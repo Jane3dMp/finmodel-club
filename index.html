@@ -135,13 +135,11 @@ small.note{font-size:11px;color:var(--muted)}
 .modal .cell.wide{width:100%}
 
 
-/* липкая шапка сетки расписания при вертикальной прокрутке */
-#gridTable thead th{position:sticky;top:92px;z-index:20;
+/* липкая шапка сетки расписания — top задаётся из JS (высота навигации) */
+#gridTable thead th{position:sticky;top:var(--navh,92px);z-index:20;
   box-shadow:0 2px 4px rgba(28,20,16,.25)}
-#gridTable thead th:first-child{left:0;z-index:21}
-/* первый столбец (время) тоже липкий по горизонтали */
+/* первый столбец (время) липкий по горизонтали */
 #gridTable td.tslot{position:sticky;left:0;z-index:10}
-@media(max-width:760px){ #gridTable thead th{top:120px} }
 
 .les .pin{cursor:pointer;font-size:11px;float:right;opacity:.55;line-height:1}
 .les .pin:hover{opacity:1}
@@ -1531,7 +1529,7 @@ function deleteScenario(){
 
 
 function renderAll(){
-  renderCourses(); renderPlanner(); renderGrid(); renderStaff(); renderFixed(); renderTax(); renderBreak(); renderSettings(); renderDash(); onSlider(); renderConflictBanner(); renderScenarioBar();
+  renderCourses(); renderPlanner(); renderGrid(); renderStaff(); renderFixed(); renderTax(); renderBreak(); renderSettings(); renderDash(); onSlider(); renderConflictBanner(); renderScenarioBar(); updateNavHeight();
 }
 function toast(m){ const t=document.getElementById("toast"); t.textContent=m; t.classList.add("show");
   clearTimeout(t._h); t._h=setTimeout(()=>t.classList.remove("show"),2200); }
@@ -1544,6 +1542,14 @@ function closeScnMenu(){ document.getElementById("scnModal").classList.remove("s
 function openSync(){ document.getElementById("gasCode").value=GAS_CODE; document.getElementById("syncModal").classList.add("show"); }
 function closeSync(){ document.getElementById("syncModal").classList.remove("show"); }
 function copyGas(){ navigator.clipboard.writeText(GAS_CODE); toast("Код скопирован"); }
+
+
+function updateNavHeight(){
+  const nav=document.querySelector("nav.tabs");
+  if(nav){ document.documentElement.style.setProperty("--navh", nav.offsetHeight+"px"); }
+}
+window.addEventListener("resize", updateNavHeight);
+window.addEventListener("load", updateNavHeight);
 
 /* табы */
 document.querySelectorAll(".tab").forEach(tb=>tb.onclick=()=>{
