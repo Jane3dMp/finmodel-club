@@ -73,7 +73,11 @@ select.cell{border:1px solid var(--line);border-radius:5px;padding:4px;font-size
 
 .kpigrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px;margin-bottom:18px}
 .kpi{background:#fff;border:1px solid var(--line);border-left:4px solid var(--terra);
-  border-radius:9px;padding:13px 15px}
+  border-radius:9px;padding:13px 15px;position:relative}
+.kpi .k-eye{position:absolute;top:8px;right:9px;cursor:pointer;font-size:13px;opacity:.35;
+  user-select:none;line-height:1;transition:opacity .15s}
+.kpi .k-eye:hover{opacity:.85}
+.kpi.val-hidden .k-val{filter:blur(0);letter-spacing:1px}
 .kpi .k-label{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;font-weight:600}
 .kpi .k-val{font-size:24px;font-weight:700;margin-top:3px;font-variant-numeric:tabular-nums}
 .kpi .k-sub{font-size:11px;color:var(--muted);margin-top:2px}
@@ -188,6 +192,7 @@ tr.rowlocked input,tr.rowlocked select{background:#EAF3EC;border-color:#cfe3d4;c
    <select id="scnSelect" class="cell" style="max-width:160px" onchange="switchScenario(this.value)" title="Сценарий / год"></select>
    <button class="btn ghost sm" onclick="openScnMenu()" title="Управление сценариями">⋮</button>
    <button class="btn ghost sm" onclick="openSync()">Хранилище</button>
+   <button class="btn ghost sm" id="undoBtn" onclick="undo()" title="Отменить последнее изменение" disabled>↩ Отменить</button>
    <button class="btn sm" id="saveBtn" onclick="saveAll()">Сохранить</button>
   </div>
  </div>
@@ -285,6 +290,7 @@ tr.rowlocked input,tr.rowlocked select{background:#EAF3EC;border-color:#cfe3d4;c
   <button class="btn ghost sm" onclick="gridToPlan()">Пересчитать план из расписания →</button>
   <button class="btn ghost sm" onclick="renderConflictBanner();document.getElementById('conflictBanner').scrollIntoView({behavior:'smooth'})">Проверить конфликты</button>
   <button class="btn ghost sm" onclick="removeDuplicates()" title="Удалить занятия-дубли, наложенные друг на друга">🧹 Убрать дубли</button>
+  <button class="btn ghost sm" onclick="snapTimes()" title="Сдвинуть время занятий к ближайшему получасовому слоту (17:50→18:00), чтобы они отображались в сетке">🕐 Выровнять время</button>
   <button class="btn sm" onclick="autoPlaceConfirm()">✨ Авторазложить по кабинетам</button>
   <button class="btn ghost sm" onclick="clearRooms()">Очистить кабинеты</button>
  </div>
@@ -293,6 +299,7 @@ tr.rowlocked input,tr.rowlocked select{background:#EAF3EC;border-color:#cfe3d4;c
  <div class="card">
   <h3 id="gridDayTitle">День</h3>
   <div id="unassigned"></div>
+  <div id="offgrid"></div>
   <div class="tscroll"><table id="gridTable"></table></div>
   <small class="note">Клик по пустой ячейке — добавить занятие. Клик по занятию — редактировать. ЗП за занятие зависит от числа детей (вкладка «Педсостав» → справочник ставок).</small>
  </div>
@@ -497,7 +504,41 @@ function load(){
   try{ const r=localStorage.getItem(LS_KEY); if(r) return Object.assign(JSON.parse(JSON.stringify(DEFAULT_STATE)),JSON.parse(r)); }catch(e){}
   return JSON.parse(JSON.stringify(DEFAULT_STATE));
 }
-function persistLocal(){ try{ localStorage.setItem(LS_KEY, JSON.stringify(S)); }catch(e){} }
+function _persistLocalRaw(){ try{ localStorage.setItem(LS_KEY, JSON.stringify(S)); }catch(e){} }
+/* ===== ИСТОРИЯ ОТМЕНЫ ===== */
+let _undoStack = [];      // снимки прошлых состояний (JSON-строки)
+let _lastSnap = null;     // последнее сохранённое состояние S (для отката на шаг назад)
+let _histLock = false;    // true = не писать в историю (загрузка/импорт/смена версии/сам undo)
+const UNDO_MAX = 30;
+function _snap(){ try{ return JSON.stringify(S); }catch(e){ return null; } }
+function updateUndoBtn(){ const b=document.getElementById("undoBtn"); if(b) b.disabled = _undoStack.length===0; }
+function persistLocal(){
+  if(!_histLock){
+    if(_lastSnap!==null && _lastSnap!==_snap()){
+      _undoStack.push(_lastSnap);
+      if(_undoStack.length>UNDO_MAX) _undoStack.shift();
+      updateUndoBtn();
+    }
+    _lastSnap = _snap();
+  }
+  _persistLocalRaw();
+}
+function undo(){
+  if(_undoStack.length===0){ toast("Нечего отменять"); return; }
+  const prev = _undoStack.pop();
+  _histLock = true;
+  try{
+    S = Object.assign(JSON.parse(JSON.stringify(DEFAULT_STATE)), JSON.parse(prev));
+    _lastSnap = _snap();
+    _persistLocalRaw();
+    renderAll();
+    toast("Действие отменено");
+  }catch(e){ toast("Ошибка отмены"); }
+  _histLock = false;
+  updateUndoBtn();
+}
+function _resetHistory(){ _undoStack=[]; _lastSnap=_snap(); updateUndoBtn(); }
+function _loadState(src){ const s=Object.assign(JSON.parse(JSON.stringify(DEFAULT_STATE)), src); S=s; _resetHistory(); return s; }
 
 async function saveAll(){
   persistLocal();
@@ -513,7 +554,7 @@ function exportJSON(){
 function importJSON(ev){
   const f=ev.target.files[0]; if(!f) return;
   const rd=new FileReader();
-  rd.onload=e=>{ try{ S=Object.assign(JSON.parse(JSON.stringify(DEFAULT_STATE)),JSON.parse(e.target.result));
+  rd.onload=e=>{ try{ S=_loadState(JSON.parse(e.target.result));
     persistLocal(); renderAll(); toast("Импортировано"); }catch(err){ toast("Ошибка файла"); } };
   rd.readAsText(f);
 }
@@ -534,11 +575,11 @@ async function connectGas(){
       // новый формат: набор сценариев
       saveScenarioList(j.data.scenarios);
       const cur=j.data.current||Object.keys(j.data.scenarios)[0];
-      if(j.data.scenarios[cur]){ S=Object.assign(JSON.parse(JSON.stringify(DEFAULT_STATE)),j.data.scenarios[cur]); }
+      if(j.data.scenarios[cur]){ _loadState(j.data.scenarios[cur]); }
       S.gasUrl=url; if(!S.meta)S.meta={}; S.meta.name=cur;
       persistLocal(); renderAll(); setSync("ok","Google-таблица"); toast("Загружено из таблицы ("+Object.keys(j.data.scenarios).length+" сценариев)");
     } else if(j && j.ok && j.data && j.data.courses){
-      S=Object.assign(JSON.parse(JSON.stringify(DEFAULT_STATE)),j.data); S.gasUrl=url;
+      S=_loadState(j.data); S.gasUrl=url;
       persistLocal(); renderAll(); setSync("ok","Google-таблица"); toast("Загружено из таблицы");
     } else { persistLocal(); setSync("ok","Google-таблица (пусто)"); toast("Таблица пуста — выгрузите текущие данные"); }
   }catch(e){ setSync("err","Ошибка связи"); toast("Не удалось подключиться"); }
@@ -965,9 +1006,19 @@ function courseMini(arr){
     <td class="num">${fmt1(r.marginPct)}%</td></tr>`; });
   return h+"</tbody>";
 }
+function _kpiKey(label){ return String(label).replace(/[^a-zA-Zа-яА-Я0-9]+/g,"_").toLowerCase(); }
+function kpiHidden(){ return (S._kpiHidden = S._kpiHidden || {}); }
+function toggleKpi(key){ const m=kpiHidden(); if(m[key]) delete m[key]; else m[key]=1; persistLocal(); renderAll(); }
 function kpi(label,val,cls,sub){
-  return `<div class="kpi ${cls}"><div class="k-label">${label}</div>
-    <div class="k-val">${val}</div><div class="k-sub">${sub||""}</div></div>`;
+  const key=_kpiKey(label);
+  const hidden=!!kpiHidden()[key];
+  const shown=hidden?"•••":val;
+  const eye=hidden?"🙈":"👁";
+  const ttl=hidden?"Показать значение":"Скрыть значение";
+  return `<div class="kpi ${cls}${hidden?' val-hidden':''}">
+    <span class="k-eye" onclick="toggleKpi('${key}')" title="${ttl}">${eye}</span>
+    <div class="k-label">${label}</div>
+    <div class="k-val">${shown}</div><div class="k-sub">${sub||""}</div></div>`;
 }
 function pnl(label,val,type){
   const cls=type==="tot"?"totrow":"";
@@ -1220,6 +1271,7 @@ function renderGrid(){
   h+=`</tr></thead><tbody>`;
   // матрица перекрытий: для каждой [строка][кабинет] помечаем, занята ли ячейка занятием сверху (rowspan)
   const covered={}; // ключ "slotIdx_room" => true
+  const drawn=new Set(); // индексы реально отрисованных занятий
   const SLOTMIN=30;
   // строка-повтор шапки (вставляется внутри таблицы)
   const headRow=`<tr class="gridhead-repeat"><td class="tslot-h">Время</td>${ROOMS.map(r=>`<td class="room-h">${esc(r)}</td>`).join("")}</tr>`;
@@ -1231,6 +1283,7 @@ function renderGrid(){
       if(les){
         const w=wageForLesson(les.course,les.students);
         const idx=S.grid.indexOf(les);
+        drawn.add(idx);
         const pinned=!!les.pinned;
         // сколько слотов занимает занятие
         let dur=minDiff(les.start,les.end); if(!dur||dur<SLOTMIN) dur=SLOTMIN;
@@ -1267,6 +1320,18 @@ function renderGrid(){
       u+=`<div class="chip" draggable="true" ondragstart="dragStart(event,${idx})" ondragend="dragEnd(event)" onclick="editLes(${idx})">${esc(l.course)} · ${l.start} · ${shortName(l.teacher)} · ${l.students}👤</div>`; });
     box.innerHTML=u+"</div>";
   } else box.innerHTML="";
+
+  // занятия дня, которые НЕ попали в сетку (время не кратно 30 мин ИЛИ перекрыты в занятом кабинете)
+  const offBox=document.getElementById("offgrid");
+  if(offBox){
+    const off=dayL.filter(l=>l.room && !drawn.has(S.grid.indexOf(l)));
+    if(off.length){
+      let o=`<div class="callout" style="border-left-color:var(--red)"><b style="color:var(--red)">⚠ Не помещаются в сетку: ${off.length}.</b> Эти занятия есть в данных и учитываются в конфликтах, но не отображаются — время не кратно 30 минутам или кабинет уже занят. Нажмите «🕐 Выровнять время» вверху или откройте занятие и поправьте время/кабинет.</div><div class="chips">`;
+      off.forEach(l=>{ const idx=S.grid.indexOf(l);
+        o+=`<div class="chip" style="border-color:var(--red)" onclick="editLes(${idx})" title="Открыть и поправить">${esc(l.course)} · ${l.start}–${l.end} · ${esc(shortName(l.teacher))} · каб. ${esc(l.room)}</div>`; });
+      offBox.innerHTML=o+"</div>";
+    } else offBox.innerHTML="";
+  }
 
   renderGridSummary();
 }
@@ -1386,6 +1451,28 @@ function removeDuplicates(){
   S.grid=keep; persistLocal(); renderGrid(); renderStaff(); renderConflictBanner();
   toast(removed>0?("Удалено дублей: "+removed):"Дублей не найдено");
 }
+function snapTimes(){
+  // округляет start каждого занятия к ближайшему 30-мин слоту, сохраняя длительность; pinned не трогаем
+  const slotsMin=TIME_SLOTS.map(toMin);
+  const lo=slotsMin[0], hi=slotsMin[slotsMin.length-1];
+  let changed=0, skippedPinned=0;
+  S.grid.forEach(l=>{
+    if(l.pinned){ const sm=toMin(l.start); if(sm%30!==0) skippedPinned++; return; }
+    const sm=toMin(l.start), em=toMin(l.end);
+    const dur=Math.max(30, em-sm);
+    // ближайший слот
+    let best=slotsMin[0], bd=Infinity;
+    slotsMin.forEach(s=>{ const d=Math.abs(s-sm); if(d<bd){ bd=d; best=s; } });
+    if(best!==sm){
+      const ns=best, ne=Math.min(hi+30, best+dur);
+      l.start=_minToStr(ns); l.end=_minToStr(ne); changed++;
+    }
+  });
+  if(changed===0){ toast(skippedPinned>0?("Все сдвигаемые уже выровнены ("+skippedPinned+" закреплённых пропущено)"):"Все занятия уже на сетке"); return; }
+  persistLocal(); renderGrid(); renderStaff(); renderConflictBanner();
+  toast("Выровнено занятий: "+changed+(skippedPinned>0?(" · пропущено закреплённых: "+skippedPinned):""));
+}
+function _minToStr(m){ const h=Math.floor(m/60), mm=m%60; return String(h).padStart(2,"0")+":"+String(mm).padStart(2,"0"); }
 function delLesByIdx(idx){
   const l=S.grid[idx]; if(!l) return;
   if(l.pinned){ toast("Занятие закреплено — сначала открепите"); return; }
@@ -1945,7 +2032,7 @@ function switchScenario(name){
   list[currentScenarioName()]=snapshotState();
   saveScenarioList(list);
   if(list[name]){
-    S=Object.assign(JSON.parse(JSON.stringify(DEFAULT_STATE)),list[name]);
+    S=_loadState(list[name]);
     if(!S.meta)S.meta={}; S.meta.name=name;
     persistLocal(); renderAll();
     toast("Открыт сценарий: "+name);
@@ -1982,7 +2069,7 @@ function deleteScenario(){
   delete list[cur];
   saveScenarioList(list);
   const next=Object.keys(list)[0];
-  if(next){ S=Object.assign(JSON.parse(JSON.stringify(DEFAULT_STATE)),list[next]); if(!S.meta)S.meta={}; S.meta.name=next; }
+  if(next){ S=_loadState(list[next]); if(!S.meta)S.meta={}; S.meta.name=next; }
   persistLocal(); renderAll();
   toast("Сценарий удалён");
 }
@@ -2048,7 +2135,7 @@ function deleteScenarioByName(name){
   saveScenarioList(list);
   if(wasCurrent){
     const next=Object.keys(list)[0];
-    S=Object.assign(JSON.parse(JSON.stringify(DEFAULT_STATE)),list[next]);
+    S=_loadState(list[next]);
     if(!S.meta)S.meta={}; S.meta.name=next;
     persistLocal(); renderAll();
   }
@@ -2095,17 +2182,19 @@ if(S.gasUrl){
       const merged=Object.assign({}, localList, j.data.scenarios);
       saveScenarioList(merged);
       const cur=j.data.current||Object.keys(merged)[0];
-      if(merged[cur]) S=Object.assign(JSON.parse(JSON.stringify(DEFAULT_STATE)),merged[cur]);
+      if(merged[cur]) S=_loadState(merged[cur]);
       if(!S.meta)S.meta={}; S.meta.name=cur;
       persistLocal(); setSync("ok","Google-таблица"); renderAll();
     } else if(j && j.ok && j.data && j.data.courses){
-      S=Object.assign(JSON.parse(JSON.stringify(DEFAULT_STATE)),j.data);
+      S=_loadState(j.data);
       persistLocal(); setSync("ok","Google-таблица"); renderAll();
     } else {
       ensureCurrentInList(); setSync("ok","Google-таблица (пусто)"); renderAll();
     }
   }).catch(e=>{ setSync("err","Нет связи — локальный режим"); renderAll(); });
 } else { ensureCurrentInList(); setSync("local","Локальный режим"); renderAll(); }
+/* инициализация истории отмены после старта */
+setTimeout(()=>{ if(_lastSnap===null) _lastSnap=_snap(); updateUndoBtn(); }, 0);
 
 </script>
 </body>
