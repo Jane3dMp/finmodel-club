@@ -165,6 +165,11 @@ tr.rowlocked input,tr.rowlocked select{background:#EAF3EC;border-color:#cfe3d4;c
 
 #gridTable tr.gridhead-repeat td{background:var(--coal);color:var(--sand);font-weight:600;font-size:11px;text-align:center;padding:8px 9px}
 #gridTable tr.gridhead-repeat td.tslot-h{text-align:left}
+
+.les-tools{display:flex;gap:3px;justify-content:flex-end;margin-bottom:2px}
+.lt-btn{cursor:pointer;font-size:12px;line-height:1;opacity:.55;padding:1px 3px;border-radius:3px}
+.lt-btn:hover{opacity:1;background:rgba(0,0,0,.06)}
+.lt-del:hover{background:#f3d6d0;color:var(--red)}
 </style>
 </head>
 <body>
@@ -294,7 +299,7 @@ tr.rowlocked input,tr.rowlocked select{background:#EAF3EC;border-color:#cfe3d4;c
  <h2 class="sec">Педсостав и фонд ЗП</h2>
  <div class="sec-desc">Фонд ЗП считается <b>автоматически из расписания</b>: каждое занятие × ставка по фактическому числу детей в группе. Поэтому ЗП/нед и ЗП/мес — расчётные (не вводятся руками): меняете занятие в сетке → ЗП пересчитывается. Колонку «Может вести» можно дописывать вручную.</div>
  <div class="kpigrid" id="staffKpi"></div>
- <div class="hd-actions"><button class="btn sm" onclick="addStaff()">+ Педагог</button><button class="btn ghost sm" onclick="sortStaffByName()">⇅ По алфавиту</button><button class="btn ghost sm" onclick="syncStaffFull()">Загрузить полный педсостав (21)</button></div>
+ <div class="hd-actions"><button class="btn sm" onclick="addStaff()">+ Педагог</button><button class="btn ghost sm" onclick="sortStaffByName()">⇅ По алфавиту</button><button class="btn ghost sm" onclick="syncStaffFromGrid()" title="Добавить в список всех педагогов из расписания">↻ Собрать из расписания</button><button class="btn ghost sm" onclick="syncStaffFull()">Загрузить полный педсостав (21)</button></div>
  <div class="card"><h3>Нагрузка и ЗП по педагогам</h3>
   <div class="tscroll"><table id="staffTable"></table></div>
   <div class="callout"><b>Связь с моделью:</b> этот фонд ЗП идёт в P&L и в расчёт взносов ФСЗН на вкладке «Налоги».</div>
@@ -1234,7 +1239,11 @@ function renderGrid(){
         for(let k=1;k<span;k++){ covered[(si+k)+"_"+room]=true; }
         h+=`<td class="cell-les" rowspan="${span}" ondragover="dragOver(event)" ondrop="dropLes(event,'${slot}','${esc(room)}')">
           <div class="les${pinned?' pinned':''}" style="height:100%" draggable="${pinned?'false':'true'}" ${pinned?'':`ondragstart="dragStart(event,${idx})" ondragend="dragEnd(event)"`} onclick="editLes(${idx})">
-            <span class="pin" onclick="event.stopPropagation();togglePin(${idx})" title="${pinned?'Закреплено — нажмите, чтобы открепить':'Закрепить (утвердить время и кабинет)'}">${pinned?'📌':'📍'}</span>
+            <div class="les-tools">
+              <span class="lt-btn" onclick="event.stopPropagation();togglePin(${idx})" title="${pinned?'Открепить':'Закрепить'}">${pinned?'📌':'📍'}</span>
+              <span class="lt-btn" onclick="event.stopPropagation();dupLes(${idx})" title="Копировать занятие">⧉</span>
+              <span class="lt-btn lt-del" onclick="event.stopPropagation();delLesByIdx(${idx})" title="Удалить занятие">×</span>
+            </div>
             <b>${esc(les.course)}</b>
             <span>${les.start}–${les.end}</span>
             <span class="lt">${esc(shortName(les.teacher))} · ${les.students}👤 · ${w}р</span>
@@ -1323,6 +1332,26 @@ function clearRooms(){
 
 /* ===== DRAG & DROP ===== */
 
+
+function dupLes(idx){
+  const l=S.grid[idx]; if(!l) return;
+  const copy=JSON.parse(JSON.stringify(l));
+  delete copy.pinned;
+  // копию сдвинем по времени на длительность вниз, кабинет тот же (можно потом перетащить)
+  const dur=minDiff(l.start,l.end)||60;
+  copy.start=addMin(l.start,dur); copy.end=addMin(copy.start,dur);
+  S.grid.push(copy);
+  persistLocal(); renderGrid(); renderStaff();
+  toast("Занятие скопировано (ниже по времени)");
+}
+function delLesByIdx(idx){
+  const l=S.grid[idx]; if(!l) return;
+  if(l.pinned){ toast("Занятие закреплено — сначала открепите"); return; }
+  if(!confirm("Удалить занятие «"+l.course+" "+l.start+"»?")) return;
+  S.grid.splice(idx,1); persistLocal(); renderGrid(); renderStaff();
+  toast("Занятие удалено");
+}
+
 function togglePin(idx){
   const l=S.grid[idx]; if(!l) return;
   l.pinned=!l.pinned;
@@ -1383,12 +1412,15 @@ function addMin(t,min){ const[h,m]=t.split(":").map(Number); let tot=h*60+m+min;
   return String(Math.floor(tot/60)).padStart(2,"0")+":"+String(tot%60).padStart(2,"0"); }
 function editLes(idx){
   const l=S.grid[idx];
-  const courseOpts=S.courses.map(c=>`<option ${c.name===l.course?"selected":""}>${esc(c.name)}</option>`).join("");
-  const teacherOpts=`<option value="">— педагог —</option>`+S.staff.map(s=>`<option ${s.name===l.teacher?"selected":""}>${esc(s.name)}</option>`).join("");
+  let courseOpts=S.courses.map(c=>`<option ${c.name===l.course?"selected":""}>${esc(c.name)}</option>`).join("");
+  if(l.course && !S.courses.some(c=>c.name===l.course)) courseOpts=`<option selected>${esc(l.course)}</option>`+courseOpts;
+  let teacherOpts=`<option value="">— педагог —</option>`+S.staff.map(s=>`<option ${s.name===l.teacher?"selected":""}>${esc(s.name)}</option>`).join("");
+  if(l.teacher && !S.staff.some(s=>s.name===l.teacher)) teacherOpts+=`<option selected>${esc(l.teacher)} (нет в списке)</option>`;
   const roomOpts=`<option value="">— кабинет —</option>`+ROOMS.map(r=>`<option ${r===l.room?"selected":""}>${esc(r)}</option>`).join("");
   document.getElementById("lesModalBody").innerHTML=`
     <label>Курс</label><select id="mCourse" class="cell wide">${courseOpts}</select>
     <label>Педагог</label><select id="mTeacher" class="cell wide">${teacherOpts}</select>
+    <div class="hint" style="margin-top:-6px">Новых педагогов и курсы заводите на вкладках «Педсостав» и «Курсы». Здесь — выбор из списка.</div>
     <div class="row2">
      <div><label>Начало</label><input id="mStart" class="cell wide" value="${l.start}"></div>
      <div><label>Конец</label><input id="mEnd" class="cell wide" value="${l.end}"></div>
@@ -1513,6 +1545,22 @@ function renderStaff(){
 
   // таблица ставок (справочник ЗП по наполняемости)
   renderWageRef();
+}
+
+
+function syncStaffFromGrid(){
+  const inList=new Set(S.staff.map(s=>s.name));
+  let added=0;
+  S.grid.forEach(l=>{
+    if(l.teacher && !inList.has(l.teacher)){
+      // соберём курсы, которые он ведёт в расписании
+      const courses=[...new Set(S.grid.filter(x=>x.teacher===l.teacher&&x.course).map(x=>x.course))];
+      S.staff.push({name:l.teacher,wageMode:"tier",fixedRate:0,canTeach:courses});
+      inList.add(l.teacher); added++;
+    }
+  });
+  persistLocal(); renderStaff();
+  toast(added>0?("Добавлено педагогов из расписания: "+added):"Все педагоги уже в списке");
 }
 
 function lockStaff(i){
