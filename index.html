@@ -293,6 +293,7 @@ tr.rowlocked input,tr.rowlocked select{background:#EAF3EC;border-color:#cfe3d4;c
   <button class="btn ghost sm" onclick="snapTimes()" title="Сдвинуть время занятий к ближайшему получасовому слоту (17:50→18:00), чтобы они отображались в сетке">🕐 Выровнять время</button>
   <button class="btn sm" onclick="autoPlaceConfirm()">✨ Авторазложить по кабинетам</button>
   <button class="btn ghost sm" onclick="clearRooms()">Очистить кабинеты</button>
+  <button class="btn sm" onclick="printSchedule()" title="Распечатать расписание для менеджеров">🖨 Печать</button>
  </div>
  <div class="dayTabs" id="dayTabs"></div>
  <div id="conflictBanner"></div>
@@ -1257,6 +1258,64 @@ function wageForLesson(course, students){
 /* ====== РЕНДЕР СЕТКИ ====== */
 function shortName(n){ if(!n) return "—"; const p=String(n).split(" "); return p.length>=2?p[0]+" "+p[1][0]+".":n; }
 function setDay(d){ curDay=d; renderGrid(); }
+function _printDayTableHTML(day){
+  // строит чистую таблицу расписания одного дня для печати (без кнопок и DnD)
+  const dayL=S.grid.filter(l=>l.day===day);
+  if(!dayL.length) return `<div class="pr-day"><h2>${DAY_FULL[day]}</h2><p class="pr-empty">Занятий нет</p></div>`;
+  const covered={};
+  const SLOTMIN=30;
+  let rows="";
+  TIME_SLOTS.forEach((slot,si)=>{
+    let tds="";
+    ROOMS.forEach(room=>{
+      if(covered[si+"_"+room]) return;
+      const les=dayL.find(l=>l.start===slot && l.room===room);
+      if(les){
+        let dur=minDiff(les.start,les.end); if(!dur||dur<SLOTMIN) dur=SLOTMIN;
+        let span=Math.round(dur/SLOTMIN); if(span<1) span=1;
+        if(si+span>TIME_SLOTS.length) span=TIME_SLOTS.length-si;
+        for(let k=1;k<span;k++){ covered[(si+k)+"_"+room]=true; }
+        tds+=`<td class="pr-les" rowspan="${span}"><b>${esc(les.course)}</b><span>${les.start}–${les.end}</span><span class="pr-t">${esc(shortName(les.teacher))} · ${les.students||0} чел.</span></td>`;
+      } else {
+        tds+=`<td class="pr-empty-cell"></td>`;
+      }
+    });
+    rows+=`<tr><td class="pr-time">${slot}</td>${tds}</tr>`;
+  });
+  const head=`<tr><th class="pr-time">Время</th>${ROOMS.map(r=>`<th>${esc(r)}</th>`).join("")}</tr>`;
+  return `<div class="pr-day"><h2>${DAY_FULL[day]}</h2><table class="pr-table"><thead>${head}</thead><tbody>${rows}</tbody></table></div>`;
+}
+function printSchedule(){
+  const onlyToday=confirm("Что распечатать?\n\nОК — только текущий день ("+DAY_FULL[curDay]+")\nОтмена — всю неделю (каждый день с новой страницы)");
+  const days = onlyToday ? [curDay] : [1,2,3,4,5,6,7];
+  const title = onlyToday ? ("Расписание · "+DAY_FULL[curDay]) : "Расписание · вся неделя";
+  let body="";
+  days.forEach(d=>{ body+=_printDayTableHTML(d); });
+  const css=`
+    @page{size:landscape;margin:10mm}
+    *{box-sizing:border-box;font-family:Arial,Helvetica,sans-serif}
+    body{margin:0;color:#1c1410}
+    .pr-day{page-break-after:always;padding:0 0 8px}
+    .pr-day:last-child{page-break-after:auto}
+    .pr-day h2{font-size:18px;margin:0 0 8px;border-bottom:2px solid #b5532a;padding-bottom:4px}
+    .pr-empty{color:#888;font-size:13px}
+    table.pr-table{width:100%;border-collapse:collapse;table-layout:fixed}
+    .pr-table th,.pr-table td{border:1px solid #ccc;font-size:9px;padding:2px 3px;vertical-align:top;text-align:center}
+    .pr-table th{background:#2a211b;color:#fff;font-size:9px}
+    .pr-table td.pr-time,.pr-table th.pr-time{width:42px;font-weight:600;background:#f3ece4}
+    .pr-les{background:#eaf4ec;text-align:left;line-height:1.25}
+    .pr-les b{display:block;font-size:9px}
+    .pr-les span{display:block;font-size:8px;color:#333}
+    .pr-les .pr-t{color:#555}
+    .pr-empty-cell{background:#fff}
+  `;
+  const w=window.open("","_print");
+  if(!w){ toast("Разрешите всплывающие окна для печати"); return; }
+  w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${title}</title><style>${css}</style></head><body>${body}</body></html>`);
+  w.document.close();
+  w.focus();
+  setTimeout(()=>{ w.print(); }, 300);
+}
 function renderGrid(){
   let dt="";
   for(let d=1;d<=7;d++){
