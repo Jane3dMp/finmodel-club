@@ -50,8 +50,7 @@ h2.sec{font-size:19px;margin-bottom:4px;color:var(--coal)}
 .card h3::before{content:'';width:4px;height:16px;background:var(--terra);border-radius:2px}
 
 table{width:100%;border-collapse:collapse;font-size:13px}
-th{background:var(--coal);color:var(--sand);padding:8px 9px;text-align:left;font-weight:600;
-  position:sticky;font-size:12px}
+th{background:var(--coal);color:var(--sand);padding:8px 9px;text-align:left;font-weight:600;font-size:12px}
 td{padding:6px 9px;border-bottom:1px solid var(--line)}
 tr:nth-child(even) td{background:var(--sand-l)}
 tbody tr:hover td{background:#F3EAD9}
@@ -135,6 +134,19 @@ small.note{font-size:11px;color:var(--muted)}
 .modal label{font-size:11px;color:var(--muted);font-weight:600;display:block;margin-top:8px}
 .modal .cell.wide{width:100%}
 
+
+/* липкая шапка сетки расписания при вертикальной прокрутке */
+#gridTable thead th{position:sticky;top:92px;z-index:20;
+  box-shadow:0 2px 4px rgba(28,20,16,.25)}
+#gridTable thead th:first-child{left:0;z-index:21}
+/* первый столбец (время) тоже липкий по горизонтали */
+#gridTable td.tslot{position:sticky;left:0;z-index:10}
+@media(max-width:760px){ #gridTable thead th{top:120px} }
+
+.les .pin{cursor:pointer;font-size:11px;float:right;opacity:.55;line-height:1}
+.les .pin:hover{opacity:1}
+.les.pinned{border-left-color:var(--green);background:#EAF3EC}
+.les.pinned b{color:var(--green)}
 </style>
 </head>
 <body>
@@ -380,6 +392,7 @@ small.note{font-size:11px;color:var(--muted)}
   <div id="lesModalBody"></div>
   <div class="hd-actions" style="margin-top:14px">
    <button class="btn sm" onclick="saveLes()">Сохранить</button>
+   <button class="btn ghost sm" onclick="togglePinModal()" id="pinBtn">Закрепить</button>
    <button class="btn gray sm" onclick="delLes()">Удалить</button>
    <button class="btn ghost sm" onclick="closeLes()">Отмена</button>
   </div>
@@ -974,8 +987,10 @@ function renderGrid(){
       if(les){
         const w=wageForLesson(les.course,les.students);
         const idx=S.grid.indexOf(les);
+        const pinned=!!les.pinned;
         h+=`<td class="cell-les" ondragover="dragOver(event)" ondrop="dropLes(event,'${slot}','${esc(room)}')">
-          <div class="les" draggable="true" ondragstart="dragStart(event,${idx})" ondragend="dragEnd(event)" onclick="editLes(${idx})">
+          <div class="les${pinned?' pinned':''}" draggable="${pinned?'false':'true'}" ${pinned?'':`ondragstart="dragStart(event,${idx})" ondragend="dragEnd(event)"`} onclick="editLes(${idx})">
+            <span class="pin" onclick="event.stopPropagation();togglePin(${idx})" title="${pinned?'Закреплено — нажмите, чтобы открепить':'Закрепить (утвердить время и кабинет)'}">${pinned?'📌':'📍'}</span>
             <b>${esc(les.course)}</b>
             <span>${les.start}–${les.end}</span>
             <span class="lt">${esc(shortName(les.teacher))} · ${les.students}👤 · ${w}р</span>
@@ -1027,7 +1042,7 @@ function autoPlaceRooms(onlyDay){
   days.forEach(day=>{
     const dayLessons = S.grid.filter(l=>l.day===day);
     // занятия, которым нужен кабинет (пустой room)
-    const toPlace = dayLessons.filter(l=>!l.room);
+    const toPlace = dayLessons.filter(l=>!l.room && !l.pinned);
     // сортируем по времени, чтобы раскладка была стабильной
     toPlace.sort((a,b)=>toMin(a.start)-toMin(b.start));
     toPlace.forEach(les=>{
@@ -1062,8 +1077,16 @@ function clearRooms(){
 
 
 /* ===== DRAG & DROP ===== */
+
+function togglePin(idx){
+  const l=S.grid[idx]; if(!l) return;
+  l.pinned=!l.pinned;
+  persistLocal(); renderGrid();
+  toast(l.pinned?"Занятие закреплено (утверждено)":"Закрепление снято");
+}
+
 let _dragIdx=null;
-function dragStart(e,idx){ _dragIdx=idx; e.dataTransfer.effectAllowed="move"; setTimeout(()=>{ if(e.target.classList) e.target.style.opacity="0.4"; },0); }
+function dragStart(e,idx){ if(S.grid[idx]&&S.grid[idx].pinned){e.preventDefault();return;} _dragIdx=idx; e.dataTransfer.effectAllowed="move"; setTimeout(()=>{ if(e.target.classList) e.target.style.opacity="0.4"; },0); }
 function dragEnd(e){ if(e.target.style) e.target.style.opacity="1"; }
 function dragOver(e){ e.preventDefault(); e.dataTransfer.dropEffect="move"; }
 function dropLes(e,slot,room){
@@ -1138,6 +1161,7 @@ function editLes(idx){
     document.getElementById("mWage").textContent=wageForLesson(cs,n)+" р"; };
   document.getElementById("mCourse").onchange=upd;
   document.getElementById("mStud").oninput=upd;
+  const pb=document.getElementById("pinBtn"); if(pb) pb.textContent=S.grid[idx].pinned?"Открепить":"Закрепить";
 }
 function saveLes(){
   const idx=+document.getElementById("lesModal").dataset.idx;
@@ -1154,6 +1178,14 @@ function delLes(){
   const idx=+document.getElementById("lesModal").dataset.idx;
   S.grid.splice(idx,1); persistLocal(); closeLes(); renderGrid(); renderStaff();
 }
+
+function togglePinModal(){
+  const idx=+document.getElementById("lesModal").dataset.idx;
+  togglePin(idx);
+  const l=S.grid[idx];
+  document.getElementById("pinBtn").textContent=l.pinned?"Открепить":"Закрепить";
+}
+
 function closeLes(){ document.getElementById("lesModal").classList.remove("show"); }
 
 /* перенос сетки → план (считаем группы по расставленным занятиям) */
