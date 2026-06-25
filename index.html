@@ -371,15 +371,15 @@ small.note{font-size:11px;color:var(--muted)}
  </div>
 </div>
 <div class="modal-bg" id="scnModal">
- <div class="modal">
-  <h3>Сценарии и годы</h3>
-  <p style="font-size:13px;margin-bottom:12px">Текущий сценарий: <b id="scnCurName"></b></p>
+ <div class="modal" style="max-width:560px">
+  <h3>Версии модели</h3>
+  <p style="font-size:13px;margin-bottom:10px;color:var(--muted)">Каждая версия — отдельная модель (год или сценарий «что если») в одной Google-таблице. Открытая сейчас: <b id="scnCurName" style="color:var(--terra-d)"></b></p>
+  <div id="scnList" style="margin-bottom:12px"></div>
   <div class="hd-actions">
-   <button class="btn sm" onclick="saveAsScenario()">Сохранить как…</button>
-   <button class="btn ghost sm" onclick="duplicateScenario()">Дублировать</button>
-   <button class="btn gray sm" onclick="deleteScenario()">Удалить текущий</button>
+   <button class="btn sm" onclick="saveAsScenario()">+ Новая версия</button>
+   <button class="btn ghost sm" onclick="duplicateScenario()">Дублировать текущую</button>
   </div>
-  <div class="callout" style="margin-top:12px">Сценарии хранятся локально и синхронизируются в Google-таблицу при сохранении. Переключайтесь через выпадающий список в шапке.</div>
+  <div class="callout" style="margin-top:12px">Чтобы открыть версию — нажмите «Открыть» в списке или выберите её в выпадающем списке шапки. После правок жмите «Сохранить» вверху — все версии уедут в таблицу.</div>
   <div class="hd-actions" style="margin-top:8px"><button class="btn ghost sm" onclick="closeScnMenu()">Закрыть</button></div>
  </div>
 </div>
@@ -535,17 +535,20 @@ function applyScn(c){
   const wpm=S.assume.weeksPerMonth;
   const fillFactor=scenario.fill/100, priceK=scenario.price/100, wageK=scenario.wage/100;
   const price=(+c.price||0)*priceK;
-  const wage=(+c.wage||0)*wageK;
   const groups=+c.groups||0;
   const fillN=Math.round((+c.fill||0)*fillFactor); // фактич. детей в группе
+  // ЗП/занятие берём из справочника ставок по числу детей (как на вкладке Педсостав)
+  let wage = wageForLesson(c.name, fillN||c.fill||4);
+  if(!wage) wage = (+c.wage||0); // фолбэк на старое поле
+  wage = wage*wageK;
   const lessonsMonth=groups*wpm; // занятий в месяц по курсу
   const revenue=price*fillN*lessonsMonth;        // оборот курса/мес
   const wageCost=wage*lessonsMonth;              // ЗП педагога/мес
-  const matCost=(+c.material||0)*lessonsMonth;   // материалы/мес
+  const matCost=0;                               // материалы убраны
   const margin=revenue-wageCost-matCost;
   const marginPct=revenue>0?margin/revenue*100:0;
-  // точка безуб. группы: мин детей = (wage+material)/price
-  const minFill=price>0?Math.ceil((wage+(+c.material||0))/price):0;
+  // точка безуб. группы: мин детей = wage/price
+  const minFill=price>0?Math.ceil(wage/price):0;
   return {price,wage,groups,fillN,lessonsMonth,revenue,wageCost,matCost,margin,marginPct,minFill};
 }
 function totals(){
@@ -581,7 +584,7 @@ function fmt1(n){ return (Math.round(n*10)/10).toLocaleString("ru-RU"); }
 function renderCourses(){
   const t=document.getElementById("courseTable");
   let h=`<thead><tr>
-    <th>Курс</th><th>Эко</th><th>Цена</th><th>ЗП/зан</th><th>Мат/зан</th>
+    <th>Курс</th><th>Эко</th><th>Цена</th><th>ЗП/зан</th>
     <th>Цель груп.</th><th>Групп/нед</th><th>Факт детей</th>
     <th>Оборот/мес</th><th>Маржа,р</th><th>Маржа,%</th><th>Мин</th><th></th></tr></thead><tbody>`;
   S.courses.forEach((c,i)=>{
@@ -597,9 +600,8 @@ function renderCourses(){
       <td><select class="cell" onchange="upd(${i},'eco',this.value)">
         ${["Прознание","CODDY","Детали"].map(e=>`<option ${c.eco===e?"selected":""}>${e}</option>`).join("")}</select></td>
       <td><input class="cell" type="number" value="${c.price}" onchange="upd(${i},'price',this.value)"></td>
-      <td><input class="cell" type="number" value="${c.wage}" onchange="upd(${i},'wage',this.value)"></td>
-      <td><input class="cell" type="number" value="${c.material}" onchange="upd(${i},'material',this.value)"></td>
-      <td class="num muted">${c.groupSize}</td>
+      <td class="num" title="из справочника ставок по ${r.fillN||c.fill||4} детям"><b>${fmt(r.wage)}</b></td>
+      <td><input class="cell" type="number" value="${c.groupSize}" onchange="upd(${i},'groupSize',this.value)"></td>
       <td><input class="cell" type="number" value="${c.groups}" onchange="upd(${i},'groups',this.value)"></td>
       <td><input class="cell" type="number" value="${c.fill}" onchange="upd(${i},'fill',this.value)"></td>
       <td class="num">${fmt(r.revenue)}</td>
@@ -611,7 +613,8 @@ function renderCourses(){
   });
   // итог
   const T=totals();
-  h+=`<tr class="totrow"><td>ИТОГО (${S.courses.length} курсов)</td><td></td><td></td><td></td><td></td>
+  h+=`<tr class="totrow"><td>ИТОГО (${S.courses.length} курсов)</td><td></td><td></td><td></td>
+    <td class="num"></td>
     <td class="num">${S.courses.reduce((a,c)=>a+(+c.groups||0),0)}</td>
     <td class="num">${T.kids}</td>
     <td class="num">${fmt(T.rev)}</td><td class="num">${fmt(T.rev-T.wage-T.mat)}</td><td></td><td></td><td></td></tr>`;
@@ -1465,6 +1468,13 @@ function loadScenarioList(){
 function saveScenarioList(obj){ try{ localStorage.setItem(SCN_KEY, JSON.stringify(obj)); }catch(e){} }
 
 function currentScenarioName(){ return (S.meta&&S.meta.name)||"Основной"; }
+function ensureCurrentInList(){
+  const list=loadScenarioList();
+  list[currentScenarioName()]=snapshotState();
+  saveScenarioList(list);
+  return list;
+}
+
 
 function snapshotState(){
   // копия без служебных полей
@@ -1473,7 +1483,7 @@ function snapshotState(){
   return c;
 }
 function renderScenarioBar(){
-  const list=loadScenarioList();
+  const list=ensureCurrentInList();
   const names=Object.keys(list);
   const cur=currentScenarioName();
   if(!names.includes(cur)){ names.unshift(cur); }
@@ -1495,23 +1505,26 @@ function switchScenario(name){
   }
 }
 function saveAsScenario(){
-  const name=prompt("Название сценария / года (например, «2026/2027» или «Если +2 группы Roblox»):", currentScenarioName());
+  const name=prompt("Название новой версии (например, «2026/2027» или «Если +2 группы Roblox»):", "");
   if(!name) return;
-  if(!S.meta)S.meta={}; S.meta.name=name;
-  const list=loadScenarioList();
+  // зафиксируем текущую, потом создадим новую как копию текущих данных
+  const list=ensureCurrentInList();
   list[name]=snapshotState();
   saveScenarioList(list);
-  persistLocal(); renderScenarioBar();
-  toast("Сохранён сценарий: "+name);
+  if(!S.meta)S.meta={}; S.meta.name=name;
+  persistLocal(); renderScenarioBar(); if(document.getElementById("scnModal").classList.contains("show")){renderScnList();document.getElementById("scnCurName").textContent=currentScenarioName();}
+  toast("Создана версия: "+name);
 }
 function duplicateScenario(){
   const name=prompt("Название копии:", currentScenarioName()+" (копия)");
   if(!name) return;
-  if(!S.meta)S.meta={}; S.meta.name=name;
-  const list=loadScenarioList();
+  // сначала зафиксируем ТЕКУЩУЮ версию в списке, чтобы она не потерялась
+  const list=ensureCurrentInList();
+  // теперь создаём копию под новым именем и делаем её текущей
   list[name]=snapshotState();
   saveScenarioList(list);
-  persistLocal(); renderScenarioBar();
+  if(!S.meta)S.meta={}; S.meta.name=name;
+  persistLocal(); renderScenarioBar(); if(document.getElementById("scnModal").classList.contains("show")){renderScnList();document.getElementById("scnCurName").textContent=currentScenarioName();}
   toast("Создана копия: "+name);
 }
 function deleteScenario(){
@@ -1536,7 +1549,66 @@ function toast(m){ const t=document.getElementById("toast"); t.textContent=m; t.
 
 /* модалка GAS */
 
-function openScnMenu(){ document.getElementById("scnCurName").textContent=currentScenarioName(); document.getElementById("scnModal").classList.add("show"); }
+function openScnMenu(){
+  document.getElementById("scnCurName").textContent=currentScenarioName();
+  renderScnList();
+  document.getElementById("scnModal").classList.add("show");
+}
+function renderScnList(){
+  const list=loadScenarioList();
+  const cur=currentScenarioName();
+  // гарантируем, что текущий есть в списке
+  if(!list[cur]) list[cur]=snapshotState();
+  const names=Object.keys(list);
+  let h="";
+  names.forEach(n=>{
+    const isCur=n===cur;
+    h+=`<div style="display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--line);border-radius:8px;margin-bottom:6px;background:${isCur?'var(--sand-l)':'#fff'}">
+      <span style="flex:1;font-weight:${isCur?'700':'500'};font-size:13px">${esc(n)}${isCur?' <span style="color:var(--green);font-size:11px">● открыта</span>':''}</span>
+      ${isCur?'':`<button class="btn sm" onclick="openScenario('${esc(n).replace(/'/g,"\\'")}')">Открыть</button>`}
+      <button class="btn ghost sm" onclick="renameScenario('${esc(n).replace(/'/g,"\\'")}')">Переименовать</button>
+      ${names.length>1?`<button class="btn gray sm" onclick="deleteScenarioByName('${esc(n).replace(/'/g,"\\'")}')">×</button>`:''}
+    </div>`;
+  });
+  document.getElementById("scnList").innerHTML=h;
+}
+function openScenario(name){
+  switchScenario(name);
+  document.getElementById("scnCurName").textContent=currentScenarioName();
+  renderScnList();
+}
+function renameScenario(oldName){
+  const nn=prompt("Новое название версии:", oldName);
+  if(!nn || nn===oldName) return;
+  const list=loadScenarioList();
+  // если переименовываем текущий — сохраним его снапшот
+  if(oldName===currentScenarioName()) list[oldName]=snapshotState();
+  if(!list[oldName]){ toast("Версия не найдена"); return; }
+  list[nn]=list[oldName];
+  delete list[oldName];
+  saveScenarioList(list);
+  if(currentScenarioName()===oldName){ if(!S.meta)S.meta={}; S.meta.name=nn; persistLocal(); }
+  renderScenarioBar(); renderScnList();
+  document.getElementById("scnCurName").textContent=currentScenarioName();
+  toast("Переименовано: "+nn);
+}
+function deleteScenarioByName(name){
+  const list=loadScenarioList();
+  if(Object.keys(list).length<=1){ toast("Нельзя удалить единственную версию"); return; }
+  if(!confirm("Удалить версию «"+name+"»? Необратимо.")) return;
+  const wasCurrent=(name===currentScenarioName());
+  delete list[name];
+  saveScenarioList(list);
+  if(wasCurrent){
+    const next=Object.keys(list)[0];
+    S=Object.assign(JSON.parse(JSON.stringify(DEFAULT_STATE)),list[next]);
+    if(!S.meta)S.meta={}; S.meta.name=next;
+    persistLocal(); renderAll();
+  }
+  renderScenarioBar(); renderScnList();
+  document.getElementById("scnCurName").textContent=currentScenarioName();
+  toast("Версия удалена");
+}
 function closeScnMenu(){ document.getElementById("scnModal").classList.remove("show"); }
 
 function openSync(){ document.getElementById("gasCode").value=GAS_CODE; document.getElementById("syncModal").classList.add("show"); }
@@ -1574,10 +1646,10 @@ if(S.gasUrl){
       S=Object.assign(JSON.parse(JSON.stringify(DEFAULT_STATE)),j.data);
       persistLocal(); setSync("ok","Google-таблица"); renderAll();
     } else {
-      setSync("ok","Google-таблица (пусто)"); renderAll();
+      ensureCurrentInList(); setSync("ok","Google-таблица (пусто)"); renderAll();
     }
   }).catch(e=>{ setSync("err","Нет связи — локальный режим"); renderAll(); });
-} else { setSync("local","Локальный режим"); renderAll(); }
+} else { ensureCurrentInList(); setSync("local","Локальный режим"); renderAll(); }
 
 </script>
 </body>
