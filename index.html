@@ -1513,7 +1513,7 @@ function saveAsScenario(){
   saveScenarioList(list);
   if(!S.meta)S.meta={}; S.meta.name=name;
   persistLocal(); renderScenarioBar(); if(document.getElementById("scnModal").classList.contains("show")){renderScnList();document.getElementById("scnCurName").textContent=currentScenarioName();}
-  toast("Создана версия: "+name);
+  if(S.gasUrl) pushGas(true); else toast("Создана версия: "+name);
 }
 function duplicateScenario(){
   const name=prompt("Название копии:", currentScenarioName()+" (копия)");
@@ -1525,7 +1525,7 @@ function duplicateScenario(){
   saveScenarioList(list);
   if(!S.meta)S.meta={}; S.meta.name=name;
   persistLocal(); renderScenarioBar(); if(document.getElementById("scnModal").classList.contains("show")){renderScnList();document.getElementById("scnCurName").textContent=currentScenarioName();}
-  toast("Создана копия: "+name);
+  if(S.gasUrl) pushGas(true); else toast("Создана копия: "+name);
 }
 function deleteScenario(){
   const cur=currentScenarioName();
@@ -1637,9 +1637,12 @@ if(S.gasUrl){
   // автоподключение: подгружаем из Google-таблицы при открытии
   fetch(S.gasUrl+"?action=load").then(r=>r.json()).then(j=>{
     if(j && j.ok && j.data && j.data.scenarios){
-      saveScenarioList(j.data.scenarios);
-      const cur=j.data.current||Object.keys(j.data.scenarios)[0];
-      if(j.data.scenarios[cur]) S=Object.assign(JSON.parse(JSON.stringify(DEFAULT_STATE)),j.data.scenarios[cur]);
+      // объединяем: версии из таблицы + локальные (которые могли не успеть уехать)
+      const localList=loadScenarioList();
+      const merged=Object.assign({}, localList, j.data.scenarios);
+      saveScenarioList(merged);
+      const cur=j.data.current||Object.keys(merged)[0];
+      if(merged[cur]) S=Object.assign(JSON.parse(JSON.stringify(DEFAULT_STATE)),merged[cur]);
       if(!S.meta)S.meta={}; S.meta.name=cur;
       persistLocal(); setSync("ok","Google-таблица"); renderAll();
     } else if(j && j.ok && j.data && j.data.courses){
