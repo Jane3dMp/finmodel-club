@@ -149,6 +149,15 @@ small.note{font-size:11px;color:var(--muted)}
 .cell-les{vertical-align:top;padding:1px!important}
 #gridTable td.cell-les .les{height:100%;display:flex;flex-direction:column;justify-content:flex-start}
 #gridTable td{height:34px}
+
+.dragh{cursor:grab;color:var(--muted);font-size:16px;text-align:center;user-select:none}
+.dragh:active{cursor:grabbing}
+#courseTable tr[draggable="true"]:hover .dragh{color:var(--terra)}
+
+.pin{cursor:pointer;font-size:13px;user-select:none;opacity:.6}
+.pin:hover{opacity:1}
+tr.rowlocked{background:#EAF3EC!important}
+tr.rowlocked input,tr.rowlocked select{background:#EAF3EC;border-color:#cfe3d4;color:var(--coal)}
 </style>
 </head>
 <body>
@@ -216,6 +225,8 @@ small.note{font-size:11px;color:var(--muted)}
  <div class="sec-desc">Ваши цены и ставки ЗП загружены из Excel. Заполните <b>группы в неделю</b> и <b>детей в группе (факт)</b> — маржа посчитается автоматически. 🔴 = наполняемость ниже точки безубыточности.</div>
  <div class="hd-actions">
   <button class="btn sm" onclick="addCourse()">+ Курс</button>
+  <button class="btn ghost sm" onclick="sortCourses('name')">⇅ По алфавиту</button>
+  <button class="btn ghost sm" onclick="sortCourses('eco')">⇅ По экосистеме</button>
   <button class="btn ghost sm" onclick="fillTarget()">Заполнить целевой наполняемостью</button>
   <button class="btn gray sm" onclick="exportJSON()">Экспорт JSON</button>
   <button class="btn gray sm" onclick="document.getElementById('impFile').click()">Импорт JSON</button>
@@ -232,6 +243,7 @@ small.note{font-size:11px;color:var(--muted)}
  <div class="kpigrid" id="planKpi"></div>
  <div class="hd-actions">
   <button class="btn sm" onclick="addPlan()">+ Курс</button>
+  <button class="btn ghost sm" onclick="rowSort('plan','name',renderPlanner)">⇅ По алфавиту</button>
   <button class="btn ghost sm" onclick="planToCourses()">Перенести в «Курсы и маржа»</button>
  </div>
  <div class="card"><h3>План по курсам</h3>
@@ -274,7 +286,7 @@ small.note{font-size:11px;color:var(--muted)}
  <h2 class="sec">Педсостав и фонд ЗП</h2>
  <div class="sec-desc">Фонд ЗП считается <b>автоматически из расписания</b>: каждое занятие × ставка по фактическому числу детей в группе. Поэтому ЗП/нед и ЗП/мес — расчётные (не вводятся руками): меняете занятие в сетке → ЗП пересчитывается. Колонку «Может вести» можно дописывать вручную.</div>
  <div class="kpigrid" id="staffKpi"></div>
- <div class="hd-actions"><button class="btn sm" onclick="addStaff()">+ Педагог</button><button class="btn ghost sm" onclick="syncStaffFull()">Загрузить полный педсостав (21)</button></div>
+ <div class="hd-actions"><button class="btn sm" onclick="addStaff()">+ Педагог</button><button class="btn ghost sm" onclick="sortStaffByName()">⇅ По алфавиту</button><button class="btn ghost sm" onclick="syncStaffFull()">Загрузить полный педсостав (21)</button></div>
  <div class="card"><h3>Нагрузка и ЗП по педагогам</h3>
   <div class="tscroll"><table id="staffTable"></table></div>
   <div class="callout"><b>Связь с моделью:</b> этот фонд ЗП идёт в P&L и в расчёт взносов ФСЗН на вкладке «Налоги».</div>
@@ -597,11 +609,58 @@ function fmt(n){ if(n===null||n===undefined||isNaN(n)) return "—";
   return Math.round(n).toLocaleString("ru-RU"); }
 function fmt1(n){ return (Math.round(n*10)/10).toLocaleString("ru-RU"); }
 
+/* ====== УНИВЕРСАЛЬНЫЕ ИНСТРУМЕНТЫ СТРОК (сортировка, перетаскивание, копирование) ====== */
+// arrName: имя массива в S ("courses","plan","staff"); rerender: функция перерисовки
+
+/* закреп строки (полная заморозка) */
+
+function lockAttr(arrName,i){ return (S[arrName]&&S[arrName][i]&&S[arrName][i]._locked)?'disabled':''; }
+function isLocked(arrName,i){ return !!(S[arrName]&&S[arrName][i]&&S[arrName][i]._locked); }
+
+function rowLock(arrName, i, rerender){
+  const arr=S[arrName]; if(!arr||!arr[i]) return;
+  arr[i]._locked=!arr[i]._locked;
+  persistLocal(); rerender();
+  toast(arr[i]._locked?"Строка закреплена":"Закрепление снято");
+}
+function rowLockBtn(arrName, i, renderName){
+  const locked=S[arrName] && S[arrName][i] && S[arrName][i]._locked;
+  return `<span class="pin" onclick="rowLock('${arrName}',${i},${renderName})" title="${locked?'Закреплено — нажмите, чтобы открепить':'Закрепить строку (защита от изменений)'}">${locked?'📌':'📍'}</span>`;
+}
+
+function rowDup(arrName, i, rerender){
+  const arr=S[arrName]; if(!arr||!arr[i]) return;
+  const copy=JSON.parse(JSON.stringify(arr[i]));
+  delete copy._locked;
+  arr.splice(i+1,0,copy);
+  persistLocal(); rerender(); toast("Строка скопирована");
+}
+function rowSort(arrName, key, rerender){
+  const arr=S[arrName]; if(!arr) return;
+  arr.sort((a,b)=>String(a[key]||"").localeCompare(String(b[key]||""),'ru'));
+  persistLocal(); rerender(); toast("Отсортировано по алфавиту");
+}
+// drag&drop для массива
+const _rowDrag={arr:null,idx:null};
+function rowDragStart(e,arrName,i){ if(S[arrName]&&S[arrName][i]&&S[arrName][i]._locked){e.preventDefault();return;} _rowDrag.arr=arrName; _rowDrag.idx=i; e.dataTransfer.effectAllowed="move";
+  if(e.currentTarget&&e.currentTarget.style) e.currentTarget.style.opacity="0.4"; }
+function rowDragEnd(e){ if(e.currentTarget&&e.currentTarget.style) e.currentTarget.style.opacity="1"; }
+function rowDragOver(e){ e.preventDefault(); e.dataTransfer.dropEffect="move"; }
+function rowDrop(e,arrName,i,rerender){
+  e.preventDefault();
+  if(_rowDrag.arr!==arrName||_rowDrag.idx==null||_rowDrag.idx===i) return;
+  const arr=S[arrName];
+  const moved=arr.splice(_rowDrag.idx,1)[0];
+  arr.splice(i,0,moved);
+  _rowDrag.arr=null;_rowDrag.idx=null;
+  persistLocal(); rerender();
+}
+
 /* ===== РЕНДЕР: КУРСЫ ===== */
 function renderCourses(){
   const t=document.getElementById("courseTable");
   let h=`<thead><tr>
-    <th>Курс</th><th>Эко</th><th>Цена</th><th>ЗП/зан</th>
+    <th style="width:24px"></th><th>Курс</th><th>Эко</th><th>Цена</th><th>ЗП/зан</th>
     <th>Цель груп.</th><th>Групп/нед</th><th>Факт детей</th>
     <th>Оборот/мес</th><th>Маржа,р</th><th>Маржа,%</th><th>Мин</th><th></th></tr></thead><tbody>`;
   S.courses.forEach((c,i)=>{
@@ -612,25 +671,27 @@ function renderCourses(){
       else if(r.marginPct>=45){sig="🟢";cls="g";}
       else {sig="🟡";cls="y";}
     }
-    h+=`<tr>
-      <td><input class="cell wide" value="${esc(c.name)}" onchange="upd(${i},'name',this.value)"></td>
-      <td><select class="cell" onchange="upd(${i},'eco',this.value)">
+    const lk=isLocked('courses',i), da=lk?'disabled':'';
+    h+=`<tr class="${lk?'rowlocked':''}" draggable="${lk?'false':'true'}" ${lk?'':`ondragstart="rowDragStart(event,'courses',${i})" ondragend="rowDragEnd(event)"`} ondragover="rowDragOver(event)" ondrop="rowDrop(event,'courses',${i},renderCourses)">
+      <td class="dragh" title="${lk?'Закреплено':'Перетащите'}">${rowLockBtn('courses',i,'renderCourses')}</td>
+      <td><input class="cell wide" value="${esc(c.name)}" ${da} onchange="upd(${i},'name',this.value)"></td>
+      <td><select class="cell" ${da} onchange="upd(${i},'eco',this.value)">
         ${["Прознание","CODDY","Детали"].map(e=>`<option ${c.eco===e?"selected":""}>${e}</option>`).join("")}</select></td>
-      <td><input class="cell" type="number" value="${c.price}" onchange="upd(${i},'price',this.value)"></td>
+      <td><input class="cell" type="number" value="${c.price}" ${da} onchange="upd(${i},'price',this.value)"></td>
       <td class="num" title="из справочника ставок по ${r.fillN||c.fill||4} детям"><b>${fmt(r.wage)}</b></td>
-      <td><input class="cell" type="number" value="${c.groupSize}" onchange="upd(${i},'groupSize',this.value)"></td>
-      <td><input class="cell" type="number" value="${c.groups}" onchange="upd(${i},'groups',this.value)"></td>
-      <td><input class="cell" type="number" value="${c.fill}" onchange="upd(${i},'fill',this.value)"></td>
+      <td><input class="cell" type="number" value="${c.groupSize}" ${da} onchange="upd(${i},'groupSize',this.value)"></td>
+      <td><input class="cell" type="number" value="${c.groups}" ${da} onchange="upd(${i},'groups',this.value)"></td>
+      <td><input class="cell" type="number" value="${c.fill}" ${da} onchange="upd(${i},'fill',this.value)"></td>
       <td class="num">${fmt(r.revenue)}</td>
       <td class="num ${r.margin>=0?'pos':'neg'}">${fmt(r.margin)}</td>
       <td class="num">${r.revenue>0?fmt1(r.marginPct)+'%':'—'}</td>
       <td class="num"><span class="sig ${cls}">${sig}</span> ${r.minFill||'—'}</td>
-      <td><button class="btn gray sm" onclick="delCourse(${i})">×</button></td>
+      <td style="white-space:nowrap">${lk?'<span class="muted" style="font-size:11px">🔒</span>':`<button class="btn ghost sm" onclick="rowDup('courses',${i},renderCourses)" title="Копировать строку">⧉</button> <button class="btn gray sm" onclick="delCourse(${i})">×</button>`}</td>
     </tr>`;
   });
   // итог
   const T=totals();
-  h+=`<tr class="totrow"><td>ИТОГО (${S.courses.length} курсов)</td><td></td><td></td><td></td>
+  h+=`<tr class="totrow"><td></td><td>ИТОГО (${S.courses.length} курсов)</td><td></td><td></td><td></td>
     <td class="num"></td>
     <td class="num">${S.courses.reduce((a,c)=>a+(+c.groups||0),0)}</td>
     <td class="num">${T.kids}</td>
@@ -644,8 +705,36 @@ function upd(i,k,v){
   else S.courses[i][k]=parseFloat(v)||0;
   persistLocal(); renderAll();
 }
+
+function sortCourses(by){
+  if(by==='name'){
+    S.courses.sort((a,b)=>a.name.localeCompare(b.name,'ru'));
+  } else if(by==='eco'){
+    const order={'Прознание':0,'CODDY':1,'Детали':2};
+    S.courses.sort((a,b)=>{
+      const d=(order[a.eco]??9)-(order[b.eco]??9);
+      return d!==0?d:a.name.localeCompare(b.name,'ru');
+    });
+  }
+  persistLocal(); renderCourses();
+  toast(by==='name'?"Отсортировано по алфавиту":"Отсортировано по экосистеме");
+}
+let _courseDrag=null;
+function courseDragStart(e,i){ _courseDrag=i; e.dataTransfer.effectAllowed="move";
+  if(e.currentTarget&&e.currentTarget.style) e.currentTarget.style.opacity="0.4"; }
+function courseDragEnd(e){ if(e.currentTarget&&e.currentTarget.style) e.currentTarget.style.opacity="1"; }
+function courseDragOver(e){ e.preventDefault(); e.dataTransfer.dropEffect="move"; }
+function courseDrop(e,i){
+  e.preventDefault();
+  if(_courseDrag==null||_courseDrag===i) return;
+  const moved=S.courses.splice(_courseDrag,1)[0];
+  S.courses.splice(i,0,moved);
+  _courseDrag=null;
+  persistLocal(); renderCourses();
+}
+
 function addCourse(){ S.courses.push({name:"Новый курс",eco:"Прознание",price:25,single:30,wage:40,dur:1,groupSize:8,groups:0,fill:0,material:0}); persistLocal(); renderCourses(); }
-function delCourse(i){ S.courses.splice(i,1); persistLocal(); renderAll(); }
+function delCourse(i){ if(isLocked("courses",i)){toast("Строка закреплена");return;} S.courses.splice(i,1); persistLocal(); renderAll(); }
 function fillTarget(){ S.courses.forEach(c=>{ if(!c.fill) c.fill=c.groupSize; if(!c.groups) c.groups=1; }); persistLocal(); renderAll(); toast("Заполнено целевыми значениями"); }
 
 /* ===== РЕНДЕР: ПОСТОЯННЫЕ ===== */
@@ -657,6 +746,7 @@ function renderFixed(){
     const row=`<div class="field" style="gap:8px">
       <input class="cell wide" style="flex:1" value="${esc(k)}" onchange="renameFixed('${safe}',this.value)" title="название статьи">
       <input type="number" style="width:90px" value="${S.fixed[k]}" onchange="updFixed('${safe}',this.value)">
+      <button class="btn ghost sm" onclick="dupFixed('${safe}')" title="Копировать статью">⧉</button>
       <button class="btn gray sm" onclick="delFixed('${safe}')" title="Удалить статью">×</button></div>`;
     if(S.fixedGroup[k]===2) h2+=row; else h1+=row;
   }
@@ -698,6 +788,14 @@ function delFixed(k){
   delete S.fixed[k]; delete S.fixedGroup[k];
   persistLocal(); renderAll(); toast("Статья удалена");
 }
+
+function dupFixed(k){
+  let base=k+" (копия)", name=base, n=1;
+  while(S.fixed[name]!=null){ name=base+" "+(++n); }
+  S.fixed[name]=S.fixed[k]; S.fixedGroup[name]=S.fixedGroup[k]||1;
+  persistLocal(); renderFixed(); toast("Статья скопирована");
+}
+
 function addFixed(group){
   let base="Новая статья", name=base, n=1;
   while(S.fixed[name]!=null){ name=base+" "+(++n); }
@@ -944,25 +1042,27 @@ function renderPlanner(){
 
   // таблица плана
   let h=`<thead><tr>
-    <th>Курс</th><th>Чел/гр</th><th>Цена</th><th>Групп/нед</th>
+    <th style="width:24px"></th><th>Курс</th><th>Чел/гр</th><th>Цена</th><th>Групп/нед</th>
     <th>Визитов/нед</th><th>Оборот/нед</th><th>Детей-мест</th><th></th></tr></thead><tbody>`;
   S.plan.forEach((p,i)=>{
     const g=+p.groups||0, cg=+p.perGroup||0, pr=+p.price||0, v=+p.visits||1;
     const rev=cg*pr*g*v, kids=cg*g;
-    h+=`<tr>
-      <td><input class="cell wide" value="${esc(p.name)}" onchange="updPlan(${i},'name',this.value)"></td>
-      <td><input class="cell" type="number" value="${cg}" onchange="updPlan(${i},'perGroup',this.value)"></td>
-      <td><input class="cell" type="number" value="${pr}" onchange="updPlan(${i},'price',this.value)"></td>
-      <td><input class="cell" type="number" value="${g}" onchange="updPlan(${i},'groups',this.value)"></td>
-      <td><select class="cell" onchange="updPlan(${i},'visits',this.value)">
+    const lk=isLocked('plan',i), da=lk?'disabled':'';
+    h+=`<tr class="${lk?'rowlocked':''}" draggable="${lk?'false':'true'}" ${lk?'':`ondragstart="rowDragStart(event,'plan',${i})" ondragend="rowDragEnd(event)"`} ondragover="rowDragOver(event)" ondrop="rowDrop(event,'plan',${i},renderPlanner)">
+      <td class="dragh" title="${lk?'Закреплено':'Перетащите'}">${rowLockBtn('plan',i,'renderPlanner')}</td>
+      <td><input class="cell wide" value="${esc(p.name)}" ${da} onchange="updPlan(${i},'name',this.value)"></td>
+      <td><input class="cell" type="number" value="${cg}" ${da} onchange="updPlan(${i},'perGroup',this.value)"></td>
+      <td><input class="cell" type="number" value="${pr}" ${da} onchange="updPlan(${i},'price',this.value)"></td>
+      <td><input class="cell" type="number" value="${g}" ${da} onchange="updPlan(${i},'groups',this.value)"></td>
+      <td><select class="cell" ${da} onchange="updPlan(${i},'visits',this.value)">
          <option value="1" ${v==1?"selected":""}>1×</option>
          <option value="2" ${v==2?"selected":""}>2×</option></select></td>
       <td class="num">${fmt(rev)}</td>
       <td class="num">${fmt1(kids)}</td>
-      <td><button class="btn gray sm" onclick="delPlan(${i})">×</button></td>
+      <td style="white-space:nowrap">${lk?'<span class="muted" style="font-size:11px">🔒</span>':`<button class="btn ghost sm" onclick="rowDup('plan',${i},renderPlanner)" title="Копировать">⧉</button> <button class="btn gray sm" onclick="delPlan(${i})">×</button>`}</td>
     </tr>`;
   });
-  h+=`<tr class="totrow"><td>ИТОГО</td><td></td><td></td>
+  h+=`<tr class="totrow"><td></td><td>ИТОГО</td><td></td><td></td>
     <td class="num">${fmt(T.groups)}</td><td></td>
     <td class="num">${fmt(T.revWeek)}</td><td class="num">${fmt1(T.uniqNeed)}</td><td></td></tr>`;
   document.getElementById("planTable").innerHTML=h+"</tbody>";
@@ -994,7 +1094,7 @@ function updPlan(i,k,v){
   if(k==="name") S.plan[i][k]=v; else S.plan[i][k]=parseFloat(v)||0;
   persistLocal(); renderPlanner();
 }
-function delPlan(i){ S.plan.splice(i,1); persistLocal(); renderPlanner(); }
+function delPlan(i){ if(isLocked("plan",i)){toast("Строка закреплена");return;} S.plan.splice(i,1); persistLocal(); renderPlanner(); }
 function addPlan(){ S.plan.push({name:"Новый курс",perGroup:6,price:25,groups:0,visits:2}); persistLocal(); renderPlanner(); }
 function updFunnel(k,v){ S.funnel[k]=parseFloat(v)||0; persistLocal(); renderPlanner(); }
 
@@ -1327,18 +1427,21 @@ function renderStaff(){
 
   let h=`<thead><tr><th>Педагог</th><th>Курсы</th><th>Занятий/нед</th><th>Детей-мест</th>
     <th>ЗП/нед</th><th>ЗП/мес</th><th></th></tr></thead><tbody>`;
-  st.sort((a,b)=>b.wageWeek-a.wageWeek);
+  if(S._sortStaffByName){ st.sort((a,b)=>String(a.name).localeCompare(String(b.name),"ru")); }
+  else { st.sort((a,b)=>b.wageWeek-a.wageWeek); }
   st.forEach(s=>{
     const idx=S.staff.findIndex(x=>x.name===s.name);
     const safeName=esc(s.name).replace(/'/g,"\\'");
-    h+=`<tr>
-      <td>${idx>=0?`<input class="cell wide" value="${esc(s.name)}" onchange="updStaff(${idx},this.value)">`:esc(s.name)+' <span class="muted">(из сетки)</span>'}</td>
-      <td style="font-size:11px">${idx>=0?`<input class="cell wide" style="font-size:11px" value="${esc([...s.courses].join(", "))}" placeholder="курсы через запятую" onchange="updTeach(${idx},this.value)">`:`<span class="muted">${[...s.courses].join(", ")||"—"}</span>`}</td>
+    const lk=(idx>=0 && S.staff[idx]._locked), da=lk?'disabled':'';
+    const lockBtn=`<span class="pin" onclick="lockStaff(${idx})" title="${lk?'Закреплено':'Закрепить педагога'}">${lk?'📌':(idx>=0?'📍':'')}</span>`;
+    h+=`<tr class="${lk?'rowlocked':''}">
+      <td style="white-space:nowrap">${idx>=0?lockBtn:''} ${idx>=0?`<input class="cell wide" style="width:170px" value="${esc(s.name)}" ${da} onchange="updStaff(${idx},this.value)">`:esc(s.name)+' <span class="muted">(из сетки)</span>'}</td>
+      <td style="font-size:11px">${idx>=0?`<input class="cell wide" style="font-size:11px" value="${esc([...s.courses].join(", "))}" placeholder="курсы через запятую" ${da} onchange="updTeach(${idx},this.value)">`:`<span class="muted">${[...s.courses].join(", ")||"—"}</span>`}</td>
       <td class="num">${s.lessons}</td>
       <td class="num">${s.students}</td>
       <td class="num">${fmt(s.wageWeek)}</td>
       <td class="num"><b>${fmt(s.wageWeek*4)}</b></td>
-      <td>${idx>=0?`<button class="btn gray sm" onclick="delStaff(${idx})" title="Удалить из педсостава">×</button>`:`<button class="btn gray sm" onclick="removeTeacherFromGrid('${safeName}')" title="Снять педагога со всех занятий">×</button>`}</td>
+      <td style="white-space:nowrap">${lk?'<span class="muted" style="font-size:11px">🔒</span>':`<button class="btn ghost sm" onclick="copyStaff('${safeName}')" title="Скопировать педагога">⧉</button> ${idx>=0?`<button class="btn gray sm" onclick="delStaff(${idx})" title="Удалить">×</button>`:`<button class="btn gray sm" onclick="removeTeacherFromGrid('${safeName}')" title="Снять со всех занятий">×</button>`}`}</td>
     </tr>`;
   });
   h+=`<tr class="totrow"><td>ИТОГО ФОНД ЗП</td><td></td><td class="num">${totalLessons}</td><td></td>
@@ -1351,7 +1454,15 @@ function renderStaff(){
   // таблица ставок (справочник ЗП по наполняемости)
   renderWageRef();
 }
-function updStaff(i,v){ S.staff[i].name=v; persistLocal(); renderStaff(); renderGrid(); }
+
+function lockStaff(i){
+  if(i<0||!S.staff[i]) return;
+  S.staff[i]._locked=!S.staff[i]._locked;
+  persistLocal(); renderStaff();
+  toast(S.staff[i]._locked?"Педагог закреплён":"Закрепление снято");
+}
+
+function updStaff(i,v){ if(S.staff[i]._locked){renderStaff();return;} S.staff[i].name=v; persistLocal(); renderStaff(); renderGrid(); }
 
 function removeTeacherFromGrid(name){
   const cnt=S.grid.filter(l=>l.teacher===name).length;
@@ -1361,7 +1472,31 @@ function removeTeacherFromGrid(name){
   toast("Педагог снят с занятий: "+name);
 }
 
-function delStaff(i){ S.staff.splice(i,1); persistLocal(); renderStaff(); }
+
+
+function sortStaffByName(){
+  S.staff.sort((a,b)=>String(a.name||"").localeCompare(String(b.name||""),'ru'));
+  S._sortStaffByName=true;
+  persistLocal(); renderStaff();
+  toast("Педагоги отсортированы по алфавиту");
+}
+
+function copyStaff(name){
+  // находим педагога (в списке или из сетки) и создаём копию-шаблон
+  const inList=S.staff.find(s=>s.name===name);
+  // соберём курсы, которые он ведёт (из canTeach + из сетки)
+  const courses=new Set();
+  if(inList && inList.canTeach) inList.canTeach.forEach(c=>courses.add(c));
+  S.grid.forEach(l=>{ if(l.teacher===name && l.course) courses.add(l.course); });
+  const newName=prompt("Имя нового педагога (копия «"+name+"» с теми же курсами):", name+" 2");
+  if(!newName) return;
+  if(S.staff.some(s=>s.name===newName)){ toast("Педагог с таким именем уже есть"); return; }
+  S.staff.push({name:newName, wageMode:"tier", fixedRate:0, canTeach:[...courses]});
+  persistLocal(); renderStaff();
+  toast("Создан педагог: "+newName+" (курсы скопированы)");
+}
+
+function delStaff(i){ if(S.staff[i]&&S.staff[i]._locked){toast("Педагог закреплён");return;} S.staff.splice(i,1); persistLocal(); renderStaff(); }
 
 function syncStaffFull(){
   const exist=new Set(S.staff.map(s=>s.name.trim()));
@@ -1373,6 +1508,7 @@ function syncStaffFull(){
 
 
 function updTeach(i,v){
+  if(S.staff[i]._locked){renderStaff();return;}
   S.staff[i].canTeach = v.split(",").map(x=>x.trim()).filter(Boolean);
   persistLocal(); renderStaff();
 }
