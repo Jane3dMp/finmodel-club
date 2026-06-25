@@ -158,6 +158,11 @@ small.note{font-size:11px;color:var(--muted)}
 .pin:hover{opacity:1}
 tr.rowlocked{background:#EAF3EC!important}
 tr.rowlocked input,tr.rowlocked select{background:#EAF3EC;border-color:#cfe3d4;color:var(--coal)}
+
+.ctags{display:flex;flex-wrap:wrap;gap:3px}
+.ctag{display:inline-flex;align-items:center;gap:3px;background:var(--sand);border:1px solid var(--line);border-radius:4px;padding:1px 6px;font-size:11px;white-space:nowrap}
+.ctag .x{cursor:pointer;color:var(--muted);font-weight:700}
+.ctag .x:hover{color:var(--red)}
 </style>
 </head>
 <body>
@@ -295,6 +300,7 @@ tr.rowlocked input,tr.rowlocked select{background:#EAF3EC;border-color:#cfe3d4;c
  <div class="card"><h3>Справочник ставок ЗП (₽ за занятие по числу детей)</h3>
   <div class="sec-desc">Ваша сетка из «Цены и ЗП (26)»: база на 4 детей + надбавка за каждого следующего. Можно править.</div>
   <div class="tscroll"><table id="wageRef"></table></div>
+  <button class="btn ghost sm" style="margin-top:10px" onclick="addWageCourse()">+ курс в справочник</button>
  </div>
 </section>
 
@@ -445,7 +451,7 @@ tr.rowlocked input,tr.rowlocked select{background:#EAF3EC;border-color:#cfe3d4;c
 /* ===== СИД (курсы из Excel) ===== */
 const LASTYEAR_FILL={"Blender": 6.9, "Blender + Unity": 6.6, "Digital art": 6.1, "Minecraft": 6.1, "Python": 5.9, "Roblox": 6.4, "Roblox + Blender": 6.5, "Scratch": 4.2, "TinkerCad": 4.1, "Английский язык": 4.7, "Арт-Студия (1 час)": 6.0, "Говорилка": 4.3, "Живая азбука": 5.0, "Каллиграфия": 6.3, "Клуб математической стратегии": 6.2, "Лепка из глины (1 час)": 6.9, "Лепка из полимерной глины": 6.0, "Логика": 4.1, "Мир научных открытий": 6.3, "Нейрогимнастика": 6.2, "Песок": 4.5, "Почемучка": 5.1, "Рисование": 7.1, "Робототехника": 5.4, "Финансовая грамотность": 4.1, "Хочу все знать! выходной": 5.4, "Электроника": 3.7, "7 навыков уверенных детей": 7.3};
 const LASTYEAR_INCOME={"year": {"Английский язык": 100690, "Клуб математической стратегии": 74106, "7 навыков уверенных детей": 68686, "Roblox": 64313, "Хочу все знать! выходной": 59861, "Лепка из глины (1 час)": 48792, "Minecraft": 46900, "Нейрогимнастика": 43557, "Roblox + Blender": 42606, "Blender + Unity": 39012, "Digital art": 36158, "Рисование": 33272, "Blender": 25354, "Почемучка": 25158, "Финансовая грамотность": 23990, "Говорилка": 23934, "Арт-Студия (1 час)": 21976, "Мир научных открытий": 20477, "Лепка из полимерной глины": 17406, "Каллиграфия": 17400, "Робототехника": 17286, "Scratch": 11586, "Логика": 7698, "Python": 7518, "Песок": 7342, "Живая азбука": 6357, "TinkerCad": 4681, "Взросление": 4366, "Электроника": 3910}, "month": {"Английский язык": 11188, "Клуб математической стратегии": 8234, "7 навыков уверенных детей": 7632, "Roblox": 7146, "Хочу все знать! выходной": 6651, "Лепка из глины (1 час)": 5421, "Minecraft": 5211, "Нейрогимнастика": 4840, "Roblox + Blender": 4734, "Blender + Unity": 4335, "Digital art": 4018, "Рисование": 3697, "Blender": 2817, "Почемучка": 2795, "Финансовая грамотность": 2666, "Говорилка": 2659, "Арт-Студия (1 час)": 2442, "Мир научных открытий": 2275, "Лепка из полимерной глины": 1934, "Каллиграфия": 1933, "Робототехника": 1921, "Scratch": 1287, "Логика": 855, "Python": 835, "Песок": 816, "Живая азбука": 706, "TinkerCad": 520, "Взросление": 485, "Электроника": 434}};
-const SEED_COURSES = [{"name": "7 навыков уверенных детей", "eco": "Прознание", "price": 32.0, "single": 37.0, "wage": 45, "dur": 1.5, "groupSize": 8, "groups": 0, "fill": 0, "material": 0}, {"name": "Английский язык", "eco": "Прознание", "price": 21.0, "single": 26.0, "wage": 40, "dur": 1, "groupSize": 8, "groups": 0, "fill": 0, "material": 0}, {"name": "Арт-Студия (1 час)", "eco": "Прознание", "price": 23.0, "single": 29.0, "wage": 40, "dur": 1, "groupSize": 8, "groups": 0, "fill": 0, "material": 0}, {"name": "Арт-Студия (1,5 часа)", "eco": "Прознание", "price": 27.0, "single": 32.0, "wage": 45, "dur": 1.5, "groupSize": 8, "groups": 0, "fill": 0, "material": 0}, {"name": "Биология", "eco": "Прознание", "price": 27.0, "single": 32.0, "wage": 45, "dur": 1.5, "groupSize": 8, "groups": 0, "fill": 0, "material": 0}, {"name": "Взросление", "eco": "Прознание", "price": 25.0, "single": 33.0, "wage": 45, "dur": 1.5, "groupSize": 8, "groups": 0, "fill": 0, "material": 0}, {"name": "Говорилка", "eco": "Прознание", "price": 22.0, "single": 27.0, "wage": 40, "dur": 1, "groupSize": 6, "groups": 0, "fill": 0, "material": 0}, {"name": "Живая азбука", "eco": "Прознание", "price": 22.0, "single": 27.0, "wage": 40, "dur": 1, "groupSize": 8, "groups": 0, "fill": 0, "material": 0}, {"name": "Каллиграфия", "eco": "Прознание", "price": 23.0, "single": 28.0, "wage": 40, "dur": 1, "groupSize": 8, "groups": 0, "fill": 0, "material": 0}, {"name": "Клуб математической стратегии", "eco": "Прознание", "price": 23.0, "single": 27.0, "wage": 40, "dur": 1, "groupSize": 8, "groups": 0, "fill": 0, "material": 0}, {"name": "Клуб математической стратегии (1,5 часа)", "eco": "Прознание", "price": 30.0, "single": 27.0, "wage": 40, "dur": 1, "groupSize": 8, "groups": 0, "fill": 0, "material": 0}, {"name": "Лепка из глины (1 час)", "eco": "Прознание", "price": 23.0, "single": 28.0, "wage": 40, "dur": 1, "groupSize": 8, "groups": 0, "fill": 0, "material": 0}, {"name": "Лепка из глины (1,5 часа)", "eco": "Прознание", "price": 29.0, "single": 35.0, "wage": 45, "dur": 1.5, "groupSize": 8, "groups": 0, "fill": 0, "material": 0}, {"name": "Лепка из полимерной глины", "eco": "Прознание", "price": 29.0, "single": 35.0, "wage": 45, "dur": 1.5, "groupSize": 8, "groups": 0, "fill": 0, "material": 0}, {"name": "Логика", "eco": "Прознание", "price": 30.0, "single": 40.0, "wage": 45, "dur": 1.5, "groupSize": 8, "groups": 0, "fill": 0, "material": 0}, {"name": "Маленькие академики", "eco": "Прознание", "price": 22.0, "single": 27.0, "wage": 40, "dur": 1, "groupSize": 6, "groups": 0, "fill": 0, "material": 0}, {"name": "Мир научных открытий", "eco": "Прознание", "price": 27.0, "single": 33.0, "wage": 45, "dur": 1.5, "groupSize": 8, "groups": 0, "fill": 0, "material": 0}, {"name": "Нейрогимнастика", "eco": "Прознание", "price": 22.0, "single": 27.0, "wage": 40, "dur": 1, "groupSize": 12, "groups": 0, "fill": 0, "material": 0}, {"name": "Почемучка", "eco": "Прознание", "price": 22.0, "single": 27.0, "wage": 40, "dur": 1, "groupSize": 8, "groups": 0, "fill": 0, "material": 0}, {"name": "Рисование", "eco": "Прознание", "price": 32.0, "single": 37.0, "wage": 50, "dur": 1.5, "groupSize": 8, "groups": 0, "fill": 0, "material": 0}, {"name": "Финансовая грамотность", "eco": "Прознание", "price": 30.0, "single": 35.0, "wage": 40, "dur": 1.5, "groupSize": 8, "groups": 0, "fill": 0, "material": 0}, {"name": "Электроника", "eco": "Прознание", "price": 30.0, "single": 37.0, "wage": 45, "dur": 1.5, "groupSize": 7, "groups": 0, "fill": 0, "material": 0}, {"name": "Химия", "eco": "Прознание", "price": 27.0, "single": 33.0, "wage": 45, "dur": 1.5, "groupSize": 8, "groups": 0, "fill": 0, "material": 0}, {"name": "Хочу все знать! будний", "eco": "Прознание", "price": 22.0, "single": 27.0, "wage": 40, "dur": 1, "groupSize": 8, "groups": 0, "fill": 0, "material": 0}, {"name": "Хочу все знать! выходной", "eco": "Прознание", "price": 36.0, "single": 44.0, "wage": 50, "dur": 2, "groupSize": 8, "groups": 0, "fill": 0, "material": 0}, {"name": "БПЛА", "eco": "CODDY", "price": 35.0, "single": 45.0, "wage": 45, "dur": 1.5, "groupSize": 8, "groups": 0, "fill": 0, "material": 0}, {"name": "Робототехника", "eco": "CODDY", "price": 35.0, "single": 45.0, "wage": 45, "dur": 1.5, "groupSize": 8, "groups": 0, "fill": 0, "material": 0}, {"name": "Scratch", "eco": "CODDY", "price": 35.0, "single": 45.0, "wage": 45, "dur": 1.5, "groupSize": 9, "groups": 0, "fill": 0, "material": 0}, {"name": "Minecraft", "eco": "CODDY", "price": 35.0, "single": 45.0, "wage": 45, "dur": 1.5, "groupSize": 9, "groups": 0, "fill": 0, "material": 0}, {"name": "Roblox", "eco": "CODDY", "price": 35.0, "single": 45.0, "wage": 45, "dur": 1.5, "groupSize": 9, "groups": 0, "fill": 0, "material": 0}, {"name": "Roblox + Blender", "eco": "CODDY", "price": 35.0, "single": 45.0, "wage": 45, "dur": 1.5, "groupSize": 9, "groups": 0, "fill": 0, "material": 0}, {"name": "Blender", "eco": "CODDY", "price": 35.0, "single": 45.0, "wage": 45, "dur": 1.5, "groupSize": 9, "groups": 0, "fill": 0, "material": 0}, {"name": "Blender + Unity", "eco": "CODDY", "price": 35.0, "single": 45.0, "wage": 45, "dur": 1.5, "groupSize": 9, "groups": 0, "fill": 0, "material": 0}, {"name": "Digital art", "eco": "CODDY", "price": 35.0, "single": 45.0, "wage": 45, "dur": 1.5, "groupSize": 9, "groups": 0, "fill": 0, "material": 0}, {"name": "Python", "eco": "CODDY", "price": 35.0, "single": 45.0, "wage": 45, "dur": 1.5, "groupSize": 9, "groups": 0, "fill": 0, "material": 0}, {"name": "TinkerCad", "eco": "CODDY", "price": 35.0, "single": 45.0, "wage": 45, "dur": 1.5, "groupSize": 9, "groups": 0, "fill": 0, "material": 0}, {"name": "Песок", "eco": "Прознание", "price": 18.0, "single": 23.0, "wage": 40, "dur": 1, "groupSize": 6, "groups": 0, "fill": 0, "material": 0}];
+const SEED_COURSES = [{"name": "7 навыков уверенных детей", "eco": "Прознание", "price": 32.0, "single": 37.0, "wage": 45, "dur": 1.5, "groupSize": 8, "groups": 0, "fill": 0, "material": 0, "visits": 1}, {"name": "Английский язык", "eco": "Прознание", "price": 21.0, "single": 26.0, "wage": 40, "dur": 1, "groupSize": 8, "groups": 0, "fill": 0, "material": 0, "visits": 2}, {"name": "Арт-Студия (1 час)", "eco": "Прознание", "price": 23.0, "single": 29.0, "wage": 40, "dur": 1, "groupSize": 8, "groups": 0, "fill": 0, "material": 0, "visits": 1}, {"name": "Арт-Студия (1,5 часа)", "eco": "Прознание", "price": 27.0, "single": 32.0, "wage": 45, "dur": 1.5, "groupSize": 8, "groups": 0, "fill": 0, "material": 0, "visits": 1}, {"name": "Биология", "eco": "Прознание", "price": 27.0, "single": 32.0, "wage": 45, "dur": 1.5, "groupSize": 8, "groups": 0, "fill": 0, "material": 0, "visits": 1}, {"name": "Взросление", "eco": "Прознание", "price": 25.0, "single": 33.0, "wage": 45, "dur": 1.5, "groupSize": 8, "groups": 0, "fill": 0, "material": 0, "visits": 1}, {"name": "Говорилка", "eco": "Прознание", "price": 22.0, "single": 27.0, "wage": 40, "dur": 1, "groupSize": 6, "groups": 0, "fill": 0, "material": 0, "visits": 2}, {"name": "Живая азбука", "eco": "Прознание", "price": 22.0, "single": 27.0, "wage": 40, "dur": 1, "groupSize": 8, "groups": 0, "fill": 0, "material": 0, "visits": 2}, {"name": "Каллиграфия", "eco": "Прознание", "price": 23.0, "single": 28.0, "wage": 40, "dur": 1, "groupSize": 8, "groups": 0, "fill": 0, "material": 0, "visits": 1}, {"name": "Клуб математической стратегии", "eco": "Прознание", "price": 23.0, "single": 27.0, "wage": 40, "dur": 1, "groupSize": 8, "groups": 0, "fill": 0, "material": 0, "visits": 1}, {"name": "Клуб математической стратегии (1,5 часа)", "eco": "Прознание", "price": 30.0, "single": 27.0, "wage": 40, "dur": 1, "groupSize": 8, "groups": 0, "fill": 0, "material": 0, "visits": 1}, {"name": "Лепка из глины (1 час)", "eco": "Прознание", "price": 23.0, "single": 28.0, "wage": 40, "dur": 1, "groupSize": 8, "groups": 0, "fill": 0, "material": 0, "visits": 1}, {"name": "Лепка из глины (1,5 часа)", "eco": "Прознание", "price": 29.0, "single": 35.0, "wage": 45, "dur": 1.5, "groupSize": 8, "groups": 0, "fill": 0, "material": 0, "visits": 1}, {"name": "Лепка из полимерной глины", "eco": "Прознание", "price": 29.0, "single": 35.0, "wage": 45, "dur": 1.5, "groupSize": 8, "groups": 0, "fill": 0, "material": 0, "visits": 1}, {"name": "Логика", "eco": "Прознание", "price": 30.0, "single": 40.0, "wage": 45, "dur": 1.5, "groupSize": 8, "groups": 0, "fill": 0, "material": 0, "visits": 1}, {"name": "Маленькие академики", "eco": "Прознание", "price": 22.0, "single": 27.0, "wage": 40, "dur": 1, "groupSize": 6, "groups": 0, "fill": 0, "material": 0, "visits": 2}, {"name": "Мир научных открытий", "eco": "Прознание", "price": 27.0, "single": 33.0, "wage": 45, "dur": 1.5, "groupSize": 8, "groups": 0, "fill": 0, "material": 0, "visits": 1}, {"name": "Нейрогимнастика", "eco": "Прознание", "price": 22.0, "single": 27.0, "wage": 40, "dur": 1, "groupSize": 12, "groups": 0, "fill": 0, "material": 0, "visits": 2}, {"name": "Почемучка", "eco": "Прознание", "price": 22.0, "single": 27.0, "wage": 40, "dur": 1, "groupSize": 8, "groups": 0, "fill": 0, "material": 0, "visits": 2}, {"name": "Рисование", "eco": "Прознание", "price": 32.0, "single": 37.0, "wage": 50, "dur": 1.5, "groupSize": 8, "groups": 0, "fill": 0, "material": 0, "visits": 1}, {"name": "Финансовая грамотность", "eco": "Прознание", "price": 30.0, "single": 35.0, "wage": 40, "dur": 1.5, "groupSize": 8, "groups": 0, "fill": 0, "material": 0, "visits": 1}, {"name": "Электроника", "eco": "Прознание", "price": 30.0, "single": 37.0, "wage": 45, "dur": 1.5, "groupSize": 7, "groups": 0, "fill": 0, "material": 0, "visits": 1}, {"name": "Химия", "eco": "Прознание", "price": 27.0, "single": 33.0, "wage": 45, "dur": 1.5, "groupSize": 8, "groups": 0, "fill": 0, "material": 0, "visits": 1}, {"name": "Хочу все знать! будний", "eco": "Прознание", "price": 22.0, "single": 27.0, "wage": 40, "dur": 1, "groupSize": 8, "groups": 0, "fill": 0, "material": 0, "visits": 1}, {"name": "Хочу все знать! выходной", "eco": "Прознание", "price": 36.0, "single": 44.0, "wage": 50, "dur": 2, "groupSize": 8, "groups": 0, "fill": 0, "material": 0, "visits": 1}, {"name": "БПЛА", "eco": "CODDY", "price": 35.0, "single": 45.0, "wage": 45, "dur": 1.5, "groupSize": 8, "groups": 0, "fill": 0, "material": 0, "visits": 1}, {"name": "Робототехника", "eco": "CODDY", "price": 35.0, "single": 45.0, "wage": 45, "dur": 1.5, "groupSize": 8, "groups": 0, "fill": 0, "material": 0, "visits": 1}, {"name": "Scratch", "eco": "CODDY", "price": 35.0, "single": 45.0, "wage": 45, "dur": 1.5, "groupSize": 9, "groups": 0, "fill": 0, "material": 0, "visits": 1}, {"name": "Minecraft", "eco": "CODDY", "price": 35.0, "single": 45.0, "wage": 45, "dur": 1.5, "groupSize": 9, "groups": 0, "fill": 0, "material": 0, "visits": 1}, {"name": "Roblox", "eco": "CODDY", "price": 35.0, "single": 45.0, "wage": 45, "dur": 1.5, "groupSize": 9, "groups": 0, "fill": 0, "material": 0, "visits": 1}, {"name": "Roblox + Blender", "eco": "CODDY", "price": 35.0, "single": 45.0, "wage": 45, "dur": 1.5, "groupSize": 9, "groups": 0, "fill": 0, "material": 0, "visits": 1}, {"name": "Blender", "eco": "CODDY", "price": 35.0, "single": 45.0, "wage": 45, "dur": 1.5, "groupSize": 9, "groups": 0, "fill": 0, "material": 0, "visits": 1}, {"name": "Blender + Unity", "eco": "CODDY", "price": 35.0, "single": 45.0, "wage": 45, "dur": 1.5, "groupSize": 9, "groups": 0, "fill": 0, "material": 0, "visits": 1}, {"name": "Digital art", "eco": "CODDY", "price": 35.0, "single": 45.0, "wage": 45, "dur": 1.5, "groupSize": 9, "groups": 0, "fill": 0, "material": 0, "visits": 1}, {"name": "Python", "eco": "CODDY", "price": 35.0, "single": 45.0, "wage": 45, "dur": 1.5, "groupSize": 9, "groups": 0, "fill": 0, "material": 0, "visits": 1}, {"name": "TinkerCad", "eco": "CODDY", "price": 35.0, "single": 45.0, "wage": 45, "dur": 1.5, "groupSize": 9, "groups": 0, "fill": 0, "material": 0, "visits": 1}, {"name": "Песок", "eco": "Прознание", "price": 18.0, "single": 23.0, "wage": 40, "dur": 1, "groupSize": 6, "groups": 0, "fill": 0, "material": 0, "visits": 1}];
 
 /* ===== СОСТОЯНИЕ МОДЕЛИ ===== */
 const DEFAULT_STATE = {
@@ -570,8 +576,9 @@ function applyScn(c){
   let wage = wageForLesson(c.name, fillN||c.fill||4);
   if(!wage) wage = (+c.wage||0); // фолбэк на старое поле
   wage = wage*wageK;
-  const lessonsMonth=groups*wpm; // занятий в месяц по курсу
-  const revenue=price*fillN*lessonsMonth;        // оборот курса/мес
+  const visits=+c.visits||1;                       // сколько раз в неделю ходит группа
+  const lessonsMonth=groups*visits*wpm;            // занятий в месяц = группы × визиты × недель
+  const revenue=price*fillN*lessonsMonth;          // оборот курса/мес (визиты учтены)
   const wageCost=wage*lessonsMonth;              // ЗП педагога/мес
   const matCost=0;                               // материалы убраны
   const margin=revenue-wageCost-matCost;
@@ -664,7 +671,7 @@ function renderCourses(){
   const t=document.getElementById("courseTable");
   let h=`<thead><tr>
     <th style="width:24px"></th><th>Курс</th><th>Эко</th><th>Цена</th><th>ЗП/зан</th>
-    <th>Цель груп.</th><th>Групп/нед</th><th>Факт детей</th>
+    <th>Цель груп.</th><th>Групп/нед</th><th title="Сколько раз в неделю ходит группа">Визиты</th><th>Факт детей</th>
     <th title="Реальный оборот по этому курсу в среднем за месяц 2025/2026">Факт/мес 25/26</th><th>Оборот/мес</th><th>Маржа,р</th><th>Маржа,%</th><th>Мин</th><th></th></tr></thead><tbody>`;
   S.courses.forEach((c,i)=>{
     const r=applyScn(c);
@@ -684,6 +691,9 @@ function renderCourses(){
       <td class="num" title="из справочника ставок по ${r.fillN||c.fill||4} детям"><b>${fmt(r.wage)}</b></td>
       <td><input class="cell" type="number" value="${c.groupSize}" ${da} onchange="upd(${i},'groupSize',this.value)"></td>
       <td><input class="cell" type="number" value="${c.groups}" ${da} onchange="upd(${i},'groups',this.value)"></td>
+      <td><select class="cell" ${da} onchange="upd(${i},'visits',this.value)">
+        <option value="1" ${(+c.visits||1)==1?"selected":""}>1×</option>
+        <option value="2" ${(+c.visits||1)==2?"selected":""}>2×</option></select></td>
       <td><input class="cell" type="number" value="${c.fill}" ${da} onchange="upd(${i},'fill',this.value)"></td>
       <td class="num muted" title="факт прошлого года">${(()=>{const f=lastYearIncomeMonth(c.name);return f?fmt(f):"—";})()}</td>
       <td class="num">${fmt(r.revenue)}</td>
@@ -698,6 +708,7 @@ function renderCourses(){
   h+=`<tr class="totrow"><td></td><td>ИТОГО (${S.courses.length} курсов)</td><td></td><td></td><td></td>
     <td class="num"></td>
     <td class="num">${S.courses.reduce((a,c)=>a+(+c.groups||0),0)}</td>
+    <td></td>
     <td class="num">${T.kids}</td>
     <td class="num muted">${fmt(Object.values(LASTYEAR_INCOME.month).reduce((a,b)=>a+b,0))}</td>
     <td class="num">${fmt(T.rev)}</td><td class="num">${fmt(T.rev-T.wage-T.mat)}</td><td></td><td></td><td></td></tr>`;
@@ -1039,12 +1050,20 @@ const PLAN_SEED = {"plan": [{"name": "Говорилка", "perGroup": 5.0, "pri
 if(!S.plan){ S.plan = JSON.parse(JSON.stringify(PLAN_SEED.plan)); }
 if(!S.funnel){ S.funnel = JSON.parse(JSON.stringify(PLAN_SEED.funnel)); }
 
+
+function courseFromLib(name){
+  return S.courses.find(c=>c.name===name) || null;
+}
+
 function planTotals(){
   let revWeek=0, kidsTot=0, groups=0;
   S.plan.forEach(p=>{
-    const g=+p.groups||0, cg=+p.perGroup||0, pr=+p.price||0, v=+p.visits||1;
-    revWeek += cg*pr*g*v;            // оборот = группы × чел × цена × визиты
-    kidsTot += cg*g;                 // детей (мест) = группы × чел (визиты не делят)
+    const lib=courseFromLib(p.name);
+    const g=+p.groups||0, cg=+p.perGroup||0;
+    const pr=lib?(+lib.price||0):(+p.price||0);      // цена из библиотеки
+    const v=lib?(+lib.visits||1):(+p.visits||1);      // визиты из библиотеки
+    revWeek += cg*pr*g*v;
+    kidsTot += cg*g;
     groups += g;
   });
   const revMonth = revWeek*4;
@@ -1074,21 +1093,24 @@ function renderPlanner(){
 
   // таблица плана
   let h=`<thead><tr>
-    <th style="width:24px"></th><th>Курс</th><th>Чел/гр</th><th>Цена</th><th>Групп/нед</th>
-    <th>Визитов/нед</th><th>Оборот/нед</th><th>Детей-мест</th><th></th></tr></thead><tbody>`;
+    <th style="width:24px"></th><th>Курс</th><th>Чел/гр</th><th title="из библиотеки курсов">Цена 📚</th><th>Групп/нед</th>
+    <th title="из библиотеки курсов">Визиты 📚</th><th>Оборот/нед</th><th>Детей-мест</th><th></th></tr></thead><tbody>`;
   S.plan.forEach((p,i)=>{
-    const g=+p.groups||0, cg=+p.perGroup||0, pr=+p.price||0, v=+p.visits||1;
+    const lib=courseFromLib(p.name);
+    const g=+p.groups||0, cg=+p.perGroup||0;
+    const pr=lib?(+lib.price||0):(+p.price||0);
+    const v=lib?(+lib.visits||1):(+p.visits||1);
     const rev=cg*pr*g*v, kids=cg*g;
     const lk=isLocked('plan',i), da=lk?'disabled':'';
+    // выпадающий список курсов из библиотеки
+    const opts=S.courses.map(c=>`<option ${c.name===p.name?"selected":""}>${esc(c.name)}</option>`).join("");
     h+=`<tr class="${lk?'rowlocked':''}" draggable="${lk?'false':'true'}" ${lk?'':`ondragstart="rowDragStart(event,'plan',${i})" ondragend="rowDragEnd(event)"`} ondragover="rowDragOver(event)" ondrop="rowDrop(event,'plan',${i},renderPlanner)">
       <td class="dragh" title="${lk?'Закреплено':'Перетащите'}">${rowLockBtn('plan',i,'renderPlanner')}</td>
-      <td><input class="cell wide" value="${esc(p.name)}" ${da} onchange="updPlan(${i},'name',this.value)"></td>
+      <td><select class="cell wide" ${da} onchange="updPlan(${i},'name',this.value)">${opts}${lib?'':`<option selected>${esc(p.name)}</option>`}</select></td>
       <td><input class="cell" type="number" value="${cg}" ${da} onchange="updPlan(${i},'perGroup',this.value)"></td>
-      <td><input class="cell" type="number" value="${pr}" ${da} onchange="updPlan(${i},'price',this.value)"></td>
+      <td class="num muted" title="из библиотеки курсов">${fmt(pr)}</td>
       <td><input class="cell" type="number" value="${g}" ${da} onchange="updPlan(${i},'groups',this.value)"></td>
-      <td><select class="cell" ${da} onchange="updPlan(${i},'visits',this.value)">
-         <option value="1" ${v==1?"selected":""}>1×</option>
-         <option value="2" ${v==2?"selected":""}>2×</option></select></td>
+      <td class="num muted" title="из библиотеки курсов">${v}×</td>
       <td class="num">${fmt(rev)}</td>
       <td class="num">${fmt1(kids)}</td>
       <td style="white-space:nowrap">${lk?'<span class="muted" style="font-size:11px">🔒</span>':`<button class="btn ghost sm" onclick="rowDup('plan',${i},renderPlanner)" title="Копировать">⧉</button> <button class="btn gray sm" onclick="delPlan(${i})">×</button>`}</td>
@@ -1468,7 +1490,7 @@ function renderStaff(){
     const lockBtn=`<span class="pin" onclick="lockStaff(${idx})" title="${lk?'Закреплено':'Закрепить педагога'}">${lk?'📌':(idx>=0?'📍':'')}</span>`;
     h+=`<tr class="${lk?'rowlocked':''}">
       <td style="white-space:nowrap">${idx>=0?lockBtn:''} ${idx>=0?`<input class="cell wide" style="width:170px" value="${esc(s.name)}" ${da} onchange="updStaff(${idx},this.value)">`:esc(s.name)+' <span class="muted">(из сетки)</span>'}</td>
-      <td style="font-size:11px">${idx>=0?`<input class="cell wide" style="font-size:11px" value="${esc([...s.courses].join(", "))}" placeholder="курсы через запятую" ${da} onchange="updTeach(${idx},this.value)">`:`<span class="muted">${[...s.courses].join(", ")||"—"}</span>`}</td>
+      <td style="font-size:11px;min-width:240px">${idx>=0?teacherCoursesCell(idx,[...s.courses],lk):`<span class="muted">${[...s.courses].join(", ")||"—"}</span>`}</td>
       <td class="num">${s.lessons}</td>
       <td class="num">${s.students}</td>
       <td class="num">${fmt(s.wageWeek)}</td>
@@ -1539,6 +1561,35 @@ function syncStaffFull(){
 }
 
 
+
+function teacherCoursesCell(idx, courses, locked){
+  // теги выбранных курсов
+  let tags=courses.map(c=>`<span class="ctag">${esc(c)}${locked?'':`<span class="x" onclick="removeTeacherCourse(${idx},'${esc(c).replace(/'/g,"\\'")}')">×</span>`}</span>`).join("");
+  if(!courses.length) tags='<span class="muted">— нет курсов —</span>';
+  // выпадашка добавления (только курсы, которых ещё нет)
+  let addSel="";
+  if(!locked){
+    const avail=S.courses.map(c=>c.name).filter(n=>!courses.includes(n));
+    addSel=`<select class="cell" style="font-size:11px;margin-top:4px;max-width:200px" onchange="addTeacherCourse(${idx},this.value);this.value='';">
+      <option value="">+ добавить курс…</option>
+      ${avail.map(n=>`<option>${esc(n)}</option>`).join("")}
+    </select>`;
+  }
+  return `<div class="ctags">${tags}</div>${addSel}`;
+}
+function addTeacherCourse(i,name){
+  if(!name) return;
+  if(!S.staff[i].canTeach) S.staff[i].canTeach=[];
+  if(!S.staff[i].canTeach.includes(name)) S.staff[i].canTeach.push(name);
+  persistLocal(); renderStaff();
+}
+function removeTeacherCourse(i,name){
+  if(!S.staff[i].canTeach) return;
+  S.staff[i].canTeach=S.staff[i].canTeach.filter(c=>c!==name);
+  // если курс был только из сетки (не canTeach) — его убрать нельзя, он подтянется снова. Это ок.
+  persistLocal(); renderStaff();
+}
+
 function updTeach(i,v){
   if(S.staff[i]._locked){renderStaff();return;}
   S.staff[i].canTeach = v.split(",").map(x=>x.trim()).filter(Boolean);
@@ -1548,24 +1599,57 @@ function updTeach(i,v){
 function addStaff(){ const n=prompt("Имя педагога:"); if(n){ S.staff.push({name:n,wageMode:"tier",fixedRate:0}); persistLocal(); renderStaff(); } }
 
 /* справочник ставок ЗП по числу детей */
+
+function addWageCourse(){
+  let base="Новый курс", name=base, n=1;
+  while(S.wageTable[name]){ name=base+" "+(++n); }
+  // дефолтная сетка как у Blender (база 41 +надбавка)
+  const tiers={}; let v=41;
+  for(let k=4;k<=10;k++){ tiers[k]=v; v+=(k<8?1:2); }
+  S.wageTable[name]={tiers};
+  persistLocal(); renderWageRef();
+  toast("Курс добавлен в справочник");
+}
+function dupWageCourse(name){
+  let base=name+" (копия)", nn=base, n=1;
+  while(S.wageTable[nn]){ nn=base+" "+(++n); }
+  S.wageTable[nn]=JSON.parse(JSON.stringify(S.wageTable[name]));
+  persistLocal(); renderWageRef();
+  toast("Скопировано: "+nn);
+}
+function delWageCourse(name){
+  if(!confirm("Удалить «"+name+"» из справочника ставок?")) return;
+  delete S.wageTable[name];
+  persistLocal(); renderWageRef();
+  toast("Удалено");
+}
+function renameWageCourse(oldN,newN){
+  newN=(newN||"").trim(); if(!newN||newN===oldN) return;
+  if(S.wageTable[newN]){ toast("Такой курс уже есть"); renderWageRef(); return; }
+  S.wageTable[newN]=S.wageTable[oldN]; delete S.wageTable[oldN];
+  persistLocal(); renderAll();
+}
+
 function renderWageRef(){
   const box=document.getElementById("wageRef");
   if(!box) return;
   let h=`<thead><tr><th>Курс</th>`;
   for(let n=4;n<=12;n++) h+=`<th>${n}</th>`;
-  h+=`</tr></thead><tbody>`;
+  h+=`<th></th></tr></thead><tbody>`;
   Object.keys(S.wageTable).sort().forEach(name=>{
     const t=S.wageTable[name].tiers;
-    h+=`<tr><td>${esc(name)}</td>`;
+    const safe=esc(name).replace(/'/g,"\\'");
+    h+=`<tr><td><input class="cell wide" style="width:180px;font-size:12px" value="${esc(name)}" onchange="renameWageCourse('${safe}',this.value)"></td>`;
     for(let n=4;n<=12;n++){
       const v=t[n];
-      h+=`<td class="num">${v!=null?`<input class="cell" style="width:46px" type="number" value="${v}" onchange="updWage('${esc(name)}',${n},this.value)">`:'<span class="muted">—</span>'}</td>`;
+      h+=`<td class="num"><input class="cell" style="width:46px" type="number" value="${v!=null?v:''}" placeholder="—" onchange="updWage('${safe}',${n},this.value)"></td>`;
     }
+    h+=`<td style="white-space:nowrap"><button class="btn ghost sm" onclick="dupWageCourse('${safe}')" title="Копировать">⧉</button> <button class="btn gray sm" onclick="delWageCourse('${safe}')" title="Удалить">×</button></td>`;
     h+=`</tr>`;
   });
   box.innerHTML=h+"</tbody>";
 }
-function updWage(name,n,v){ if(!S.wageTable[name])S.wageTable[name]={tiers:{}}; S.wageTable[name].tiers[n]=parseFloat(v)||0; persistLocal(); renderGrid(); renderStaff(); }
+function updWage(name,n,v){ if(!S.wageTable[name])S.wageTable[name]={tiers:{}}; const num=parseFloat(v); if(v===""||isNaN(num)){ delete S.wageTable[name].tiers[n]; } else { S.wageTable[name].tiers[n]=num; } persistLocal(); renderGrid(); renderStaff(); }
 
 /* ====== АВТОИМПОРТ ВЫГРУЗКИ АЛЬФЫ (.xlsx) ====== */
 const ALPHA_COURSE_MAP = {
