@@ -823,19 +823,20 @@ if(!S.plan){ S.plan = JSON.parse(JSON.stringify(PLAN_SEED.plan)); }
 if(!S.funnel){ S.funnel = JSON.parse(JSON.stringify(PLAN_SEED.funnel)); }
 
 function planTotals(){
-  let revWeek=0, need=0, groups=0;
+  let revWeek=0, kidsTot=0, groups=0;
   S.plan.forEach(p=>{
     const g=+p.groups||0, cg=+p.perGroup||0, pr=+p.price||0, v=+p.visits||1;
-    revWeek += cg*pr*g;
-    need += v>0 ? cg*g/v : cg*g;   // «детей нужно» = Σ(чел×групп/визиты) — как G52 в Excel
+    revWeek += cg*pr*g*v;            // оборот = группы × чел × цена × визиты
+    kidsTot += cg*g;                 // детей (мест) = группы × чел (визиты не делят)
     groups += g;
   });
   const revMonth = revWeek*4;
-  const visitsTot = need;                  // совместимость со старым именем
-  const kidsUniq = need;
-  // воронка набора
-  const coef = +S.funnel.coef||1;          // визитов на 1 уникального ребёнка
-  const uniqNeed = coef>0 ? need/coef : need; // уникальных нужно (G55 = G52/коэф)
+  const need = kidsTot;
+  const visitsTot = kidsTot;
+  const kidsUniq = kidsTot;
+  // воронка: один ребёнок ходит на coef курсов → уникальных = места / coef
+  const coef = +S.funnel.coef||1;
+  const uniqNeed = coef>0 ? kidsTot/coef : kidsTot;
   const now = +S.funnel.now||0;
   const showRate = +S.funnel.showRate||0;  // доля доходимости
   const willCome = now*showRate;
@@ -847,20 +848,20 @@ function renderPlanner(){
   const T=planTotals();
   // KPI сверху
   document.getElementById("planKpi").innerHTML=`
-   ${kpi("Оборот/неделя",fmt(T.revWeek)+" р","coal","Σ чел×цена×групп")}
+   ${kpi("Оборот/неделя",fmt(T.revWeek)+" р","coal","группы×чел×цена×визиты")}
    ${kpi("Оборот/месяц",fmt(T.revMonth)+" р","green","×4 недели")}
    ${kpi("Групп/неделю",fmt(T.groups),"blue","всего по расписанию")}
-   ${kpi("Детей нужно/нед",fmt1(T.need),"blue","Σ по курсам (как G52)")}
+   ${kpi("Детей-мест/нед",fmt1(T.need),"blue","группы×чел по курсам")}
    ${kpi("Уникальных детей",fmt(T.uniqNeed),"coal","нужно для плана")}
    ${kpi("Нужно добрать",fmt(Math.max(0,T.toRecruit)),T.toRecruit>0?"red":"green","сверх дойдущих")}`;
 
   // таблица плана
   let h=`<thead><tr>
     <th>Курс</th><th>Чел/гр</th><th>Цена</th><th>Групп/нед</th>
-    <th>Визитов/нед</th><th>Оборот/нед</th><th>Детей(уник)</th><th></th></tr></thead><tbody>`;
+    <th>Визитов/нед</th><th>Оборот/нед</th><th>Детей-мест</th><th></th></tr></thead><tbody>`;
   S.plan.forEach((p,i)=>{
     const g=+p.groups||0, cg=+p.perGroup||0, pr=+p.price||0, v=+p.visits||1;
-    const rev=cg*pr*g, kids=v>0?cg*g/v:cg*g;
+    const rev=cg*pr*g*v, kids=cg*g;
     h+=`<tr>
       <td><input class="cell wide" value="${esc(p.name)}" onchange="updPlan(${i},'name',this.value)"></td>
       <td><input class="cell" type="number" value="${cg}" onchange="updPlan(${i},'perGroup',this.value)"></td>
@@ -888,7 +889,7 @@ function renderPlanner(){
    <div class="field"><label>Доходимость, доля<span class="hint">0,8 = 80% дойдут до оплаты</span></label>
      <input type="number" step="0.05" value="${S.funnel.showRate}" onchange="updFunnel('showRate',this.value)"></div>`;
   document.getElementById("funnelCalc").innerHTML=`<tbody>
-   <tr><td>Всего детей нужно (Σ по курсам)</td><td class="num"><b>${fmt(T.visitsTot)}</b></td></tr>
+   <tr><td>Всего детей-мест (группы×чел)</td><td class="num"><b>${fmt(T.visitsTot)}</b></td></tr>
    <tr><td>Уникальных детей нужно (÷ коэф ${T.coef})</td><td class="num"><b>${fmt1(T.uniqNeed)}</b></td></tr>
    <tr><td>Сейчас в базе</td><td class="num">${fmt(T.now)}</td></tr>
    <tr><td>Дойдёт примерно (× ${T.showRate})</td><td class="num">${fmt1(T.willCome)}</td></tr>
