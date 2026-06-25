@@ -15,7 +15,7 @@ body{font-family:'Segoe UI',system-ui,-apple-system,sans-serif;background:var(--
   color:var(--coal);line-height:1.5;font-size:14px}
 .wrap{max-width:1180px;margin:0 auto;padding:0 16px 80px}
 
-header{background:var(--coal);color:var(--sand);padding:18px 0;margin-bottom:0}
+header{background:var(--coal);color:var(--sand);padding:12px 0;margin-bottom:0}
 header .wrap{padding:0 16px}
 .htop{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px}
 .brand{font-size:20px;font-weight:700;letter-spacing:.3px}
@@ -32,15 +32,14 @@ header .wrap{padding:0 16px}
 .btn.sm{padding:5px 10px;font-size:12px}
 .btn.gray{background:#6b6256}.btn.gray:hover{background:#544c42}
 
-nav.tabs{display:flex;gap:2px;flex-wrap:wrap;background:var(--sand);
-  border-bottom:2px solid var(--terra);position:sticky;top:0;z-index:30}
-nav.tabs .wrap{display:flex;gap:2px;flex-wrap:wrap;width:100%;max-width:1180px}
-.tab{padding:11px 16px;font-size:13px;font-weight:600;color:var(--muted);cursor:pointer;
-  border:none;background:none;border-bottom:3px solid transparent;white-space:nowrap}
+nav.tabs{display:flex;background:var(--sand);border-bottom:2px solid var(--terra);position:sticky;top:0;z-index:30}
+nav.tabs .wrap{display:flex;gap:1px 2px;flex-wrap:wrap;width:100%;max-width:1180px;padding:0 16px}
+.tab{padding:8px 14px;font-size:13px;font-weight:600;color:var(--muted);cursor:pointer;
+  border:none;background:none;border-bottom:3px solid transparent;white-space:nowrap;line-height:1.2}
 .tab:hover{color:var(--coal)}
 .tab.active{color:var(--coal);border-bottom-color:var(--terra);background:var(--cream)}
 
-.panel{display:none;padding-top:22px}
+.panel{display:none;padding-top:16px}
 .panel.active{display:block}
 h2.sec{font-size:19px;margin-bottom:4px;color:var(--coal)}
 .sec-desc{color:var(--muted);font-size:13px;margin-bottom:16px;max-width:760px}
@@ -243,6 +242,8 @@ small.note{font-size:11px;color:var(--muted)}
   <input type="file" id="alphaFile" hidden accept=".xlsx,.xls" onchange="importAlphaFile(event)">
   <button class="btn ghost sm" onclick="gridToPlan()">Пересчитать план из расписания →</button>
   <button class="btn ghost sm" onclick="renderConflictBanner();document.getElementById('conflictBanner').scrollIntoView({behavior:'smooth'})">Проверить конфликты</button>
+  <button class="btn sm" onclick="autoPlaceConfirm()">✨ Авторазложить по кабинетам</button>
+  <button class="btn ghost sm" onclick="clearRooms()">Очистить кабинеты</button>
  </div>
  <div class="dayTabs" id="dayTabs"></div>
  <div id="conflictBanner"></div>
@@ -1009,6 +1010,55 @@ function reloadGridFromAlpha(){
   persistLocal(); renderAll(); curDay=1; renderGrid();
   toast("Загружено 159 занятий (Пн–Вс)");
 }
+
+/* ====== АВТОРАСКЛАДКА ПО КАБИНЕТАМ ====== */
+// Какие кабинеты считаем "компьютерными" (для IT). Можно менять.
+const IT_ROOMS = ["3","4","5","6"];
+const OTHER_ROOMS = ["1 этаж №1","1 этаж №2","1","2","3 этаж","Детали"];
+function isITcourse(name){
+  return /Blender|Unity|Roblox|Scratch|Minecraft|Python|Digital|TinkerCad|Робот/i.test(name||"");
+}
+function autoPlaceRooms(onlyDay){
+  // расставляет кабинеты для занятий без кабинета (или для всех, если переразложить)
+  // onlyDay: если задан — только этот день; иначе вся неделя
+  let placed=0, failed=0;
+  const days = onlyDay? [onlyDay] : [1,2,3,4,5,6,7];
+  days.forEach(day=>{
+    const dayLessons = S.grid.filter(l=>l.day===day);
+    // занятия, которым нужен кабинет (пустой room)
+    const toPlace = dayLessons.filter(l=>!l.room);
+    // сортируем по времени, чтобы раскладка была стабильной
+    toPlace.sort((a,b)=>toMin(a.start)-toMin(b.start));
+    toPlace.forEach(les=>{
+      const pool = isITcourse(les.course)? IT_ROOMS.concat(OTHER_ROOMS) : OTHER_ROOMS.concat(IT_ROOMS);
+      // первый кабинет, где в это время никто не стоит И педагог не занят
+      let chosen=null;
+      for(const room of pool){
+        const roomBusy = S.grid.some(o=>o!==les && o.day===day && o.room===room && overlaps(o,les));
+        if(roomBusy) continue;
+        chosen=room; break;
+      }
+      if(chosen){ les.room=chosen; placed++; } else { failed++; }
+    });
+  });
+  persistLocal(); renderGrid(); renderStaff(); renderConflictBanner();
+  if(failed>0) toast("Разложено: "+placed+", не хватило кабинетов: "+failed);
+  else toast("Разложено по кабинетам: "+placed);
+}
+function autoPlaceConfirm(){
+  const noRoom=S.grid.filter(l=>!l.room).length;
+  if(noRoom===0){ toast("Все занятия уже распределены по кабинетам"); return; }
+  if(confirm("Автоматически разложить "+noRoom+" занятий по кабинетам?\n\nIT-курсы → кабинеты "+IT_ROOMS.join(", ")+"\nОстальные → "+OTHER_ROOMS.join(", ")+"\n\nБез конфликтов педагогов и кабинетов.")){
+    autoPlaceRooms(null);
+  }
+}
+function clearRooms(){
+  if(!confirm("Убрать кабинеты у всех занятий (вернуть в карточки сверху)?")) return;
+  S.grid.forEach(l=>l.room="");
+  persistLocal(); renderGrid(); renderStaff(); renderConflictBanner();
+  toast("Кабинеты очищены");
+}
+
 
 /* ===== DRAG & DROP ===== */
 let _dragIdx=null;
