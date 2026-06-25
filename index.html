@@ -1220,8 +1220,6 @@ function renderGrid(){
   // строка-повтор шапки (вставляется внутри таблицы)
   const headRow=`<tr class="gridhead-repeat"><td class="tslot-h">Время</td>${ROOMS.map(r=>`<td class="room-h">${esc(r)}</td>`).join("")}</tr>`;
   TIME_SLOTS.forEach((slot,si)=>{
-    // повтор шапки в середине (перед 13:30)
-    if(slot==="13:30") h+=headRow;
     h+=`<tr><td class="tslot">${slot}</td>`;
     ROOMS.forEach(room=>{
       if(covered[si+"_"+room]) return; // ячейка занята растянутым сверху занятием — пропускаем
