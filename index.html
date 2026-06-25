@@ -1607,14 +1607,15 @@ function addStaff(){ const n=prompt("Имя педагога:"); if(n){ S.staff.
 /* справочник ставок ЗП по числу детей */
 
 function addWageCourse(){
-  let base="Новый курс", name=base, n=1;
-  while(S.wageTable[name]){ name=base+" "+(++n); }
-  // дефолтная сетка как у Blender (база 41 +надбавка)
+  // возьмём первый курс из библиотеки, которого ещё нет в справочнике
+  const missing=S.courses.map(c=>c.name).find(n=>!S.wageTable[n]);
+  let name=missing;
+  if(!name){ let base="Новый курс"; name=base; let n=1; while(S.wageTable[name]){ name=base+" "+(++n); } }
   const tiers={}; let v=41;
   for(let k=4;k<=10;k++){ tiers[k]=v; v+=(k<8?1:2); }
   S.wageTable[name]={tiers};
   persistLocal(); renderWageRef();
-  toast("Курс добавлен в справочник");
+  toast("Курс добавлен: "+name);
 }
 function dupWageCourse(name){
   let base=name+" (копия)", nn=base, n=1;
@@ -1645,7 +1646,12 @@ function renderWageRef(){
   Object.keys(S.wageTable).sort().forEach(name=>{
     const t=S.wageTable[name].tiers;
     const safe=esc(name).replace(/'/g,"\\'");
-    h+=`<tr><td><input class="cell wide" style="width:180px;font-size:12px" value="${esc(name)}" onchange="renameWageCourse('${safe}',this.value)"></td>`;
+    // выпадашка курсов из библиотеки (+ текущее имя, если его нет в библиотеке)
+    const libNames=S.courses.map(c=>c.name);
+    const inLib=libNames.includes(name);
+    const opts=libNames.map(n=>`<option ${n===name?"selected":""}>${esc(n)}</option>`).join("");
+    const extra=inLib?"":`<option selected>${esc(name)}</option>`;
+    h+=`<tr><td><select class="cell wide" style="width:190px;font-size:12px" onchange="renameWageCourse('${safe}',this.value)">${opts}${extra}</select></td>`;
     for(let n=4;n<=12;n++){
       const v=t[n];
       h+=`<td class="num"><input class="cell" style="width:46px" type="number" value="${v!=null?v:''}" placeholder="—" onchange="updWage('${safe}',${n},this.value)"></td>`;
