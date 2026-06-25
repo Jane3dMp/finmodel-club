@@ -428,7 +428,7 @@ const DEFAULT_STATE = {
   tax: { usn:6, fszn:34, belgosstrah:0.6, acquiring:1.0 },
   fotTaxable: 70, // % ФОТ по трудовым договорам (облагается ФСЗН)
   assume: { weeksPerMonth:4, targetProfitShare:18, ownerSalary:0 },
-  gasUrl: ""
+  gasUrl: "https://script.google.com/macros/s/AKfycbxJajbntVctGjXImc1hVhWimvOkXHcNCkuVFpszEbA8ad-B40Lj2Q8gdMMTBar4YLnsew/exec"
 };
 let S = load();
 let scenario = {fill:100,price:100,wage:100,rent:100};
@@ -1471,8 +1471,24 @@ document.querySelectorAll(".tab").forEach(tb=>tb.onclick=()=>{
 });
 
 /* старт */
-if(S.gasUrl) setSync("ok","Google-таблица"); else setSync("local","Локальный режим");
-renderAll();
+if(S.gasUrl){
+  setSync("","Подключение к таблице...");
+  // автоподключение: подгружаем из Google-таблицы при открытии
+  fetch(S.gasUrl+"?action=load").then(r=>r.json()).then(j=>{
+    if(j && j.ok && j.data && j.data.scenarios){
+      saveScenarioList(j.data.scenarios);
+      const cur=j.data.current||Object.keys(j.data.scenarios)[0];
+      if(j.data.scenarios[cur]) S=Object.assign(JSON.parse(JSON.stringify(DEFAULT_STATE)),j.data.scenarios[cur]);
+      if(!S.meta)S.meta={}; S.meta.name=cur;
+      persistLocal(); setSync("ok","Google-таблица"); renderAll();
+    } else if(j && j.ok && j.data && j.data.courses){
+      S=Object.assign(JSON.parse(JSON.stringify(DEFAULT_STATE)),j.data);
+      persistLocal(); setSync("ok","Google-таблица"); renderAll();
+    } else {
+      setSync("ok","Google-таблица (пусто)"); renderAll();
+    }
+  }).catch(e=>{ setSync("err","Нет связи — локальный режим"); renderAll(); });
+} else { setSync("local","Локальный режим"); renderAll(); }
 
 </script>
 </body>
