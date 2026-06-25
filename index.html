@@ -758,13 +758,24 @@ function renderCourses(){
   });
   // итог
   const T=totals();
-  h+=`<tr class="totrow"><td></td><td>ИТОГО (${S.courses.length} курсов)</td><td></td><td></td><td></td>
-    <td class="num"></td>
-    <td class="num" title="Всего групп в неделю по всем курсам (сумма столбца «Групп/нед»)">${S.courses.reduce((a,c)=>a+(+c.groups||0),0)}</td>
-    <td></td>
-    <td class="num" title="Всего детей-мест: по каждому курсу «факт детей × группы», затем сложено">${T.kids}</td>
-    <td class="num muted" title="Сумма факта прошлого года из Альфы">${fmt(Object.values(LASTYEAR_INCOME.month).reduce((a,b)=>a+b,0))}</td>
-    <td class="num" title="Сумма оборотов всех курсов (= сумме столбца «Оборот/мес»)">${fmt(T.rev)}</td><td class="num" title="Оборот минус ФАКТИЧЕСКИЙ ФОТ из расписания. Может не совпадать с суммой столбца «Маржа после ЗП» — там зарплата из карточек курсов">${fmt(T.rev-T.wage-T.mat)}</td><td></td><td></td><td></td></tr>`;
+  const _totGroups=S.courses.reduce((a,c)=>a+(+c.groups||0),0);
+  const _totLastYear=fmt(Object.values(LASTYEAR_INCOME.month).reduce((a,b)=>a+b,0));
+  h+=`<tr class="totrow">`+
+    `<td></td>`+
+    `<td>ИТОГО (${S.courses.length} курсов)</td>`+
+    `<td></td>`+
+    `<td></td>`+
+    `<td></td>`+
+    `<td class="num" title="Всего групп в неделю по всем курсам (сумма столбца «Групп/нед»)">${_totGroups}</td>`+
+    `<td></td>`+
+    `<td class="num" title="Всего детей-мест: по каждому курсу «факт детей × группы», затем сложено">${T.kids}</td>`+
+    `<td class="num muted" title="Сумма факта прошлого года из Альфы">${_totLastYear}</td>`+
+    `<td class="num" title="Сумма оборотов всех курсов (= сумме столбца «Оборот/мес»)">${fmt(T.rev)}</td>`+
+    `<td class="num" title="Оборот минус ФАКТИЧЕСКИЙ ФОТ из расписания. Может не совпадать с суммой столбца «Маржа после ЗП» — там зарплата из карточек курсов">${fmt(T.rev-T.wage-T.mat)}</td>`+
+    `<td></td>`+
+    `<td></td>`+
+    `<td></td>`+
+  `</tr>`;
   h+="</tbody>";
   t.innerHTML=h;
 }
