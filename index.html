@@ -1,0 +1,1479 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Финмодель · Прознание 2026/2027</title>
+<style>
+:root{
+  --terra:#C1694F; --terra-d:#A4543C; --coal:#1C1410; --sand:#EDE3D0;
+  --sand-l:#F6F0E4; --cream:#FBF8F2; --green:#3E7C5A; --red:#C0392B;
+  --blue:#2E6F8E; --line:#E0D6C4; --muted:#8A7E6E;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Segoe UI',system-ui,-apple-system,sans-serif;background:var(--cream);
+  color:var(--coal);line-height:1.5;font-size:14px}
+.wrap{max-width:1180px;margin:0 auto;padding:0 16px 80px}
+
+header{background:var(--coal);color:var(--sand);padding:18px 0;margin-bottom:0}
+header .wrap{padding:0 16px}
+.htop{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px}
+.brand{font-size:20px;font-weight:700;letter-spacing:.3px}
+.brand span{color:var(--terra)}
+.sub{font-size:12px;color:#C9BBA6;margin-top:2px}
+.syncbox{display:flex;align-items:center;gap:8px;font-size:12px}
+.dot{width:9px;height:9px;border-radius:50%;background:#888}
+.dot.ok{background:var(--green)} .dot.err{background:var(--red)} .dot.local{background:var(--terra)}
+.btn{background:var(--terra);color:#fff;border:none;padding:8px 14px;border-radius:7px;
+  font-size:13px;font-weight:600;cursor:pointer;transition:.15s}
+.btn:hover{background:var(--terra-d)}
+.btn.ghost{background:transparent;border:1px solid var(--terra);color:var(--terra)}
+.btn.ghost:hover{background:var(--sand-l)}
+.btn.sm{padding:5px 10px;font-size:12px}
+.btn.gray{background:#6b6256}.btn.gray:hover{background:#544c42}
+
+nav.tabs{display:flex;gap:2px;flex-wrap:wrap;background:var(--sand);
+  border-bottom:2px solid var(--terra);position:sticky;top:0;z-index:30}
+nav.tabs .wrap{display:flex;gap:2px;flex-wrap:wrap;width:100%;max-width:1180px}
+.tab{padding:11px 16px;font-size:13px;font-weight:600;color:var(--muted);cursor:pointer;
+  border:none;background:none;border-bottom:3px solid transparent;white-space:nowrap}
+.tab:hover{color:var(--coal)}
+.tab.active{color:var(--coal);border-bottom-color:var(--terra);background:var(--cream)}
+
+.panel{display:none;padding-top:22px}
+.panel.active{display:block}
+h2.sec{font-size:19px;margin-bottom:4px;color:var(--coal)}
+.sec-desc{color:var(--muted);font-size:13px;margin-bottom:16px;max-width:760px}
+
+.card{background:#fff;border:1px solid var(--line);border-radius:11px;padding:18px;margin-bottom:16px;
+  box-shadow:0 1px 3px rgba(28,20,16,.04)}
+.card h3{font-size:15px;margin-bottom:12px;display:flex;align-items:center;gap:8px}
+.card h3::before{content:'';width:4px;height:16px;background:var(--terra);border-radius:2px}
+
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{background:var(--coal);color:var(--sand);padding:8px 9px;text-align:left;font-weight:600;
+  position:sticky;font-size:12px}
+td{padding:6px 9px;border-bottom:1px solid var(--line)}
+tr:nth-child(even) td{background:var(--sand-l)}
+tbody tr:hover td{background:#F3EAD9}
+.tscroll{overflow-x:auto;border-radius:9px;border:1px solid var(--line)}
+input.cell{width:62px;border:1px solid var(--line);border-radius:5px;padding:4px 6px;font-size:13px;
+  text-align:right;background:#fff;font-family:inherit}
+input.cell:focus{outline:none;border-color:var(--terra);background:#FFFCF6}
+input.wide{width:100%;text-align:left}
+select.cell{border:1px solid var(--line);border-radius:5px;padding:4px;font-size:12px;background:#fff}
+
+.eco-pill{display:inline-block;padding:1px 8px;border-radius:10px;font-size:11px;font-weight:600}
+.eco-Прознание{background:#FCE9C8;color:#8A5A12}
+.eco-CODDY{background:#D6E8F0;color:var(--blue)}
+.eco-Детали{background:#F0DAD0;color:var(--terra-d)}
+
+.sig{font-weight:700;font-size:13px}
+.sig.g{color:var(--green)} .sig.r{color:var(--red)} .sig.y{color:#C8860A}
+.num{text-align:right;font-variant-numeric:tabular-nums}
+.pos{color:var(--green);font-weight:600}.neg{color:var(--red);font-weight:600}
+
+.kpigrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px;margin-bottom:18px}
+.kpi{background:#fff;border:1px solid var(--line);border-left:4px solid var(--terra);
+  border-radius:9px;padding:13px 15px}
+.kpi .k-label{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;font-weight:600}
+.kpi .k-val{font-size:24px;font-weight:700;margin-top:3px;font-variant-numeric:tabular-nums}
+.kpi .k-sub{font-size:11px;color:var(--muted);margin-top:2px}
+.kpi.green{border-left-color:var(--green)} .kpi.red{border-left-color:var(--red)}
+.kpi.blue{border-left-color:var(--blue)} .kpi.coal{border-left-color:var(--coal)}
+
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+@media(max-width:760px){.row2{grid-template-columns:1fr}.htop{flex-direction:column;align-items:flex-start}}
+.field{display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid var(--line)}
+.field:last-child{border-bottom:none}
+.field label{font-size:13px;color:var(--coal)}
+.field .hint{font-size:11px;color:var(--muted);display:block}
+.field input{width:90px;border:1px solid var(--line);border-radius:6px;padding:6px 8px;text-align:right;font-size:13px}
+
+.callout{background:var(--sand-l);border-left:4px solid var(--terra);padding:11px 14px;border-radius:7px;
+  font-size:13px;margin:12px 0}
+.callout b{color:var(--terra-d)}
+.totrow td{background:var(--coal)!important;color:var(--sand);font-weight:700;font-size:13px}
+.barwrap{background:var(--sand);border-radius:6px;height:22px;overflow:hidden;position:relative;min-width:90px}
+.bar{height:100%;background:var(--terra);border-radius:6px 0 0 6px}
+.barlbl{position:absolute;left:8px;top:0;line-height:22px;font-size:11px;font-weight:600;color:var(--coal)}
+.muted{color:var(--muted)}
+.hd-actions{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px}
+.scn{display:flex;gap:8px;margin-bottom:14px}
+.scn button{flex:1;padding:9px;border:1px solid var(--line);background:#fff;border-radius:8px;cursor:pointer;font-weight:600;font-size:13px}
+.scn button.on{background:var(--terra);color:#fff;border-color:var(--terra)}
+.slider-row{display:grid;grid-template-columns:160px 1fr 60px;gap:10px;align-items:center;margin:9px 0}
+.slider-row label{font-size:13px}
+input[type=range]{width:100%;accent-color:var(--terra)}
+.toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--coal);color:#fff;
+  padding:11px 20px;border-radius:8px;font-size:13px;opacity:0;transition:.3s;z-index:99;pointer-events:none}
+.toast.show{opacity:1}
+small.note{font-size:11px;color:var(--muted)}
+.modal-bg{display:none;position:fixed;inset:0;background:rgba(28,20,16,.5);z-index:80;align-items:center;justify-content:center}
+.modal-bg.show{display:flex}
+.modal{background:#fff;border-radius:12px;padding:22px;max-width:480px;width:90%}
+.modal h3{margin-bottom:12px}
+.modal input{width:100%;border:1px solid var(--line);border-radius:7px;padding:9px;margin:6px 0;font-size:13px}
+.dayTabs{display:flex;gap:6px;margin-bottom:14px;flex-wrap:wrap}
+.dayb{padding:8px 16px;border:1px solid var(--line);background:#fff;border-radius:8px;cursor:pointer;font-weight:600;font-size:13px;position:relative}
+.dayb.on{background:var(--terra);color:#fff;border-color:var(--terra)}
+.dayb .badge{background:var(--coal);color:#fff;border-radius:9px;padding:0 6px;font-size:10px;margin-left:4px}
+.dayb.on .badge{background:rgba(255,255,255,.3)}
+#gridTable{table-layout:fixed}
+#gridTable th{font-size:11px;text-align:center}
+.tslot{background:var(--sand)!important;font-weight:600;font-size:11px;text-align:center;color:var(--muted)}
+.cell-empty{height:30px;cursor:pointer;border:1px dashed transparent}
+.cell-empty:hover{background:var(--sand-l);border-color:var(--line)}
+.cell-les{padding:0!important;vertical-align:top}
+.les{background:var(--sand-l);border-left:3px solid var(--terra);border-radius:4px;padding:4px 6px;cursor:pointer;margin:1px;min-height:30px}
+.les:hover{background:#F3EAD9}
+.les b{display:block;font-size:11px;line-height:1.2}
+.les span{display:block;font-size:9px;color:var(--muted)}
+.les .lt{color:var(--terra-d);font-weight:600}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.chip{background:#FCE9C8;border:1px solid #E8C98A;border-radius:14px;padding:4px 11px;font-size:11px;cursor:pointer}
+.chip:hover{background:#F8DCA8}
+.modal label{font-size:11px;color:var(--muted);font-weight:600;display:block;margin-top:8px}
+.modal .cell.wide{width:100%}
+
+</style>
+</head>
+<body>
+<header>
+ <div class="wrap htop">
+  <div>
+   <div class="brand">Финмодель <span>Прознание</span> + CODDY</div>
+   <div class="sub">Интерактивный калькулятор · учебный год 2026/2027 · Могилёв</div>
+  </div>
+  <div class="syncbox">
+   <span class="dot local" id="syncDot"></span>
+   <span id="syncTxt">Локальный режим</span>
+   <select id="scnSelect" class="cell" style="max-width:160px" onchange="switchScenario(this.value)" title="Сценарий / год"></select>
+   <button class="btn ghost sm" onclick="openScnMenu()" title="Управление сценариями">⋮</button>
+   <button class="btn ghost sm" onclick="openSync()">Хранилище</button>
+   <button class="btn sm" id="saveBtn" onclick="saveAll()">Сохранить</button>
+  </div>
+ </div>
+</header>
+
+<nav class="tabs"><div class="wrap">
+ <button class="tab active" data-t="dash">Дашборд</button>
+ <button class="tab" data-t="courses">Курсы и маржа</button>
+ <button class="tab" data-t="planner">Планировщик загрузки</button>
+ <button class="tab" data-t="grid">Расписание (сетка)</button>
+ <button class="tab" data-t="staff">Педсостав и ФОТ</button>
+ <button class="tab" data-t="fixed">Постоянные расходы</button>
+ <button class="tab" data-t="tax">Налоги РБ и ФОТ</button>
+ <button class="tab" data-t="break">Точка безубыточности</button>
+ <button class="tab" data-t="scenario">Сценарии</button>
+ <button class="tab" data-t="settings">Параметры</button>
+</div></nav>
+
+<div class="wrap">
+
+<!-- ===== ДАШБОРД ===== -->
+<section class="panel active" id="dash">
+ <h2 class="sec">Дашборд</h2>
+ <div class="sec-desc">Сводка модели на основе введённых курсов, расходов и налогов. Меняйте данные на других вкладках — здесь всё пересчитается.</div>
+ <div class="kpigrid" id="kpiGrid"></div>
+ <div class="row2">
+  <div class="card">
+   <h3>P&amp;L (помесячно, управленческий)</h3>
+   <div class="tscroll"><table id="pnlTable"></table></div>
+   <small class="note">Выручка считается по проведённым занятиям (4 недели/мес). Налог УСН — от валовой выручки.</small>
+  </div>
+  <div class="card">
+   <h3>Структура расходов (% от выручки)</h3>
+   <table id="structTable"></table>
+   <div class="callout" id="structHint"></div>
+  </div>
+ </div>
+ <div class="card">
+  <h3>Топ и аутсайдеры по марже курсов</h3>
+  <div class="row2">
+   <div><b style="color:var(--green)">🟢 Локомотивы</b><table id="topCourses" style="margin-top:8px"></table></div>
+   <div><b style="color:var(--red)">🔴 Под вопросом</b><table id="botCourses" style="margin-top:8px"></table></div>
+  </div>
+ </div>
+</section>
+
+<!-- ===== КУРСЫ ===== -->
+<section class="panel" id="courses">
+ <h2 class="sec">Курсы и продуктовая матрица</h2>
+ <div class="sec-desc">Ваши цены и ставки ЗП загружены из Excel. Заполните <b>группы в неделю</b> и <b>детей в группе (факт)</b> — маржа посчитается автоматически. 🔴 = наполняемость ниже точки безубыточности.</div>
+ <div class="hd-actions">
+  <button class="btn sm" onclick="addCourse()">+ Курс</button>
+  <button class="btn ghost sm" onclick="fillTarget()">Заполнить целевой наполняемостью</button>
+  <button class="btn gray sm" onclick="exportJSON()">Экспорт JSON</button>
+  <button class="btn gray sm" onclick="document.getElementById('impFile').click()">Импорт JSON</button>
+  <input type="file" id="impFile" hidden accept=".json" onchange="importJSON(event)">
+ </div>
+ <div class="tscroll"><table id="courseTable"></table></div>
+ <div class="callout"><b>Подсказка:</b> «целевой размер группы» — это план (из листа «Емкость»). «Факт детей» — сколько реально ходит. Разница между ними и есть ваш резерв роста выручки без новых затрат.</div>
+</section>
+
+<!-- ===== ПЛАНИРОВЩИК ===== -->
+<section class="panel" id="planner">
+ <h2 class="sec">Планировщик загрузки клуба</h2>
+ <div class="sec-desc">Главный лист планирования (из «Пож (25) макс прогноз»). Задаёте <b>число групп в неделю</b> по каждому курсу — считается прогнозируемый оборот и сколько уникальных детей нужно набрать. Логика 1:1 с вашим Excel.</div>
+ <div class="kpigrid" id="planKpi"></div>
+ <div class="hd-actions">
+  <button class="btn sm" onclick="addPlan()">+ Курс</button>
+  <button class="btn ghost sm" onclick="planToCourses()">Перенести в «Курсы и маржа»</button>
+ </div>
+ <div class="card"><h3>План по курсам</h3>
+  <div class="tscroll"><table id="planTable"></table></div>
+  <div class="callout" id="planSyncHint"></div>
+ </div>
+ <div class="row2">
+  <div class="card"><h3>Параметры набора</h3><div id="funnelBox"></div></div>
+  <div class="card"><h3>Воронка: сколько детей нужно</h3><table id="funnelCalc"></table>
+   <div class="callout"><b>Как читать:</b> «детей нужно» — сумма по курсам (с учётом, что на дошкольные ходят 2×/нед). Делим на коэффициент загрузки (один ребёнок ходит на ~1,32 занятия) → получаем уникальных детей. Вычитаем тех, кто дойдёт из текущей базы → остаётся набрать новых.</div>
+  </div>
+ </div>
+</section>
+
+<!-- ===== СЕТКА РАСПИСАНИЯ ===== -->
+<section class="panel" id="grid">
+ <h2 class="sec">Расписание (сетка)</h2>
+ <div class="sec-desc">Главный ввод. Расставляете занятия по дням, кабинетам и времени — из этого считаются группы для плана и фонд ЗП педагогов (по ставке для числа детей). Стартовая сетка загружена из вашей выгрузки Альфы (06–12.04).</div>
+ <div class="kpigrid" id="gridSummary"></div>
+ <div class="hd-actions">
+  <button class="btn sm" onclick="triggerAlphaImport()">📂 Импорт из Альфы (.xlsx)</button>
+  <input type="file" id="alphaFile" hidden accept=".xlsx,.xls" onchange="importAlphaFile(event)">
+  <button class="btn ghost sm" onclick="gridToPlan()">Пересчитать план из расписания →</button>
+  <button class="btn ghost sm" onclick="renderConflictBanner();document.getElementById('conflictBanner').scrollIntoView({behavior:'smooth'})">Проверить конфликты</button>
+ </div>
+ <div class="dayTabs" id="dayTabs"></div>
+ <div id="conflictBanner"></div>
+ <div class="card">
+  <h3 id="gridDayTitle">День</h3>
+  <div id="unassigned"></div>
+  <div class="tscroll"><table id="gridTable"></table></div>
+  <small class="note">Клик по пустой ячейке — добавить занятие. Клик по занятию — редактировать. ЗП за занятие зависит от числа детей (вкладка «Педсостав» → справочник ставок).</small>
+ </div>
+</section>
+
+<!-- ===== ПЕДСОСТАВ ===== -->
+<section class="panel" id="staff">
+ <h2 class="sec">Педсостав и фонд ЗП</h2>
+ <div class="sec-desc">Фонд ЗП считается <b>автоматически из расписания</b>: каждое занятие × ставка по фактическому числу детей в группе. Поэтому ЗП/нед и ЗП/мес — расчётные (не вводятся руками): меняете занятие в сетке → ЗП пересчитывается. Колонку «Может вести» можно дописывать вручную.</div>
+ <div class="kpigrid" id="staffKpi"></div>
+ <div class="hd-actions"><button class="btn sm" onclick="addStaff()">+ Педагог</button><button class="btn ghost sm" onclick="syncStaffFull()">Загрузить полный педсостав (21)</button></div>
+ <div class="card"><h3>Нагрузка и ЗП по педагогам</h3>
+  <div class="tscroll"><table id="staffTable"></table></div>
+  <div class="callout"><b>Связь с моделью:</b> этот фонд ЗП идёт в P&L и в расчёт взносов ФСЗН на вкладке «Налоги».</div>
+ </div>
+ <div class="card"><h3>Справочник ставок ЗП (₽ за занятие по числу детей)</h3>
+  <div class="sec-desc">Ваша сетка из «Цены и ЗП (26)»: база на 4 детей + надбавка за каждого следующего. Можно править.</div>
+  <div class="tscroll"><table id="wageRef"></table></div>
+ </div>
+</section>
+
+<!-- ===== ПОСТОЯННЫЕ ===== -->
+<section class="panel" id="fixed">
+ <h2 class="sec">Постоянные расходы</h2>
+ <div class="sec-desc">Расходы, которые есть всегда, независимо от числа занятий. Значения — за месяц, в рублях.</div>
+ <div class="row2">
+  <div class="card"><h3>Помещение и сервисы</h3><div id="fixed1"></div></div>
+  <div class="card"><h3>Команда (оклады)</h3><div id="fixed2"></div></div>
+ </div>
+ <div class="card"><h3>Итого постоянных</h3>
+  <div class="field"><label><b>Сумма постоянных расходов в месяц</b></label><b id="fixedTotal" class="num">—</b></div>
+ </div>
+</section>
+
+<!-- ===== НАЛОГИ ===== -->
+<section class="panel" id="tax">
+ <h2 class="sec">Налоги РБ и ФОТ</h2>
+ <div class="sec-desc">Юрисдикция — Республика Беларусь, ООО на УСН. Ставки актуальны на 2026 год; проверяйте с бухгалтером.</div>
+ <div class="callout"><b>Важно:</b> в РБ нет «УСН доходы минус расходы». Налог при УСН — 6% от валовой выручки. Взносы ФСЗН 34% и Белгосстрах 0,6% платятся сверх ФОТ работников по трудовым договорам.</div>
+ <div class="row2">
+  <div class="card"><h3>Ставки</h3><div id="taxRates"></div></div>
+  <div class="card"><h3>Расчёт налоговой нагрузки</h3><table id="taxCalc"></table></div>
+ </div>
+</section>
+
+<!-- ===== ТБУ ===== -->
+<section class="panel" id="break">
+ <h2 class="sec">Точка безубыточности</h2>
+ <div class="sec-desc">«Точка безубыточности» — это <b>сколько денег клуб должен заработать за месяц, чтобы выйти в ноль</b> (покрыть аренду, зарплаты, налоги — все расходы). Заработали больше — это прибыль, меньше — убыток.</div>
+<div class="callout" id="bepExplain"></div>
+ <div class="kpigrid" id="breakKpi"></div>
+ <div class="card"><h3>Минимальная наполняемость по курсам</h3>
+  <div class="sec-desc">Минимум детей в группе, чтобы конкретный курс окупал хотя бы зарплату педагога. Если «Факт» ниже «Мин детей» — группа работает в минус, её стоит доукомплектовать или объединить.</div>
+  <div class="tscroll"><table id="breakTable"></table></div>
+ </div>
+</section>
+
+<!-- ===== СЦЕНАРИИ ===== -->
+<section class="panel" id="scenario">
+ <h2 class="sec">Сценарии и чувствительность</h2>
+ <div class="sec-desc">Двигайте ползунки — прибыль пересчитывается. Базовые значения берутся из ваших данных.</div>
+ <div class="scn">
+  <button data-s="base" class="on" onclick="setScenario('base')">Базовый</button>
+  <button data-s="opt" onclick="setScenario('opt')">Оптимистичный</button>
+  <button data-s="pess" onclick="setScenario('pess')">Пессимистичный</button>
+ </div>
+ <div class="card">
+  <div class="slider-row"><label>Загрузка групп</label><input type="range" id="sFill" min="40" max="100" value="100" oninput="onSlider()"><span id="sFillV">100%</span></div>
+  <div class="slider-row"><label>Цена (× от текущей)</label><input type="range" id="sPrice" min="80" max="130" value="100" oninput="onSlider()"><span id="sPriceV">100%</span></div>
+  <div class="slider-row"><label>Ставка ЗП (× )</label><input type="range" id="sWage" min="80" max="140" value="100" oninput="onSlider()"><span id="sWageV">100%</span></div>
+  <div class="slider-row"><label>Аренда (× )</label><input type="range" id="sRent" min="80" max="160" value="100" oninput="onSlider()"><span id="sRentV">100%</span></div>
+ </div>
+ <div class="kpigrid" id="scnKpi"></div>
+</section>
+
+<!-- ===== ПАРАМЕТРЫ ===== -->
+<section class="panel" id="settings">
+ <h2 class="sec">Параметры модели</h2>
+ <div class="sec-desc">Глобальные настройки расчёта и подключение Google-таблицы как базы данных.</div>
+ <div class="row2">
+  <div class="card"><h3>Расчётные допущения</h3><div id="assumptions"></div></div>
+  <div class="card"><h3>Подключение Google-таблицы (БД)</h3>
+   <div class="sec-desc" style="margin-bottom:10px">Вставьте URL вашего GAS Web App (doGet/doPost). Тогда модель будет открываться и продолжаться на любом устройстве. Пока URL пуст — данные хранятся локально в этом браузере.</div>
+   <input id="gasUrl" class="cell wide" style="width:100%;margin-bottom:8px" placeholder="https://script.google.com/macros/s/.../exec">
+   <div class="hd-actions">
+    <button class="btn sm" onclick="connectGas()">Подключить и загрузить</button>
+    <button class="btn ghost sm" onclick="pushGas()">Выгрузить в таблицу</button>
+   </div>
+   <div class="callout"><b>Инструкция по GAS</b> — кнопка «Хранилище» вверху: там готовый код Code.gs, который надо вставить в Apps Script вашей таблицы.</div>
+  </div>
+ </div>
+</section>
+
+</div>
+
+<div class="toast" id="toast"></div>
+
+
+
+<div class="modal-bg" id="impModal">
+ <div class="modal">
+  <h3>Импорт расписания из Альфы</h3>
+  <div id="impPreviewBody"></div>
+  <div class="hd-actions" style="margin-top:14px">
+   <button class="btn sm" onclick="applyImport('replace')">Заменить сетку</button>
+   <button class="btn ghost sm" onclick="applyImport('add')">Добавить к текущей</button>
+   <button class="btn gray sm" onclick="closeImport()">Отмена</button>
+  </div>
+ </div>
+</div>
+<div class="modal-bg" id="scnModal">
+ <div class="modal">
+  <h3>Сценарии и годы</h3>
+  <p style="font-size:13px;margin-bottom:12px">Текущий сценарий: <b id="scnCurName"></b></p>
+  <div class="hd-actions">
+   <button class="btn sm" onclick="saveAsScenario()">Сохранить как…</button>
+   <button class="btn ghost sm" onclick="duplicateScenario()">Дублировать</button>
+   <button class="btn gray sm" onclick="deleteScenario()">Удалить текущий</button>
+  </div>
+  <div class="callout" style="margin-top:12px">Сценарии хранятся локально и синхронизируются в Google-таблицу при сохранении. Переключайтесь через выпадающий список в шапке.</div>
+  <div class="hd-actions" style="margin-top:8px"><button class="btn ghost sm" onclick="closeScnMenu()">Закрыть</button></div>
+ </div>
+</div>
+
+<div class="modal-bg" id="lesModal">
+ <div class="modal">
+  <h3>Занятие</h3>
+  <div id="lesModalBody"></div>
+  <div class="hd-actions" style="margin-top:14px">
+   <button class="btn sm" onclick="saveLes()">Сохранить</button>
+   <button class="btn gray sm" onclick="delLes()">Удалить</button>
+   <button class="btn ghost sm" onclick="closeLes()">Отмена</button>
+  </div>
+ </div>
+</div>
+
+<div class="modal-bg" id="syncModal">
+ <div class="modal">
+  <h3>Хранилище данных</h3>
+  <p style="font-size:13px;margin-bottom:10px">Чтобы продолжать моделирование на разных устройствах, подключите Google-таблицу как базу. Шаги:</p>
+  <ol style="font-size:13px;margin:0 0 12px 18px;line-height:1.7">
+   <li>Создайте новую Google-таблицу.</li>
+   <li>Расширения → Apps Script, вставьте код ниже, сохраните.</li>
+   <li>Развернуть → Новое развёртывание → Веб-приложение → доступ «Все».</li>
+   <li>Скопируйте URL (.../exec) во вкладку «Параметры» → Подключить.</li>
+  </ol>
+  <textarea id="gasCode" readonly style="width:100%;height:140px;font-family:monospace;font-size:11px;border:1px solid var(--line);border-radius:7px;padding:8px"></textarea>
+  <div class="hd-actions" style="margin-top:12px">
+   <button class="btn sm" onclick="copyGas()">Копировать код</button>
+   <button class="btn ghost sm" onclick="closeSync()">Закрыть</button>
+  </div>
+ </div>
+</div>
+
+<script>
+/* ===== СИД (курсы из Excel) ===== */
+const SEED_COURSES = [{"name": "7 навыков уверенных детей", "eco": "Прознание", "price": 32.0, "single": 37.0, "wage": 45, "dur": 1.5, "groupSize": 8, "groups": 0, "fill": 0, "material": 0}, {"name": "Английский язык", "eco": "Прознание", "price": 21.0, "single": 26.0, "wage": 40, "dur": 1, "groupSize": 8, "groups": 0, "fill": 0, "material": 0}, {"name": "Арт-Студия (1 час)", "eco": "Прознание", "price": 23.0, "single": 29.0, "wage": 40, "dur": 1, "groupSize": 8, "groups": 0, "fill": 0, "material": 0}, {"name": "Арт-Студия (1,5 часа)", "eco": "Прознание", "price": 27.0, "single": 32.0, "wage": 45, "dur": 1.5, "groupSize": 8, "groups": 0, "fill": 0, "material": 0}, {"name": "Биология", "eco": "Прознание", "price": 27.0, "single": 32.0, "wage": 45, "dur": 1.5, "groupSize": 8, "groups": 0, "fill": 0, "material": 0}, {"name": "Взросление", "eco": "Прознание", "price": 25.0, "single": 33.0, "wage": 45, "dur": 1.5, "groupSize": 8, "groups": 0, "fill": 0, "material": 0}, {"name": "Говорилка", "eco": "Прознание", "price": 22.0, "single": 27.0, "wage": 40, "dur": 1, "groupSize": 6, "groups": 0, "fill": 0, "material": 0}, {"name": "Живая азбука", "eco": "Прознание", "price": 22.0, "single": 27.0, "wage": 40, "dur": 1, "groupSize": 8, "groups": 0, "fill": 0, "material": 0}, {"name": "Каллиграфия", "eco": "Прознание", "price": 23.0, "single": 28.0, "wage": 40, "dur": 1, "groupSize": 8, "groups": 0, "fill": 0, "material": 0}, {"name": "Клуб математической стратегии", "eco": "Прознание", "price": 23.0, "single": 27.0, "wage": 40, "dur": 1, "groupSize": 8, "groups": 0, "fill": 0, "material": 0}, {"name": "Клуб математической стратегии (1,5 часа)", "eco": "Прознание", "price": 30.0, "single": 27.0, "wage": 40, "dur": 1, "groupSize": 8, "groups": 0, "fill": 0, "material": 0}, {"name": "Лепка из глины (1 час)", "eco": "Прознание", "price": 23.0, "single": 28.0, "wage": 40, "dur": 1, "groupSize": 8, "groups": 0, "fill": 0, "material": 0}, {"name": "Лепка из глины (1,5 часа)", "eco": "Прознание", "price": 29.0, "single": 35.0, "wage": 45, "dur": 1.5, "groupSize": 8, "groups": 0, "fill": 0, "material": 0}, {"name": "Лепка из полимерной глины", "eco": "Прознание", "price": 29.0, "single": 35.0, "wage": 45, "dur": 1.5, "groupSize": 8, "groups": 0, "fill": 0, "material": 0}, {"name": "Логика", "eco": "Прознание", "price": 30.0, "single": 40.0, "wage": 45, "dur": 1.5, "groupSize": 8, "groups": 0, "fill": 0, "material": 0}, {"name": "Маленькие академики", "eco": "Прознание", "price": 22.0, "single": 27.0, "wage": 40, "dur": 1, "groupSize": 6, "groups": 0, "fill": 0, "material": 0}, {"name": "Мир научных открытий", "eco": "Прознание", "price": 27.0, "single": 33.0, "wage": 45, "dur": 1.5, "groupSize": 8, "groups": 0, "fill": 0, "material": 0}, {"name": "Нейрогимнастика", "eco": "Прознание", "price": 22.0, "single": 27.0, "wage": 40, "dur": 1, "groupSize": 12, "groups": 0, "fill": 0, "material": 0}, {"name": "Почемучка", "eco": "Прознание", "price": 22.0, "single": 27.0, "wage": 40, "dur": 1, "groupSize": 8, "groups": 0, "fill": 0, "material": 0}, {"name": "Рисование", "eco": "Прознание", "price": 32.0, "single": 37.0, "wage": 50, "dur": 1.5, "groupSize": 8, "groups": 0, "fill": 0, "material": 0}, {"name": "Финансовая грамотность", "eco": "Прознание", "price": 30.0, "single": 35.0, "wage": 40, "dur": 1.5, "groupSize": 8, "groups": 0, "fill": 0, "material": 0}, {"name": "Электроника", "eco": "Прознание", "price": 30.0, "single": 37.0, "wage": 45, "dur": 1.5, "groupSize": 7, "groups": 0, "fill": 0, "material": 0}, {"name": "Химия", "eco": "Прознание", "price": 27.0, "single": 33.0, "wage": 45, "dur": 1.5, "groupSize": 8, "groups": 0, "fill": 0, "material": 0}, {"name": "Хочу все знать! будний", "eco": "Прознание", "price": 22.0, "single": 27.0, "wage": 40, "dur": 1, "groupSize": 8, "groups": 0, "fill": 0, "material": 0}, {"name": "Хочу все знать! выходной", "eco": "Прознание", "price": 36.0, "single": 44.0, "wage": 50, "dur": 2, "groupSize": 8, "groups": 0, "fill": 0, "material": 0}, {"name": "БПЛА", "eco": "CODDY", "price": 35.0, "single": 45.0, "wage": 45, "dur": 1.5, "groupSize": 8, "groups": 0, "fill": 0, "material": 0}, {"name": "Робототехника", "eco": "CODDY", "price": 35.0, "single": 45.0, "wage": 45, "dur": 1.5, "groupSize": 8, "groups": 0, "fill": 0, "material": 0}, {"name": "Scratch", "eco": "CODDY", "price": 35.0, "single": 45.0, "wage": 45, "dur": 1.5, "groupSize": 9, "groups": 0, "fill": 0, "material": 0}, {"name": "Minecraft", "eco": "CODDY", "price": 35.0, "single": 45.0, "wage": 45, "dur": 1.5, "groupSize": 9, "groups": 0, "fill": 0, "material": 0}, {"name": "Roblox", "eco": "CODDY", "price": 35.0, "single": 45.0, "wage": 45, "dur": 1.5, "groupSize": 9, "groups": 0, "fill": 0, "material": 0}, {"name": "Roblox + Blender", "eco": "CODDY", "price": 35.0, "single": 45.0, "wage": 45, "dur": 1.5, "groupSize": 9, "groups": 0, "fill": 0, "material": 0}, {"name": "Blender", "eco": "CODDY", "price": 35.0, "single": 45.0, "wage": 45, "dur": 1.5, "groupSize": 9, "groups": 0, "fill": 0, "material": 0}, {"name": "Blender + Unity", "eco": "CODDY", "price": 35.0, "single": 45.0, "wage": 45, "dur": 1.5, "groupSize": 9, "groups": 0, "fill": 0, "material": 0}, {"name": "Digital art", "eco": "CODDY", "price": 35.0, "single": 45.0, "wage": 45, "dur": 1.5, "groupSize": 9, "groups": 0, "fill": 0, "material": 0}, {"name": "Python", "eco": "CODDY", "price": 35.0, "single": 45.0, "wage": 45, "dur": 1.5, "groupSize": 9, "groups": 0, "fill": 0, "material": 0}, {"name": "TinkerCad", "eco": "CODDY", "price": 35.0, "single": 45.0, "wage": 45, "dur": 1.5, "groupSize": 9, "groups": 0, "fill": 0, "material": 0}, {"name": "Песок", "eco": "Прознание", "price": 18.0, "single": 23.0, "wage": 40, "dur": 1, "groupSize": 6, "groups": 0, "fill": 0, "material": 0}];
+
+/* ===== СОСТОЯНИЕ МОДЕЛИ ===== */
+const DEFAULT_STATE = {
+  courses: JSON.parse(JSON.stringify(SEED_COURSES)),
+  fixed: {
+    "Аренда": 9600, "Коммунальные": 800,
+    "Интернет и связь": 200, "CRM / сервисы": 400, "Телефония": 150,
+    "Сайт / хостинг": 100, "Банк / РКО": 120, "Клининг": 1680,
+    "Реклама (базовая)": 1500,
+    "Администраторы": 1840, "Управляющий": 0, "Бухгалтерия": 1500,
+    "Отдел продаж": 1500, "Маркетолог": 1800, "SMM": 900, "Видео / Рилс": 1800,
+    "Методисты": 2160, "Кредит / лизинг": 4000
+  },
+  fixedGroup: {
+    "Аренда":1,"Коммунальные":1,"Интернет и связь":1,
+    "CRM / сервисы":1,"Телефония":1,"Сайт / хостинг":1,"Банк / РКО":1,"Клининг":1,"Реклама (базовая)":1,
+    "Администраторы":2,"Управляющий":2,"Бухгалтерия":2,"Отдел продаж":2,"Маркетолог":2,
+    "SMM":2,"Видео / Рилс":2,"Методисты":2,"Кредит / лизинг":1
+  },
+  tax: { usn:6, fszn:34, belgosstrah:0.6, acquiring:1.0 },
+  fotTaxable: 70, // % ФОТ по трудовым договорам (облагается ФСЗН)
+  assume: { weeksPerMonth:4, targetProfitShare:18, ownerSalary:0 },
+  gasUrl: ""
+};
+let S = load();
+let scenario = {fill:100,price:100,wage:100,rent:100};
+
+/* ===== ХРАНЕНИЕ ===== */
+const LS_KEY = "proznanie_finmodel_v1";
+function load(){
+  try{ const r=localStorage.getItem(LS_KEY); if(r) return Object.assign(JSON.parse(JSON.stringify(DEFAULT_STATE)),JSON.parse(r)); }catch(e){}
+  return JSON.parse(JSON.stringify(DEFAULT_STATE));
+}
+function persistLocal(){ try{ localStorage.setItem(LS_KEY, JSON.stringify(S)); }catch(e){} }
+
+async function saveAll(){
+  persistLocal();
+  if(S.gasUrl){ await pushGas(true); }
+  else toast("Сохранено локально");
+}
+function exportJSON(){
+  const blob=new Blob([JSON.stringify(S,null,1)],{type:"application/json"});
+  const a=document.createElement("a"); a.href=URL.createObjectURL(blob);
+  a.download="finmodel_proznanie_"+new Date().toISOString().slice(0,10)+".json"; a.click();
+  toast("Файл выгружен");
+}
+function importJSON(ev){
+  const f=ev.target.files[0]; if(!f) return;
+  const rd=new FileReader();
+  rd.onload=e=>{ try{ S=Object.assign(JSON.parse(JSON.stringify(DEFAULT_STATE)),JSON.parse(e.target.result));
+    persistLocal(); renderAll(); toast("Импортировано"); }catch(err){ toast("Ошибка файла"); } };
+  rd.readAsText(f);
+}
+
+/* ===== GAS (Google Sheets как БД) ===== */
+function setSync(state,txt){
+  const d=document.getElementById("syncDot"), t=document.getElementById("syncTxt");
+  d.className="dot "+state; t.textContent=txt;
+}
+async function connectGas(){
+  const url=document.getElementById("gasUrl").value.trim();
+  if(!url){ toast("Вставьте URL"); return; }
+  S.gasUrl=url; setSync("","Подключение...");
+  try{
+    const r=await fetch(url+"?action=load",{method:"GET"});
+    const j=await r.json();
+    if(j && j.ok && j.data && j.data.scenarios){
+      // новый формат: набор сценариев
+      saveScenarioList(j.data.scenarios);
+      const cur=j.data.current||Object.keys(j.data.scenarios)[0];
+      if(j.data.scenarios[cur]){ S=Object.assign(JSON.parse(JSON.stringify(DEFAULT_STATE)),j.data.scenarios[cur]); }
+      S.gasUrl=url; if(!S.meta)S.meta={}; S.meta.name=cur;
+      persistLocal(); renderAll(); setSync("ok","Google-таблица"); toast("Загружено из таблицы ("+Object.keys(j.data.scenarios).length+" сценариев)");
+    } else if(j && j.ok && j.data && j.data.courses){
+      S=Object.assign(JSON.parse(JSON.stringify(DEFAULT_STATE)),j.data); S.gasUrl=url;
+      persistLocal(); renderAll(); setSync("ok","Google-таблица"); toast("Загружено из таблицы");
+    } else { persistLocal(); setSync("ok","Google-таблица (пусто)"); toast("Таблица пуста — выгрузите текущие данные"); }
+  }catch(e){ setSync("err","Ошибка связи"); toast("Не удалось подключиться"); }
+}
+async function pushGas(silent){
+  if(!S.gasUrl){ toast("Сначала подключите таблицу"); return; }
+  setSync("","Сохранение...");
+  // соберём весь набор сценариев + текущий
+  const list=loadScenarioList();
+  list[currentScenarioName()]=snapshotState();
+  saveScenarioList(list);
+  const payload={scenarios:list, current:currentScenarioName(), savedAt:new Date().toISOString()};
+  try{
+    await fetch(S.gasUrl,{method:"POST",headers:{"Content-Type":"text/plain;charset=utf-8"},
+      body:JSON.stringify({action:"save",data:payload})});
+    setSync("ok","Google-таблица"); if(!silent) toast("Выгружено в таблицу"); else toast("Сохранено в таблицу");
+  }catch(e){ setSync("err","Ошибка связи"); toast("Ошибка сохранения"); }
+}
+
+const GAS_CODE = `function doGet(e){
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sh = ss.getSheetByName('DB') || ss.insertSheet('DB');
+  var v = sh.getRange('A1').getValue();
+  var data = v ? JSON.parse(v) : {};
+  return ContentService.createTextOutput(JSON.stringify({ok:true,data:data}))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+function doPost(e){
+  var body = JSON.parse(e.postData.contents);
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sh = ss.getSheetByName('DB') || ss.insertSheet('DB');
+  if(body.action==='save'){ sh.getRange('A1').setValue(JSON.stringify(body.data)); }
+  return ContentService.createTextOutput(JSON.stringify({ok:true}))
+    .setMimeType(ContentService.MimeType.JSON);
+}`;
+
+/* ===== РАСЧЁТЫ ===== */
+function applyScn(c){
+  // возвращает рассчитанные показатели курса с учётом сценария
+  const wpm=S.assume.weeksPerMonth;
+  const fillFactor=scenario.fill/100, priceK=scenario.price/100, wageK=scenario.wage/100;
+  const price=(+c.price||0)*priceK;
+  const wage=(+c.wage||0)*wageK;
+  const groups=+c.groups||0;
+  const fillN=Math.round((+c.fill||0)*fillFactor); // фактич. детей в группе
+  const lessonsMonth=groups*wpm; // занятий в месяц по курсу
+  const revenue=price*fillN*lessonsMonth;        // оборот курса/мес
+  const wageCost=wage*lessonsMonth;              // ЗП педагога/мес
+  const matCost=(+c.material||0)*lessonsMonth;   // материалы/мес
+  const margin=revenue-wageCost-matCost;
+  const marginPct=revenue>0?margin/revenue*100:0;
+  // точка безуб. группы: мин детей = (wage+material)/price
+  const minFill=price>0?Math.ceil((wage+(+c.material||0))/price):0;
+  return {price,wage,groups,fillN,lessonsMonth,revenue,wageCost,matCost,margin,marginPct,minFill};
+}
+function totals(){
+  let rev=0,wage=0,mat=0,lessons=0,kids=0;
+  S.courses.forEach(c=>{ const r=applyScn(c); rev+=r.revenue; wage+=r.wageCost; mat+=r.matCost;
+    lessons+=r.lessonsMonth; kids+=r.fillN*r.groups; });
+  // если расписание заполнено педагогами — ФОТ берём из сетки (точнее, по ставке наполняемости)
+  if(S._teacherFOTmonth && S._teacherFOTmonth>0 && scenario.wage===100){
+    wage = S._teacherFOTmonth;
+  } else if(S._teacherFOTmonth && S._teacherFOTmonth>0){
+    wage = S._teacherFOTmonth*(scenario.wage/100);
+  }
+  const rentK=scenario.rent/100;
+  let fixed=0;
+  for(const k in S.fixed){ let v=+S.fixed[k]||0; if(k.indexOf("Аренда")===0) v*=rentK; fixed+=v; }
+  const variableExtra=rev*(S.tax.acquiring/100); // эквайринг
+  const grossProfit=rev-wage-mat-variableExtra;
+  const opProfit=grossProfit-fixed;
+  // налоги
+  const usn=rev*(S.tax.usn/100);
+  const fotBase=wage*(S.fotTaxable/100); // часть ФОТ по трудовым
+  const fszn=fotBase*(S.tax.fszn/100);
+  const belg=fotBase*(S.tax.belgosstrah/100);
+  const taxTotal=usn+fszn+belg;
+  const netProfit=opProfit-taxTotal-(+S.assume.ownerSalary||0);
+  return {rev,wage,mat,lessons,kids,fixed,variableExtra,grossProfit,opProfit,usn,fszn,belg,taxTotal,netProfit};
+}
+function fmt(n){ if(n===null||n===undefined||isNaN(n)) return "—";
+  return Math.round(n).toLocaleString("ru-RU"); }
+function fmt1(n){ return (Math.round(n*10)/10).toLocaleString("ru-RU"); }
+
+/* ===== РЕНДЕР: КУРСЫ ===== */
+function renderCourses(){
+  const t=document.getElementById("courseTable");
+  let h=`<thead><tr>
+    <th>Курс</th><th>Эко</th><th>Цена</th><th>ЗП/зан</th><th>Мат/зан</th>
+    <th>Цель груп.</th><th>Групп/нед</th><th>Факт детей</th>
+    <th>Оборот/мес</th><th>Маржа,р</th><th>Маржа,%</th><th>Мин</th><th></th></tr></thead><tbody>`;
+  S.courses.forEach((c,i)=>{
+    const r=applyScn(c);
+    let sig="", cls="";
+    if(r.groups>0 && r.fillN>0){
+      if(r.fillN<r.minFill){sig="🔴";cls="r";}
+      else if(r.marginPct>=45){sig="🟢";cls="g";}
+      else {sig="🟡";cls="y";}
+    }
+    h+=`<tr>
+      <td><input class="cell wide" value="${esc(c.name)}" onchange="upd(${i},'name',this.value)"></td>
+      <td><select class="cell" onchange="upd(${i},'eco',this.value)">
+        ${["Прознание","CODDY","Детали"].map(e=>`<option ${c.eco===e?"selected":""}>${e}</option>`).join("")}</select></td>
+      <td><input class="cell" type="number" value="${c.price}" onchange="upd(${i},'price',this.value)"></td>
+      <td><input class="cell" type="number" value="${c.wage}" onchange="upd(${i},'wage',this.value)"></td>
+      <td><input class="cell" type="number" value="${c.material}" onchange="upd(${i},'material',this.value)"></td>
+      <td class="num muted">${c.groupSize}</td>
+      <td><input class="cell" type="number" value="${c.groups}" onchange="upd(${i},'groups',this.value)"></td>
+      <td><input class="cell" type="number" value="${c.fill}" onchange="upd(${i},'fill',this.value)"></td>
+      <td class="num">${fmt(r.revenue)}</td>
+      <td class="num ${r.margin>=0?'pos':'neg'}">${fmt(r.margin)}</td>
+      <td class="num">${r.revenue>0?fmt1(r.marginPct)+'%':'—'}</td>
+      <td class="num"><span class="sig ${cls}">${sig}</span> ${r.minFill||'—'}</td>
+      <td><button class="btn gray sm" onclick="delCourse(${i})">×</button></td>
+    </tr>`;
+  });
+  // итог
+  const T=totals();
+  h+=`<tr class="totrow"><td>ИТОГО (${S.courses.length} курсов)</td><td></td><td></td><td></td><td></td>
+    <td class="num">${S.courses.reduce((a,c)=>a+(+c.groups||0),0)}</td>
+    <td class="num">${T.kids}</td>
+    <td class="num">${fmt(T.rev)}</td><td class="num">${fmt(T.rev-T.wage-T.mat)}</td><td></td><td></td><td></td></tr>`;
+  h+="</tbody>";
+  t.innerHTML=h;
+}
+function esc(s){return String(s).replace(/"/g,"&quot;");}
+function upd(i,k,v){
+  if(k==="name"||k==="eco") S.courses[i][k]=v;
+  else S.courses[i][k]=parseFloat(v)||0;
+  persistLocal(); renderAll();
+}
+function addCourse(){ S.courses.push({name:"Новый курс",eco:"Прознание",price:25,single:30,wage:40,dur:1,groupSize:8,groups:0,fill:0,material:0}); persistLocal(); renderCourses(); }
+function delCourse(i){ S.courses.splice(i,1); persistLocal(); renderAll(); }
+function fillTarget(){ S.courses.forEach(c=>{ if(!c.fill) c.fill=c.groupSize; if(!c.groups) c.groups=1; }); persistLocal(); renderAll(); toast("Заполнено целевыми значениями"); }
+
+/* ===== РЕНДЕР: ПОСТОЯННЫЕ ===== */
+function renderFixed(){
+  const g1=document.getElementById("fixed1"), g2=document.getElementById("fixed2");
+  let h1="",h2="";
+  for(const k in S.fixed){
+    const row=`<div class="field"><label>${k}</label>
+      <input type="number" value="${S.fixed[k]}" onchange="updFixed('${k}',this.value)"></div>`;
+    if(S.fixedGroup[k]===2) h2+=row; else h1+=row;
+  }
+  g1.innerHTML=h1; g2.innerHTML=h2;
+  let tot=0; for(const k in S.fixed) tot+=+S.fixed[k]||0;
+  document.getElementById("fixedTotal").textContent=fmt(tot)+" р";
+}
+function updFixed(k,v){ S.fixed[k]=parseFloat(v)||0; persistLocal(); renderAll(); }
+
+/* ===== РЕНДЕР: НАЛОГИ ===== */
+function renderTax(){
+  const r=document.getElementById("taxRates");
+  r.innerHTML=`
+   <div class="field"><label>УСН, % от валовой выручки<span class="hint">2026: 6%</span></label><input type="number" value="${S.tax.usn}" onchange="updTax('usn',this.value)"></div>
+   <div class="field"><label>ФСЗН (наниматель), %<span class="hint">от ФОТ по труд. договорам</span></label><input type="number" value="${S.tax.fszn}" onchange="updTax('fszn',this.value)"></div>
+   <div class="field"><label>Белгосстрах, %<span class="hint">от ФОТ</span></label><input type="number" value="${S.tax.belgosstrah}" onchange="updTax('belgosstrah',this.value)"></div>
+   <div class="field"><label>Эквайринг, % от выручки</label><input type="number" value="${S.tax.acquiring}" onchange="updTax('acquiring',this.value)"></div>
+   <div class="field"><label>Доля ФОТ по труд. договорам, %<span class="hint">остальное — ГПХ/самозанятые/ИП</span></label><input type="number" value="${S.fotTaxable}" onchange="updFot(this.value)"></div>`;
+  const T=totals();
+  document.getElementById("taxCalc").innerHTML=`<tbody>
+   <tr><td>Валовая выручка/мес</td><td class="num">${fmt(T.rev)} р</td></tr>
+   <tr><td>Налог УСN (${S.tax.usn}%)</td><td class="num neg">${fmt(T.usn)} р</td></tr>
+   <tr><td>ФОТ облагаемый (${S.fotTaxable}% от ЗП)</td><td class="num">${fmt(T.wage*S.fotTaxable/100)} р</td></tr>
+   <tr><td>ФСЗН (${S.tax.fszn}%)</td><td class="num neg">${fmt(T.fszn)} р</td></tr>
+   <tr><td>Белгосстрах (${S.tax.belgosstrah}%)</td><td class="num neg">${fmt(T.belg)} р</td></tr>
+   <tr class="totrow"><td>Итого налоги и взносы</td><td class="num">${fmt(T.taxTotal)} р</td></tr>
+   <tr><td>Налоговая нагрузка к выручке</td><td class="num">${T.rev>0?fmt1(T.taxTotal/T.rev*100):0}%</td></tr>
+  </tbody>`;
+}
+function updTax(k,v){ S.tax[k]=parseFloat(v)||0; persistLocal(); renderAll(); }
+function updFot(v){ S.fotTaxable=parseFloat(v)||0; persistLocal(); renderAll(); }
+
+/* ===== РЕНДЕР: ПАРАМЕТРЫ ===== */
+function renderSettings(){
+  document.getElementById("assumptions").innerHTML=`
+   <div class="field"><label>Недель в месяце</label><input type="number" value="${S.assume.weeksPerMonth}" onchange="updAssume('weeksPerMonth',this.value)"></div>
+   <div class="field"><label>Целевая доля прибыли, %<span class="hint">для точки безубыточности</span></label><input type="number" value="${S.assume.targetProfitShare}" onchange="updAssume('targetProfitShare',this.value)"></div>
+   <div class="field"><label>ЗП собственника/мес<span class="hint">оценка вашего труда в операционке</span></label><input type="number" value="${S.assume.ownerSalary}" onchange="updAssume('ownerSalary',this.value)"></div>`;
+  document.getElementById("gasUrl").value=S.gasUrl||"";
+}
+function updAssume(k,v){ S.assume[k]=parseFloat(v)||0; persistLocal(); renderAll(); }
+
+/* ===== РЕНДЕР: ДАШБОРД ===== */
+function renderDash(){
+  const T=totals();
+  const rentShare=T.rev>0?(sumRent()/T.rev*100):0;
+  const fotShare=T.rev>0?((T.wage+sumAdminFOT())/T.rev*100):0;
+  const k=document.getElementById("kpiGrid");
+  const profCls=T.netProfit>=0?"green":"red";
+  k.innerHTML=`
+   ${kpi("Выручка/мес",fmt(T.rev)+" р","coal","по проведённым занятиям")}
+   ${kpi("Чистая прибыль",fmt(T.netProfit)+" р",profCls,"после налогов и ЗП собств.")}
+   ${kpi("Рентабельность",(T.rev>0?fmt1(T.netProfit/T.rev*100):0)+"%",profCls,"чистая прибыль / выручка")}
+   ${kpi("Детей (мест занято)",fmt(T.kids),"blue","сумма по группам")}
+   ${kpi("Занятий/мес",fmt(T.lessons),"blue","всего по расписанию")}
+   ${kpi("Доля ФОТ",fmt1(fotShare)+"%",fotShare>55?"red":"green","педагоги + админ-команда")}
+   ${kpi("Доля аренды",fmt1(rentShare)+"%",rentShare>12?"red":"green","ориентир 8–12%")}
+   ${kpi("Налог. нагрузка",(T.rev>0?fmt1(T.taxTotal/T.rev*100):0)+"%","coal","УСН + взносы")}`;
+
+  // P&L
+  document.getElementById("pnlTable").innerHTML=`<tbody>
+   ${pnl("Выручка",T.rev,"")}
+   ${pnl("− ЗП педагогов",-T.wage,"sub")}
+   ${pnl("− Материалы",-T.mat,"sub")}
+   ${pnl("− Эквайринг",-T.variableExtra,"sub")}
+   ${pnl("= Валовая прибыль",T.grossProfit,"mid")}
+   ${pnl("− Постоянные расходы",-T.fixed,"sub")}
+   ${pnl("= Операционная прибыль",T.opProfit,"mid")}
+   ${pnl("− Налог УСН",-T.usn,"sub")}
+   ${pnl("− ФСЗН + Белгосстрах",-(T.fszn+T.belg),"sub")}
+   ${S.assume.ownerSalary>0?pnl("− ЗП собственника",-S.assume.ownerSalary,"sub"):""}
+   ${pnl("= ЧИСТАЯ ПРИБЫЛЬ",T.netProfit,"tot")}
+  </tbody>`;
+
+  // структура расходов
+  const items=[
+    ["ЗП педагогов",T.wage],["Постоянные (аренда, команда, сервисы)",T.fixed],
+    ["Материалы",T.mat],["Налоги и взносы",T.taxTotal],["Эквайринг",T.variableExtra]
+  ];
+  let sh="<tbody>";
+  items.forEach(([n,v])=>{ const p=T.rev>0?v/T.rev*100:0;
+    sh+=`<tr><td>${n}</td><td class="num">${fmt(v)} р</td>
+      <td style="width:130px"><div class="barwrap"><div class="bar" style="width:${Math.min(p,100)}%"></div><span class="barlbl">${fmt1(p)}%</span></div></td></tr>`; });
+  sh+="</tbody>";
+  document.getElementById("structTable").innerHTML=sh;
+  const totExp=T.wage+T.fixed+T.mat+T.taxTotal+T.variableExtra;
+  document.getElementById("structHint").innerHTML=
+    `<b>Всего расходов:</b> ${fmt(totExp)} р/мес. Прибыль ${T.netProfit>=0?"положительная":"отрицательная"}: <b>${fmt(T.netProfit)} р</b>. ${fotShare>55?"⚠ Доля ФОТ выше 55% — проверьте загрузку и ставки.":""}`;
+
+  // топ/аутсайдеры
+  const ranked=S.courses.map((c,i)=>({c,i,r:applyScn(c)})).filter(x=>x.r.groups>0&&x.r.fillN>0);
+  ranked.sort((a,b)=>b.r.margin-a.r.margin);
+  const top=ranked.slice(0,6), bot=ranked.slice(-6).reverse();
+  document.getElementById("topCourses").innerHTML=courseMini(top);
+  document.getElementById("botCourses").innerHTML=courseMini(bot.filter(x=>x.r.margin<top[top.length-1]?.r.margin||1e9));
+}
+function courseMini(arr){
+  if(!arr.length) return `<tbody><tr><td class="muted">Заполните группы и наполняемость на вкладке «Курсы»</td></tr></tbody>`;
+  let h="<tbody>";
+  arr.forEach(({c,r})=>{ h+=`<tr><td>${c.name}</td>
+    <td class="num ${r.margin>=0?'pos':'neg'}">${fmt(r.margin)} р</td>
+    <td class="num">${fmt1(r.marginPct)}%</td></tr>`; });
+  return h+"</tbody>";
+}
+function kpi(label,val,cls,sub){
+  return `<div class="kpi ${cls}"><div class="k-label">${label}</div>
+    <div class="k-val">${val}</div><div class="k-sub">${sub||""}</div></div>`;
+}
+function pnl(label,val,type){
+  const cls=type==="tot"?"totrow":"";
+  const style=type==="mid"?"font-weight:600;border-top:1px solid var(--terra)":(type==="sub"?"color:var(--muted)":"");
+  const vcls=val>=0?"pos":"neg";
+  return `<tr class="${cls}"><td style="${style}">${label}</td><td class="num ${type==='tot'?'':vcls}" style="${style}">${fmt(val)} р</td></tr>`;
+}
+function sumRent(){ let s=0; for(const k in S.fixed) if(k.indexOf("Аренда")===0) s+=(+S.fixed[k]||0)*(scenario.rent/100); return s; }
+function sumAdminFOT(){ let s=0; for(const k in S.fixed) if(S.fixedGroup[k]===2) s+=+S.fixed[k]||0; return s; }
+
+/* ===== РЕНДЕР: ТБУ ===== */
+function renderBreak(){
+  const T=totals();
+  // маржинальность на рубль выручки (вклад в покрытие постоянных)
+  const contrib=T.rev>0?(T.grossProfit/T.rev):0;
+  const fixedPlusTax=T.fixed; // налоги частично переменны; для упрощения ТБУ от постоянных
+  const bep=contrib>0?fixedPlusTax/contrib:0;
+  const targetProfit=T.rev*(S.assume.targetProfitShare/100);
+  const bepTarget=contrib>0?(fixedPlusTax+targetProfit)/contrib:0;
+  const safety=T.rev>0?((T.rev-bep)/T.rev*100):0;
+  const expl=document.getElementById("bepExplain");
+  if(expl){
+    if(T.rev<=0){
+      expl.innerHTML='<b>Как это работает:</b> заполните расписание и курсы — тогда здесь появится расчёт. Кратко: берём все постоянные расходы за месяц и делим на долю, которая остаётся с каждого рубля выручки после оплаты педагогов и материалов.';
+    } else {
+      const pct=Math.round(contrib*100);
+      const diff=T.rev-bep;
+      expl.innerHTML='<b>Простыми словами:</b> с каждого заработанного рубля после оплаты педагогов и расходников у вас остаётся ~<b>'+pct+' коп.</b> на покрытие аренды, команды и налогов. '+
+        'Чтобы покрыть постоянные расходы ('+fmt(T.fixed)+' р/мес), нужно заработать <b>'+fmt(bep)+' р</b>. '+
+        (diff>=0
+          ? 'Сейчас по модели выходит '+fmt(T.rev)+' р — это <b>выше</b> точки на '+fmt(diff)+' р, клуб в плюсе. ✓'
+          : 'Сейчас по модели только '+fmt(T.rev)+' р — это <b>ниже</b> точки на '+fmt(-diff)+' р, клуб в минусе. Нужно добрать группы или поднять наполняемость.');
+    }
+  }
+  document.getElementById("breakKpi").innerHTML=`
+   ${kpi("Нужно заработать для нуля",fmt(bep)+" р","coal","покрыть все расходы")}
+   ${kpi("Для плановой прибыли",fmt(bepTarget)+" р","blue","чтобы получить "+S.assume.targetProfitShare+"% сверху")}
+   ${kpi("Сейчас по модели",fmt(T.rev)+" р",T.rev>=bep?"green":"red",T.rev>=bep?"выше точки — плюс":"ниже точки — минус")}
+   ${kpi("Запас прочности",fmt1(safety)+"%",safety<20?"red":"green","на сколько можно просесть")}`;
+  // мин наполняемость
+  let h=`<thead><tr><th>Курс</th><th>Цена</th><th>ЗП/зан</th><th>Мин детей</th><th>Цель</th><th>Факт</th><th>Статус</th></tr></thead><tbody>`;
+  S.courses.forEach(c=>{ const r=applyScn(c);
+    let st="—",cls="";
+    if(c.groups>0&&c.fill>0){ if(r.fillN>=r.minFill){st="✓ ок";cls="g";}else{st="ниже порога";cls="r";} }
+    h+=`<tr><td>${c.name}</td><td class="num">${fmt(r.price)}</td><td class="num">${fmt(r.wage)}</td>
+      <td class="num"><b>${r.minFill||"—"}</b></td><td class="num muted">${c.groupSize}</td>
+      <td class="num">${r.fillN||"—"}</td><td><span class="sig ${cls}">${st}</span></td></tr>`; });
+  document.getElementById("breakTable").innerHTML=h+"</tbody>";
+}
+
+/* ===== СЦЕНАРИИ ===== */
+function setScenario(s){
+  document.querySelectorAll(".scn button").forEach(b=>b.classList.toggle("on",b.dataset.s===s));
+  const P={base:{fill:100,price:100,wage:100,rent:100},
+    opt:{fill:100,price:108,wage:100,rent:100},
+    pess:{fill:65,price:95,wage:110,rent:115}};
+  const p=P[s];
+  document.getElementById("sFill").value=p.fill;
+  document.getElementById("sPrice").value=p.price;
+  document.getElementById("sWage").value=p.wage;
+  document.getElementById("sRent").value=p.rent;
+  onSlider();
+}
+function onSlider(){
+  scenario.fill=+document.getElementById("sFill").value;
+  scenario.price=+document.getElementById("sPrice").value;
+  scenario.wage=+document.getElementById("sWage").value;
+  scenario.rent=+document.getElementById("sRent").value;
+  document.getElementById("sFillV").textContent=scenario.fill+"%";
+  document.getElementById("sPriceV").textContent=scenario.price+"%";
+  document.getElementById("sWageV").textContent=scenario.wage+"%";
+  document.getElementById("sRentV").textContent=scenario.rent+"%";
+  const T=totals();
+  document.getElementById("scnKpi").innerHTML=`
+   ${kpi("Выручка",fmt(T.rev)+" р","coal","при заданных условиях")}
+   ${kpi("Чистая прибыль",fmt(T.netProfit)+" р",T.netProfit>=0?"green":"red","")}
+   ${kpi("Рентабельность",(T.rev>0?fmt1(T.netProfit/T.rev*100):0)+"%",T.netProfit>=0?"green":"red","")}
+   ${kpi("Маржа до постоянных",fmt(T.grossProfit)+" р","blue","валовая прибыль")}`;
+  // дашборд тоже обновим (для согласованности после возврата на базовый)
+}
+
+/* ===== ОБЩЕЕ ===== */
+const PLAN_SEED = {"plan": [{"name": "Говорилка", "perGroup": 5.0, "price": 22, "groups": 15, "visits": 2}, {"name": "Почемучка", "perGroup": 4.0, "price": 22, "groups": 4, "visits": 2}, {"name": "Нейрогимнастика", "perGroup": 5.0, "price": 22, "groups": 6, "visits": 2}, {"name": "Хочу все знать! будний", "perGroup": 0, "price": 22, "groups": 0, "visits": 1}, {"name": "Хочу все знать! выходной", "perGroup": 5.0, "price": 44, "groups": 5, "visits": 1}, {"name": "Живая азбука", "perGroup": 5.0, "price": 22, "groups": 1, "visits": 1}, {"name": "Арт-Студия (1 час)", "perGroup": 7.0, "price": 23, "groups": 2, "visits": 1}, {"name": "Арт-Студия (1,5 часа)", "perGroup": 7.0, "price": 27, "groups": 2, "visits": 1}, {"name": "Лепка из глины (1 час)", "perGroup": 6.0, "price": 25, "groups": 3, "visits": 1}, {"name": "Лепка из глины (1,5 часа)", "perGroup": 7.0, "price": 29, "groups": 4, "visits": 1}, {"name": "Лепка из полимерной глины", "perGroup": 6.0, "price": 29, "groups": 3, "visits": 1}, {"name": "Песок", "perGroup": 0, "price": 18, "groups": 0, "visits": 1}, {"name": "Рисование", "perGroup": 8.0, "price": 32, "groups": 3, "visits": 1}, {"name": "Каллиграфия", "perGroup": 5.0, "price": 23, "groups": 4, "visits": 1}, {"name": "Театр", "perGroup": 0, "price": 0, "groups": 0, "visits": 1}, {"name": "СДВ 1 час", "perGroup": 7.0, "price": 27, "groups": 2, "visits": 1}, {"name": "СДВ 1,5 часа", "perGroup": 7.0, "price": 32, "groups": 5, "visits": 1}, {"name": "СДВ 2 часа", "perGroup": 0, "price": 35, "groups": 0, "visits": 1}, {"name": "Английский язык", "perGroup": 5.61, "price": 21, "groups": 31, "visits": 2}, {"name": "Взросление", "perGroup": 8.0, "price": 25, "groups": 2, "visits": 1}, {"name": "Финансовая грамотность", "perGroup": 6.0, "price": 29, "groups": 5, "visits": 1}, {"name": "Логика", "perGroup": 0, "price": 30, "groups": 0, "visits": 1}, {"name": "Клуб математической стратегии", "perGroup": 6.0, "price": 23, "groups": 5, "visits": 1}, {"name": "Электроника", "perGroup": 6.0, "price": 30, "groups": 1, "visits": 1}, {"name": "Робототехника", "perGroup": 7.0, "price": 35, "groups": 2, "visits": 1}, {"name": "Scratch", "perGroup": 8.0, "price": 35, "groups": 2, "visits": 1}, {"name": "Minecraft", "perGroup": 8.0, "price": 35, "groups": 5, "visits": 1}, {"name": "Roblox", "perGroup": 8.0, "price": 35, "groups": 8, "visits": 1}, {"name": "Roblox + Blender", "perGroup": 8.0, "price": 35, "groups": 6, "visits": 1}, {"name": "Blender", "perGroup": 8.0, "price": 35, "groups": 1, "visits": 1}, {"name": "Blender + Unity", "perGroup": 8.0, "price": 35, "groups": 4, "visits": 1}, {"name": "Python", "perGroup": 8.0, "price": 35, "groups": 1, "visits": 1}, {"name": "ХКГ", "perGroup": 6.0, "price": 35, "groups": 3, "visits": 1}, {"name": "БПЛА", "perGroup": 6.0, "price": 35, "groups": 3, "visits": 1}], "funnel": {"coef": 1.32, "now": 550, "showRate": 0.8}};
+/* ====== ПЛАНИРОВЩИК ЗАГРУЗКИ (лист «Пож (25) макс прогноз») ====== */
+/* Логика 1:1 с вашим Excel:
+   оборот/нед курса = perGroup × price × groups
+   детей(уник)/нед  = perGroup × groups / visits   (visits: 2 для дошкольных, 1 для IT)
+   Снизу — воронка набора: коэф загрузки, доходимость, сколько добрать.
+*/
+if(!S.plan){ S.plan = JSON.parse(JSON.stringify(PLAN_SEED.plan)); }
+if(!S.funnel){ S.funnel = JSON.parse(JSON.stringify(PLAN_SEED.funnel)); }
+
+function planTotals(){
+  let revWeek=0, need=0, groups=0;
+  S.plan.forEach(p=>{
+    const g=+p.groups||0, cg=+p.perGroup||0, pr=+p.price||0, v=+p.visits||1;
+    revWeek += cg*pr*g;
+    need += v>0 ? cg*g/v : cg*g;   // «детей нужно» = Σ(чел×групп/визиты) — как G52 в Excel
+    groups += g;
+  });
+  const revMonth = revWeek*4;
+  const visitsTot = need;                  // совместимость со старым именем
+  const kidsUniq = need;
+  // воронка набора
+  const coef = +S.funnel.coef||1;          // визитов на 1 уникального ребёнка
+  const uniqNeed = coef>0 ? need/coef : need; // уникальных нужно (G55 = G52/коэф)
+  const now = +S.funnel.now||0;
+  const showRate = +S.funnel.showRate||0;  // доля доходимости
+  const willCome = now*showRate;
+  const toRecruit = uniqNeed - willCome;
+  return {revWeek,revMonth,kidsUniq,visitsTot,groups,need,uniqNeed,now,willCome,toRecruit,coef,showRate};
+}
+
+function renderPlanner(){
+  const T=planTotals();
+  // KPI сверху
+  document.getElementById("planKpi").innerHTML=`
+   ${kpi("Оборот/неделя",fmt(T.revWeek)+" р","coal","Σ чел×цена×групп")}
+   ${kpi("Оборот/месяц",fmt(T.revMonth)+" р","green","×4 недели")}
+   ${kpi("Групп/неделю",fmt(T.groups),"blue","всего по расписанию")}
+   ${kpi("Детей нужно/нед",fmt1(T.need),"blue","Σ по курсам (как G52)")}
+   ${kpi("Уникальных детей",fmt(T.uniqNeed),"coal","нужно для плана")}
+   ${kpi("Нужно добрать",fmt(Math.max(0,T.toRecruit)),T.toRecruit>0?"red":"green","сверх дойдущих")}`;
+
+  // таблица плана
+  let h=`<thead><tr>
+    <th>Курс</th><th>Чел/гр</th><th>Цена</th><th>Групп/нед</th>
+    <th>Визитов/нед</th><th>Оборот/нед</th><th>Детей(уник)</th><th></th></tr></thead><tbody>`;
+  S.plan.forEach((p,i)=>{
+    const g=+p.groups||0, cg=+p.perGroup||0, pr=+p.price||0, v=+p.visits||1;
+    const rev=cg*pr*g, kids=v>0?cg*g/v:cg*g;
+    h+=`<tr>
+      <td><input class="cell wide" value="${esc(p.name)}" onchange="updPlan(${i},'name',this.value)"></td>
+      <td><input class="cell" type="number" value="${cg}" onchange="updPlan(${i},'perGroup',this.value)"></td>
+      <td><input class="cell" type="number" value="${pr}" onchange="updPlan(${i},'price',this.value)"></td>
+      <td><input class="cell" type="number" value="${g}" onchange="updPlan(${i},'groups',this.value)"></td>
+      <td><select class="cell" onchange="updPlan(${i},'visits',this.value)">
+         <option value="1" ${v==1?"selected":""}>1×</option>
+         <option value="2" ${v==2?"selected":""}>2×</option></select></td>
+      <td class="num">${fmt(rev)}</td>
+      <td class="num">${fmt1(kids)}</td>
+      <td><button class="btn gray sm" onclick="delPlan(${i})">×</button></td>
+    </tr>`;
+  });
+  h+=`<tr class="totrow"><td>ИТОГО</td><td></td><td></td>
+    <td class="num">${fmt(T.groups)}</td><td></td>
+    <td class="num">${fmt(T.revWeek)}</td><td class="num">${fmt1(T.uniqNeed)}</td><td></td></tr>`;
+  document.getElementById("planTable").innerHTML=h+"</tbody>";
+
+  // воронка набора
+  document.getElementById("funnelBox").innerHTML=`
+   <div class="field"><label>Коэффициент загрузки<span class="hint">визитов на 1 ребёнка (у вас 1,32)</span></label>
+     <input type="number" step="0.01" value="${S.funnel.coef}" onchange="updFunnel('coef',this.value)"></div>
+   <div class="field"><label>Детей сейчас в базе<span class="hint">активных</span></label>
+     <input type="number" value="${S.funnel.now}" onchange="updFunnel('now',this.value)"></div>
+   <div class="field"><label>Доходимость, доля<span class="hint">0,8 = 80% дойдут до оплаты</span></label>
+     <input type="number" step="0.05" value="${S.funnel.showRate}" onchange="updFunnel('showRate',this.value)"></div>`;
+  document.getElementById("funnelCalc").innerHTML=`<tbody>
+   <tr><td>Всего детей нужно (Σ по курсам)</td><td class="num"><b>${fmt(T.visitsTot)}</b></td></tr>
+   <tr><td>Уникальных детей нужно (÷ коэф ${T.coef})</td><td class="num"><b>${fmt1(T.uniqNeed)}</b></td></tr>
+   <tr><td>Сейчас в базе</td><td class="num">${fmt(T.now)}</td></tr>
+   <tr><td>Дойдёт примерно (× ${T.showRate})</td><td class="num">${fmt1(T.willCome)}</td></tr>
+   <tr class="totrow"><td>Нужно добрать новых</td><td class="num">${fmt1(Math.max(0,T.toRecruit))}</td></tr>
+  </tbody>`;
+  const cap = document.getElementById("planSyncHint");
+  if(cap){
+    cap.innerHTML = `<b>Прогноз оборота:</b> ${fmt(T.revMonth)} р/мес при плане ${fmt(T.groups)} групп. `+
+      (T.toRecruit>0
+        ? `Чтобы заполнить клуб, нужно добрать ~<b>${fmt1(T.toRecruit)}</b> детей сверх тех, кто дойдёт из базы.`
+        : `Текущей базы достаточно для плана — добор не требуется.`);
+  }
+}
+function updPlan(i,k,v){
+  if(k==="name") S.plan[i][k]=v; else S.plan[i][k]=parseFloat(v)||0;
+  persistLocal(); renderPlanner();
+}
+function delPlan(i){ S.plan.splice(i,1); persistLocal(); renderPlanner(); }
+function addPlan(){ S.plan.push({name:"Новый курс",perGroup:6,price:25,groups:0,visits:2}); persistLocal(); renderPlanner(); }
+function updFunnel(k,v){ S.funnel[k]=parseFloat(v)||0; persistLocal(); renderPlanner(); }
+
+/* импорт плана в продуктовую матрицу (вкладка Курсы) */
+function planToCourses(){
+  if(!confirm("Перенести группы и наполняемость из Планировщика в вкладку «Курсы»? Существующие группы/факт будут перезаписаны по совпадению названий.")) return;
+  S.plan.forEach(p=>{
+    const c=S.courses.find(x=>x.name.trim().toLowerCase()===p.name.trim().toLowerCase());
+    if(c){ c.groups=+p.groups||0; c.fill=+p.perGroup||0; if(p.price) c.price=+p.price; }
+  });
+  persistLocal(); renderAll(); toast("Перенесено в «Курсы»");
+}
+
+const GRID_SEED=[{"day": 3, "start": "09:00", "end": "10:00", "teacher": "Бурдук Наталья Вячеславовна", "course": "Английский язык", "group": "Английский №1", "students": 6, "room": ""}, {"day": 3, "start": "09:30", "end": "10:30", "teacher": "Гашникова Юлия Владимирована", "course": "Английский язык", "group": "Английский №10", "students": 4, "room": ""}, {"day": 3, "start": "10:00", "end": "11:00", "teacher": "Бурдук Наталья Вячеславовна", "course": "Английский язык", "group": "Английский №2", "students": 6, "room": ""}, {"day": 3, "start": "11:00", "end": "12:00", "teacher": "Бурдук Наталья Вячеславовна", "course": "Английский язык", "group": "Английский №3", "students": 6, "room": ""}, {"day": 3, "start": "15:00", "end": "16:00", "teacher": "Бурдук Наталья Вячеславовна", "course": "Английский язык", "group": "Английский №4", "students": 5, "room": ""}, {"day": 3, "start": "16:00", "end": "17:00", "teacher": "Бурдук Наталья Вячеславовна", "course": "Английский язык", "group": "Английский №5", "students": 5, "room": ""}, {"day": 3, "start": "16:00", "end": "17:00", "teacher": "Гашникова Юлия Владимирована", "course": "Английский язык", "group": "Английский №11", "students": 6, "room": ""}, {"day": 3, "start": "16:30", "end": "17:30", "teacher": "Громыко Ирина", "course": "Нейрогимнастика", "group": "Нейрогимнастика №3", "students": 10, "room": ""}, {"day": 3, "start": "17:00", "end": "18:00", "teacher": "Бурдук Наталья Вячеславовна", "course": "Английский язык", "group": "Английский №6", "students": 6, "room": ""}, {"day": 3, "start": "17:00", "end": "18:30", "teacher": "Козырев Влад", "course": "Робототехника", "group": "Робототехника №1", "students": 6, "room": ""}, {"day": 3, "start": "17:30", "end": "18:30", "teacher": "Костикова Ольга", "course": "Арт-Студия (1 час)", "group": "Арт-студия №3", "students": 11, "room": ""}, {"day": 3, "start": "17:30", "end": "18:30", "teacher": "Громыко Ирина", "course": "Нейрогимнастика", "group": "Нейрогимнастика №4", "students": 11, "room": ""}, {"day": 3, "start": "17:30", "end": "18:30", "teacher": "Печковская Юлия", "course": "Песок", "group": "Пескография №1", "students": 8, "room": ""}, {"day": 3, "start": "18:00", "end": "19:00", "teacher": "Бурдук Наталья Вячеславовна", "course": "Английский язык", "group": "Английский №7", "students": 4, "room": ""}, {"day": 3, "start": "18:30", "end": "20:00", "teacher": "Костикова Ольга", "course": "Арт-Студия (1 час)", "group": "Арт-студия №4", "students": 9, "room": ""}, {"day": 3, "start": "18:30", "end": "19:30", "teacher": "Громыко Ирина", "course": "Нейрогимнастика", "group": "Нейрогимнастика №5", "students": 7, "room": ""}, {"day": 3, "start": "18:30", "end": "20:00", "teacher": "Козырев Влад", "course": "Scratch", "group": "Scratch №1", "students": 6, "room": ""}, {"day": 3, "start": "18:30", "end": "19:30", "teacher": "Печковская Юлия", "course": "Песок", "group": "Пескография №2", "students": 8, "room": ""}, {"day": 3, "start": "19:00", "end": "20:00", "teacher": "Гашникова Юлия Владимирована", "course": "Английский язык", "group": "Английский 14", "students": 4, "room": ""}, {"day": 4, "start": "09:30", "end": "10:30", "teacher": "Громыко Ирина", "course": "Говорилка", "group": "Говорилка №1", "students": 7, "room": ""}, {"day": 4, "start": "10:00", "end": "11:30", "teacher": "Печковская Юлия", "course": "Финансовая грамотность", "group": "Финансовая грамотность №1", "students": 4, "room": ""}, {"day": 4, "start": "10:30", "end": "11:30", "teacher": "Громыко Ирина", "course": "Говорилка", "group": "Говорилка №2", "students": 6, "room": ""}, {"day": 4, "start": "15:30", "end": "16:30", "teacher": "Лаппо Ксения", "course": "Английский язык", "group": "Английский №8", "students": 6, "room": ""}, {"day": 4, "start": "16:30", "end": "17:30", "teacher": "Лаппо Ксения", "course": "Английский язык", "group": "Английский №9", "students": 8, "room": ""}, {"day": 4, "start": "16:30", "end": "17:30", "teacher": "Громыко Ирина", "course": "Почемучка", "group": "Почемучка №1", "students": 7, "room": ""}, {"day": 4, "start": "17:30", "end": "18:30", "teacher": "Афанасенко Евгения", "course": "Лепка из глины (1 час)", "group": "Лепка из глина №3", "students": 13, "room": ""}, {"day": 4, "start": "17:30", "end": "18:30", "teacher": "Громыко Ирина", "course": "Почемучка", "group": "Почемучка №2", "students": 8, "room": ""}, {"day": 4, "start": "17:30", "end": "18:30", "teacher": "Шавцова Ольга", "course": "Хочу все знать! выходной", "group": "Хочу всё знать №1", "students": 5, "room": ""}, {"day": 4, "start": "17:45", "end": "18:45", "teacher": "Кургузикова Мария", "course": "7 навыков уверенных детей", "group": "7 навыков №2", "students": 8, "room": ""}, {"day": 4, "start": "17:50", "end": "18:50", "teacher": "Середич Алеся", "course": "Английский язык", "group": "Английский №12", "students": 5, "room": ""}, {"day": 4, "start": "18:30", "end": "19:30", "teacher": "Громыко Ирина", "course": "Почемучка", "group": "Почемучка №3", "students": 10, "room": ""}, {"day": 4, "start": "18:30", "end": "19:30", "teacher": "Шавцова Ольга", "course": "Хочу все знать! выходной", "group": "Хочу всё знать №2", "students": 9, "room": ""}, {"day": 4, "start": "18:30", "end": "20:00", "teacher": "Афанасенко Евгения", "course": "Лепка из глины (1 час)", "group": "Лепка из глины №4", "students": 10, "room": ""}, {"day": 4, "start": "18:45", "end": "19:45", "teacher": "Кургузикова Мария", "course": "7 навыков уверенных детей", "group": "7 навыков №10", "students": 6, "room": ""}, {"day": 4, "start": "19:00", "end": "20:00", "teacher": "Середич Алеся", "course": "Английский язык", "group": "Английский №13", "students": 9, "room": ""}, {"day": 5, "start": "08:30", "end": "09:30", "teacher": "Маркевич Юлия", "course": "Клуб математической стратегии", "group": "Клуб математической стратегии №4", "students": 6, "room": ""}, {"day": 5, "start": "09:30", "end": "10:30", "teacher": "Зайцева Виктория", "course": "Говорилка", "group": "Говорилка №4", "students": 6, "room": ""}, {"day": 5, "start": "09:30", "end": "10:30", "teacher": "Маркевич Юлия", "course": "Клуб математической стратегии", "group": "Клуб математической стратегии №5", "students": 8, "room": ""}, {"day": 5, "start": "10:30", "end": "11:30", "teacher": "Маркевич Юлия", "course": "Клуб математической стратегии", "group": "Клуб математической стратегии №6", "students": 7, "room": ""}, {"day": 5, "start": "10:30", "end": "11:30", "teacher": "Зайцева Виктория", "course": "Говорилка", "group": "Говорилка №5", "students": 9, "room": ""}, {"day": 5, "start": "11:30", "end": "13:00", "teacher": "Маркевич Юлия", "course": "Клуб математической стратегии", "group": "Клуб математической стратегии №7", "students": 4, "room": ""}, {"day": 5, "start": "15:30", "end": "16:30", "teacher": "Маркевич Юлия", "course": "Клуб математической стратегии", "group": "Клуб математической стратегии №1", "students": 9, "room": ""}, {"day": 5, "start": "16:30", "end": "17:00", "teacher": "Жарикова Татьяна Владимировна", "course": "Логика", "group": "Мир логики №1", "students": 2, "room": ""}, {"day": 5, "start": "16:30", "end": "17:30", "teacher": "Маркевич Юлия", "course": "Клуб математической стратегии", "group": "Клуб математической стратегии №10", "students": 6, "room": ""}, {"day": 5, "start": "16:30", "end": "18:00", "teacher": "Афанасенко Евгения", "course": "Лепка из полимерной глины", "group": "Лепка из полимерной глины №1", "students": 10, "room": ""}, {"day": 5, "start": "17:00", "end": "18:30", "teacher": "Жарикова Татьяна Владимировна", "course": "Логика", "group": "Мир логики №2", "students": 6, "room": ""}, {"day": 5, "start": "17:00", "end": "18:30", "teacher": "Винтилов Сергей", "course": "Blender", "group": "3D Blender №1", "students": 9, "room": ""}, {"day": 5, "start": "17:00", "end": "18:30", "teacher": "Титова Злата", "course": "Digital art", "group": "Digital Art: Художник компьютерной графики №1", "students": 5, "room": ""}, {"day": 5, "start": "17:00", "end": "18:30", "teacher": "Пашкевич Кирилл", "course": "Roblox", "group": "Roblox №8", "students": 5, "room": ""}, {"day": 5, "start": "17:30", "end": "18:30", "teacher": "Шавцова Ольга", "course": "Живая азбука", "group": "Живая азбука №1", "students": 8, "room": ""}, {"day": 5, "start": "17:30", "end": "18:30", "teacher": "Маркевич Юлия", "course": "Клуб математической стратегии", "group": "Клуб математической стратегии №3", "students": 8, "room": ""}, {"day": 5, "start": "17:30", "end": "18:30", "teacher": "Громыко Ирина", "course": "Нейрогимнастика", "group": "Нейрогимнастика №1", "students": 10, "room": ""}, {"day": 5, "start": "18:00", "end": "19:30", "teacher": "Афанасенко Евгения", "course": "Лепка из полимерной глины", "group": "Лепка из полимерной глины №2", "students": 9, "room": ""}, {"day": 5, "start": "18:30", "end": "19:30", "teacher": "Громыко Ирина", "course": "Нейрогимнастика", "group": "Нейрогимнастика №2", "students": 11, "room": ""}, {"day": 5, "start": "18:30", "end": "20:00", "teacher": "Винтилов Сергей", "course": "Blender + Unity", "group": "3D Blender и Unity: Проектирование виртуальных сред №1", "students": 9, "room": ""}, {"day": 5, "start": "18:30", "end": "20:00", "teacher": "Пашкевич Кирилл", "course": "Roblox", "group": "Roblox №9", "students": 3, "room": ""}, {"day": 5, "start": "18:30", "end": "20:00", "teacher": "Титова Злата", "course": "Digital art", "group": "Digital Art: Художник компьютерной графики №5", "students": 5, "room": ""}, {"day": 5, "start": "18:30", "end": "19:30", "teacher": "Шавцова Ольга", "course": "Живая азбука", "group": "Живая азбука №2", "students": 8, "room": ""}, {"day": 6, "start": "09:00", "end": "10:00", "teacher": "Лаппо Ксения", "course": "Английский язык", "group": "Английский №1", "students": 6, "room": ""}, {"day": 6, "start": "09:30", "end": "10:30", "teacher": "Гашникова Юлия Владимирована", "course": "Английский язык", "group": "Английский №10", "students": 3, "room": ""}, {"day": 6, "start": "09:30", "end": "11:00", "teacher": "Винтилов Сергей", "course": "Roblox + Blender", "group": "Roblox и 3D Blender: Технологии 3D-игры №1", "students": 5, "room": ""}, {"day": 6, "start": "09:30", "end": "10:30", "teacher": "Громыко Ирина", "course": "Говорилка", "group": "Говорилка №1", "students": 8, "room": ""}, {"day": 6, "start": "10:00", "end": "11:00", "teacher": "Лаппо Ксения", "course": "Английский язык", "group": "Английский №2", "students": 6, "room": ""}, {"day": 6, "start": "10:00", "end": "11:30", "teacher": "Козырев Влад", "course": "Roblox", "group": "Roblox №1", "students": 7, "room": ""}, {"day": 6, "start": "10:30", "end": "11:30", "teacher": "Громыко Ирина", "course": "Говорилка", "group": "Говорилка №2", "students": 6, "room": ""}, {"day": 6, "start": "11:00", "end": "12:00", "teacher": "Лаппо Ксения", "course": "Английский язык", "group": "Английский №3", "students": 6, "room": ""}, {"day": 6, "start": "15:00", "end": "16:00", "teacher": "Лаппо Ксения", "course": "Английский язык", "group": "Английский №4", "students": 7, "room": ""}, {"day": 6, "start": "15:30", "end": "16:30", "teacher": "Маркевич Юлия", "course": "Клуб математической стратегии", "group": "Клуб математической стратегии №1", "students": 9, "room": ""}, {"day": 6, "start": "16:00", "end": "17:00", "teacher": "Лаппо Ксения", "course": "Английский язык", "group": "Английский №5", "students": 5, "room": ""}, {"day": 6, "start": "16:00", "end": "17:00", "teacher": "Гашникова Юлия Владимирована", "course": "Английский язык", "group": "Английский №11", "students": 6, "room": ""}, {"day": 6, "start": "16:30", "end": "17:30", "teacher": "Громыко Ирина", "course": "Почемучка", "group": "Почемучка №1", "students": 8, "room": ""}, {"day": 6, "start": "16:30", "end": "17:30", "teacher": "Маркевич Юлия", "course": "Клуб математической стратегии", "group": "Клуб математической стратегии №10", "students": 9, "room": ""}, {"day": 6, "start": "17:00", "end": "18:00", "teacher": "Лаппо Ксения", "course": "Английский язык", "group": "Английский №6", "students": 6, "room": ""}, {"day": 6, "start": "17:30", "end": "18:30", "teacher": "Костикова Ольга", "course": "Арт-Студия (1 час)", "group": "Арт-студия №1", "students": 9, "room": ""}, {"day": 6, "start": "17:30", "end": "18:30", "teacher": "Маркевич Юлия", "course": "Клуб математической стратегии", "group": "Клуб математической стратегии №3", "students": 8, "room": ""}, {"day": 6, "start": "17:30", "end": "18:30", "teacher": "Громыко Ирина", "course": "Почемучка", "group": "Почемучка №2", "students": 8, "room": ""}, {"day": 6, "start": "18:00", "end": "19:00", "teacher": "Бурдук Наталья Вячеславовна", "course": "Английский язык", "group": "Английский №7", "students": 4, "room": ""}, {"day": 6, "start": "18:00", "end": "19:30", "teacher": "Козырев Влад", "course": "Roblox", "group": "Roblox №2", "students": 6, "room": ""}, {"day": 6, "start": "18:00", "end": "19:30", "teacher": "Винтилов Сергей", "course": "Roblox + Blender", "group": "Roblox и 3D Blender: Технологии 3D-игры №3", "students": 8, "room": ""}, {"day": 6, "start": "18:00", "end": "19:30", "teacher": "Лаппо Ксения", "course": "TinkerCad", "group": "TinkerCad №1", "students": 6, "room": ""}, {"day": 6, "start": "18:30", "end": "20:00", "teacher": "Костикова Ольга", "course": "Арт-Студия (1 час)", "group": "Арт-студия №2", "students": 11, "room": ""}, {"day": 6, "start": "18:30", "end": "19:30", "teacher": "Громыко Ирина", "course": "Почемучка", "group": "Почемучка №3", "students": 10, "room": ""}, {"day": 6, "start": "19:00", "end": "20:00", "teacher": "Гашникова Юлия Владимирована", "course": "Английский язык", "group": "Английский 14", "students": 4, "room": ""}, {"day": 7, "start": "10:00", "end": "11:30", "teacher": "Козырев Влад", "course": "Робототехника", "group": "Робототехника №2", "students": 9, "room": ""}, {"day": 7, "start": "10:00", "end": "11:30", "teacher": "Винтилов Сергей", "course": "Blender + Unity", "group": "3D Blender и Unity: Проектирование виртуальных сред №3", "students": 9, "room": ""}, {"day": 7, "start": "10:00", "end": "11:30", "teacher": "Титова Злата", "course": "Digital art", "group": "Digital Art: Художник компьютерной графики №2", "students": 6, "room": ""}, {"day": 7, "start": "10:00", "end": "11:30", "teacher": "Костикова Ольга", "course": "Рисование", "group": "Рисование №1", "students": 14, "room": ""}, {"day": 7, "start": "10:00", "end": "12:00", "teacher": "Шавцова Ольга", "course": "Хочу все знать! выходной", "group": "Хочу всё знать №3", "students": 7, "room": ""}, {"day": 7, "start": "10:00", "end": "12:00", "teacher": "Зайцева Виктория", "course": "Хочу все знать! выходной", "group": "Хочу всё знать №6", "students": 3, "room": ""}, {"day": 7, "start": "10:30", "end": "12:00", "teacher": "Ермоленко Алексей", "course": "Мир научных открытий", "group": "Мир научных открытий №1", "students": 9, "room": ""}, {"day": 7, "start": "10:30", "end": "12:00", "teacher": "Починкова Лилия Феликовсовна", "course": "Клуб математической стратегии", "group": "Клуб математической стратегии №8", "students": 10, "room": ""}, {"day": 7, "start": "11:30", "end": "13:00", "teacher": "Козырев Влад", "course": "Scratch", "group": "Scratch №2", "students": 8, "room": ""}, {"day": 7, "start": "11:30", "end": "13:00", "teacher": "Винтилов Сергей", "course": "Blender + Unity", "group": "3D Unity 2.0 Системная разработка игр на C# и Unity", "students": 6, "room": ""}, {"day": 7, "start": "11:30", "end": "13:00", "teacher": "Титова Злата", "course": "Digital art", "group": "Digital Art: Художник компьютерной графики №3", "students": 10, "room": ""}, {"day": 7, "start": "12:00", "end": "13:30", "teacher": "Починкова Лилия Феликовсовна", "course": "Клуб математической стратегии", "group": "Клуб математической стратегии №9", "students": 5, "room": ""}, {"day": 7, "start": "12:00", "end": "13:30", "teacher": "Костикова Ольга", "course": "Рисование", "group": "Рисование №2", "students": 15, "room": ""}, {"day": 7, "start": "12:00", "end": "13:30", "teacher": "Ермоленко Алексей", "course": "Мир научных открытий", "group": "Мир научных открытий №2", "students": 11, "room": ""}, {"day": 7, "start": "12:30", "end": "14:30", "teacher": "Шавцова Ольга", "course": "Хочу все знать! выходной", "group": "Хочу всё знать №4", "students": 8, "room": ""}, {"day": 7, "start": "12:30", "end": "14:30", "teacher": "Зайцева Виктория", "course": "Хочу все знать! выходной", "group": "Хочу всё знать №7", "students": 7, "room": ""}, {"day": 7, "start": "13:30", "end": "15:00", "teacher": "Козырев Влад", "course": "Minecraft", "group": "Minecraft №5", "students": 10, "room": ""}, {"day": 7, "start": "13:30", "end": "15:00", "teacher": "Винтилов Сергей", "course": "Roblox + Blender", "group": "Roblox и 3D Blender: Технологии 3D-игры №6", "students": 10, "room": ""}, {"day": 7, "start": "13:30", "end": "15:00", "teacher": "Титова Злата", "course": "Digital art", "group": "Digital Art: Художник компьютерной графики №4", "students": 9, "room": ""}, {"day": 7, "start": "14:00", "end": "15:30", "teacher": "Костикова Ольга", "course": "Рисование", "group": "Рисование №3", "students": 13, "room": ""}, {"day": 7, "start": "14:00", "end": "15:30", "teacher": "Ермоленко Алексей", "course": "Мир научных открытий", "group": "Мир научных открытий №3", "students": 10, "room": ""}, {"day": 7, "start": "14:30", "end": "16:00", "teacher": "Туркова Татьяна", "course": "Финансовая грамотность", "group": "Финансовая грамотность №5", "students": 5, "room": ""}, {"day": 7, "start": "15:00", "end": "16:30", "teacher": "Козырев Влад", "course": "Roblox", "group": "Roblox №7", "students": 8, "room": ""}, {"day": 7, "start": "15:00", "end": "16:30", "teacher": "Винтилов Сергей", "course": "Blender + Unity", "group": "3D Blender и Unity: Проектирование виртуальных сред №4", "students": 10, "room": ""}, {"day": 7, "start": "15:00", "end": "17:00", "teacher": "Шавцова Ольга", "course": "Хочу все знать! выходной", "group": "Хочу всё знать №5", "students": 9, "room": ""}, {"day": 7, "start": "15:00", "end": "17:00", "teacher": "Зайцева Виктория", "course": "Хочу все знать! выходной", "group": "Хочу все знать №8", "students": 9, "room": ""}, {"day": 7, "start": "15:00", "end": "16:30", "teacher": "Титова Злата", "course": "Digital art", "group": "Didital Art: Художник компьютерной графики №6", "students": 6, "room": ""}, {"day": 7, "start": "15:30", "end": "17:00", "teacher": "Ермоленко Алексей", "course": "Мир научных открытий", "group": "Мир научных открытий №4", "students": 9, "room": ""}, {"day": 7, "start": "16:30", "end": "18:00", "teacher": "Туркова Татьяна", "course": "Финансовая грамотность", "group": "Финансовая грамотность №6", "students": 5, "room": ""}, {"day": 7, "start": "17:00", "end": "18:30", "teacher": "Винтилов Сергей", "course": "Blender", "group": "3D Blender №2", "students": 10, "room": ""}, {"day": 7, "start": "18:00", "end": "19:00", "teacher": "Зайцева Виктория", "course": "Нейрогимнастика", "group": "Нейрогимнастика №7", "students": 12, "room": ""}, {"day": 1, "start": "09:00", "end": "10:00", "teacher": "Середич Алеся", "course": "Английский язык", "group": "Английский №1", "students": 6, "room": ""}, {"day": 1, "start": "09:30", "end": "10:30", "teacher": "Гашникова Юлия Владимирована", "course": "Английский язык", "group": "Английский №10", "students": 3, "room": ""}, {"day": 1, "start": "09:30", "end": "11:00", "teacher": "Винтилов Сергей", "course": "Roblox + Blender", "group": "Roblox и 3D Blender: Технологии 3D-игры №1", "students": 5, "room": ""}, {"day": 1, "start": "09:30", "end": "10:30", "teacher": "Громыко Ирина", "course": "Говорилка", "group": "Говорилка №1", "students": 8, "room": ""}, {"day": 1, "start": "10:00", "end": "11:00", "teacher": "Середич Алеся", "course": "Английский язык", "group": "Английский №2", "students": 6, "room": ""}, {"day": 1, "start": "10:00", "end": "11:30", "teacher": "Козырев Влад", "course": "Roblox", "group": "Roblox №1", "students": 7, "room": ""}, {"day": 1, "start": "10:30", "end": "11:30", "teacher": "Громыко Ирина", "course": "Говорилка", "group": "Говорилка №2", "students": 6, "room": ""}, {"day": 1, "start": "11:00", "end": "12:00", "teacher": "Середич Алеся", "course": "Английский язык", "group": "Английский №3", "students": 6, "room": ""}, {"day": 1, "start": "15:00", "end": "16:00", "teacher": "Лаппо Ксения", "course": "Английский язык", "group": "Английский №4", "students": 5, "room": ""}, {"day": 1, "start": "15:30", "end": "16:30", "teacher": "Маркевич Юлия", "course": "Клуб математической стратегии", "group": "Клуб математической стратегии №1", "students": 8, "room": ""}, {"day": 1, "start": "16:00", "end": "17:00", "teacher": "Лаппо Ксения", "course": "Английский язык", "group": "Английский №5", "students": 5, "room": ""}, {"day": 1, "start": "16:00", "end": "17:00", "teacher": "Гашникова Юлия Владимирована", "course": "Английский язык", "group": "Английский №11", "students": 6, "room": ""}, {"day": 1, "start": "16:30", "end": "17:30", "teacher": "Громыко Ирина", "course": "Почемучка", "group": "Почемучка №1", "students": 8, "room": ""}, {"day": 1, "start": "16:30", "end": "17:30", "teacher": "Маркевич Юлия", "course": "Клуб математической стратегии", "group": "Клуб математической стратегии №10", "students": 8, "room": ""}, {"day": 1, "start": "17:00", "end": "18:00", "teacher": "Лаппо Ксения", "course": "Английский язык", "group": "Английский №6", "students": 6, "room": ""}, {"day": 1, "start": "17:30", "end": "18:30", "teacher": "Костикова Ольга", "course": "Арт-Студия (1 час)", "group": "Арт-студия №1", "students": 9, "room": ""}, {"day": 1, "start": "17:30", "end": "18:30", "teacher": "Маркевич Юлия", "course": "Клуб математической стратегии", "group": "Клуб математической стратегии №3", "students": 6, "room": ""}, {"day": 1, "start": "17:30", "end": "18:30", "teacher": "Громыко Ирина", "course": "Почемучка", "group": "Почемучка №2", "students": 9, "room": ""}, {"day": 1, "start": "18:00", "end": "19:00", "teacher": "Гашникова Юлия Владимирована", "course": "Английский язык", "group": "Английский №7", "students": 4, "room": ""}, {"day": 1, "start": "18:00", "end": "19:30", "teacher": "Козырев Влад", "course": "Roblox", "group": "Roblox №2", "students": 8, "room": ""}, {"day": 1, "start": "18:00", "end": "19:30", "teacher": "Винтилов Сергей", "course": "Roblox + Blender", "group": "Roblox и 3D Blender: Технологии 3D-игры №3", "students": 8, "room": ""}, {"day": 1, "start": "18:00", "end": "19:30", "teacher": "Лаппо Ксения", "course": "TinkerCad", "group": "TinkerCad №1", "students": 6, "room": ""}, {"day": 1, "start": "18:30", "end": "20:00", "teacher": "Костикова Ольга", "course": "Арт-Студия (1 час)", "group": "Арт-студия №2", "students": 9, "room": ""}, {"day": 1, "start": "18:30", "end": "19:30", "teacher": "Громыко Ирина", "course": "Почемучка", "group": "Почемучка №3", "students": 8, "room": ""}, {"day": 1, "start": "19:00", "end": "20:00", "teacher": "Гашникова Юлия Владимирована", "course": "Английский язык", "group": "Английский 14", "students": 4, "room": ""}, {"day": 2, "start": "08:30", "end": "09:30", "teacher": "Маркевич Юлия", "course": "Клуб математической стратегии", "group": "Клуб математической стратегии №4", "students": 6, "room": ""}, {"day": 2, "start": "09:30", "end": "10:30", "teacher": "Зайцева Виктория", "course": "Говорилка", "group": "Говорилка №4", "students": 7, "room": ""}, {"day": 2, "start": "09:30", "end": "10:30", "teacher": "Маркевич Юлия", "course": "Клуб математической стратегии", "group": "Клуб математической стратегии №5", "students": 8, "room": ""}, {"day": 2, "start": "10:30", "end": "11:30", "teacher": "Маркевич Юлия", "course": "Клуб математической стратегии", "group": "Клуб математической стратегии №6", "students": 8, "room": ""}, {"day": 2, "start": "10:30", "end": "11:30", "teacher": "Зайцева Виктория", "course": "Говорилка", "group": "Говорилка №5", "students": 9, "room": ""}, {"day": 2, "start": "15:30", "end": "16:30", "teacher": "Середич Алеся", "course": "Английский язык", "group": "Английский №8", "students": 6, "room": ""}, {"day": 2, "start": "16:30", "end": "17:30", "teacher": "Середич Алеся", "course": "Английский язык", "group": "Английский №9", "students": 8, "room": ""}, {"day": 2, "start": "16:30", "end": "17:30", "teacher": "Громыко Ирина", "course": "Нейрогимнастика", "group": "Нейрогимнастика №6", "students": 8, "room": ""}, {"day": 2, "start": "17:00", "end": "18:30", "teacher": "Козырев Влад", "course": "Minecraft", "group": "Minecraft №1", "students": 6, "room": ""}, {"day": 2, "start": "17:30", "end": "18:30", "teacher": "Печковская Юлия", "course": "7 навыков уверенных детей", "group": "7 навыков №1", "students": 8, "room": ""}, {"day": 2, "start": "17:30", "end": "18:30", "teacher": "Афанасенко Евгения", "course": "Лепка из глины (1 час)", "group": "Лепка из глины №1", "students": 11, "room": ""}, {"day": 2, "start": "17:30", "end": "18:30", "teacher": "Громыко Ирина", "course": "Нейрогимнастика", "group": "Нейрогимнастика №1", "students": 10, "room": ""}, {"day": 2, "start": "17:30", "end": "18:30", "teacher": "Шавцова Ольга", "course": "Хочу все знать! выходной", "group": "Хочу всё знать №1", "students": 7, "room": ""}, {"day": 2, "start": "17:50", "end": "18:50", "teacher": "Середич Алеся", "course": "Английский язык", "group": "Английский №12", "students": 5, "room": ""}, {"day": 2, "start": "18:30", "end": "20:00", "teacher": "Афанасенко Евгения", "course": "Лепка из глины (1 час)", "group": "Лепка из глина №2", "students": 10, "room": ""}, {"day": 2, "start": "18:30", "end": "19:30", "teacher": "Громыко Ирина", "course": "Нейрогимнастика", "group": "Нейрогимнастика №2", "students": 12, "room": ""}, {"day": 2, "start": "18:30", "end": "20:00", "teacher": "Козырев Влад", "course": "Minecraft", "group": "Minecraft №2", "students": 5, "room": ""}, {"day": 2, "start": "18:30", "end": "19:30", "teacher": "Шавцова Ольга", "course": "Хочу все знать! выходной", "group": "Хочу всё знать №2", "students": 9, "room": ""}, {"day": 2, "start": "18:30", "end": "19:30", "teacher": "Печковская Юлия", "course": "7 навыков уверенных детей", "group": "7 навыков №9", "students": 9, "room": ""}, {"day": 2, "start": "19:00", "end": "20:00", "teacher": "Середич Алеся", "course": "Английский язык", "group": "Английский №13", "students": 9, "room": ""}];
+const STAFF_SEED=[{"name": "Афанасенко Евгения", "wageMode": "tier", "fixedRate": 0}, {"name": "Бурдук Наталья Вячеславовна", "wageMode": "tier", "fixedRate": 0}, {"name": "Винтилов Сергей", "wageMode": "tier", "fixedRate": 0}, {"name": "Власова Юля", "wageMode": "tier", "fixedRate": 0}, {"name": "Гашникова Юлия", "wageMode": "tier", "fixedRate": 0}, {"name": "Ермоленко Алексей", "wageMode": "tier", "fixedRate": 0}, {"name": "Жарикова Татьяна Владимировна", "wageMode": "tier", "fixedRate": 0}, {"name": "Зайцева Виктория", "wageMode": "tier", "fixedRate": 0}, {"name": "Козырев Влад", "wageMode": "tier", "fixedRate": 0}, {"name": "Костикова Ольга", "wageMode": "tier", "fixedRate": 0}, {"name": "Кургузикова Мария", "wageMode": "tier", "fixedRate": 0}, {"name": "Лаппо Ксения", "wageMode": "tier", "fixedRate": 0}, {"name": "Маркевич Юлия", "wageMode": "tier", "fixedRate": 0}, {"name": "Пашкевич Кирилл", "wageMode": "tier", "fixedRate": 0}, {"name": "Печковская Юлия", "wageMode": "tier", "fixedRate": 0}, {"name": "Починкова Лилия Феликовсовна", "wageMode": "tier", "fixedRate": 0}, {"name": "Середич Олеся", "wageMode": "tier", "fixedRate": 0}, {"name": "Станченко Екатерина", "wageMode": "tier", "fixedRate": 0}, {"name": "Титова Злата", "wageMode": "tier", "fixedRate": 0}, {"name": "Туркова Татьяна", "wageMode": "tier", "fixedRate": 0}, {"name": "Шавцова Ольга", "wageMode": "tier", "fixedRate": 0}];
+const WAGE_TABLE={"7 навыков уверенных детей": {"base": 50.0, "tiers": {"4": 45.0, "5": 46.0, "6": 47.0, "7": 48.0, "8": 50.0, "9": 52.0, "10": 54.0, "11": 57.0, "12": 58.0}}, "Английский язык": {"base": 40.0, "tiers": {"4": 35.0, "5": 36.0, "6": 37.0, "7": 38.0, "8": 40.0, "9": 42.0, "10": 44.0, "11": 47.0}}, "Арт-Студия (1 час)": {"base": 40.0, "tiers": {"4": 35.0, "5": 36.0, "6": 37.0, "7": 38.0, "8": 40.0, "9": 42.0, "10": 44.0, "11": 47.0, "12": 49.0}}, "Арт-Студия (1,5 часа)": {"base": 45.0, "tiers": {"4": 40.0, "5": 41.0, "6": 42.0, "7": 43.0, "8": 45.0, "9": 47.0, "10": 49.0, "11": 52.0, "12": 54.0}}, "Биология": {"base": 45.0, "tiers": {"4": 40.0, "5": 41.0, "6": 42.0, "7": 43.0, "8": 45.0, "9": 47.0, "10": 49.0, "11": 52.0, "12": 54.0}}, "Взросление": {"base": 45.0, "tiers": {"4": 40.0, "5": 41.0, "6": 42.0, "7": 43.0, "8": 45.0, "9": 47.0, "10": 49.0, "11": 52.0, "12": 49.0}}, "Говорилка": {"base": 40.0, "tiers": {"4": 36.0, "5": 37.0, "6": 38.0}}, "Живая азбука": {"base": 40.0, "tiers": {"4": 35.0, "5": 36.0, "6": 37.0, "7": 38.0, "8": 40.0}}, "Каллиграфия": {"base": 40.0, "tiers": {"4": 35.0, "5": 36.0, "6": 37.0, "7": 38.0, "8": 40.0, "9": 42.0, "10": 44.0}}, "Клуб математической стратегии": {"base": 40.0, "tiers": {"4": 35.0, "5": 36.0, "6": 37.0, "7": 38.0, "8": 40.0, "9": 42.0, "10": 44.0}}, "Клуб математической стратегии (1,5 часа)": {"base": 40.0, "tiers": {"4": 40.0, "5": 41.0, "6": 42.0, "7": 43.0, "8": 45.0, "9": 47.0, "10": 49.0}}, "Лепка из глины (1 час)": {"base": 40.0, "tiers": {"4": 35.0, "5": 36.0, "6": 37.0, "7": 38.0, "8": 40.0, "9": 42.0, "10": 44.0, "11": 47.0, "12": 49.0}}, "Лепка из глины (1,5 часа)": {"base": 45.0, "tiers": {"4": 40.0, "5": 41.0, "6": 42.0, "7": 43.0, "8": 45.0, "9": 47.0, "10": 49.0, "11": 52.0, "12": 55.0}}, "Лепка из полимерной глины": {"base": 45.0, "tiers": {"4": 40.0, "5": 41.0, "6": 42.0, "7": 43.0, "8": 45.0, "9": 47.0, "10": 49.0, "11": 52.0, "12": 55.0}}, "Логика": {"base": 45.0, "tiers": {"4": 40.0, "5": 41.0, "6": 42.0, "7": 43.0, "8": 45.0, "9": 47.0, "10": 49.0}}, "Маленькие академики": {"base": 40.0, "tiers": {"4": 35.0, "5": 36.0, "6": 37.0, "7": 38.0, "8": 40.0, "9": 42.0, "10": 44.0}}, "Мир научных открытий": {"base": 45.0, "tiers": {"4": 40.0, "5": 41.0, "6": 42.0, "7": 43.0, "8": 45.0, "9": 47.0, "10": 49.0, "11": 52.0, "12": 55.0}}, "Нейрогимнастика": {"base": 40.0, "tiers": {"4": 35.0, "5": 36.0, "6": 37.0, "7": 38.0, "8": 40.0, "9": 42.0, "10": 44.0}}, "Почемучка": {"base": 40.0, "tiers": {"4": 35.0, "5": 36.0, "6": 37.0, "7": 38.0, "8": 40.0, "9": 42.0, "10": 44.0}}, "Рисование": {"base": 50.0, "tiers": {"4": 45.0, "5": 46.0, "6": 47.0, "7": 48.0, "8": 50.0, "9": 52.0, "10": 54.0, "11": 57.0, "12": 55.0}}, "Финансовая грамотность": {"base": 40.0, "tiers": {"4": 40.0, "5": 41.0, "6": 42.0, "7": 43.0, "8": 45.0, "9": 47.0, "10": 49.0, "11": 52.0, "12": 49.0}}, "Электроника": {"base": 45.0, "tiers": {"4": 40.0, "5": 41.0, "6": 42.0, "7": 43.0, "8": 45.0, "9": 47.0, "10": 49.0}}, "Химия": {"base": 45.0, "tiers": {"4": 40.0, "5": 41.0, "6": 42.0, "7": 43.0, "8": 45.0, "9": 47.0, "10": 49.0, "11": 52.0, "12": 49.0}}, "Хочу все знать! будний": {"base": 40.0, "tiers": {"4": 35.0, "5": 36.0, "6": 37.0, "7": 38.0, "8": 40.0, "9": 42.0, "10": 44.0}}, "Хочу все знать! выходной": {"base": 50.0, "tiers": {"4": 45.0, "5": 46.0, "6": 47.0, "7": 48.0, "8": 50.0, "9": 52.0, "10": 54.0}}, "Робототехника": {"base": 45.0, "tiers": {"4": 41.0, "5": 42.0, "6": 43.0, "7": 44.0, "8": 46.0, "9": 48.0, "10": 51.0}}, "Scratch": {"base": 45.0, "tiers": {"4": 41.0, "5": 42.0, "6": 43.0, "7": 44.0, "8": 46.0, "9": 48.0, "10": 51.0}}, "Minecraft": {"base": 45.0, "tiers": {"4": 41.0, "5": 42.0, "6": 43.0, "7": 44.0, "8": 46.0, "9": 48.0, "10": 51.0}}, "Roblox": {"base": 45.0, "tiers": {"4": 41.0, "5": 42.0, "6": 43.0, "7": 44.0, "8": 46.0, "9": 48.0, "10": 51.0}}, "Roblox + Blender": {"base": 45.0, "tiers": {"4": 41.0, "5": 42.0, "6": 43.0, "7": 44.0, "8": 46.0, "9": 48.0, "10": 51.0}}, "Blender": {"base": 45.0, "tiers": {"4": 41.0, "5": 42.0, "6": 43.0, "7": 44.0, "8": 46.0, "9": 48.0, "10": 51.0}}, "Blender + Unity": {"base": 45.0, "tiers": {"4": 41.0, "5": 42.0, "6": 43.0, "7": 44.0, "8": 46.0, "9": 48.0, "10": 51.0}}, "Digital art": {"base": 45.0, "tiers": {"4": 41.0, "5": 42.0, "6": 43.0, "7": 44.0, "8": 46.0, "9": 48.0, "10": 51.0}}, "Python": {"base": 45.0, "tiers": {"4": 41.0, "5": 42.0, "6": 43.0, "7": 44.0, "8": 46.0, "9": 48.0, "10": 51.0}}, "TinkerCad": {"base": 45, "tiers": {"4": 41, "5": 42, "6": 43, "7": 44, "8": 46, "9": 48, "10": 51}}, "Песок": {"base": 40, "tiers": {"4": 36, "5": 37, "6": 38}}};
+const COURSE_MAP={"3D Blender": "Blender", "3D Blender и Unity": "Blender + Unity", "3D Unity": "Blender + Unity", "Roblox и 3D Blender": "Roblox + Blender", "Digital Art": "Digital art", "Minecraft": "Minecraft", "Roblox": "Roblox", "Scratch": "Scratch", "Робототехника": "Робототехника", "Клуб математической стратегии": "Клуб математической стратегии", "Мир научных открытий": "Мир научных открытий", "Нейрогимнастика": "Нейрогимнастика", "Рисование": "Рисование", "Финансовая грамотность": "Финансовая грамотность", "Хочу всё знать": "Хочу все знать! выходной"};
+const TIME_SLOTS=["09:00", "09:30", "10:00", "10:30", "11:00", "11:30", "12:00", "12:30", "13:00", "13:30", "14:00", "14:30", "15:00", "15:30", "16:00", "16:30", "17:00", "17:30", "18:00", "18:30", "19:00", "19:30", "20:00"];
+const ROOMS=["1 этаж №1","1 этаж №2","1","2","3","4","5","6","3 этаж","Детали"];
+/* ====== РАСПИСАНИЕ (сетка) + ПЕДСОСТАВ + ФОНД ЗП ====== */
+if(!S.grid){ S.grid = JSON.parse(JSON.stringify(GRID_SEED)); }
+if(!S.staff){ S.staff = JSON.parse(JSON.stringify(STAFF_SEED)); }
+if(!S.wageTable){ S.wageTable = JSON.parse(JSON.stringify(WAGE_TABLE)); }
+const DAY_NAMES=["","Пн","Вт","Ср","Чт","Пт","Сб","Вс"];
+const DAY_FULL=["","Понедельник","Вторник","Среда","Четверг","Пятница","Суббота","Воскресенье"];
+let curDay = 5; // стартуем с пятницы (есть данные)
+
+/* ЗП за одно занятие по числу детей (ваша сетка ставок) */
+function wageForLesson(course, students){
+  const wt = S.wageTable[course];
+  if(!wt || !wt.tiers){ // фолбэк: ищем в курсах базовую ставку
+    const c=S.courses.find(x=>x.name===course); return c? (+c.wage||0):0;
+  }
+  const t=wt.tiers; const n=Math.max(4, Math.min(12, students||4));
+  // точное совпадение
+  if(t[n]!=null) return t[n];
+  // ближайшее снизу/база
+  let best=null;
+  for(let k=n;k>=4;k--){ if(t[k]!=null){best=t[k];break;} }
+  if(best==null) for(let k=n;k<=12;k++){ if(t[k]!=null){best=t[k];break;} }
+  return best!=null?best:(wt.base||0);
+}
+
+/* ====== РЕНДЕР СЕТКИ ====== */
+function shortName(n){ if(!n) return "—"; const p=String(n).split(" "); return p.length>=2?p[0]+" "+p[1][0]+".":n; }
+function setDay(d){ curDay=d; renderGrid(); }
+function renderGrid(){
+  let dt="";
+  for(let d=1;d<=7;d++){
+    const cnt=S.grid.filter(l=>l.day===d).length;
+    dt+=`<button class="dayb ${d===curDay?'on':''}" onclick="setDay(${d})">${DAY_NAMES[d]}${cnt?` <span class="badge">${cnt}</span>`:''}</button>`;
+  }
+  document.getElementById("dayTabs").innerHTML=dt;
+  document.getElementById("gridDayTitle").textContent=DAY_FULL[curDay];
+
+  const dayL=S.grid.filter(l=>l.day===curDay);
+  let h=`<thead><tr><th style="width:54px">Время</th>`;
+  ROOMS.forEach(r=>h+=`<th>${r}</th>`);
+  h+=`</tr></thead><tbody>`;
+  TIME_SLOTS.forEach(slot=>{
+    h+=`<tr><td class="tslot">${slot}</td>`;
+    ROOMS.forEach(room=>{
+      const les=dayL.find(l=>l.start===slot && l.room===room);
+      if(les){
+        const w=wageForLesson(les.course,les.students);
+        const idx=S.grid.indexOf(les);
+        h+=`<td class="cell-les" ondragover="dragOver(event)" ondrop="dropLes(event,'${slot}','${esc(room)}')">
+          <div class="les" draggable="true" ondragstart="dragStart(event,${idx})" ondragend="dragEnd(event)" onclick="editLes(${idx})">
+            <b>${esc(les.course)}</b>
+            <span>${les.start}–${les.end}</span>
+            <span class="lt">${esc(shortName(les.teacher))} · ${les.students}👤 · ${w}р</span>
+          </div></td>`;
+      } else {
+        h+=`<td class="cell-empty" ondragover="dragOver(event)" ondrop="dropLes(event,'${slot}','${esc(room)}')" onclick="addLes('${slot}','${esc(room)}')"></td>`;
+      }
+    });
+    h+=`</tr>`;
+  });
+  document.getElementById("gridTable").innerHTML=h+"</tbody>";
+
+  const noRoom=dayL.filter(l=>!l.room);
+  const box=document.getElementById("unassigned");
+  if(noRoom.length){
+    let u=`<div class="callout"><b>Занятий без кабинета: ${noRoom.length}.</b> Перетащите карточку в нужную ячейку сетки (или кликните для выбора кабинета).</div><div class="chips" ondragover="dragOver(event)">`;
+    noRoom.forEach(l=>{ const idx=S.grid.indexOf(l);
+      u+=`<div class="chip" draggable="true" ondragstart="dragStart(event,${idx})" ondragend="dragEnd(event)" onclick="editLes(${idx})">${esc(l.course)} · ${l.start} · ${shortName(l.teacher)} · ${l.students}👤</div>`; });
+    box.innerHTML=u+"</div>";
+  } else box.innerHTML="";
+
+  renderGridSummary();
+}
+
+
+function reloadGridFromAlpha(){
+  if(!confirm("Заменить текущую сетку расписания на полную неделю из выгрузки Альфы (159 занятий)? Текущая расстановка по кабинетам будет заменена.")) return;
+  S.grid = JSON.parse(JSON.stringify(GRID_SEED));
+  // догрузим недостающие курсы и педагогов
+  GRID_SEED.forEach(l=>{
+    if(l.teacher && !S.staff.some(s=>s.name===l.teacher)) S.staff.push({name:l.teacher,wageMode:"tier",fixedRate:0});
+  });
+  persistLocal(); renderAll(); curDay=1; renderGrid();
+  toast("Загружено 159 занятий (Пн–Вс)");
+}
+
+/* ===== DRAG & DROP ===== */
+let _dragIdx=null;
+function dragStart(e,idx){ _dragIdx=idx; e.dataTransfer.effectAllowed="move"; setTimeout(()=>{ if(e.target.classList) e.target.style.opacity="0.4"; },0); }
+function dragEnd(e){ if(e.target.style) e.target.style.opacity="1"; }
+function dragOver(e){ e.preventDefault(); e.dataTransfer.dropEffect="move"; }
+function dropLes(e,slot,room){
+  e.preventDefault();
+  if(_dragIdx==null) return;
+  const l=S.grid[_dragIdx];
+  if(!l) return;
+  // длительность сохраняем, сдвигаем начало и конец
+  const dur=minDiff(l.start,l.end);
+  l.start=slot;
+  l.end=addMin(slot,dur||90);
+  l.room=room;
+  l.day=curDay;
+  _dragIdx=null;
+  persistLocal(); renderGrid(); renderStaff();
+}
+function minDiff(a,b){ const[ah,am]=a.split(":").map(Number),[bh,bm]=b.split(":").map(Number); return (bh*60+bm)-(ah*60+am); }
+
+
+function gridStats(){
+  let lessons=S.grid.length, students=0, wageWeek=0, revWeek=0;
+  const groupsByCourse={};
+  S.grid.forEach(l=>{
+    students+=l.students||0;
+    wageWeek += wageForLesson(l.course,l.students);
+    const c=S.courses.find(x=>x.name===l.course);
+    const price=c?(+c.price||0):0;
+    revWeek += price*(l.students||0);
+    groupsByCourse[l.course]=(groupsByCourse[l.course]||0)+1;
+  });
+  return {lessons,students,wageWeek,revWeek,groupsByCourse};
+}
+function renderGridSummary(){
+  const st=gridStats();
+  document.getElementById("gridSummary").innerHTML=`
+   ${kpi("Занятий/нед",fmt(st.lessons),"coal","всего в сетке")}
+   ${kpi("Детей-мест/нед",fmt(st.students),"blue","сумма учеников")}
+   ${kpi("Оборот/нед",fmt(st.revWeek)+" р","green","цена×ученики")}
+   ${kpi("ФОТ педагогов/нед",fmt(st.wageWeek)+" р","red","по ставкам наполняемости")}`;
+}
+
+/* ====== РЕДАКТИРОВАНИЕ ЗАНЯТИЯ ====== */
+function addLes(slot,room){
+  const courseNames=S.courses.map(c=>c.name);
+  S.grid.push({day:curDay,start:slot,end:addMin(slot,90),course:courseNames[0]||"",teacher:"",students:6,room:room});
+  persistLocal(); renderGrid(); editLes(S.grid.length-1);
+}
+function addMin(t,min){ const[h,m]=t.split(":").map(Number); let tot=h*60+m+min;
+  return String(Math.floor(tot/60)).padStart(2,"0")+":"+String(tot%60).padStart(2,"0"); }
+function editLes(idx){
+  const l=S.grid[idx];
+  const courseOpts=S.courses.map(c=>`<option ${c.name===l.course?"selected":""}>${esc(c.name)}</option>`).join("");
+  const teacherOpts=`<option value="">— педагог —</option>`+S.staff.map(s=>`<option ${s.name===l.teacher?"selected":""}>${esc(s.name)}</option>`).join("");
+  const roomOpts=`<option value="">— кабинет —</option>`+ROOMS.map(r=>`<option ${r===l.room?"selected":""}>${esc(r)}</option>`).join("");
+  document.getElementById("lesModalBody").innerHTML=`
+    <label>Курс</label><select id="mCourse" class="cell wide">${courseOpts}</select>
+    <label>Педагог</label><select id="mTeacher" class="cell wide">${teacherOpts}</select>
+    <div class="row2">
+     <div><label>Начало</label><input id="mStart" class="cell wide" value="${l.start}"></div>
+     <div><label>Конец</label><input id="mEnd" class="cell wide" value="${l.end}"></div>
+    </div>
+    <div class="row2">
+     <div><label>Кабинет</label><select id="mRoom" class="cell wide">${roomOpts}</select></div>
+     <div><label>Учеников</label><input id="mStud" type="number" class="cell wide" value="${l.students}"></div>
+    </div>
+    <div class="callout">ЗП за это занятие: <b id="mWage">${wageForLesson(l.course,l.students)} р</b> (по ставке для ${l.students} детей)</div>`;
+  document.getElementById("lesModal").classList.add("show");
+  document.getElementById("lesModal").dataset.idx=idx;
+  // live-пересчёт ЗП
+  const upd=()=>{ const cs=document.getElementById("mCourse").value;
+    const n=+document.getElementById("mStud").value;
+    document.getElementById("mWage").textContent=wageForLesson(cs,n)+" р"; };
+  document.getElementById("mCourse").onchange=upd;
+  document.getElementById("mStud").oninput=upd;
+}
+function saveLes(){
+  const idx=+document.getElementById("lesModal").dataset.idx;
+  const l=S.grid[idx];
+  l.course=document.getElementById("mCourse").value;
+  l.teacher=document.getElementById("mTeacher").value;
+  l.start=document.getElementById("mStart").value;
+  l.end=document.getElementById("mEnd").value;
+  l.room=document.getElementById("mRoom").value;
+  l.students=+document.getElementById("mStud").value||0;
+  persistLocal(); closeLes(); renderGrid(); renderStaff();
+}
+function delLes(){
+  const idx=+document.getElementById("lesModal").dataset.idx;
+  S.grid.splice(idx,1); persistLocal(); closeLes(); renderGrid(); renderStaff();
+}
+function closeLes(){ document.getElementById("lesModal").classList.remove("show"); }
+
+/* перенос сетки → план (считаем группы по расставленным занятиям) */
+function gridToPlan(){
+  if(!confirm("Пересчитать план по курсам из расписания? Число групп = число занятий каждого курса в неделю.")) return;
+  const st=gridStats();
+  // средняя наполняемость по курсу из сетки
+  const fillByCourse={};
+  S.grid.forEach(l=>{ if(!fillByCourse[l.course]) fillByCourse[l.course]=[]; fillByCourse[l.course].push(l.students||0); });
+  for(const name in st.groupsByCourse){
+    let p=S.plan.find(x=>x.name===name);
+    const groups=st.groupsByCourse[name];
+    const fills=fillByCourse[name]||[];
+    const avgFill=fills.length?Math.round(fills.reduce((a,b)=>a+b,0)/fills.length):6;
+    const c=S.courses.find(x=>x.name===name);
+    if(!p){ p={name,perGroup:avgFill,price:c?+c.price||0:0,groups:0,visits:2}; S.plan.push(p); }
+    p.groups=groups; p.perGroup=avgFill;
+  }
+  persistLocal(); renderAll(); toast("План пересчитан из расписания");
+}
+
+/* ====== ПЕДСОСТАВ И ФОНД ЗП ====== */
+function staffStats(){
+  // по каждому педагогу: занятий/нед, ЗП/нед (из сетки), ЗП/мес
+  const map={};
+  S.staff.forEach(s=>{ map[s.name]={name:s.name,lessons:0,students:0,wageWeek:0,courses:new Set()}; });
+  S.grid.forEach(l=>{
+    if(!l.teacher) return;
+    if(!map[l.teacher]) map[l.teacher]={name:l.teacher,lessons:0,students:0,wageWeek:0,courses:new Set()};
+    const w=wageForLesson(l.course,l.students);
+    map[l.teacher].lessons++;
+    map[l.teacher].students+=l.students||0;
+    map[l.teacher].wageWeek+=w;
+    map[l.teacher].courses.add(l.course);
+  });
+  // добавим курсы, заданные вручную (canTeach), даже без занятий
+  S.staff.forEach(s=>{
+    if(!map[s.name]) map[s.name]={name:s.name,lessons:0,students:0,wageWeek:0,courses:new Set()};
+    (s.canTeach||[]).forEach(c=>map[s.name].courses.add(c));
+  });
+  return Object.values(map);
+}
+function renderStaff(){
+  const st=staffStats();
+  let totalWeek=0, totalLessons=0;
+  st.forEach(s=>{ totalWeek+=s.wageWeek; totalLessons+=s.lessons; });
+  const totalMonth=totalWeek*4;
+
+  document.getElementById("staffKpi").innerHTML=`
+   ${kpi("Педагогов",fmt(S.staff.length),"coal","в составе")}
+   ${kpi("Занятий/нед",fmt(totalLessons),"blue","расставлено в сетке")}
+   ${kpi("ФОТ педагогов/нед",fmt(totalWeek)+" р","red","по ставкам наполняемости")}
+   ${kpi("ФОТ педагогов/мес",fmt(totalMonth)+" р","red","×4 недели")}`;
+
+  let h=`<thead><tr><th>Педагог</th><th>Курсы</th><th>Занятий/нед</th><th>Детей-мест</th>
+    <th>ЗП/нед</th><th>ЗП/мес</th><th></th></tr></thead><tbody>`;
+  st.sort((a,b)=>b.wageWeek-a.wageWeek);
+  st.forEach(s=>{
+    const idx=S.staff.findIndex(x=>x.name===s.name);
+    h+=`<tr>
+      <td>${idx>=0?`<input class="cell wide" value="${esc(s.name)}" onchange="updStaff(${idx},this.value)">`:esc(s.name)+' <span class="muted">(из сетки)</span>'}</td>
+      <td style="font-size:11px">${idx>=0?`<input class="cell wide" style="font-size:11px" value="${esc([...s.courses].join(", "))}" placeholder="курсы через запятую" onchange="updTeach(${idx},this.value)">`:`<span class="muted">${[...s.courses].join(", ")||"—"}</span>`}</td>
+      <td class="num">${s.lessons}</td>
+      <td class="num">${s.students}</td>
+      <td class="num">${fmt(s.wageWeek)}</td>
+      <td class="num"><b>${fmt(s.wageWeek*4)}</b></td>
+      <td>${idx>=0?`<button class="btn gray sm" onclick="delStaff(${idx})">×</button>`:''}</td>
+    </tr>`;
+  });
+  h+=`<tr class="totrow"><td>ИТОГО ФОНД ЗП</td><td></td><td class="num">${totalLessons}</td><td></td>
+    <td class="num">${fmt(totalWeek)}</td><td class="num">${fmt(totalMonth)}</td><td></td></tr>`;
+  document.getElementById("staffTable").innerHTML=h+"</tbody>";
+
+  // привяжем ФОТ педагогов к модели (для дашборда/налогов)
+  S._teacherFOTmonth = totalMonth;
+
+  // таблица ставок (справочник ЗП по наполняемости)
+  renderWageRef();
+}
+function updStaff(i,v){ S.staff[i].name=v; persistLocal(); renderStaff(); renderGrid(); }
+function delStaff(i){ S.staff.splice(i,1); persistLocal(); renderStaff(); }
+
+function syncStaffFull(){
+  const exist=new Set(S.staff.map(s=>s.name.trim()));
+  let added=0;
+  STAFF_SEED.forEach(s=>{ if(!exist.has(s.name.trim())){ S.staff.push(JSON.parse(JSON.stringify(s))); added++; } });
+  persistLocal(); renderStaff(); renderGrid();
+  toast(added>0?("Добавлено педагогов: "+added):"Все педагоги уже в составе");
+}
+
+
+function updTeach(i,v){
+  S.staff[i].canTeach = v.split(",").map(x=>x.trim()).filter(Boolean);
+  persistLocal(); renderStaff();
+}
+
+function addStaff(){ const n=prompt("Имя педагога:"); if(n){ S.staff.push({name:n,wageMode:"tier",fixedRate:0}); persistLocal(); renderStaff(); } }
+
+/* справочник ставок ЗП по числу детей */
+function renderWageRef(){
+  const box=document.getElementById("wageRef");
+  if(!box) return;
+  let h=`<thead><tr><th>Курс</th>`;
+  for(let n=4;n<=12;n++) h+=`<th>${n}</th>`;
+  h+=`</tr></thead><tbody>`;
+  Object.keys(S.wageTable).sort().forEach(name=>{
+    const t=S.wageTable[name].tiers;
+    h+=`<tr><td>${esc(name)}</td>`;
+    for(let n=4;n<=12;n++){
+      const v=t[n];
+      h+=`<td class="num">${v!=null?`<input class="cell" style="width:46px" type="number" value="${v}" onchange="updWage('${esc(name)}',${n},this.value)">`:'<span class="muted">—</span>'}</td>`;
+    }
+    h+=`</tr>`;
+  });
+  box.innerHTML=h+"</tbody>";
+}
+function updWage(name,n,v){ if(!S.wageTable[name])S.wageTable[name]={tiers:{}}; S.wageTable[name].tiers[n]=parseFloat(v)||0; persistLocal(); renderGrid(); renderStaff(); }
+
+/* ====== АВТОИМПОРТ ВЫГРУЗКИ АЛЬФЫ (.xlsx) ====== */
+const ALPHA_COURSE_MAP = {
+ "3D Blender":"Blender","3D Blender и Unity":"Blender + Unity","3D Unity":"Blender + Unity",
+ "Roblox и 3D Blender":"Roblox + Blender","Digital Art":"Digital art","Digital art":"Digital art",
+ "Английский Язык":"Английский язык","Английский язык":"Английский язык","Арт-студия":"Арт-Студия (1 час)",
+ "Хочу всё знать":"Хочу все знать! выходной","Хочу все знать":"Хочу все знать! выходной",
+ "Лепка из глины":"Лепка из глины (1 час)","Мир логики":"Логика","Пескография":"Песок",
+ "Робототехника":"Робототехника","Клуб математической стратегии":"Клуб математической стратегии",
+ "Мир научных открытий":"Мир научных открытий","Нейрогимнастика":"Нейрогимнастика","Рисование":"Рисование",
+ "Финансовая грамотность":"Финансовая грамотность","TinkerCad":"TinkerCad","Minecraft":"Minecraft",
+ "Roblox":"Roblox","Scratch":"Scratch","Говорилка":"Говорилка","Почемучка":"Почемучка",
+ "Живая азбука":"Живая азбука","Лепка из полимерной глины":"Лепка из полимерной глины",
+ "7 навыков уверенных детей":"7 навыков уверенных детей",
+};
+const DAY_MAP_RU={"Понедельник":1,"Вторник":2,"Среда":3,"Четверг":4,"Пятница":5,"Суббота":6,"Воскресенье":7};
+
+function triggerAlphaImport(){ document.getElementById("alphaFile").click(); }
+
+async function importAlphaFile(ev){
+  const f=ev.target.files[0]; if(!f) return;
+  ev.target.value=""; // сброс для повторного выбора того же файла
+  if(typeof XLSX==="undefined"){ toast("Загрузка библиотеки..."); await loadSheetJS(); }
+  try{
+    const buf=await f.arrayBuffer();
+    const wb=XLSX.read(buf,{type:"array"});
+    const ws=wb.Sheets[wb.SheetNames[0]];
+    const rows=XLSX.utils.sheet_to_json(ws,{header:1,defval:""});
+    const parsed=parseAlphaRows(rows);
+    if(!parsed.lessons.length){ toast("Не найдено занятий в файле"); return; }
+    showImportPreview(parsed);
+  }catch(e){ console.error(e); toast("Ошибка чтения файла"); }
+}
+
+function parseAlphaRows(rows){
+  const lessons=[]; let curDay=null; const unknownCourses=new Set();
+  const reTime=/^(\d{1,2}:\d{2})\s*[-–]\s*(\d{1,2}:\d{2})/;
+  rows.forEach(r=>{
+    const a=(r[0]!=null?String(r[0]):"").trim();
+    if(!a) return;
+    // день?
+    const dk=Object.keys(DAY_MAP_RU).find(d=>a.startsWith(d));
+    if(dk){ curDay=DAY_MAP_RU[dk]; return; }
+    const m=a.match(reTime);
+    if(m && curDay){
+      const teacher=(r[2]!=null?String(r[2]):"").trim();
+      let course=(r[3]!=null?String(r[3]):"").trim();
+      const students=(r[5]!=null?String(r[5]):"");
+      const nst=students?students.split(",").filter(s=>s.trim()).length:0;
+      const canon=ALPHA_COURSE_MAP[course]||course;
+      if(!ALPHA_COURSE_MAP[course] && course) unknownCourses.add(course);
+      lessons.push({day:curDay,start:m[1],end:m[2],teacher,course:canon,group:(r[4]!=null?String(r[4]):"").trim(),students:nst,room:""});
+    }
+  });
+  return {lessons,unknownCourses:[...unknownCourses]};
+}
+
+function showImportPreview(parsed){
+  const byDay={};
+  parsed.lessons.forEach(l=>{ byDay[l.day]=(byDay[l.day]||0)+1; });
+  const dayNames=["","Пн","Вт","Ср","Чт","Пт","Сб","Вс"];
+  let dh=Object.keys(byDay).sort().map(d=>`${dayNames[d]}: ${byDay[d]}`).join(" · ");
+  const newCourses=parsed.unknownCourses.filter(c=>!S.courses.some(x=>x.name===c));
+  const newTeachers=[...new Set(parsed.lessons.map(l=>l.teacher).filter(Boolean))].filter(t=>!S.staff.some(s=>s.name===t));
+  let warn="";
+  if(newCourses.length) warn+=`<div class="callout"><b>Новые курсы (${newCourses.length}):</b> ${newCourses.join(", ")}. Будут добавлены с базовой ставкой ЗП — потом отредактируете.</div>`;
+  if(newTeachers.length) warn+=`<div class="callout"><b>Новые педагоги (${newTeachers.length}):</b> ${newTeachers.join(", ")}. Будут добавлены в педсостав.</div>`;
+  document.getElementById("impPreviewBody").innerHTML=`
+    <p style="font-size:13px;margin-bottom:8px">Найдено занятий: <b>${parsed.lessons.length}</b></p>
+    <p style="font-size:13px;margin-bottom:10px">По дням: ${dh}</p>
+    ${warn}
+    <div class="callout" style="border-left-color:var(--terra)"><b>Заменить</b> — текущая сетка очистится и заполнится из файла. <b>Добавить</b> — занятия добавятся к текущим.</div>`;
+  document.getElementById("impModal").classList.add("show");
+  document.getElementById("impModal")._parsed=parsed;
+}
+function applyImport(mode){
+  const parsed=document.getElementById("impModal")._parsed;
+  if(!parsed) return;
+  // новые курсы
+  parsed.lessons.forEach(l=>{
+    if(l.course && !S.courses.some(c=>c.name===l.course)){
+      const isIT=/Blender|Unity|Roblox|Scratch|Minecraft|Python|Digital|TinkerCad|Робот/.test(l.course);
+      S.courses.push({name:l.course,eco:isIT?"CODDY":"Прознание",price:isIT?35:25,single:isIT?45:30,wage:isIT?45:40,dur:1.5,groupSize:isIT?9:8,groups:0,fill:0,material:0});
+    }
+    if(l.teacher && !S.staff.some(s=>s.name===l.teacher)) S.staff.push({name:l.teacher,wageMode:"tier",fixedRate:0});
+  });
+  if(mode==="replace") S.grid = JSON.parse(JSON.stringify(parsed.lessons));
+  else S.grid = S.grid.concat(JSON.parse(JSON.stringify(parsed.lessons)));
+  persistLocal(); closeImport(); renderAll(); curDay=1; renderGrid();
+  toast(mode==="replace"?("Загружено "+parsed.lessons.length+" занятий"):("Добавлено "+parsed.lessons.length+" занятий"));
+}
+function closeImport(){ document.getElementById("impModal").classList.remove("show"); }
+
+function loadSheetJS(){
+  return new Promise((res,rej)=>{
+    if(typeof XLSX!=="undefined") return res();
+    const s=document.createElement("script");
+    s.src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js";
+    s.onload=res; s.onerror=rej; document.head.appendChild(s);
+  });
+}
+
+
+/* ====== ПРОВЕРКА КОНФЛИКТОВ ====== */
+function toMin(t){ const[h,m]=String(t).split(":").map(Number); return h*60+(m||0); }
+function overlaps(a,b){ // занятия пересекаются по времени?
+  return a.day===b.day && toMin(a.start)<toMin(b.end) && toMin(b.start)<toMin(a.end);
+}
+function findConflicts(){
+  // возвращает Map: index занятия -> массив причин
+  const conf={};
+  const g=S.grid;
+  for(let i=0;i<g.length;i++){
+    for(let j=i+1;j<g.length;j++){
+      if(!overlaps(g[i],g[j])) continue;
+      // педагог занят
+      if(g[i].teacher && g[i].teacher===g[j].teacher){
+        addConf(conf,i,"педагог «"+shortName(g[i].teacher)+"» в это время уже ведёт «"+g[j].course+"»");
+        addConf(conf,j,"педагог «"+shortName(g[j].teacher)+"» в это время уже ведёт «"+g[i].course+"»");
+      }
+      // кабинет занят (только если оба с кабинетом)
+      if(g[i].room && g[i].room===g[j].room){
+        addConf(conf,i,"кабинет «"+g[i].room+"» занят («"+g[j].course+"»)");
+        addConf(conf,j,"кабинет «"+g[j].room+"» занят («"+g[i].course+"»)");
+      }
+    }
+  }
+  return conf;
+}
+function addConf(conf,i,msg){ if(!conf[i])conf[i]=[]; conf[i].push(msg); }
+
+function conflictCount(){
+  const c=findConflicts(); return Object.keys(c).length;
+}
+function renderConflictBanner(){
+  const c=findConflicts();
+  const n=Object.keys(c).length;
+  const box=document.getElementById("conflictBanner");
+  if(!box) return;
+  if(n===0){ box.innerHTML=`<div class="callout" style="border-left-color:var(--green)"><b style="color:var(--green)">✓ Конфликтов нет</b> — ни один педагог и кабинет не пересекаются по времени.</div>`; return; }
+  // соберём список по дням
+  const dayNames=["","Понедельник","Вторник","Среда","Четверг","Пятница","Суббота","Воскресенье"];
+  let items=[];
+  Object.keys(c).forEach(i=>{ const l=S.grid[i];
+    items.push(`<li><b>${dayNames[l.day]} ${l.start}</b> · ${l.course}: ${[...new Set(c[i])].join("; ")}</li>`);
+  });
+  box.innerHTML=`<div class="callout" style="border-left-color:var(--red)">
+    <b style="color:var(--red)">⚠ Конфликтов: ${n}</b> — есть пересечения по педагогам или кабинетам.
+    <ul style="margin:8px 0 0 18px;font-size:12px;line-height:1.6">${items.slice(0,12).join("")}</ul>
+    ${items.length>12?`<div class="muted" style="font-size:11px;margin-top:4px">…и ещё ${items.length-12}</div>`:""}
+  </div>`;
+}
+
+
+/* ====== СЦЕНАРИИ / ГОДЫ (несколько версий модели) ====== */
+// Структура хранения: S.meta = {scenarioName, ...}; набор сценариев хранится отдельно
+const SCN_KEY="proznanie_finmodel_scenarios_v1";
+function loadScenarioList(){
+  try{ const r=localStorage.getItem(SCN_KEY); if(r) return JSON.parse(r); }catch(e){}
+  return {};  // {name: stateSnapshot}
+}
+function saveScenarioList(obj){ try{ localStorage.setItem(SCN_KEY, JSON.stringify(obj)); }catch(e){} }
+
+function currentScenarioName(){ return (S.meta&&S.meta.name)||"Основной"; }
+
+function snapshotState(){
+  // копия без служебных полей
+  const c=JSON.parse(JSON.stringify(S));
+  delete c._teacherFOTmonth;
+  return c;
+}
+function renderScenarioBar(){
+  const list=loadScenarioList();
+  const names=Object.keys(list);
+  const cur=currentScenarioName();
+  if(!names.includes(cur)){ names.unshift(cur); }
+  const sel=document.getElementById("scnSelect");
+  if(sel){
+    sel.innerHTML=names.map(n=>`<option ${n===cur?"selected":""}>${esc(n)}</option>`).join("");
+  }
+}
+function switchScenario(name){
+  const list=loadScenarioList();
+  // сохраним текущий перед переключением
+  list[currentScenarioName()]=snapshotState();
+  saveScenarioList(list);
+  if(list[name]){
+    S=Object.assign(JSON.parse(JSON.stringify(DEFAULT_STATE)),list[name]);
+    if(!S.meta)S.meta={}; S.meta.name=name;
+    persistLocal(); renderAll();
+    toast("Открыт сценарий: "+name);
+  }
+}
+function saveAsScenario(){
+  const name=prompt("Название сценария / года (например, «2026/2027» или «Если +2 группы Roblox»):", currentScenarioName());
+  if(!name) return;
+  if(!S.meta)S.meta={}; S.meta.name=name;
+  const list=loadScenarioList();
+  list[name]=snapshotState();
+  saveScenarioList(list);
+  persistLocal(); renderScenarioBar();
+  toast("Сохранён сценарий: "+name);
+}
+function duplicateScenario(){
+  const name=prompt("Название копии:", currentScenarioName()+" (копия)");
+  if(!name) return;
+  if(!S.meta)S.meta={}; S.meta.name=name;
+  const list=loadScenarioList();
+  list[name]=snapshotState();
+  saveScenarioList(list);
+  persistLocal(); renderScenarioBar();
+  toast("Создана копия: "+name);
+}
+function deleteScenario(){
+  const cur=currentScenarioName();
+  const list=loadScenarioList();
+  if(Object.keys(list).length<=1 && list[cur]){ toast("Нельзя удалить единственный сценарий"); return; }
+  if(!confirm("Удалить сценарий «"+cur+"»? Это действие необратимо.")) return;
+  delete list[cur];
+  saveScenarioList(list);
+  const next=Object.keys(list)[0];
+  if(next){ S=Object.assign(JSON.parse(JSON.stringify(DEFAULT_STATE)),list[next]); if(!S.meta)S.meta={}; S.meta.name=next; }
+  persistLocal(); renderAll();
+  toast("Сценарий удалён");
+}
+
+
+function renderAll(){
+  renderCourses(); renderPlanner(); renderGrid(); renderStaff(); renderFixed(); renderTax(); renderBreak(); renderSettings(); renderDash(); onSlider(); renderConflictBanner(); renderScenarioBar();
+}
+function toast(m){ const t=document.getElementById("toast"); t.textContent=m; t.classList.add("show");
+  clearTimeout(t._h); t._h=setTimeout(()=>t.classList.remove("show"),2200); }
+
+/* модалка GAS */
+
+function openScnMenu(){ document.getElementById("scnCurName").textContent=currentScenarioName(); document.getElementById("scnModal").classList.add("show"); }
+function closeScnMenu(){ document.getElementById("scnModal").classList.remove("show"); }
+
+function openSync(){ document.getElementById("gasCode").value=GAS_CODE; document.getElementById("syncModal").classList.add("show"); }
+function closeSync(){ document.getElementById("syncModal").classList.remove("show"); }
+function copyGas(){ navigator.clipboard.writeText(GAS_CODE); toast("Код скопирован"); }
+
+/* табы */
+document.querySelectorAll(".tab").forEach(tb=>tb.onclick=()=>{
+  document.querySelectorAll(".tab").forEach(x=>x.classList.remove("active"));
+  document.querySelectorAll(".panel").forEach(x=>x.classList.remove("active"));
+  tb.classList.add("active");
+  document.getElementById(tb.dataset.t).classList.add("active");
+});
+
+/* старт */
+if(S.gasUrl) setSync("ok","Google-таблица"); else setSync("local","Локальный режим");
+renderAll();
+
+</script>
+</body>
+</html>
