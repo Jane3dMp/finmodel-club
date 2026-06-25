@@ -284,6 +284,7 @@ tr.rowlocked input,tr.rowlocked select{background:#EAF3EC;border-color:#cfe3d4;c
   <input type="file" id="alphaFile" hidden accept=".xlsx,.xls" onchange="importAlphaFile(event)">
   <button class="btn ghost sm" onclick="gridToPlan()">Пересчитать план из расписания →</button>
   <button class="btn ghost sm" onclick="renderConflictBanner();document.getElementById('conflictBanner').scrollIntoView({behavior:'smooth'})">Проверить конфликты</button>
+  <button class="btn ghost sm" onclick="removeDuplicates()" title="Удалить занятия-дубли, наложенные друг на друга">🧹 Убрать дубли</button>
   <button class="btn sm" onclick="autoPlaceConfirm()">✨ Авторазложить по кабинетам</button>
   <button class="btn ghost sm" onclick="clearRooms()">Очистить кабинеты</button>
  </div>
@@ -1334,16 +1335,56 @@ function clearRooms(){
 /* ===== DRAG & DROP ===== */
 
 
+function slotBusy(day,start,end,room,exceptIdx){
+  // занят ли кабинет в это время (любым занятием, кроме exceptIdx)
+  for(let k=0;k<S.grid.length;k++){
+    if(k===exceptIdx) continue;
+    const x=S.grid[k];
+    if(x.day===day && x.room===room && toMin(start)<toMin(x.end) && toMin(x.start)<toMin(end)) return true;
+  }
+  return false;
+}
 function dupLes(idx){
   const l=S.grid[idx]; if(!l) return;
   const copy=JSON.parse(JSON.stringify(l));
   delete copy.pinned;
-  // копию сдвинем по времени на длительность вниз, кабинет тот же (можно потом перетащить)
   const dur=minDiff(l.start,l.end)||60;
-  copy.start=addMin(l.start,dur); copy.end=addMin(copy.start,dur);
+  // 1) пробуем тот же кабинет, следующий свободный слот вниз
+  let placed=false;
+  let st=addMin(l.start,dur);
+  for(let tries=0; tries<24 && st; tries++){
+    const en=addMin(st,dur);
+    if(!slotBusy(copy.day,st,en,copy.room,null)){
+      copy.start=st; copy.end=en; placed=true; break;
+    }
+    st=addMin(st,30);
+  }
+  // 2) если в этом кабинете всё занято — то же время, другой свободный кабинет
+  if(!placed){
+    for(const r of ROOMS){
+      if(r===l.room) continue;
+      if(!slotBusy(copy.day,l.start,l.end,r,null)){
+        copy.room=r; copy.start=l.start; copy.end=l.end; placed=true; break;
+      }
+    }
+  }
+  // 3) совсем не нашли — кладём без кабинета (будет в «нераспределённых»), чтобы не накладывать
+  if(!placed){ copy.room=""; copy.start=l.start; copy.end=l.end; }
   S.grid.push(copy);
   persistLocal(); renderGrid(); renderStaff();
-  toast("Занятие скопировано (ниже по времени)");
+  toast(placed?"Занятие скопировано в свободное место":"Копия без кабинета — выберите место");
+}
+function removeDuplicates(){
+  // удаляем точные дубли (день+время+кабинет+курс+педагог)
+  const seen=new Set(); const keep=[];
+  let removed=0;
+  S.grid.forEach(l=>{
+    const key=[l.day,l.start,l.end,l.room,l.course,l.teacher].join("|");
+    if(seen.has(key)){ removed++; return; }
+    seen.add(key); keep.push(l);
+  });
+  S.grid=keep; persistLocal(); renderGrid(); renderStaff(); renderConflictBanner();
+  toast(removed>0?("Удалено дублей: "+removed):"Дублей не найдено");
 }
 function delLesByIdx(idx){
   const l=S.grid[idx]; if(!l) return;
