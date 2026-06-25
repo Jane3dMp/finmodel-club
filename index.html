@@ -145,6 +145,10 @@ small.note{font-size:11px;color:var(--muted)}
 .les .pin:hover{opacity:1}
 .les.pinned{border-left-color:var(--green);background:#EAF3EC}
 .les.pinned b{color:var(--green)}
+
+.cell-les{vertical-align:top;padding:1px!important}
+#gridTable td.cell-les .les{height:100%;display:flex;flex-direction:column;justify-content:flex-start}
+#gridTable td{height:34px}
 </style>
 </head>
 <body>
@@ -286,11 +290,20 @@ small.note{font-size:11px;color:var(--muted)}
  <h2 class="sec">Постоянные расходы</h2>
  <div class="sec-desc">Расходы, которые есть всегда, независимо от числа занятий. Значения — за месяц, в рублях.</div>
  <div class="row2">
-  <div class="card"><h3>Помещение и сервисы</h3><div id="fixed1"></div></div>
-  <div class="card"><h3>Команда (оклады)</h3><div id="fixed2"></div></div>
+  <div class="card"><h3>Помещение и сервисы</h3><div id="fixed1"></div>
+   <button class="btn ghost sm" style="margin-top:10px" onclick="addFixed(1)">+ строка</button></div>
+  <div class="card"><h3>Команда (оклады)</h3><div id="fixed2"></div>
+   <button class="btn ghost sm" style="margin-top:10px" onclick="addFixed(2)">+ строка</button></div>
  </div>
- <div class="card"><h3>Итого постоянных</h3>
-  <div class="field"><label><b>Сумма постоянных расходов в месяц</b></label><b id="fixedTotal" class="num">—</b></div>
+ <div class="card"><h3>Расходы в % от оборота</h3>
+  <div class="sec-desc">Расходы, которые зависят от выручки (например, бытовые расходы 5%). Считаются от оборота автоматически.</div>
+  <div id="fixedPct"></div>
+  <button class="btn ghost sm" style="margin-top:10px" onclick="addFixedPct()">+ процентная статья</button>
+ </div>
+ <div class="card"><h3>Итого расходов</h3>
+  <div class="field"><label>Постоянные (фикс. суммы)</label><b id="fixedTotal" class="num">—</b></div>
+  <div class="field"><label>Процентные (от оборота)</label><b id="fixedPctTotal" class="num">—</b></div>
+  <div class="field"><label><b>Всего расходов этого блока в месяц</b></label><b id="fixedGrand" class="num">—</b></div>
  </div>
 </section>
 
@@ -438,6 +451,7 @@ const DEFAULT_STATE = {
     "SMM":2,"Видео / Рилс":2,"Методисты":2,"Кредит / лизинг":1
   },
   tax: { usn:6, fszn:34, belgosstrah:0.6, acquiring:1.0 },
+  fixedPct: [],  // расходы в % от оборота: [{name, pct}]
   fotTaxable: 70, // % ФОТ по трудовым договорам (облагается ФСЗН)
   assume: { weeksPerMonth:4, targetProfitShare:18, ownerSalary:0 },
   gasUrl: "https://script.google.com/macros/s/AKfycbxJajbntVctGjXImc1hVhWimvOkXHcNCkuVFpszEbA8ad-B40Lj2Q8gdMMTBar4YLnsew/exec"
@@ -564,9 +578,12 @@ function totals(){
   const rentK=scenario.rent/100;
   let fixed=0;
   for(const k in S.fixed){ let v=+S.fixed[k]||0; if(k.indexOf("Аренда")===0) v*=rentK; fixed+=v; }
+  // расходы в % от оборота (бытовые и т.п.)
+  let pctExpense=0;
+  (S.fixedPct||[]).forEach(p=>{ pctExpense += rev*((+p.pct||0)/100); });
   const variableExtra=rev*(S.tax.acquiring/100); // эквайринг
   const grossProfit=rev-wage-mat-variableExtra;
-  const opProfit=grossProfit-fixed;
+  const opProfit=grossProfit-fixed-pctExpense;
   // налоги
   const usn=rev*(S.tax.usn/100);
   const fotBase=wage*(S.fotTaxable/100); // часть ФОТ по трудовым
@@ -574,7 +591,7 @@ function totals(){
   const belg=fotBase*(S.tax.belgosstrah/100);
   const taxTotal=usn+fszn+belg;
   const netProfit=opProfit-taxTotal-(+S.assume.ownerSalary||0);
-  return {rev,wage,mat,lessons,kids,fixed,variableExtra,grossProfit,opProfit,usn,fszn,belg,taxTotal,netProfit};
+  return {rev,wage,mat,lessons,kids,fixed,pctExpense,variableExtra,grossProfit,opProfit,usn,fszn,belg,taxTotal,netProfit};
 }
 function fmt(n){ if(n===null||n===undefined||isNaN(n)) return "—";
   return Math.round(n).toLocaleString("ru-RU"); }
@@ -636,15 +653,70 @@ function renderFixed(){
   const g1=document.getElementById("fixed1"), g2=document.getElementById("fixed2");
   let h1="",h2="";
   for(const k in S.fixed){
-    const row=`<div class="field"><label>${k}</label>
-      <input type="number" value="${S.fixed[k]}" onchange="updFixed('${k}',this.value)"></div>`;
+    const safe=esc(k).replace(/'/g,"\\'");
+    const row=`<div class="field" style="gap:8px">
+      <input class="cell wide" style="flex:1" value="${esc(k)}" onchange="renameFixed('${safe}',this.value)" title="название статьи">
+      <input type="number" style="width:90px" value="${S.fixed[k]}" onchange="updFixed('${safe}',this.value)">
+      <button class="btn gray sm" onclick="delFixed('${safe}')" title="Удалить статью">×</button></div>`;
     if(S.fixedGroup[k]===2) h2+=row; else h1+=row;
   }
   g1.innerHTML=h1; g2.innerHTML=h2;
   let tot=0; for(const k in S.fixed) tot+=+S.fixed[k]||0;
   document.getElementById("fixedTotal").textContent=fmt(tot)+" р";
+
+  // секция процентных расходов
+  const pb=document.getElementById("fixedPct");
+  if(pb){
+    const T=totals();
+    let ph="";
+    (S.fixedPct||[]).forEach((p,i)=>{
+      const sum=T.rev*((+p.pct||0)/100);
+      ph+=`<div class="field" style="gap:8px">
+        <input class="cell wide" style="flex:1" value="${esc(p.name||"")}" placeholder="название (напр. Бытовые)" onchange="updFixedPct(${i},'name',this.value)">
+        <input type="number" step="0.1" style="width:70px" value="${p.pct}" onchange="updFixedPct(${i},'pct',this.value)"> %
+        <span class="num muted" style="width:90px;text-align:right">${fmt(sum)} р</span>
+        <button class="btn gray sm" onclick="delFixedPct(${i})">×</button></div>`;
+    });
+    if(!(S.fixedPct||[]).length) ph='<div class="muted" style="font-size:13px;padding:6px 0">Пока нет процентных статей. Нажмите «+ процентная статья».</div>';
+    pb.innerHTML=ph;
+    document.getElementById("fixedPctTotal").textContent=fmt(T.pctExpense)+" р ("+(T.rev>0?fmt1(T.pctExpense/T.rev*100):0)+"% оборота)";
+    document.getElementById("fixedGrand").textContent=fmt(tot+T.pctExpense)+" р";
+  }
 }
 function updFixed(k,v){ S.fixed[k]=parseFloat(v)||0; persistLocal(); renderAll(); }
+function renameFixed(oldK,newK){
+  newK=(newK||"").trim(); if(!newK||newK===oldK) return;
+  if(S.fixed[newK]!=null){ toast("Статья с таким названием уже есть"); renderFixed(); return; }
+  const val=S.fixed[oldK], grp=S.fixedGroup[oldK];
+  const nf={}; for(const k in S.fixed){ nf[k===oldK?newK:k]=S.fixed[k]; }
+  S.fixed=nf;
+  S.fixedGroup[newK]=grp; if(oldK!==newK) delete S.fixedGroup[oldK];
+  persistLocal(); renderAll();
+}
+function delFixed(k){
+  if(!confirm("Удалить статью «"+k+"»?")) return;
+  delete S.fixed[k]; delete S.fixedGroup[k];
+  persistLocal(); renderAll(); toast("Статья удалена");
+}
+function addFixed(group){
+  let base="Новая статья", name=base, n=1;
+  while(S.fixed[name]!=null){ name=base+" "+(++n); }
+  S.fixed[name]=0; S.fixedGroup[name]=group;
+  persistLocal(); renderFixed();
+}
+function updFixedPct(i,k,v){
+  if(!S.fixedPct) S.fixedPct=[];
+  if(k==="name") S.fixedPct[i].name=v; else S.fixedPct[i].pct=parseFloat(v)||0;
+  persistLocal(); renderAll();
+}
+function addFixedPct(){
+  if(!S.fixedPct) S.fixedPct=[];
+  S.fixedPct.push({name:"",pct:5});
+  persistLocal(); renderFixed();
+}
+function delFixedPct(i){
+  S.fixedPct.splice(i,1); persistLocal(); renderAll(); toast("Статья удалена");
+}
 
 /* ===== РЕНДЕР: НАЛОГИ ===== */
 function renderTax(){
@@ -704,6 +776,7 @@ function renderDash(){
    ${pnl("− Эквайринг",-T.variableExtra,"sub")}
    ${pnl("= Валовая прибыль",T.grossProfit,"mid")}
    ${pnl("− Постоянные расходы",-T.fixed,"sub")}
+   ${T.pctExpense>0?pnl("− Расходы % от оборота",-T.pctExpense,"sub"):""}
    ${pnl("= Операционная прибыль",T.opProfit,"mid")}
    ${pnl("− Налог УСН",-T.usn,"sub")}
    ${pnl("− ФСЗН + Белгосстрах",-(T.fszn+T.belg),"sub")}
@@ -714,7 +787,7 @@ function renderDash(){
   // структура расходов
   const items=[
     ["ЗП педагогов",T.wage],["Постоянные (аренда, команда, сервисы)",T.fixed],
-    ["Материалы",T.mat],["Налоги и взносы",T.taxTotal],["Эквайринг",T.variableExtra]
+    ["Материалы",T.mat],["Налоги и взносы",T.taxTotal],["Эквайринг",T.variableExtra],["Расходы % от оборота",T.pctExpense]
   ];
   let sh="<tbody>";
   items.forEach(([n,v])=>{ const p=T.rev>0?v/T.rev*100:0;
@@ -722,7 +795,7 @@ function renderDash(){
       <td style="width:130px"><div class="barwrap"><div class="bar" style="width:${Math.min(p,100)}%"></div><span class="barlbl">${fmt1(p)}%</span></div></td></tr>`; });
   sh+="</tbody>";
   document.getElementById("structTable").innerHTML=sh;
-  const totExp=T.wage+T.fixed+T.mat+T.taxTotal+T.variableExtra;
+  const totExp=T.wage+T.fixed+T.mat+T.taxTotal+T.variableExtra+T.pctExpense;
   document.getElementById("structHint").innerHTML=
     `<b>Всего расходов:</b> ${fmt(totExp)} р/мес. Прибыль ${T.netProfit>=0?"положительная":"отрицательная"}: <b>${fmt(T.netProfit)} р</b>. ${fotShare>55?"⚠ Доля ФОТ выше 55% — проверьте загрузку и ставки.":""}`;
 
@@ -981,16 +1054,27 @@ function renderGrid(){
   let h=`<thead><tr><th style="width:54px">Время</th>`;
   ROOMS.forEach(r=>h+=`<th>${r}</th>`);
   h+=`</tr></thead><tbody>`;
-  TIME_SLOTS.forEach(slot=>{
+  // матрица перекрытий: для каждой [строка][кабинет] помечаем, занята ли ячейка занятием сверху (rowspan)
+  const covered={}; // ключ "slotIdx_room" => true
+  const SLOTMIN=30;
+  TIME_SLOTS.forEach((slot,si)=>{
     h+=`<tr><td class="tslot">${slot}</td>`;
     ROOMS.forEach(room=>{
+      if(covered[si+"_"+room]) return; // ячейка занята растянутым сверху занятием — пропускаем
       const les=dayL.find(l=>l.start===slot && l.room===room);
       if(les){
         const w=wageForLesson(les.course,les.students);
         const idx=S.grid.indexOf(les);
         const pinned=!!les.pinned;
-        h+=`<td class="cell-les" ondragover="dragOver(event)" ondrop="dropLes(event,'${slot}','${esc(room)}')">
-          <div class="les${pinned?' pinned':''}" draggable="${pinned?'false':'true'}" ${pinned?'':`ondragstart="dragStart(event,${idx})" ondragend="dragEnd(event)"`} onclick="editLes(${idx})">
+        // сколько слотов занимает занятие
+        let dur=minDiff(les.start,les.end); if(!dur||dur<SLOTMIN) dur=SLOTMIN;
+        let span=Math.round(dur/SLOTMIN); if(span<1) span=1;
+        // не выходим за пределы сетки
+        if(si+span>TIME_SLOTS.length) span=TIME_SLOTS.length-si;
+        // пометим перекрытые ячейки ниже
+        for(let k=1;k<span;k++){ covered[(si+k)+"_"+room]=true; }
+        h+=`<td class="cell-les" rowspan="${span}" ondragover="dragOver(event)" ondrop="dropLes(event,'${slot}','${esc(room)}')">
+          <div class="les${pinned?' pinned':''}" style="height:100%" draggable="${pinned?'false':'true'}" ${pinned?'':`ondragstart="dragStart(event,${idx})" ondragend="dragEnd(event)"`} onclick="editLes(${idx})">
             <span class="pin" onclick="event.stopPropagation();togglePin(${idx})" title="${pinned?'Закреплено — нажмите, чтобы открепить':'Закрепить (утвердить время и кабинет)'}">${pinned?'📌':'📍'}</span>
             <b>${esc(les.course)}</b>
             <span>${les.start}–${les.end}</span>
@@ -1246,6 +1330,7 @@ function renderStaff(){
   st.sort((a,b)=>b.wageWeek-a.wageWeek);
   st.forEach(s=>{
     const idx=S.staff.findIndex(x=>x.name===s.name);
+    const safeName=esc(s.name).replace(/'/g,"\\'");
     h+=`<tr>
       <td>${idx>=0?`<input class="cell wide" value="${esc(s.name)}" onchange="updStaff(${idx},this.value)">`:esc(s.name)+' <span class="muted">(из сетки)</span>'}</td>
       <td style="font-size:11px">${idx>=0?`<input class="cell wide" style="font-size:11px" value="${esc([...s.courses].join(", "))}" placeholder="курсы через запятую" onchange="updTeach(${idx},this.value)">`:`<span class="muted">${[...s.courses].join(", ")||"—"}</span>`}</td>
@@ -1253,7 +1338,7 @@ function renderStaff(){
       <td class="num">${s.students}</td>
       <td class="num">${fmt(s.wageWeek)}</td>
       <td class="num"><b>${fmt(s.wageWeek*4)}</b></td>
-      <td>${idx>=0?`<button class="btn gray sm" onclick="delStaff(${idx})">×</button>`:''}</td>
+      <td>${idx>=0?`<button class="btn gray sm" onclick="delStaff(${idx})" title="Удалить из педсостава">×</button>`:`<button class="btn gray sm" onclick="removeTeacherFromGrid('${safeName}')" title="Снять педагога со всех занятий">×</button>`}</td>
     </tr>`;
   });
   h+=`<tr class="totrow"><td>ИТОГО ФОНД ЗП</td><td></td><td class="num">${totalLessons}</td><td></td>
@@ -1267,6 +1352,15 @@ function renderStaff(){
   renderWageRef();
 }
 function updStaff(i,v){ S.staff[i].name=v; persistLocal(); renderStaff(); renderGrid(); }
+
+function removeTeacherFromGrid(name){
+  const cnt=S.grid.filter(l=>l.teacher===name).length;
+  if(!confirm("Снять педагога «"+name+"» со всех его занятий ("+cnt+")? Занятия останутся, но без педагога.")) return;
+  S.grid.forEach(l=>{ if(l.teacher===name) l.teacher=""; });
+  persistLocal(); renderStaff(); renderGrid();
+  toast("Педагог снят с занятий: "+name);
+}
+
 function delStaff(i){ S.staff.splice(i,1); persistLocal(); renderStaff(); }
 
 function syncStaffFull(){
@@ -1542,7 +1636,7 @@ function deleteScenario(){
 
 
 function renderAll(){
-  renderCourses(); renderPlanner(); renderGrid(); renderStaff(); renderFixed(); renderTax(); renderBreak(); renderSettings(); renderDash(); onSlider(); renderConflictBanner(); renderScenarioBar(); updateNavHeight();
+  renderCourses(); renderPlanner(); renderGrid(); renderStaff(); renderFixed(); renderTax(); renderBreak(); renderSettings(); renderDash(); onSlider(); renderConflictBanner(); renderScenarioBar(); updateNavHeightDelayed();
 }
 function toast(m){ const t=document.getElementById("toast"); t.textContent=m; t.classList.add("show");
   clearTimeout(t._h); t._h=setTimeout(()=>t.classList.remove("show"),2200); }
@@ -1618,10 +1712,15 @@ function copyGas(){ navigator.clipboard.writeText(GAS_CODE); toast("Код ск�
 
 function updateNavHeight(){
   const nav=document.querySelector("nav.tabs");
-  if(nav){ document.documentElement.style.setProperty("--navh", nav.offsetHeight+"px"); }
+  if(nav){
+    const hh=document.querySelector("header");
+    // навигация sticky top:0, поэтому липкая шапка таблицы должна отступать на высоту nav
+    document.documentElement.style.setProperty("--navh", nav.offsetHeight+"px");
+  }
 }
-window.addEventListener("resize", updateNavHeight);
-window.addEventListener("load", updateNavHeight);
+function updateNavHeightDelayed(){ updateNavHeight(); setTimeout(updateNavHeight,160); setTimeout(updateNavHeight,500); }
+window.addEventListener("resize", updateNavHeightDelayed);
+window.addEventListener("load", updateNavHeightDelayed);
 
 /* табы */
 document.querySelectorAll(".tab").forEach(tb=>tb.onclick=()=>{
@@ -1629,6 +1728,7 @@ document.querySelectorAll(".tab").forEach(tb=>tb.onclick=()=>{
   document.querySelectorAll(".panel").forEach(x=>x.classList.remove("active"));
   tb.classList.add("active");
   document.getElementById(tb.dataset.t).classList.add("active");
+  updateNavHeightDelayed();
 });
 
 /* старт */
