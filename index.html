@@ -300,6 +300,7 @@ tr.rowlocked input,tr.rowlocked select{background:#EAF3EC;border-color:#cfe3d4;c
   <h3 id="gridDayTitle">День</h3>
   <div id="unassigned"></div>
   <div id="offgrid"></div>
+  <div id="visitcheck"></div>
   <div class="tscroll"><table id="gridTable"></table></div>
   <small class="note">Клик по пустой ячейке — добавить занятие. Клик по занятию — редактировать. ЗП за занятие зависит от числа детей (вкладка «Педсостав» → справочник ставок).</small>
  </div>
@@ -1331,6 +1332,26 @@ function renderGrid(){
         o+=`<div class="chip" style="border-color:var(--red)" onclick="editLes(${idx})" title="Открыть и поправить">${esc(l.course)} · ${l.start}–${l.end} · ${esc(shortName(l.teacher))} · каб. ${esc(l.room)}</div>`; });
       offBox.innerHTML=o+"</div>";
     } else offBox.innerHTML="";
+  }
+
+  // проверка: курсы 2× с нечётным числом занятий за неделю (вероятно, забыли вторую плитку)
+  const vBox=document.getElementById("visitcheck");
+  if(vBox){
+    const cntByCourse={};
+    S.grid.forEach(l=>{ if(l.course) cntByCourse[l.course]=(cntByCourse[l.course]||0)+1; });
+    const warn=[];
+    Object.keys(cntByCourse).forEach(name=>{
+      const c=S.courses.find(x=>x.name===name);
+      const v=c?(+c.visits||1):1;
+      const n=cntByCourse[name];
+      if(v>=2 && n%2!==0) warn.push({name, n});
+    });
+    if(warn.length){
+      let w=`<div class="callout" style="border-left-color:var(--blue)"><b style="color:var(--blue)">ℹ Проверьте двухразовые курсы.</b> У этих курсов в карточке стоит «2×/нед», но в расписании за неделю нечётное число занятий — возможно, где-то у группы стоит только одна плитка вместо двух:<ul style="margin:6px 0 0 18px;font-size:12px;line-height:1.6">`;
+      warn.forEach(x=>{ w+=`<li><b>${esc(x.name)}</b> — ${x.n} занят. в неделю (нечётное)</li>`; });
+      w+=`</ul><div class="muted" style="font-size:11px;margin-top:4px">Подсказка не покрывает все случаи: если две разные группы и у обеих по одному занятию, число будет чётным, но обе неполные. Сверяйтесь с фактом по группам.</div></div>`;
+      vBox.innerHTML=w;
+    } else vBox.innerHTML="";
   }
 
   renderGridSummary();
