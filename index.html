@@ -162,6 +162,13 @@ small.note{font-size:11px;color:var(--muted)}
 .dragh{cursor:grab;color:var(--muted);font-size:16px;text-align:center;user-select:none}
 .dragh:active{cursor:grabbing}
 #courseTable tr[draggable="true"]:hover .dragh{color:var(--terra)}
+/* ширины колонок таблицы курсов */
+#courseTable .col-name{min-width:230px}
+#courseTable .col-name input{width:100%;min-width:220px}
+#courseTable .col-eco{width:46px}
+#courseTable .eco-sel{width:42px;padding:5px 2px;text-align:center}
+#courseTable td input[type="number"]{width:62px}
+#courseTable .iconbtn{padding:2px 6px;font-size:11px;line-height:1.2;min-width:0}
 
 .pin{cursor:pointer;font-size:13px;user-select:none;opacity:.6}
 .pin:hover{opacity:1}
@@ -742,7 +749,7 @@ function rowDrop(e,arrName,i,rerender){
 function renderCourses(){
   const t=document.getElementById("courseTable");
   let h=`<thead><tr>
-    <th style="width:24px"></th><th>Курс</th><th>Эко</th><th>Цена</th><th>ЗП/зан</th>
+    <th style="width:24px"></th><th class="col-name">Курс</th><th class="col-eco" title="Экосистема: П — Прознание, C — CODDY, Д — Детали">Эко</th><th>Цена</th><th>ЗП/зан</th>
     <th>Групп/нед</th><th title="Сколько раз в неделю ходит группа">Визиты</th><th>Факт детей</th>
     <th title="Реальный оборот по этому курсу в среднем за месяц 2025/2026">Факт/мес 25/26</th><th>Оборот/мес</th><th title="Оборот минус зарплата педагога. НЕ учтены аренда, налоги, команда — это не прибыль">Маржа после ЗП, р</th><th title="Маржа после ЗП ÷ оборот">Маржа после ЗП, %</th><th>Мин</th><th></th></tr></thead><tbody>`;
   S.courses.forEach((c,i)=>{
@@ -756,9 +763,9 @@ function renderCourses(){
     const lk=isLocked('courses',i), da=lk?'disabled':'';
     h+=`<tr class="${lk?'rowlocked':''}" draggable="${lk?'false':'true'}" ${lk?'':`ondragstart="rowDragStart(event,'courses',${i})" ondragend="rowDragEnd(event)"`} ondragover="rowDragOver(event)" ondrop="rowDrop(event,'courses',${i},renderCourses)">
       <td class="dragh" title="${lk?'Закреплено':'Перетащите'}">${rowLockBtn('courses',i,'renderCourses')}</td>
-      <td><input class="cell wide" value="${esc(c.name)}" ${da} onchange="upd(${i},'name',this.value)"></td>
-      <td><select class="cell" ${da} onchange="upd(${i},'eco',this.value)">
-        ${["Прознание","CODDY","Детали"].map(e=>`<option ${c.eco===e?"selected":""}>${e}</option>`).join("")}</select></td>
+      <td class="col-name"><input class="cell wide" value="${esc(c.name)}" ${da} onchange="upd(${i},'name',this.value)"></td>
+      <td class="col-eco"><select class="cell eco-sel" ${da} title="${esc(c.eco)}" onchange="upd(${i},'eco',this.value)">
+        ${[["Прознание","П"],["CODDY","C"],["Детали","Д"]].map(([v,lab])=>`<option value="${v}" ${c.eco===v?"selected":""}>${lab}</option>`).join("")}</select></td>
       <td><input class="cell" type="number" value="${c.price}" ${da} onchange="upd(${i},'price',this.value)"></td>
       <td class="num" title="из справочника ставок по ${r.fillN||c.fill||4} детям"><b>${fmt(r.wage)}</b></td>
       <td><input class="cell" type="number" value="${c.groups}" ${da} onchange="upd(${i},'groups',this.value)"></td>
@@ -771,7 +778,7 @@ function renderCourses(){
       <td class="num ${r.margin>=0?'pos':'neg'}">${fmt(r.margin)}</td>
       <td class="num">${r.revenue>0?fmt1(r.marginPct)+'%':'—'}</td>
       <td class="num"><span class="sig ${cls}">${sig}</span> ${r.minFill||'—'}</td>
-      <td style="white-space:nowrap">${lk?'<span class="muted" style="font-size:11px">🔒</span>':`<button class="btn ghost sm" onclick="rowDup('courses',${i},renderCourses)" title="Копировать строку">⧉</button> <button class="btn gray sm" onclick="delCourse(${i})">×</button>`}</td>
+      <td style="white-space:nowrap">${lk?'<span class="muted" style="font-size:11px">🔒</span>':`<button class="btn ghost iconbtn" onclick="rowDup('courses',${i},renderCourses)" title="Копировать строку">⧉</button><button class="btn gray iconbtn" onclick="delCourse(${i})" title="Удалить">×</button>`}</td>
     </tr>`;
   });
   // итог
