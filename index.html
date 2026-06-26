@@ -12,8 +12,8 @@
 }
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:'Segoe UI',system-ui,-apple-system,sans-serif;background:var(--cream);
-  color:var(--coal);line-height:1.5;font-size:14px}
-.wrap{max-width:1180px;margin:0 auto;padding:0 16px 80px}
+  color:var(--coal);line-height:1.5;font-size:15px}
+.wrap{max-width:96vw;margin:0 auto;padding:0 20px 80px}
 
 header{background:var(--coal);color:var(--sand);padding:12px 0;margin-bottom:0}
 header .wrap{padding:0 16px}
@@ -29,20 +29,19 @@ header .wrap{padding:0 16px}
 .btn:hover{background:var(--terra-d)}
 .btn.ghost{background:transparent;border:1px solid var(--terra);color:var(--terra)}
 .btn.ghost:hover{background:var(--sand-l)}
-.btn.sm{padding:5px 10px;font-size:12px}
+.btn.sm{padding:6px 11px;font-size:13px}
 .btn.gray{background:#6b6256}.btn.gray:hover{background:#544c42}
 
 nav.tabs{display:flex;background:var(--sand);border-bottom:2px solid var(--terra);position:sticky;top:0;z-index:30}
-nav.tabs .wrap{display:flex;gap:1px 2px;flex-wrap:wrap;width:100%;max-width:1180px;padding:0 16px}
-.tab{padding:8px 14px;font-size:13px;font-weight:600;color:var(--muted);cursor:pointer;
+nav.tabs .wrap{display:flex;gap:1px 2px;flex-wrap:wrap;width:100%;max-width:96vw;padding:0 20px}
+.tab{padding:9px 15px;font-size:14px;font-weight:600;color:var(--muted);cursor:pointer;
   border:none;background:none;border-bottom:3px solid transparent;white-space:nowrap;line-height:1.2}
 .tab:hover{color:var(--coal)}
 .tab.active{color:var(--coal);border-bottom-color:var(--terra);background:var(--cream)}
 
 .panel{display:none;padding-top:16px}
 /* расписание — почти на всю ширину экрана, узкие поля по бокам */
-#grid.panel{width:96vw;max-width:96vw;margin-left:calc(-48vw + 50%);margin-right:calc(-48vw + 50%);padding-left:20px;padding-right:20px;box-sizing:border-box}
-@media(max-width:760px){#grid.panel{width:100%;max-width:100%;margin-left:0;margin-right:0;padding-left:0;padding-right:0}}
+
 .panel.active{display:block}
 h2.sec{font-size:19px;margin-bottom:4px;color:var(--coal)}
 .sec-desc{color:var(--muted);font-size:13px;margin-bottom:16px;max-width:760px}
@@ -52,8 +51,8 @@ h2.sec{font-size:19px;margin-bottom:4px;color:var(--coal)}
 .card h3{font-size:15px;margin-bottom:12px;display:flex;align-items:center;gap:8px}
 .card h3::before{content:'';width:4px;height:16px;background:var(--terra);border-radius:2px}
 
-table{width:100%;border-collapse:collapse;font-size:13px}
-th{background:var(--coal);color:var(--sand);padding:8px 9px;text-align:left;font-weight:600;font-size:12px}
+table{width:100%;border-collapse:collapse;font-size:14px}
+th{background:var(--coal);color:var(--sand);padding:9px 10px;text-align:left;font-weight:600;font-size:13px}
 td{padding:6px 9px;border-bottom:1px solid var(--line)}
 tr:nth-child(even) td{background:var(--sand-l)}
 tbody tr:hover td{background:#F3EAD9}
