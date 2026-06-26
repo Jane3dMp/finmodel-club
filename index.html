@@ -330,7 +330,7 @@ tr.rowlocked input,tr.rowlocked select{background:#EAF3EC;border-color:#cfe3d4;c
  <h2 class="sec">Педсостав и фонд ЗП</h2>
  <div class="sec-desc">Фонд ЗП считается <b>автоматически из расписания</b>: каждое занятие × ставка по фактическому числу детей в группе. Поэтому ЗП/нед и ЗП/мес — расчётные (не вводятся руками): меняете занятие в сетке → ЗП пересчитывается. Колонку «Может вести» можно дописывать вручную.</div>
  <div class="kpigrid" id="staffKpi"></div>
- <div class="hd-actions"><button class="btn sm" onclick="addStaff()">+ Педагог</button><button class="btn ghost sm" onclick="sortStaffByName()">⇅ По алфавиту</button><button class="btn ghost sm" onclick="syncStaffFromGrid()" title="Добавить в список всех педагогов из расписания">↻ Собрать из расписания</button><button class="btn ghost sm" onclick="syncStaffFull()">Загрузить полный педсостав (21)</button></div>
+ <div class="hd-actions"><button class="btn sm" onclick="addStaff()">+ Педагог</button><button class="btn ghost sm" onclick="setStaffSort('name')" title="Сортировать педагогов по алфавиту">⇅ По алфавиту</button><button class="btn ghost sm" onclick="setStaffSort('wage')" title="Сортировать по ЗП. Повторный клик — обратный порядок">⇅ По ЗП</button><button class="btn ghost sm" onclick="syncStaffFromGrid()" title="Добавить в список всех педагогов из расписания">↻ Собрать из расписания</button><button class="btn ghost sm" onclick="syncStaffFull()">Загрузить полный педсостав (21)</button></div>
  <div class="card"><h3>Нагрузка и ЗП по педагогам</h3>
   <div class="tscroll"><table id="staffTable"></table></div>
   <div class="callout"><b>Связь с моделью:</b> этот фонд ЗП идёт в P&L и в расчёт взносов ФСЗН на вкладке «Налоги».</div>
@@ -1759,9 +1759,14 @@ function renderStaff(){
    ${kpi("ФОТ педагогов/нед",fmt(totalWeek)+" р","red","по ставкам наполняемости")}
    ${kpi("ФОТ педагогов/мес",fmt(totalMonth)+" р","red","×4 недели")}`;
 
-  let h=`<thead><tr><th>Педагог</th><th>Курсы</th><th>Занятий/нед</th><th>Детей-мест</th>
-    <th>ЗП/нед</th><th>ЗП/мес</th><th></th></tr></thead><tbody>`;
-  if(S._sortStaffByName){ st.sort((a,b)=>String(a.name).localeCompare(String(b.name),"ru")); }
+  const _ssm=S._staffSort||"wage";
+  const _arrName=_ssm==="name"?" ▼":"";
+  const _arrWage=_ssm==="wage"?" ▼":(_ssm==="wage_asc"?" ▲":"");
+  let h=`<thead><tr><th>Педагог${_arrName}</th><th>Курсы</th><th>Занятий/нед</th><th>Детей-мест</th>
+    <th>ЗП/нед${_arrWage}</th><th>ЗП/мес</th><th></th></tr></thead><tbody>`;
+  const _ss=S._staffSort||"wage";
+  if(_ss==="name"){ st.sort((a,b)=>String(a.name).localeCompare(String(b.name),"ru")); }
+  else if(_ss==="wage_asc"){ st.sort((a,b)=>a.wageWeek-b.wageWeek); }
   else { st.sort((a,b)=>b.wageWeek-a.wageWeek); }
   st.forEach(s=>{
     const idx=S.staff.findIndex(x=>x.name===s.name);
@@ -1824,11 +1829,14 @@ function removeTeacherFromGrid(name){
 
 
 
-function sortStaffByName(){
-  S.staff.sort((a,b)=>String(a.name||"").localeCompare(String(b.name||""),'ru'));
-  S._sortStaffByName=true;
+function sortStaffByName(){ setStaffSort("name"); }
+function setStaffSort(mode){
+  // wage = по ЗП убыв., wage_asc = по ЗП возр., name = по алфавиту
+  if(mode==="wage" && S._staffSort==="wage") mode="wage_asc"; // повторный клик — реверс
+  S._staffSort=mode;
   persistLocal(); renderStaff();
-  toast("Педагоги отсортированы по алфавиту");
+  const lbl = mode==="name"?"по алфавиту" : mode==="wage_asc"?"по ЗП (возрастание)" : "по ЗП (убывание)";
+  toast("Педагоги отсортированы "+lbl);
 }
 
 function copyStaff(name){
