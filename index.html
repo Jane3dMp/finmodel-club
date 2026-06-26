@@ -153,6 +153,7 @@ small.note{font-size:11px;color:var(--muted)}
 #gridTable td.cell-les .les{height:100%;display:flex;flex-direction:column;justify-content:flex-start}
 #gridTable{table-layout:fixed}
 #gridTable tbody tr{height:44px}
+.les-note{cursor:help;font-size:10px;opacity:.8}
 #gridTable tbody td{height:44px;box-sizing:border-box;vertical-align:top}
 #gridTable td.tslot{height:44px;font-size:11px}
 
@@ -1286,7 +1287,7 @@ function _printDayTableHTML(day){
         let span=Math.round(dur/SLOTMIN); if(span<1) span=1;
         if(si+span>TIME_SLOTS.length) span=TIME_SLOTS.length-si;
         for(let k=1;k<span;k++){ covered[(si+k)+"_"+room]=true; }
-        tds+=`<td class="pr-les" rowspan="${span}"><b>${esc(les.course)}</b><span>${les.start}–${les.end}</span><span class="pr-t">${esc(shortName(les.teacher))} · ${les.students||0} чел.</span></td>`;
+        tds+=`<td class="pr-les" rowspan="${span}"><b>${esc(les.course)}</b><span>${les.start}–${les.end}</span><span class="pr-t">${esc(shortName(les.teacher))} · ${les.students||0} чел.</span>${les.note?`<span class="pr-note">📝 ${esc(les.note)}</span>`:""}</td>`;
       } else {
         tds+=`<td class="pr-empty-cell"></td>`;
       }
@@ -1319,6 +1320,7 @@ function printSchedule(){
     .pr-les span{display:block;font-size:8px;color:#333}
     .pr-les .pr-t{color:#555}
     .pr-empty-cell{background:#fff}
+    .pr-note{display:block;font-size:8px;color:#7a5;margin-top:1px;font-style:italic}
   `;
   const w=window.open("","_print");
   if(!w){ toast("Разрешите всплывающие окна для печати"); return; }
@@ -1370,7 +1372,7 @@ function renderGrid(){
               <span class="lt-btn" onclick="event.stopPropagation();dupLes(${idx})" title="Копировать занятие">⧉</span>
               <span class="lt-btn lt-del" onclick="event.stopPropagation();delLesByIdx(${idx})" title="Удалить занятие">×</span>
             </div>
-            <b>${esc(les.course)}</b>
+            <b>${esc(les.course)}${les.note?` <span class="les-note" title="${esc(les.note)}">📝</span>`:""}</b>
             <span>${les.start}–${les.end}</span>
             <span class="lt">${esc(shortName(les.teacher))} · ${les.students}👤 · ${w}р</span>
           </div></td>`;
@@ -1648,6 +1650,7 @@ function editLes(idx){
      <div><label>Кабинет</label><select id="mRoom" class="cell wide">${roomOpts}</select></div>
      <div><label>Учеников</label><input id="mStud" type="number" class="cell wide" value="${l.students}"></div>
     </div>
+    <label>Примечание</label><textarea id="mNote" class="cell wide" rows="2" placeholder="например: замена, пробное, перенос с пятницы…">${esc(l.note||"")}</textarea>
     <div class="callout">ЗП за это занятие: <b id="mWage">${wageForLesson(l.course,l.students)} р</b> (по ставке для ${l.students} детей)</div>`;
   document.getElementById("lesModal").classList.add("show");
   document.getElementById("lesModal").dataset.idx=idx;
@@ -1668,6 +1671,7 @@ function saveLes(){
   l.end=document.getElementById("mEnd").value;
   l.room=document.getElementById("mRoom").value;
   l.students=+document.getElementById("mStud").value||0;
+  l.note=(document.getElementById("mNote").value||"").trim();
   persistLocal(); closeLes(); renderGrid(); renderStaff();
 }
 function delLes(){
