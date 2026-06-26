@@ -100,7 +100,9 @@ select.cell{border:1px solid var(--line);border-radius:5px;padding:4px;font-size
 .bar{height:100%;background:var(--terra);border-radius:6px 0 0 6px}
 .barlbl{position:absolute;left:8px;top:0;line-height:22px;font-size:11px;font-weight:600;color:var(--coal)}
 .muted{color:var(--muted)}
-.hd-actions{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px}
+.hd-actions{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:14px;align-items:center}
+.hd-sep{width:1px;align-self:stretch;background:var(--line);margin:2px 3px}
+.hd-grp{display:inline-flex;gap:6px;flex-wrap:wrap;align-items:center}
 .scn{display:flex;gap:8px;margin-bottom:14px}
 .scn button{flex:1;padding:9px;border:1px solid var(--line);background:#fff;border-radius:8px;cursor:pointer;font-weight:600;font-size:13px}
 .scn button.on{background:var(--terra);color:#fff;border-color:var(--terra)}
@@ -286,15 +288,30 @@ tr.rowlocked input,tr.rowlocked select{background:#EAF3EC;border-color:#cfe3d4;c
  <div class="sec-desc">Главный ввод. Расставляете занятия по дням, кабинетам и времени — из этого считаются группы для плана и фонд ЗП педагогов (по ставке для числа детей). Стартовая сетка загружена из вашей выгрузки Альфы (06–12.04).</div>
  <div class="kpigrid" id="gridSummary"></div>
  <div class="hd-actions">
-  <button class="btn sm" onclick="triggerAlphaImport()">📂 Импорт из Альфы (.xlsx)</button>
-  <input type="file" id="alphaFile" hidden accept=".xlsx,.xls" onchange="importAlphaFile(event)">
-  <button class="btn ghost sm" onclick="gridToPlan()">Пересчитать план из расписания →</button>
-  <button class="btn ghost sm" onclick="renderConflictBanner();document.getElementById('conflictBanner').scrollIntoView({behavior:'smooth'})">Проверить конфликты</button>
-  <button class="btn ghost sm" onclick="removeDuplicates()" title="Удалить занятия-дубли, наложенные друг на друга">🧹 Убрать дубли</button>
-  <button class="btn ghost sm" onclick="snapTimes()" title="Сдвинуть время занятий к ближайшему получасовому слоту (17:50→18:00), чтобы они отображались в сетке">🕐 Выровнять время</button>
-  <button class="btn sm" onclick="autoPlaceConfirm()">✨ Авторазложить по кабинетам</button>
-  <button class="btn ghost sm" onclick="clearRooms()">Очистить кабинеты</button>
-  <button class="btn sm" onclick="printSchedule()" title="Распечатать расписание для менеджеров">🖨 Печать</button>
+  <span class="hd-grp">
+   <button class="btn sm" onclick="triggerAlphaImport(false)" title="Импорт всей недели из выгрузки Альфы">📂 Импорт недели</button>
+   <button class="btn ghost sm" onclick="triggerAlphaImport(true)" title="Импорт только активного дня из выгрузки Альфы">📂 Импорт 1 дня</button>
+   <input type="file" id="alphaFile" hidden accept=".xlsx,.xls" onchange="importAlphaFile(event)">
+  </span>
+  <span class="hd-sep"></span>
+  <span class="hd-grp">
+   <button class="btn ghost sm" onclick="gridToPlan()" title="Пересчитать планировщик из текущего расписания">↻ Пересчитать план</button>
+  </span>
+  <span class="hd-sep"></span>
+  <span class="hd-grp">
+   <button class="btn ghost sm" onclick="renderConflictBanner();document.getElementById('conflictBanner').scrollIntoView({behavior:'smooth'})">⚠ Конфликты</button>
+   <button class="btn ghost sm" onclick="removeDuplicates()" title="Удалить занятия-дубли, наложенные друг на друга">🧹 Убрать дубли</button>
+   <button class="btn ghost sm" onclick="snapTimes()" title="Сдвинуть время занятий к ближайшему получасовому слоту (17:50→18:00), чтобы они отображались в сетке">🕐 Выровнять время</button>
+  </span>
+  <span class="hd-sep"></span>
+  <span class="hd-grp">
+   <button class="btn sm" onclick="autoPlaceConfirm()">✨ Авторазложить</button>
+   <button class="btn ghost sm" onclick="clearRooms()" title="Убрать кабинеты только за активный день">🧽 Очистить день</button>
+  </span>
+  <span class="hd-sep"></span>
+  <span class="hd-grp">
+   <button class="btn sm" onclick="printSchedule()" title="Распечатать расписание для менеджеров">🖨 Печать</button>
+  </span>
  </div>
  <div class="dayTabs" id="dayTabs"></div>
  <div id="conflictBanner"></div>
@@ -1249,7 +1266,7 @@ if(!S.staff){ S.staff = JSON.parse(JSON.stringify(STAFF_SEED)); }
 if(!S.wageTable){ S.wageTable = JSON.parse(JSON.stringify(WAGE_TABLE)); }
 const DAY_NAMES=["","Пн","Вт","Ср","Чт","Пт","Сб","Вс"];
 const DAY_FULL=["","Понедельник","Вторник","Среда","Четверг","Пятница","Суббота","Воскресенье"];
-let curDay = 5; // стартуем с пятницы (есть данные)
+let curDay = 1; // стартуем с понедельника
 
 /* ЗП за одно занятие по числу детей (ваша сетка ставок) */
 function wageForLesson(course, students){
@@ -1483,10 +1500,12 @@ function autoPlaceConfirm(){
   }
 }
 function clearRooms(){
-  if(!confirm("Убрать кабинеты у всех занятий (вернуть в карточки сверху)?")) return;
-  S.grid.forEach(l=>l.room="");
+  const dn=DAY_FULL[curDay]||("день "+curDay);
+  if(!confirm("Убрать кабинеты у занятий за "+dn+"? (другие дни не тронутся)")) return;
+  let n=0;
+  S.grid.forEach(l=>{ if(l.day===curDay && l.room){ l.room=""; n++; } });
   persistLocal(); renderGrid(); renderStaff(); renderConflictBanner();
-  toast("Кабинеты очищены");
+  toast("Кабинеты очищены за "+dn+": "+n);
 }
 
 
@@ -1950,7 +1969,8 @@ const ALPHA_COURSE_MAP = {
 };
 const DAY_MAP_RU={"Понедельник":1,"Вторник":2,"Среда":3,"Четверг":4,"Пятница":5,"Суббота":6,"Воскресенье":7};
 
-function triggerAlphaImport(){ document.getElementById("alphaFile").click(); }
+let _importDayOnly=false;
+function triggerAlphaImport(dayOnly){ _importDayOnly=!!dayOnly; document.getElementById("alphaFile").click(); }
 
 async function importAlphaFile(ev){
   const f=ev.target.files[0]; if(!f) return;
@@ -1962,6 +1982,12 @@ async function importAlphaFile(ev){
     const ws=wb.Sheets[wb.SheetNames[0]];
     const rows=XLSX.utils.sheet_to_json(ws,{header:1,defval:""});
     const parsed=parseAlphaRows(rows);
+    if(_importDayOnly){
+      const before=parsed.lessons.length;
+      parsed.lessons=parsed.lessons.filter(l=>l.day===curDay);
+      parsed.dayOnly=true; parsed.dayOnlyDay=curDay;
+      if(!parsed.lessons.length){ toast("В файле нет занятий за "+(DAY_FULL[curDay]||("день "+curDay))); return; }
+    }
     if(!parsed.lessons.length){ toast("Не найдено занятий в файле"); return; }
     showImportPreview(parsed);
   }catch(e){ console.error(e); toast("Ошибка чтения файла"); }
@@ -2004,7 +2030,8 @@ function showImportPreview(parsed){
     <p style="font-size:13px;margin-bottom:8px">Найдено занятий: <b>${parsed.lessons.length}</b></p>
     <p style="font-size:13px;margin-bottom:10px">По дням: ${dh}</p>
     ${warn}
-    <div class="callout" style="border-left-color:var(--terra)"><b>Заменить</b> — текущая сетка очистится и заполнится из файла. <b>Добавить</b> — занятия добавятся к текущим.</div>`;
+    ${parsed.dayOnly?`<div class="callout" style="border-left-color:var(--blue)"><b>Импорт только за ${DAY_FULL[parsed.dayOnlyDay]}.</b> Остальные дни не тронутся.</div>`:""}
+    <div class="callout" style="border-left-color:var(--terra)"><b>Заменить</b> — ${parsed.dayOnly?("очистятся занятия только за "+DAY_FULL[parsed.dayOnlyDay]+" и заполнятся из файла"):"текущая сетка очистится и заполнится из файла"}. <b>Добавить</b> — занятия добавятся к текущим.</div>`;
   document.getElementById("impModal").classList.add("show");
   document.getElementById("impModal")._parsed=parsed;
 }
@@ -2019,9 +2046,19 @@ function applyImport(mode){
     }
     if(l.teacher && !S.staff.some(s=>s.name===l.teacher)) S.staff.push({name:l.teacher,wageMode:"tier",fixedRate:0});
   });
-  if(mode==="replace") S.grid = JSON.parse(JSON.stringify(parsed.lessons));
-  else S.grid = S.grid.concat(JSON.parse(JSON.stringify(parsed.lessons)));
-  persistLocal(); closeImport(); renderAll(); curDay=1; renderGrid();
+  const newLes=JSON.parse(JSON.stringify(parsed.lessons));
+  if(mode==="replace"){
+    if(parsed.dayOnly){
+      const d=parsed.dayOnlyDay;
+      S.grid = S.grid.filter(l=>l.day!==d).concat(newLes); // чистим только этот день
+    } else {
+      S.grid = newLes;
+    }
+  } else {
+    S.grid = S.grid.concat(newLes);
+  }
+  const goDay = parsed.dayOnly ? parsed.dayOnlyDay : 1;
+  persistLocal(); closeImport(); renderAll(); curDay=goDay; renderGrid();
   toast(mode==="replace"?("Загружено "+parsed.lessons.length+" занятий"):("Добавлено "+parsed.lessons.length+" занятий"));
 }
 function closeImport(){ document.getElementById("impModal").classList.remove("show"); }
