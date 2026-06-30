@@ -389,7 +389,7 @@ tr.rowlocked input,tr.rowlocked select{background:#EAF3EC;border-color:#cfe3d4;c
 <section class="panel" id="tax">
  <h2 class="sec">Налоги РБ и ФОТ</h2>
  <div class="sec-desc">Юрисдикция — Республика Беларусь, ООО на УСН. Ставки актуальны на 2026 год; проверяйте с бухгалтером.</div>
- <div class="callout"><b>Важно:</b> в РБ нет «УСН доходы минус расходы». Налог при УСН — 6% от валовой выручки. Взносы ФСЗН 34% и Белгосстрах 0,6% платятся сверх ФОТ работников по трудовым договорам.</div>
+ <div class="callout"><b>Важно:</b> в РБ нет «УСН доходы минус расходы». Налог при УСН — 6% от валовой выручки. Взносы ФСЗН 34% и Белгосстрах 0,6% платятся с ФОТ работников по трудовым договорам. Сотрудники на НПД (самозанятые — например, видеограф, СММ) взносами не облагаются: укажите их ФОТ в поле «ФОТ на НПД», он вычитается из базы.</div>
  <div class="row2">
   <div class="card"><h3>Ставки</h3><div id="taxRates"></div></div>
   <div class="card"><h3>Расчёт налоговой нагрузки</h3><table id="taxCalc"></table></div>
@@ -532,7 +532,8 @@ const DEFAULT_STATE = {
   },
   tax: { usn:6, fszn:34, belgosstrah:0.6, acquiring:1.0 },
   fixedPct: [],  // расходы в % от оборота: [{name, pct}]
-  fotTaxable: 70, // % ФОТ по трудовым договорам (облагается ФСЗН)
+  fotTaxable: 100, // (устаревшее) % ФОТ по трудовым; теперь база = весь ФОТ − НПД
+  _npdMonth: 0,   // сумма ФОТ на НПД (видеограф, СММ) — НЕ облагается взносами
   assume: { weeksPerMonth:4, targetProfitShare:18, ownerSalary:0 },
   gasUrl: "https://script.google.com/macros/s/AKfycbxJajbntVctGjXImc1hVhWimvOkXHcNCkuVFpszEbA8ad-B40Lj2Q8gdMMTBar4YLnsew/exec"
 };
@@ -701,12 +702,15 @@ function totals(){
   const opProfit=grossProfit-fixed-pctExpense;
   // налоги
   const usn=rev*(S.tax.usn/100);
-  const fotBase=wage*(S.fotTaxable/100); // часть ФОТ по трудовым
+  // База взносов = ФОТ педагогов + ФОТ админ-команды − сумма НПД (самозанятые), не меньше 0
+  const adminFOT=sumAdminFOT();
+  const npd=+S._npdMonth||0;
+  const fotBase=Math.max(0, wage + adminFOT - npd);
   const fszn=fotBase*(S.tax.fszn/100);
   const belg=fotBase*(S.tax.belgosstrah/100);
   const taxTotal=usn+fszn+belg;
   const netProfit=opProfit-taxTotal-(+S.assume.ownerSalary||0);
-  return {rev,wage,mat,lessons,kids,fixed,pctExpense,variableExtra,grossProfit,opProfit,usn,fszn,belg,taxTotal,netProfit};
+  return {rev,wage,mat,lessons,kids,fixed,pctExpense,variableExtra,grossProfit,opProfit,usn,fszn,belg,taxTotal,netProfit,fotBase,adminFOT,npd};
 }
 function fmt(n){ if(n===null||n===undefined||isNaN(n)) return "—";
   return Math.round(n).toLocaleString("ru-RU"); }
@@ -997,12 +1001,15 @@ function renderTax(){
    <div class="field"><label>ФСЗН (наниматель), %<span class="hint">от ФОТ по труд. договорам</span></label><input type="number" value="${S.tax.fszn}" onchange="updTax('fszn',this.value)"></div>
    <div class="field"><label>Белгосстрах, %<span class="hint">от ФОТ</span></label><input type="number" value="${S.tax.belgosstrah}" onchange="updTax('belgosstrah',this.value)"></div>
    <div class="field"><label>Эквайринг, % от выручки</label><input type="number" value="${S.tax.acquiring}" onchange="updTax('acquiring',this.value)"></div>
-   <div class="field"><label>Доля ФОТ по труд. договорам, %<span class="hint">остальное — ГПХ/самозанятые/ИП</span></label><input type="number" value="${S.fotTaxable}" onchange="updFot(this.value)"></div>`;
+   <div class="field"><label>ФОТ на НПД (самозанятые), р/мес<span class="hint">видеограф, СММ — НЕ облагается взносами</span></label><input type="number" value="${S._npdMonth||0}" onchange="updNpd(this.value)"></div>`;
   const T=totals();
   document.getElementById("taxCalc").innerHTML=`<tbody>
    <tr><td>Валовая выручка/мес</td><td class="num">${fmt(T.rev)} р</td></tr>
-   <tr><td>Налог УСN (${S.tax.usn}%)</td><td class="num neg">${fmt(T.usn)} р</td></tr>
-   <tr><td>ФОТ облагаемый (${S.fotTaxable}% от ЗП)</td><td class="num">${fmt(T.wage*S.fotTaxable/100)} р</td></tr>
+   <tr><td>Налог УСН (${S.tax.usn}%)</td><td class="num neg">${fmt(T.usn)} р</td></tr>
+   <tr><td>ФОТ педагогов/мес</td><td class="num">${fmt(T.wage)} р</td></tr>
+   <tr><td>ФОТ админ-команды/мес</td><td class="num">${fmt(T.adminFOT)} р</td></tr>
+   <tr><td>− ФОТ на НПД (не облагается)</td><td class="num">−${fmt(T.npd)} р</td></tr>
+   <tr><td><b>База взносов</b> (педагоги + админ − НПД)</td><td class="num"><b>${fmt(T.fotBase)} р</b></td></tr>
    <tr><td>ФСЗН (${S.tax.fszn}%)</td><td class="num neg">${fmt(T.fszn)} р</td></tr>
    <tr><td>Белгосстрах (${S.tax.belgosstrah}%)</td><td class="num neg">${fmt(T.belg)} р</td></tr>
    <tr class="totrow"><td>Итого налоги и взносы</td><td class="num">${fmt(T.taxTotal)} р</td></tr>
@@ -1010,7 +1017,7 @@ function renderTax(){
   </tbody>`;
 }
 function updTax(k,v){ S.tax[k]=parseFloat(v)||0; persistLocal(); renderAll(); }
-function updFot(v){ S.fotTaxable=parseFloat(v)||0; persistLocal(); renderAll(); }
+function updNpd(v){ S._npdMonth=parseFloat(v)||0; persistLocal(); renderAll(); }
 
 /* ===== РЕНДЕР: ПАРАМЕТРЫ ===== */
 function renderSettings(){
