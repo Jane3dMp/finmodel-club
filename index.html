@@ -171,6 +171,7 @@ small.note{font-size:11px;color:var(--muted)}
 #courseTable .eco-sel{width:42px;padding:5px 2px;text-align:center}
 #courseTable td input[type="number"]{width:62px}
 #courseTable .iconbtn{padding:2px 6px;font-size:11px;line-height:1.2;min-width:0}
+#courseTable .ly-col{background:rgba(120,90,60,.05);border-left:1px dashed var(--line)}
 
 .pin{cursor:pointer;font-size:13px;user-select:none;opacity:.6}
 .pin:hover{opacity:1}
@@ -262,7 +263,6 @@ tr.rowlocked input,tr.rowlocked select{background:#EAF3EC;border-color:#cfe3d4;c
   <button class="btn ghost sm" onclick="sortCourses('name')">⇅ По алфавиту</button>
   <button class="btn ghost sm" onclick="sortCourses('eco')">⇅ По экосистеме</button>
   <button class="btn ghost sm" onclick="fillTarget()">Заполнить целевой наполняемостью</button>
-  <button class="btn ghost sm" onclick="applyLastYearFill()" title="Средняя наполняемость из Альфы за 2025/2026">📊 Факт прошлого года</button>
   <button class="btn gray sm" onclick="exportJSON()">Экспорт JSON</button>
   <button class="btn gray sm" onclick="document.getElementById('impFile').click()">Импорт JSON</button>
   <input type="file" id="impFile" hidden accept=".json" onchange="importJSON(event)">
@@ -795,8 +795,10 @@ function renderCourses(){
   const t=document.getElementById("courseTable");
   let h=`<thead><tr>
     <th style="width:24px"></th><th class="col-name">Курс</th><th class="col-eco" title="Экосистема: П — Прознание, C — CODDY, Д — Детали">Эко</th><th>Цена</th><th>ЗП/зан</th>
-    <th>Групп/нед</th><th title="Сколько раз в неделю ходит группа">Визиты</th><th>Факт детей</th>
-    <th title="Реальный оборот по этому курсу в среднем за месяц 2025/2026">Факт/мес 25/26</th><th>Оборот/мес</th><th title="Оборот минус зарплата педагога. НЕ учтены аренда, налоги, команда — это не прибыль">Маржа после ЗП, р</th><th title="Маржа после ЗП ÷ оборот">Маржа после ЗП, %</th><th>Мин</th><th></th></tr></thead><tbody>`;
+    <th>Групп/нед</th><th title="Сколько раз в неделю ходит группа">Визиты</th><th title="Моделируемое вами число детей в группе">Факт детей</th>
+    <th>Оборот/мес</th><th title="Оборот минус зарплата педагога. НЕ учтены аренда, налоги, команда — это не прибыль">Маржа после ЗП, р</th><th title="Маржа после ЗП ÷ оборот">Маржа после ЗП, %</th>
+    <th class="ly-col" title="Средняя наполняемость прошлого года (неизменно, из Альфы)">Факт детей 25/26</th><th class="ly-col" title="Реальный оборот по курсу в среднем за месяц 2025/2026 (неизменно)">Факт/мес 25/26</th>
+    <th>Мин</th><th></th></tr></thead><tbody>`;
   S.courses.forEach((c,i)=>{
     const r=applyScn(c);
     let sig="", cls="";
@@ -818,10 +820,11 @@ function renderCourses(){
         <option value="1" ${(+c.visits||1)==1?"selected":""}>1×</option>
         <option value="2" ${(+c.visits||1)==2?"selected":""}>2×</option></select></td>
       <td><input class="cell" type="number" value="${c.fill}" ${da} onchange="upd(${i},'fill',this.value)"></td>
-      <td class="num muted" title="факт прошлого года">${(()=>{const f=lastYearIncomeMonth(c.name);return f?fmt(f):"—";})()}</td>
       <td class="num">${fmt(r.revenue)}</td>
       <td class="num ${r.margin>=0?'pos':'neg'}">${fmt(r.margin)}</td>
       <td class="num">${r.revenue>0?fmt1(r.marginPct)+'%':'—'}</td>
+      <td class="num muted ly-col" title="наполняемость прошлого года">${(()=>{const f=lastYearFillFor(c.name);return f?f.toFixed(1):"—";})()}</td>
+      <td class="num muted ly-col" title="оборот прошлого года">${(()=>{const f=lastYearIncomeMonth(c.name);return f?fmt(f):"—";})()}</td>
       <td class="num"><span class="sig ${cls}">${sig}</span> ${r.minFill||'—'}</td>
       <td style="white-space:nowrap">${lk?'<span class="muted" style="font-size:11px">🔒</span>':`<button class="btn ghost iconbtn" onclick="rowDup('courses',${i},renderCourses)" title="Копировать строку">⧉</button><button class="btn gray iconbtn" onclick="delCourse(${i})" title="Удалить">×</button>`}</td>
     </tr>`;
@@ -836,13 +839,14 @@ function renderCourses(){
     `<td></td>`+
     `<td></td>`+
     `<td></td>`+
-    `<td class="num" title="Всего групп в неделю по всем курсам (сумма столбца «Групп/нед»)">${_totGroups}</td>`+
+    `<td class="num" title="Всего групп в неделю по всем курсам">${_totGroups}</td>`+
     `<td></td>`+
     `<td class="num" title="Всего детей-мест: по каждому курсу «факт детей × группы», затем сложено">${T.kids}</td>`+
-    `<td class="num muted" title="Сумма факта прошлого года из Альфы">${_totLastYear}</td>`+
-    `<td class="num" title="Сумма оборотов всех курсов (= сумме столбца «Оборот/мес»)">${fmt(T.rev)}</td>`+
-    `<td class="num" title="Оборот минус ФАКТИЧЕСКИЙ ФОТ из расписания. Может не совпадать с суммой столбца «Маржа после ЗП» — там зарплата из карточек курсов">${fmt(T.rev-T.wage-T.mat)}</td>`+
+    `<td class="num" title="Сумма оборотов всех курсов">${fmt(T.rev)}</td>`+
+    `<td class="num" title="Оборот минус ФАКТИЧЕСКИЙ ФОТ из расписания">${fmt(T.rev-T.wage-T.mat)}</td>`+
     `<td></td>`+
+    `<td class="ly-col"></td>`+
+    `<td class="num muted ly-col" title="Сумма факта прошлого года из Альфы">${_totLastYear}</td>`+
     `<td></td>`+
     `<td></td>`+
   `</tr>`;
@@ -888,6 +892,11 @@ function courseDrop(e,i){
 function lastYearIncomeMonth(name){
   let v=LASTYEAR_INCOME.month[name];
   if(v==null){ const k=Object.keys(LASTYEAR_INCOME.month).find(k=>name.indexOf(k)===0||k.indexOf(name)===0); if(k)v=LASTYEAR_INCOME.month[k]; }
+  return v||0;
+}
+function lastYearFillFor(name){
+  let v=LASTYEAR_FILL[name];
+  if(v==null){ const k=Object.keys(LASTYEAR_FILL).find(k=>name.indexOf(k)===0||k.indexOf(name)===0); if(k)v=LASTYEAR_FILL[k]; }
   return v||0;
 }
 
