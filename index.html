@@ -151,6 +151,9 @@ small.note{font-size:11px;color:var(--muted)}
 .les .pin{cursor:pointer;font-size:11px;float:right;opacity:.55;line-height:1}
 .les .pin:hover{opacity:1}
 .les.pinned{border-left-color:var(--green);background:#EAF3EC}
+.les.newintake{border:2px solid #E8863B;border-left:4px solid #E8863B;background:#FDF1E5}
+.les.newintake.pinned{background:#FDF1E5}
+.ni-badge{font-size:11px}
 .les.pinned b{color:var(--green)}
 
 .cell-les{vertical-align:top;padding:1px!important}
@@ -1523,6 +1526,7 @@ function renderGrid(){
         const idx=S.grid.indexOf(les);
         drawn.add(idx);
         const pinned=!!les.pinned;
+        const newintake=!!les.newIntake;
         // сколько слотов занимает занятие
         let dur=minDiff(les.start,les.end); if(!dur||dur<SLOTMIN) dur=SLOTMIN;
         let span=Math.round(dur/SLOTMIN); if(span<1) span=1;
@@ -1531,13 +1535,14 @@ function renderGrid(){
         // пометим перекрытые ячейки ниже
         for(let k=1;k<span;k++){ covered[(si+k)+"_"+room]=true; }
         h+=`<td class="cell-les" rowspan="${span}" ondragover="dragOver(event)" ondrop="dropLes(event,'${slot}','${esc(room)}')">
-          <div class="les${pinned?' pinned':''}" style="height:100%" draggable="${pinned?'false':'true'}" ${pinned?'':`ondragstart="dragStart(event,${idx})" ondragend="dragEnd(event)"`} onclick="editLes(${idx})">
+          <div class="les${pinned?' pinned':''}${newintake?' newintake':''}" style="height:100%" draggable="${pinned?'false':'true'}" ${pinned?'':`ondragstart="dragStart(event,${idx})" ondragend="dragEnd(event)"`} onclick="editLes(${idx})">
             <div class="les-tools">
               <span class="lt-btn" onclick="event.stopPropagation();togglePin(${idx})" title="${pinned?'Открепить':'Закрепить'}">${pinned?'📌':'📍'}</span>
+              <span class="lt-btn" onclick="event.stopPropagation();toggleNewIntake(${idx})" title="${newintake?'Снять «новый набор»':'Отметить «новый набор»'}">${newintake?'🟠':'🆕'}</span>
               <span class="lt-btn" onclick="event.stopPropagation();dupLes(${idx})" title="Копировать занятие">⧉</span>
               <span class="lt-btn lt-del" onclick="event.stopPropagation();delLesByIdx(${idx})" title="Удалить занятие">×</span>
             </div>
-            <b>${esc(les.course)}${les.note?` <span class="les-note" title="${esc(les.note)}">📝</span>`:""}</b>
+            <b>${newintake?'<span class="ni-badge" title="Новый набор">🟠</span> ':''}${esc(les.course)}${les.note?` <span class="les-note" title="${esc(les.note)}">📝</span>`:""}</b>
             <span>${les.start}–${les.end}</span>
             <span class="lt">${esc(shortName(les.teacher))} · ${les.students}👤 · ${w}р</span>
             ${les.note?`<span class="les-notet" title="${esc(les.note)}">📝 ${esc(les.note)}</span>`:""}
@@ -1748,6 +1753,12 @@ function togglePin(idx){
   persistLocal(); renderGrid();
   toast(l.pinned?"Занятие закреплено (утверждено)":"Закрепление снято");
 }
+function toggleNewIntake(idx){
+  const l=S.grid[idx]; if(!l) return;
+  l.newIntake=!l.newIntake;
+  persistLocal(); renderGrid();
+  toast(l.newIntake?"Отмечено: новый набор":"Метка «новый набор» снята");
+}
 
 let _dragIdx=null;
 function dragStart(e,idx){ if(S.grid[idx]&&S.grid[idx].pinned){e.preventDefault();return;} _dragIdx=idx; e.dataTransfer.effectAllowed="move"; setTimeout(()=>{ if(e.target.classList) e.target.style.opacity="0.4"; },0); }
@@ -1821,6 +1832,9 @@ function editLes(idx){
      <div><label>Учеников</label><input id="mStud" type="number" class="cell wide" value="${l.students}"></div>
     </div>
     <label>Примечание</label><textarea id="mNote" class="cell wide" rows="2" placeholder="например: замена, пробное, перенос с пятницы…">${esc(l.note||"")}</textarea>
+    <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-top:8px">
+      <input type="checkbox" id="mNewIntake" ${l.newIntake?"checked":""} style="width:auto">
+      <span>🟠 Новый набор (подсветить оранжевым)</span></label>
     <div class="callout">ЗП за это занятие: <b id="mWage">${wageForLesson(l.course,l.students,l)} р</b> ${S._wageMode==="fix"?"(фикс-ставка)":"(по ставке для "+l.students+" детей)"}</div>`;
   document.getElementById("lesModal").classList.add("show");
   document.getElementById("lesModal").dataset.idx=idx;
@@ -1849,6 +1863,7 @@ function saveLes(){
   l.room=document.getElementById("mRoom").value;
   l.students=+document.getElementById("mStud").value||0;
   l.note=(document.getElementById("mNote").value||"").trim();
+  l.newIntake=!!document.getElementById("mNewIntake")?.checked;
   persistLocal(); closeLes(); renderGrid(); renderStaff();
 }
 function delLes(){
