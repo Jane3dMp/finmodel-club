@@ -264,11 +264,13 @@ tr.rowlocked input,tr.rowlocked select{background:#EAF3EC;border-color:#cfe3d4;c
   <button class="btn ghost sm" onclick="sortCourses('name')">⇅ По алфавиту</button>
   <button class="btn ghost sm" onclick="sortCourses('eco')">⇅ По экосистеме</button>
   <button class="btn ghost sm" onclick="fillTarget()">Заполнить целевой наполняемостью</button>
+  <button class="btn ghost sm" onclick="checkCourseNames()" title="Сверить названия курсов в таблице и в расписании">🔍 Проверить названия</button>
   <button class="btn gray sm" onclick="exportJSON()">Экспорт JSON</button>
   <button class="btn gray sm" onclick="document.getElementById('impFile').click()">Импорт JSON</button>
   <input type="file" id="impFile" hidden accept=".json" onchange="importJSON(event)">
  </div>
- <div class="tscroll"><table id="courseTable"></table></div>
+ <div id="nameCheckResult"></div>
+  <div class="tscroll"><table id="courseTable"></table></div>
  <div class="callout"><b>Подсказка:</b> «целевой размер группы» — это план (из листа «Емкость»). «Факт детей» — сколько реально ходит. Разница между ними и есть ваш резерв роста выручки без новых затрат.<br><br><b>Про маржу:</b> «Маржа после ЗП» = оборот минус зарплата педагога. Аренда, налоги, эквайринг и команда сюда НЕ входят — это не чистая прибыль (она на Дашборде и в «Точке безубыточности»).<br><b>Про строку ИТОГО:</b> «Оборот», «Групп/нед» и «Факт детей» — это точная сумма столбцов выше. А «Маржа» в ИТОГО считается по <b>фактическому ФОТ из расписания</b>, поэтому может не совпадать с суммой столбца «Маржа после ЗП» (там зарплата берётся из карточек курсов).</div>
 </section>
 
@@ -673,6 +675,37 @@ function doPost(e){
 /* ===== РАСЧЁТЫ ===== */
 /* Фикс-ЗП/зан для отображения в таблице курсов (Вариант 3):
    один педагог курса с заданной ставкой → число; иначе → null (прочерк). */
+function checkCourseNames(){
+  const box=document.getElementById("nameCheckResult"); if(!box) return;
+  const gridSet={}; (S.grid||[]).forEach(l=>{ if(l.course) gridSet[l.course]=1; });
+  const gridCourses=Object.keys(gridSet).sort((a,b)=>a.localeCompare(b,"ru"));
+  const tableCourses=(S.courses||[]).map(c=>c.name);
+  const tableSet={}; tableCourses.forEach(n=>tableSet[n]=1);
+  const inGridNotTable=gridCourses.filter(c=>!tableSet[c]);
+  const inTableNotGrid=tableCourses.filter(c=>!gridSet[c]).sort((a,b)=>a.localeCompare(b,"ru"));
+  const matched=gridCourses.filter(c=>tableSet[c]);
+  let html='<div class="card" style="margin:10px 0;border-left:4px solid var(--terra)">';
+  html+='<h3>Проверка совпадения названий</h3>';
+  html+='<div class="sec-desc">Фикс-ставка подтягивается только при точном совпадении названия курса в таблице и в расписании. Ниже — расхождения, которые стоит выровнять.</div>';
+  if(!inGridNotTable.length && !inTableNotGrid.length){
+    html+='<p style="color:var(--green);font-weight:600">✓ Все названия совпадают. Расхождений нет.</p>';
+  } else {
+    if(inGridNotTable.length){
+      html+='<p style="font-weight:600;margin-top:10px">🟡 Есть в расписании, но НЕТ точного совпадения в таблице курсов ('+inGridNotTable.length+'):</p><ul style="margin:4px 0 0 18px">';
+      inGridNotTable.forEach(c=>{ html+='<li>«'+esc(c)+'»</li>'; });
+      html+='</ul>';
+    }
+    if(inTableNotGrid.length){
+      html+='<p style="font-weight:600;margin-top:10px">⚪ Есть в таблице курсов, но НЕТ в расписании ('+inTableNotGrid.length+'):</p><ul style="margin:4px 0 0 18px">';
+      inTableNotGrid.forEach(c=>{ html+='<li>«'+esc(c)+'»</li>'; });
+      html+='</ul>';
+    }
+    html+='<div class="sec-desc" style="margin-top:10px">Приведите названия к единому виду (в расписании или в таблице), чтобы фикс-ставка подтянулась. Совпадают сейчас: '+matched.length+' курс(ов).</div>';
+  }
+  html+='<div style="margin-top:8px"><button class="btn ghost sm" onclick="document.getElementById(\'nameCheckResult\').innerHTML=\'\'">Закрыть</button></div>';
+  html+='</div>';
+  box.innerHTML=html;
+}
 function courseFixWageDisplay(courseName){
   // педагоги, ведущие этот курс в расписании
   const teachers={};
