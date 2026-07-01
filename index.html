@@ -671,6 +671,17 @@ function doPost(e){
 }`;
 
 /* ===== РАСЧЁТЫ ===== */
+/* Фикс-ЗП/зан для отображения в таблице курсов (Вариант 3):
+   один педагог курса с заданной ставкой → число; иначе → null (прочерк). */
+function courseFixWageDisplay(courseName){
+  // педагоги, ведущие этот курс в расписании
+  const teachers={};
+  (S.grid||[]).forEach(l=>{ if(l.course===courseName && l.teacher) teachers[l.teacher]=l; });
+  const names=Object.keys(teachers);
+  if(names.length!==1) return null;            // 0 или несколько педагогов → прочерк
+  const rate=fixRateFor(teachers[names[0]]);   // ставка по педагогу+длительности занятия
+  return rate>0 ? rate : null;                 // ставка не задана → прочерк
+}
 function applyScn(c){
   // возвращает рассчитанные показатели курса с учётом сценария
   const wpm=S.assume.weeksPerMonth;
@@ -826,7 +837,7 @@ function renderCourses(){
       <td class="col-eco"><select class="cell eco-sel" ${da} title="${esc(c.eco)}" onchange="upd(${i},'eco',this.value)">
         ${[["Прознание","П"],["CODDY","C"],["Детали","Д"]].map(([v,lab])=>`<option value="${v}" ${c.eco===v?"selected":""}>${lab}</option>`).join("")}</select></td>
       <td><input class="cell" type="number" value="${c.price}" ${da} onchange="upd(${i},'price',this.value)"></td>
-      <td class="num" title="из справочника ставок по ${r.fillN||c.fill||4} детям"><b>${fmt(r.wage)}</b></td>
+      <td class="num" title="${S._wageMode==='fix'?'фикс-ставка педагога курса (прочерк = один педагог не назначен или ставка не задана)':'из справочника ставок по '+(r.fillN||c.fill||4)+' детям'}"><b>${(()=>{ if(S._wageMode==='fix'){ const fw=courseFixWageDisplay(c.name); return fw!=null?fmt(fw):'—'; } return fmt(r.wage); })()}</b></td>
       <td><input class="cell" type="number" value="${c.groups}" ${da} onchange="upd(${i},'groups',this.value)"></td>
       <td><select class="cell" ${da} onchange="upd(${i},'visits',this.value)">
         <option value="1" ${(+c.visits||1)==1?"selected":""}>1×</option>
