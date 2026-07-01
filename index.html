@@ -706,6 +706,12 @@ function checkCourseNames(){
   html+='</div>';
   box.innerHTML=html;
 }
+function courseGroupsInGrid(courseName, visits){
+  let lessons=0;
+  (S.grid||[]).forEach(l=>{ if(l.course===courseName) lessons++; });
+  const v=Math.max(1, +visits||1);
+  return Math.round(lessons/v);
+}
 function courseFixWageDisplay(courseName){
   // педагоги, ведущие этот курс в расписании
   const teachers={};
@@ -851,7 +857,7 @@ function renderCourses(){
   const t=document.getElementById("courseTable");
   let h=`<thead><tr>
     <th style="width:24px"></th><th class="col-name">Курс</th><th class="col-eco" title="Экосистема: П — Прознание, C — CODDY, Д — Детали">Эко</th><th>Цена</th><th>ЗП/зан</th>
-    <th>Групп/нед</th><th title="Сколько раз в неделю ходит группа">Визиты</th><th title="Моделируемое вами число детей в группе">Факт детей</th>
+    <th>Групп/нед</th><th title="Сколько групп этого курса уже стоит в расписании (занятия÷визиты). Обновляется из сетки">В расписании</th><th title="Сколько раз в неделю ходит группа">Визиты</th><th title="Моделируемое вами число детей в группе">Факт детей</th>
     <th>Оборот/мес</th><th title="Оборот минус зарплата педагога. НЕ учтены аренда, налоги, команда — это не прибыль">Маржа после ЗП, р</th><th title="Маржа после ЗП ÷ оборот">Маржа после ЗП, %</th>
     <th class="ly-col" title="Средняя наполняемость прошлого года (неизменно, из Альфы)">Факт детей 25/26</th><th class="ly-col" title="Реальный оборот по курсу в среднем за месяц 2025/2026 (неизменно)">Факт/мес 25/26</th>
     <th>Мин</th><th></th></tr></thead><tbody>`;
@@ -872,6 +878,7 @@ function renderCourses(){
       <td><input class="cell" type="number" value="${c.price}" ${da} onchange="upd(${i},'price',this.value)"></td>
       <td class="num" title="${S._wageMode==='fix'?'фикс-ставка педагога курса (прочерк = один педагог не назначен или ставка не задана)':'из справочника ставок по '+(r.fillN||c.fill||4)+' детям'}"><b>${(()=>{ if(S._wageMode==='fix'){ const fw=courseFixWageDisplay(c.name); return fw!=null?fmt(fw):'—'; } return fmt(r.wage); })()}</b></td>
       <td><input class="cell" type="number" value="${c.groups}" ${da} onchange="upd(${i},'groups',this.value)"></td>
+      <td class="num" title="групп в расписании (из сетки)">${(()=>{ const g=courseGroupsInGrid(c.name,c.visits); const plan=+c.groups||0; const cls=g===plan?'pos':(g<plan?'neg':''); return `<b class="${cls}">${g}</b>`; })()}</td>
       <td><select class="cell" ${da} onchange="upd(${i},'visits',this.value)">
         <option value="1" ${(+c.visits||1)==1?"selected":""}>1×</option>
         <option value="2" ${(+c.visits||1)==2?"selected":""}>2×</option></select></td>
@@ -896,6 +903,7 @@ function renderCourses(){
     `<td></td>`+
     `<td></td>`+
     `<td class="num" title="Всего групп в неделю по всем курсам">${_totGroups}</td>`+
+    `<td class="num" title="Всего групп в расписании (из сетки)">${S.courses.reduce((a,c)=>a+courseGroupsInGrid(c.name,c.visits),0)}</td>`+
     `<td></td>`+
     `<td class="num" title="Всего детей-мест: по каждому курсу «факт детей × группы», затем сложено">${T.kids}</td>`+
     `<td class="num" title="Сумма оборотов всех курсов">${fmt(T.rev)}</td>`+
