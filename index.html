@@ -141,6 +141,8 @@ small.note{font-size:11px;color:var(--muted)}
 .chip:hover{background:#F8DCA8}
 .modal label{font-size:11px;color:var(--muted);font-weight:600;display:block;margin-top:8px}
 .modal .cell.wide{width:100%}
+#lesModal .modal{max-width:640px}
+#lesModal #mNote{min-height:150px;resize:vertical;font-size:13px;line-height:1.4}
 
 
 /* липкая шапка сетки расписания — top задаётся из JS (высота навигации) */
@@ -1831,7 +1833,7 @@ function editLes(idx){
      <div><label>Кабинет</label><select id="mRoom" class="cell wide">${roomOpts}</select></div>
      <div><label>Учеников</label><input id="mStud" type="number" class="cell wide" value="${l.students}"></div>
     </div>
-    <label>Примечание</label><textarea id="mNote" class="cell wide" rows="2" placeholder="например: замена, пробное, перенос с пятницы…">${esc(l.note||"")}</textarea>
+    <label>Примечание</label><textarea id="mNote" class="cell wide" rows="6" placeholder="например: замена, пробное, перенос с пятницы…">${esc(l.note||"")}</textarea>
     <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-top:8px">
       <input type="checkbox" id="mNewIntake" ${l.newIntake?"checked":""} style="width:auto">
       <span>🟠 Новый набор (подсветить оранжевым)</span></label>
