@@ -158,6 +158,7 @@ small.note{font-size:11px;color:var(--muted)}
 #gridTable{table-layout:fixed}
 #gridTable tbody tr{height:52px}
 .les-note{cursor:help;font-size:12px;opacity:.8}
+.les-notet{display:block;font-size:10px;line-height:1.15;color:var(--terra-d);font-style:italic;margin-top:1px;overflow:hidden;text-overflow:ellipsis}
 #gridTable tbody td{height:52px;box-sizing:border-box;vertical-align:top}
 #gridTable td.tslot{height:52px;font-size:12px}
 
@@ -1476,6 +1477,7 @@ function renderGrid(){
             <b>${esc(les.course)}${les.note?` <span class="les-note" title="${esc(les.note)}">📝</span>`:""}</b>
             <span>${les.start}–${les.end}</span>
             <span class="lt">${esc(shortName(les.teacher))} · ${les.students}👤 · ${w}р</span>
+            ${les.note?`<span class="les-notet" title="${esc(les.note)}">📝 ${esc(les.note)}</span>`:""}
           </div></td>`;
       } else {
         h+=`<td class="cell-empty" ondragover="dragOver(event)" ondrop="dropLes(event,'${slot}','${esc(room)}')" onclick="addLes('${slot}','${esc(room)}')"></td>`;
