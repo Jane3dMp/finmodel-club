@@ -535,14 +535,16 @@ const DEFAULT_STATE = {
   fixedPct: [],  // расходы в % от оборота: [{name, pct}]
   fotTaxable: 100, // (устаревшее) % ФОТ по трудовым; теперь база = весь ФОТ − НПД
   _npdMonth: 0,   // сумма ФОТ на НПД (видеограф, СММ) — НЕ облагается взносами
+  _wageMode: "kpi", // модель ЗП: kpi | fix
+  _fixRates: {},    // фикс-ставки: {педагог: {длительность_мин: ставка}}
   assume: { weeksPerMonth:4, targetProfitShare:18, ownerSalary:0 },
   gasUrl: "https://script.google.com/macros/s/AKfycbxJajbntVctGjXImc1hVhWimvOkXHcNCkuVFpszEbA8ad-B40Lj2Q8gdMMTBar4YLnsew/exec"
 };
+const LS_KEY = "proznanie_finmodel_v1";
 let S = load();
 let scenario = {fill:100,price:100,wage:100,rent:100};
 
 /* ===== ХРАНЕНИЕ ===== */
-const LS_KEY = "proznanie_finmodel_v1";
 function load(){
   try{ const r=localStorage.getItem(LS_KEY); if(r) return Object.assign(JSON.parse(JSON.stringify(DEFAULT_STATE)),JSON.parse(r)); }catch(e){}
   return JSON.parse(JSON.stringify(DEFAULT_STATE));
@@ -565,6 +567,15 @@ function persistLocal(){
     _lastSnap = _snap();
   }
   _persistLocalRaw();
+  // синхронизируем текущий сценарий, чтобы данные не терялись при перезагрузке
+  // (при старте S грузится из списка сценариев, а не только из LS_KEY)
+  try{
+    if(typeof loadScenarioList==="function" && typeof snapshotState==="function"){
+      const list=loadScenarioList();
+      list[currentScenarioName()]=snapshotState();
+      saveScenarioList(list);
+    }
+  }catch(e){}
 }
 function undo(){
   if(_undoStack.length===0){ toast("Нечего отменять"); return; }
@@ -2479,9 +2490,9 @@ if(S.gasUrl){
   // автоподключение: подгружаем из Google-таблицы при открытии
   fetch(S.gasUrl+"?action=load").then(r=>r.json()).then(j=>{
     if(j && j.ok && j.data && j.data.scenarios){
-      // объединяем: версии из таблицы + локальные (которые могли не успеть уехать)
+      // объединяем: локальные версии приоритетнее (свежие несохранённые правки не теряются)
       const localList=loadScenarioList();
-      const merged=Object.assign({}, localList, j.data.scenarios);
+      const merged=Object.assign({}, j.data.scenarios, localList);
       saveScenarioList(merged);
       const cur=j.data.current||Object.keys(merged)[0];
       if(merged[cur]) S=_loadState(merged[cur]);
