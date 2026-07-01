@@ -1724,7 +1724,9 @@ function renderGridSummary(){
    ${kpi("Занятий/нед",fmt(st.lessons),"coal","всего в сетке")}
    ${kpi("Детей-мест/нед",fmt(st.students),"blue","сумма учеников")}
    ${kpi("Оборот/нед",fmt(st.revWeek)+" р","green","цена×ученики")}
-   ${kpi("ФОТ педагогов/нед",fmt(st.wageWeek)+" р","red","по ставкам наполняемости")}`;
+   ${kpi("Оборот/мес",fmt(Math.round(st.revWeek*4))+" р","green","×4 недели")}
+   ${kpi("ФОТ педагогов/нед",fmt(st.wageWeek)+" р","red","по ставкам наполняемости")}
+   ${kpi("ФОТ педагогов/мес",fmt(Math.round(st.wageWeek*4))+" р","red","×4 недели")}`;
 }
 
 /* ====== РЕДАКТИРОВАНИЕ ЗАНЯТИЯ ====== */
