@@ -1101,8 +1101,24 @@ function renderCourses(){
   t.innerHTML=h;
 }
 function esc(s){return String(s).replace(/"/g,"&quot;");}
+/* нормализация имени (без учёта регистра и лишних пробелов) */
+function _normName(s){return String(s||"").trim().toLowerCase().replace(/\s+/g," ");}
+/* устойчивый список <option> для выпадашек по именам:
+   - value задаётся явно (браузер не срезает хвостовые пробелы),
+   - выбранная опция ищется без учёта регистра/пробелов,
+   - если текущего значения нет в списке — добавляем его первым (выбранным). */
+function optList(names, current){
+  const key=_normName(current); let matched=false;
+  let h=(names||[]).map(n=>{
+    const sel = !matched && _normName(n)===key;
+    if(sel) matched=true;
+    return `<option value="${esc(n)}"${sel?" selected":""}>${esc(n)}</option>`;
+  }).join("");
+  if(current && !matched) h=`<option value="${esc(current)}" selected>${esc(current)}</option>`+h;
+  return h;
+}
 function upd(i,k,v){
-  if(k==="name"||k==="eco") S.courses[i][k]=v;
+  if(k==="name"||k==="eco") S.courses[i][k]=String(v).trim().replace(/\s+/g," ");
   else S.courses[i][k]=parseFloat(v)||0;
   persistLocal(); renderAll();
 }
@@ -1519,10 +1535,10 @@ function renderPlanner(){
     const rev=cg*pr*g*v, kids=cg*g;
     const lk=isLocked('plan',i), da=lk?'disabled':'';
     // выпадающий список курсов из библиотеки
-    const opts=S.courses.map(c=>`<option ${c.name===p.name?"selected":""}>${esc(c.name)}</option>`).join("");
+    const opts=optList(S.courses.map(c=>c.name), p.name);
     h+=`<tr class="${lk?'rowlocked':''}" draggable="${lk?'false':'true'}" ${lk?'':`ondragstart="rowDragStart(event,'plan',${i})" ondragend="rowDragEnd(event)"`} ondragover="rowDragOver(event)" ondrop="rowDrop(event,'plan',${i},renderPlanner)">
       <td class="dragh" title="${lk?'Закреплено':'Перетащите'}">${rowLockBtn('plan',i,'renderPlanner')}</td>
-      <td><select class="cell wide" ${da} onchange="updPlan(${i},'name',this.value)">${opts}${lib?'':`<option selected>${esc(p.name)}</option>`}</select></td>
+      <td><select class="cell wide" ${da} onchange="updPlan(${i},'name',this.value)">${opts}</select></td>
       <td><input class="cell" type="number" value="${cg}" ${da} onchange="updPlan(${i},'perGroup',this.value)"></td>
       <td class="num muted" title="из библиотеки курсов">${fmt(pr)}</td>
       <td><input class="cell" type="number" value="${g}" ${da} onchange="updPlan(${i},'groups',this.value)"></td>
@@ -2008,11 +2024,9 @@ function addMin(t,min){ const[h,m]=t.split(":").map(Number); let tot=h*60+m+min;
   return String(Math.floor(tot/60)).padStart(2,"0")+":"+String(tot%60).padStart(2,"0"); }
 function editLes(idx){
   const l=S.grid[idx];
-  let courseOpts=S.courses.map(c=>`<option ${c.name===l.course?"selected":""}>${esc(c.name)}</option>`).join("");
-  if(l.course && !S.courses.some(c=>c.name===l.course)) courseOpts=`<option selected>${esc(l.course)}</option>`+courseOpts;
-  let teacherOpts=`<option value="">— педагог —</option>`+S.staff.map(s=>`<option ${s.name===l.teacher?"selected":""}>${esc(s.name)}</option>`).join("");
-  if(l.teacher && !S.staff.some(s=>s.name===l.teacher)) teacherOpts+=`<option selected>${esc(l.teacher)} (нет в списке)</option>`;
-  const roomOpts=`<option value="">— кабинет —</option>`+ROOMS.map(r=>`<option ${r===l.room?"selected":""}>${esc(r)}</option>`).join("");
+  let courseOpts=optList(S.courses.map(c=>c.name), l.course);
+  let teacherOpts=`<option value="">— педагог —</option>`+optList(S.staff.map(s=>s.name), l.teacher);
+  const roomOpts=`<option value="">— кабинет —</option>`+optList(ROOMS, l.room);
   document.getElementById("lesModalBody").innerHTML=`
     <label>Курс</label><select id="mCourse" class="cell wide">${courseOpts}</select>
     <label>Педагог</label><select id="mTeacher" class="cell wide">${teacherOpts}</select>
