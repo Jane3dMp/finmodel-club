@@ -270,6 +270,7 @@ tr.rowlocked input,tr.rowlocked select{background:#EAF3EC;border-color:#cfe3d4;c
   <button class="btn ghost sm" onclick="sortCourses('eco')">⇅ По экосистеме</button>
   <button class="btn ghost sm" onclick="fillTarget()">Заполнить целевой наполняемостью</button>
   <button class="btn ghost sm" onclick="checkCourseNames()" title="Сверить названия курсов в таблице и в расписании">🔍 Проверить названия</button>
+  <button class="btn ghost sm" onclick="unlockAllCourses()" title="Снять закрепление со всех строк курсов, чтобы их можно было редактировать">🔓 Разблокировать все</button>
   <button class="btn gray sm" onclick="exportJSON()">Экспорт JSON</button>
   <button class="btn gray sm" onclick="document.getElementById('impFile').click()">Импорт JSON</button>
   <input type="file" id="impFile" hidden accept=".json" onchange="importJSON(event)">
@@ -1047,6 +1048,12 @@ function applyLastYearFill(){
 }
 
 function addCourse(){ S.courses.push({name:"Новый курс",eco:"Прознание",price:25,single:30,wage:40,dur:1,groupSize:8,groups:0,fill:0,material:0}); persistLocal(); renderCourses(); }
+function unlockAllCourses(){
+  let n=0;
+  (S.courses||[]).forEach(c=>{ if(c._locked){ delete c._locked; n++; } });
+  persistLocal(); renderCourses();
+  toast(n>0?("Разблокировано строк: "+n):"Закреплённых строк не было");
+}
 function delCourse(i){ if(isLocked("courses",i)){toast("Строка закреплена");return;} S.courses.splice(i,1); persistLocal(); renderAll(); }
 function fillTarget(){ S.courses.forEach(c=>{ if(!c.fill) c.fill=c.groupSize; if(!c.groups) c.groups=1; }); persistLocal(); renderAll(); toast("Заполнено целевыми значениями"); }
 
