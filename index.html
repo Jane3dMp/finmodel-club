@@ -2396,6 +2396,7 @@ function snapshotState(){
   // копия без служебных полей
   const c=JSON.parse(JSON.stringify(S));
   delete c._teacherFOTmonth;
+  c._savedAt=new Date().toISOString(); // метка времени для синхронизации между устройствами
   return c;
 }
 function renderScenarioBar(){
@@ -2559,9 +2560,22 @@ if(S.gasUrl){
   // автоподключение: подгружаем из Google-таблицы при открытии
   fetch(S.gasUrl+"?action=load").then(r=>r.json()).then(j=>{
     if(j && j.ok && j.data && j.data.scenarios){
-      // объединяем: локальные версии приоритетнее (свежие несохранённые правки не теряются)
+      // объединяем по времени: для каждого сценария берём более СВЕЖУЮ версию
+      // (по метке _savedAt). Так и локальные правки не теряются, и синхронизация
+      // между компами работает.
       const localList=loadScenarioList();
-      const merged=Object.assign({}, j.data.scenarios, localList);
+      const remoteList=j.data.scenarios;
+      const merged={};
+      const allNames=new Set([...Object.keys(localList), ...Object.keys(remoteList)]);
+      allNames.forEach(name=>{
+        const loc=localList[name], rem=remoteList[name];
+        if(loc && !rem){ merged[name]=loc; return; }
+        if(rem && !loc){ merged[name]=rem; return; }
+        // обе есть — сравниваем по _savedAt (ISO-строка сравнивается лексикографически)
+        const lt=(loc&&loc._savedAt)||"";
+        const rt=(rem&&rem._savedAt)||"";
+        merged[name]=(lt>=rt)?loc:rem;
+      });
       saveScenarioList(merged);
       const cur=j.data.current||Object.keys(merged)[0];
       if(merged[cur]) S=_loadState(merged[cur]);
