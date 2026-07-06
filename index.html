@@ -403,6 +403,13 @@ tr.rowlocked input,tr.rowlocked select{background:#EAF3EC;border-color:#cfe3d4;c
   <div class="card"><h3>Ставки</h3><div id="taxRates"></div></div>
   <div class="card"><h3>Расчёт налоговой нагрузки</h3><table id="taxCalc"></table></div>
  </div>
+ <div class="card" style="margin-top:12px">
+  <h3>Калькулятор ЗП: «на руки» → начислить</h3>
+  <div class="sec-desc">Из зарплаты работника удерживается 14% (подоходный 13% + 1% ФСЗН). Чтобы человек получил нужную сумму на руки, начисляем больше: <b>начислить = на руки ÷ 0,86</b>. Сверху клуб доплачивает взносы нанимателя (ФСЗН + Белгосстрах).</div>
+  <div id="netCalcBox"></div>
+  <div class="tscroll" style="margin-top:10px"><table id="netCalcTable"></table></div>
+  <div class="sec-desc" style="margin-top:8px">⚠️ Расчёт по плоским 14%. Если у педагога есть стандартный вычет (на детей и т.п.), подоходный будет чуть меньше — точную цифру считает бухгалтер по месячному доходу человека.</div>
+ </div>
 </section>
 
 <!-- ===== ТБУ ===== -->
@@ -543,6 +550,7 @@ const DEFAULT_STATE = {
   fixedPct: [],  // расходы в % от оборота: [{name, pct}]
   fotTaxable: 100, // (устаревшее) % ФОТ по трудовым; теперь база = весь ФОТ − НПД
   _npdMonth: 0,   // сумма ФОТ на НПД (видеограф, СММ) — НЕ облагается взносами
+  _netInput: 35,  // калькулятор: желаемая сумма «на руки»
   _wageMode: "kpi", // модель ЗП: kpi | fix
   _fixRates: {},    // фикс-ставки: {педагог: {длительность_мин: ставка}}
   assume: { weeksPerMonth:4, targetProfitShare:18, ownerSalary:0 },
@@ -1293,7 +1301,39 @@ function renderTax(){
    <tr class="totrow"><td>Итого налоги и взносы</td><td class="num">${fmt(T.taxTotal)} р</td></tr>
    <tr><td>Налоговая нагрузка к выручке</td><td class="num">${T.rev>0?fmt1(T.taxTotal/T.rev*100):0}%</td></tr>
   </tbody>`;
+  renderNetCalc();
 }
+/* калькулятор: «на руки» → начислить → стоимость для клуба */
+const PN_RATE=13, FSZN_EMP=1;               // удержания из ЗП работника, %
+function netToGross(net){ return net/(1-(PN_RATE+FSZN_EMP)/100); }        // ÷0,86
+function grossToClub(gross){ return gross*(1+(S.tax.fszn+S.tax.belgosstrah)/100); } // ×1,346
+function renderNetCalc(){
+  const net=+S._netInput||0;
+  const gross=netToGross(net);
+  const pn=gross*PN_RATE/100, fw=gross*FSZN_EMP/100;
+  const club=grossToClub(gross);
+  const emp=gross*(S.tax.fszn+S.tax.belgosstrah)/100;
+  const box=document.getElementById("netCalcBox");
+  if(box) box.innerHTML=`
+   <div class="field" style="max-width:280px"><label>Сколько человек получает «на руки», р</label>
+     <input type="number" value="${net}" onchange="updNetInput(this.value)"></div>
+   <table style="margin-top:6px"><tbody>
+     <tr><td>Начислить (грязными)</td><td class="num"><b>${fmt1(gross)} р</b></td></tr>
+     <tr><td>− Подоходный (${PN_RATE}%)</td><td class="num neg">−${fmt1(pn)} р</td></tr>
+     <tr><td>− ФСЗН работника (${FSZN_EMP}%)</td><td class="num neg">−${fmt1(fw)} р</td></tr>
+     <tr class="totrow"><td>На руки</td><td class="num"><b>${fmt1(net)} р</b></td></tr>
+     <tr><td>+ Взносы нанимателя (ФСЗН ${S.tax.fszn}% + Белгосстрах ${S.tax.belgosstrah}%)</td><td class="num neg">+${fmt1(emp)} р</td></tr>
+     <tr class="totrow"><td><b>Полная стоимость для клуба</b></td><td class="num"><b>${fmt1(club)} р</b></td></tr>
+   </tbody></table>`;
+  // справочная таблица под типовые ставки
+  const rows=[35,40,45,50].map(n=>{
+    const g=netToGross(n), c=grossToClub(g);
+    return `<tr><td class="num">${fmt1(n)}</td><td class="num">${fmt1(g)}</td><td class="num">${fmt1(c)}</td></tr>`;
+  }).join("");
+  const t=document.getElementById("netCalcTable");
+  if(t) t.innerHTML=`<thead><tr><th>На руки, р</th><th>Начислить, р</th><th>Стоимость для клуба, р</th></tr></thead><tbody>${rows}</tbody>`;
+}
+function updNetInput(v){ S._netInput=parseFloat(v)||0; persistLocal(); renderNetCalc(); }
 function updTax(k,v){ S.tax[k]=parseFloat(v)||0; persistLocal(); renderAll(); }
 function updNpd(v){ S._npdMonth=parseFloat(v)||0; persistLocal(); renderAll(); }
 
