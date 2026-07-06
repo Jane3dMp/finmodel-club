@@ -1461,7 +1461,14 @@ if(!S.funnel){ S.funnel = JSON.parse(JSON.stringify(PLAN_SEED.funnel)); }
 
 
 function courseFromLib(name){
-  return S.courses.find(c=>c.name===name) || null;
+  if(!name) return null;
+  // точное совпадение
+  let c = S.courses.find(x=>x.name===name);
+  if(c) return c;
+  // устойчивое: без учёта регистра и лишних пробелов
+  const norm = s => String(s||"").trim().toLowerCase().replace(/\s+/g," ");
+  const key = norm(name);
+  return S.courses.find(x=>norm(x.name)===key) || null;
 }
 
 function planTotals(){
