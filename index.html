@@ -654,7 +654,9 @@ async function pushGas(silent){
   setSync("","Сохранение...");
   // соберём весь набор сценариев + текущий
   const list=loadScenarioList();
-  list[currentScenarioName()]=snapshotState();
+  const snap=snapshotState();
+  snap._savedAt=new Date().toISOString(); // метка реальной выгрузки в таблицу
+  list[currentScenarioName()]=snap;
   saveScenarioList(list);
   const payload={scenarios:list, current:currentScenarioName(), savedAt:new Date().toISOString()};
   try{
@@ -669,31 +671,32 @@ async function pushGas(silent){
   }catch(e){ setSync("err","Ошибка связи"); toast("Ошибка сохранения"); }
 }
 
-const GAS_CODE = `// Хранение: лист DB. Строка 1 — служебная (A1=current, B1=savedAt).
-// Со строки 2: A=имя версии, B=JSON версии. Каждая версия в своей строке —
-// это обходит лимит Google Sheets в 50000 символов на ЯЧЕЙКУ.
+const GAS_CODE = `// Хранение: лист DB. Строка 1 служебная: A1=current, B1=savedAt.
+// Со строки 2: A=имя версии, B,C,D... = куски JSON (по 40000 символов).
+// Разбивка на куски обходит лимит Google Sheets в 50000 символов на ЯЧЕЙКУ —
+// тяжёлая версия (с полным расписанием) записывается по частям и склеивается при чтении.
+var CHUNK = 40000;
 function doGet(e){
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sh = ss.getSheetByName('DB') || ss.insertSheet('DB');
   var last = sh.getLastRow();
+  var lastCol = sh.getLastColumn();
   var scenarios = {};
   var current = '', savedAt = '';
   if(last >= 1){
     current = String(sh.getRange('A1').getValue()||'');
     savedAt = String(sh.getRange('B1').getValue()||'');
   }
-  // старый формат: весь JSON в A1 (если B1 пустой, а A1 похож на JSON)
+  // старый формат: весь JSON в A1
   if(last === 1 && current.charAt(0) === '{'){
-    try{
-      var old = JSON.parse(current);
-      return ContentService.createTextOutput(JSON.stringify({ok:true, data:old}))
-        .setMimeType(ContentService.MimeType.JSON);
-    }catch(err){}
+    try{ return ContentService.createTextOutput(JSON.stringify({ok:true, data:JSON.parse(current)})).setMimeType(ContentService.MimeType.JSON); }catch(err){}
   }
   for(var r = 2; r <= last; r++){
     var name = String(sh.getRange(r,1).getValue()||'');
-    var json = String(sh.getRange(r,2).getValue()||'');
-    if(!name || !json) continue;
+    if(!name) continue;
+    var json = '';
+    for(var c = 2; c <= lastCol; c++){ json += String(sh.getRange(r,c).getValue()||''); }
+    if(!json) continue;
     try{ scenarios[name] = JSON.parse(json); }catch(err){}
   }
   return ContentService.createTextOutput(JSON.stringify({ok:true, data:{scenarios:scenarios, current:current, savedAt:savedAt}}))
@@ -706,14 +709,22 @@ function doPost(e){
   if(body.action==='save' && body.data && body.data.scenarios){
     var scen = body.data.scenarios;
     var names = Object.keys(scen);
-    sh.clearContents();
+    sh.clear();
     sh.getRange('A1').setValue(body.data.current || (names[0]||''));
     sh.getRange('B1').setValue(body.data.savedAt || new Date().toISOString());
-    var rows = [];
+    var maxCols = 1;
+    // сначала подготовим строки с разбивкой на куски
+    var prepared = [];
     for(var i=0;i<names.length;i++){
-      rows.push([names[i], JSON.stringify(scen[names[i]])]);
+      var js = JSON.stringify(scen[names[i]]);
+      var parts = [names[i]];
+      for(var p=0; p<js.length; p+=CHUNK){ parts.push(js.substring(p, p+CHUNK)); }
+      if(parts.length>maxCols) maxCols = parts.length;
+      prepared.push(parts);
     }
-    if(rows.length){ sh.getRange(2,1,rows.length,2).setValues(rows); }
+    // выровняем длину строк (setValues требует прямоугольник)
+    for(var k=0;k<prepared.length;k++){ while(prepared[k].length<maxCols) prepared[k].push(''); }
+    if(prepared.length){ sh.getRange(2,1,prepared.length,maxCols).setValues(prepared); }
   }
   return ContentService.createTextOutput(JSON.stringify({ok:true}))
     .setMimeType(ContentService.MimeType.JSON);
@@ -2435,10 +2446,11 @@ function ensureCurrentInList(){
 
 
 function snapshotState(){
-  // копия без служебных полей
+  // копия без служебных полей. _savedAt НЕ трогаем здесь —
+  // он обновляется только при реальной выгрузке в таблицу (pushGas),
+  // иначе простое открытие модели «омолаживало» бы версию и ломало синхронизацию.
   const c=JSON.parse(JSON.stringify(S));
   delete c._teacherFOTmonth;
-  c._savedAt=new Date().toISOString(); // метка времени для синхронизации между устройствами
   return c;
 }
 function renderScenarioBar(){
