@@ -663,9 +663,14 @@ async function pushGas(silent){
     const r=await fetch(S.gasUrl,{method:"POST",headers:{"Content-Type":"text/plain;charset=utf-8"},
       body:JSON.stringify({action:"save",data:payload})});
     const txt=await r.text();
+    // Успех определяем по HTTP-статусу. Apps Script на POST часто отвечает
+    // HTML-редиректом (200), внутри которого нет нашего JSON — это НЕ ошибка.
+    // Неуспехом считаем ТОЛЬКО если весь ответ — чистый JSON с ok:false.
     let ok=r.ok;
-    // если ответ содержит JSON с ok:false — считаем неуспехом
-    try{ const jr=JSON.parse(txt.match(/\{[\s\S]*\}/)?.[0]||txt); if(jr && jr.ok===false) ok=false; }catch(e){}
+    const trimmed=(txt||"").trim();
+    if(ok && trimmed.charAt(0)==="{"){
+      try{ const jr=JSON.parse(trimmed); if(jr && jr.ok===false) ok=false; }catch(e){}
+    }
     if(ok){ setSync("ok","Google-таблица"); if(!silent) toast("Выгружено в таблицу"); else toast("Сохранено в таблицу"); }
     else { setSync("err","Таблица отклонила сохранение"); toast("Ошибка сохранения"); }
   }catch(e){ setSync("err","Ошибка связи"); toast("Ошибка сохранения"); }
