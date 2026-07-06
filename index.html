@@ -631,7 +631,9 @@ async function connectGas(){
   S.gasUrl=url; setSync("","Подключение...");
   try{
     const r=await fetch(url+"?action=load",{method:"GET"});
-    const j=await r.json();
+    const txt=await r.text();
+    let j=null;
+    try{ j=JSON.parse(txt); }catch(err){ const m=txt&&txt.match(/\{[\s\S]*\}/); if(m){ try{ j=JSON.parse(m[0]); }catch(e2){} } }
     if(j && j.ok && j.data && j.data.scenarios){
       // новый формат: набор сценариев
       saveScenarioList(j.data.scenarios);
@@ -656,9 +658,14 @@ async function pushGas(silent){
   saveScenarioList(list);
   const payload={scenarios:list, current:currentScenarioName(), savedAt:new Date().toISOString()};
   try{
-    await fetch(S.gasUrl,{method:"POST",headers:{"Content-Type":"text/plain;charset=utf-8"},
+    const r=await fetch(S.gasUrl,{method:"POST",headers:{"Content-Type":"text/plain;charset=utf-8"},
       body:JSON.stringify({action:"save",data:payload})});
-    setSync("ok","Google-таблица"); if(!silent) toast("Выгружено в таблицу"); else toast("Сохранено в таблицу");
+    const txt=await r.text();
+    let ok=r.ok;
+    // если ответ содержит JSON с ok:false — считаем неуспехом
+    try{ const jr=JSON.parse(txt.match(/\{[\s\S]*\}/)?.[0]||txt); if(jr && jr.ok===false) ok=false; }catch(e){}
+    if(ok){ setSync("ok","Google-таблица"); if(!silent) toast("Выгружено в таблицу"); else toast("Сохранено в таблицу"); }
+    else { setSync("err","Таблица отклонила сохранение"); toast("Ошибка сохранения"); }
   }catch(e){ setSync("err","Ошибка связи"); toast("Ошибка сохранения"); }
 }
 
@@ -2597,12 +2604,19 @@ document.querySelectorAll(".tab").forEach(tb=>tb.onclick=()=>{
 /* старт */
 if(S.gasUrl){
   setSync("","Подключение к таблице...");
-  // автоподключение: подгружаем из Google-таблицы при открытии
-  fetch(S.gasUrl+"?action=load").then(r=>r.json()).then(j=>{
+  // автоподключение: подгружаем из Google-таблицы при открытии.
+  // Читаем как ТЕКСТ и парсим вручную — Apps Script иногда отвечает text/html
+  // или с редиректом, и r.json() падает, давая ложную «ошибку связи».
+  fetch(S.gasUrl+"?action=load").then(r=>r.text()).then(txt=>{
+    let j=null;
+    try{ j=JSON.parse(txt); }
+    catch(err){
+      // не JSON — попробуем выдернуть JSON из HTML-обёртки
+      const m=txt&&txt.match(/\{[\s\S]*\}/);
+      if(m){ try{ j=JSON.parse(m[0]); }catch(e2){} }
+    }
+    if(!j){ setSync("err","Таблица ответила не JSON — локальный режим"); renderAll(); return; }
     if(j && j.ok && j.data && j.data.scenarios){
-      // объединяем по времени: для каждого сценария берём более СВЕЖУЮ версию
-      // (по метке _savedAt). Так и локальные правки не теряются, и синхронизация
-      // между компами работает.
       const localList=loadScenarioList();
       const remoteList=j.data.scenarios;
       const merged={};
@@ -2611,14 +2625,12 @@ if(S.gasUrl){
         const loc=localList[name], rem=remoteList[name];
         if(loc && !rem){ merged[name]=loc; return; }
         if(rem && !loc){ merged[name]=rem; return; }
-        // обе есть — сравниваем по _savedAt (ISO-строка сравнивается лексикографически)
         const lt=(loc&&loc._savedAt)||"";
         const rt=(rem&&rem._savedAt)||"";
         merged[name]=(lt>=rt)?loc:rem;
       });
       saveScenarioList(merged);
       let cur=j.data.current||Object.keys(merged)[0];
-      // защита: если current указывает на несуществующую версию — берём первую доступную
       if(!merged[cur]) cur=Object.keys(merged)[0];
       if(merged[cur]) S=_loadState(merged[cur]);
       if(!S.meta)S.meta={}; S.meta.name=cur;
