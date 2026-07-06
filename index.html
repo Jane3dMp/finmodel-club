@@ -660,19 +660,52 @@ async function pushGas(silent){
   }catch(e){ setSync("err","Ошибка связи"); toast("Ошибка сохранения"); }
 }
 
-const GAS_CODE = `function doGet(e){
+const GAS_CODE = `// Хранение: лист DB. Строка 1 — служебная (A1=current, B1=savedAt).
+// Со строки 2: A=имя версии, B=JSON версии. Каждая версия в своей строке —
+// это обходит лимит Google Sheets в 50000 символов на ЯЧЕЙКУ.
+function doGet(e){
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sh = ss.getSheetByName('DB') || ss.insertSheet('DB');
-  var v = sh.getRange('A1').getValue();
-  var data = v ? JSON.parse(v) : {};
-  return ContentService.createTextOutput(JSON.stringify({ok:true,data:data}))
+  var last = sh.getLastRow();
+  var scenarios = {};
+  var current = '', savedAt = '';
+  if(last >= 1){
+    current = String(sh.getRange('A1').getValue()||'');
+    savedAt = String(sh.getRange('B1').getValue()||'');
+  }
+  // старый формат: весь JSON в A1 (если B1 пустой, а A1 похож на JSON)
+  if(last === 1 && current.charAt(0) === '{'){
+    try{
+      var old = JSON.parse(current);
+      return ContentService.createTextOutput(JSON.stringify({ok:true, data:old}))
+        .setMimeType(ContentService.MimeType.JSON);
+    }catch(err){}
+  }
+  for(var r = 2; r <= last; r++){
+    var name = String(sh.getRange(r,1).getValue()||'');
+    var json = String(sh.getRange(r,2).getValue()||'');
+    if(!name || !json) continue;
+    try{ scenarios[name] = JSON.parse(json); }catch(err){}
+  }
+  return ContentService.createTextOutput(JSON.stringify({ok:true, data:{scenarios:scenarios, current:current, savedAt:savedAt}}))
     .setMimeType(ContentService.MimeType.JSON);
 }
 function doPost(e){
   var body = JSON.parse(e.postData.contents);
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sh = ss.getSheetByName('DB') || ss.insertSheet('DB');
-  if(body.action==='save'){ sh.getRange('A1').setValue(JSON.stringify(body.data)); }
+  if(body.action==='save' && body.data && body.data.scenarios){
+    var scen = body.data.scenarios;
+    var names = Object.keys(scen);
+    sh.clearContents();
+    sh.getRange('A1').setValue(body.data.current || (names[0]||''));
+    sh.getRange('B1').setValue(body.data.savedAt || new Date().toISOString());
+    var rows = [];
+    for(var i=0;i<names.length;i++){
+      rows.push([names[i], JSON.stringify(scen[names[i]])]);
+    }
+    if(rows.length){ sh.getRange(2,1,rows.length,2).setValues(rows); }
+  }
   return ContentService.createTextOutput(JSON.stringify({ok:true}))
     .setMimeType(ContentService.MimeType.JSON);
 }`;
