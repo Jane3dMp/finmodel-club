@@ -677,11 +677,13 @@ async function pushGas(silent){
   }catch(e){ setSync("err","Ошибка связи"); toast("Ошибка сохранения"); }
 }
 
-const GAS_CODE = `// Хранение: лист DB. Строка 1 служебная: A1=current, B1=savedAt.
-// Со строки 2: A=имя версии, B,C,D... = куски JSON (по 40000 символов).
-// Разбивка на куски обходит лимит Google Sheets в 50000 символов на ЯЧЕЙКУ —
-// тяжёлая версия (с полным расписанием) записывается по частям и склеивается при чтении.
+const GAS_CODE = `// ХРАНЕНИЕ v2: служебный лист DB (технический JSON, источник правды для модели)
+// + листы-витрины по каждой версии для чтения глазами.
+// Модель ЧИТАЕТ только из DB. Витрины обновляются при каждом сохранении.
+// Витрины: "{версия} · Курсы", "{версия} · Расписание", "{версия} · Педсостав",
+//          "{версия} · Расходы", "{версия} · Настройки".
 var CHUNK = 40000;
+
 function doGet(e){
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sh = ss.getSheetByName('DB') || ss.insertSheet('DB');
@@ -693,7 +695,6 @@ function doGet(e){
     current = String(sh.getRange('A1').getValue()||'');
     savedAt = String(sh.getRange('B1').getValue()||'');
   }
-  // старый формат: весь JSON в A1
   if(last === 1 && current.charAt(0) === '{'){
     try{ return ContentService.createTextOutput(JSON.stringify({ok:true, data:JSON.parse(current)})).setMimeType(ContentService.MimeType.JSON); }catch(err){}
   }
@@ -708,33 +709,151 @@ function doGet(e){
   return ContentService.createTextOutput(JSON.stringify({ok:true, data:{scenarios:scenarios, current:current, savedAt:savedAt}}))
     .setMimeType(ContentService.MimeType.JSON);
 }
+
 function doPost(e){
   var body = JSON.parse(e.postData.contents);
   var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sh = ss.getSheetByName('DB') || ss.insertSheet('DB');
   if(body.action==='save' && body.data && body.data.scenarios){
     var scen = body.data.scenarios;
     var names = Object.keys(scen);
-    sh.clear();
-    sh.getRange('A1').setValue(body.data.current || (names[0]||''));
-    sh.getRange('B1').setValue(body.data.savedAt || new Date().toISOString());
-    var maxCols = 1;
-    // сначала подготовим строки с разбивкой на куски
-    var prepared = [];
-    for(var i=0;i<names.length;i++){
-      var js = JSON.stringify(scen[names[i]]);
-      var parts = [names[i]];
-      for(var p=0; p<js.length; p+=CHUNK){ parts.push(js.substring(p, p+CHUNK)); }
-      if(parts.length>maxCols) maxCols = parts.length;
-      prepared.push(parts);
-    }
-    // выровняем длину строк (setValues требует прямоугольник)
-    for(var k=0;k<prepared.length;k++){ while(prepared[k].length<maxCols) prepared[k].push(''); }
-    if(prepared.length){ sh.getRange(2,1,prepared.length,maxCols).setValues(prepared); }
+    // 1) служебный DB (JSON, источник правды)
+    _writeDB_(ss, body.data, scen, names);
+    // 2) листы-витрины по каждой версии
+    _writeShowcases_(ss, scen, names);
   }
   return ContentService.createTextOutput(JSON.stringify({ok:true}))
     .setMimeType(ContentService.MimeType.JSON);
-}`;
+}
+
+function _writeDB_(ss, data, scen, names){
+  var sh = ss.getSheetByName('DB') || ss.insertSheet('DB');
+  sh.clear();
+  sh.getRange('A1').setValue(data.current || (names[0]||''));
+  sh.getRange('B1').setValue(data.savedAt || new Date().toISOString());
+  var maxCols = 1;
+  var prepared = [];
+  for(var i=0;i<names.length;i++){
+    var js = JSON.stringify(scen[names[i]]);
+    var parts = [names[i]];
+    for(var p=0; p<js.length; p+=CHUNK){ parts.push(js.substring(p, p+CHUNK)); }
+    if(parts.length>maxCols) maxCols = parts.length;
+    prepared.push(parts);
+  }
+  for(var k=0;k<prepared.length;k++){ while(prepared[k].length<maxCols) prepared[k].push(''); }
+  if(prepared.length){ sh.getRange(2,1,prepared.length,maxCols).setValues(prepared); }
+}
+
+function _writeShowcases_(ss, scen, names){
+  // сначала удалим старые листы-витрины (всё, что после " · ")
+  var all = ss.getSheets();
+  for(var s=0;s<all.length;s++){
+    var nm = all[s].getName();
+    if(nm.indexOf(' · ') > -1){ ss.deleteSheet(all[s]); }
+  }
+  // создаём заново для каждой версии
+  for(var i=0;i<names.length;i++){
+    var v = names[i];
+    var st = scen[v];
+    _sheetCourses_(ss, v, st);
+    _sheetGrid_(ss, v, st);
+    _sheetStaff_(ss, v, st);
+    _sheetExpenses_(ss, v, st);
+    _sheetSettings_(ss, v, st);
+  }
+}
+
+function _put_(ss, title, rows){
+  var sh = ss.getSheetByName(title) || ss.insertSheet(title);
+  sh.clear();
+  if(rows.length){
+    var cols = rows[0].length;
+    sh.getRange(1,1,rows.length,cols).setValues(rows);
+    sh.getRange(1,1,1,cols).setFontWeight('bold');
+    sh.setFrozenRows(1);
+  }
+}
+
+function _sheetCourses_(ss, v, st){
+  var rows = [['Курс','Экосистема','Цена','Ставка ЗП','Длительность (ч)','Групп/нед','Наполняемость','Мин детей','Визитов/нед','Размер группы']];
+  var courses = st.courses || [];
+  for(var i=0;i<courses.length;i++){
+    var c = courses[i];
+    rows.push([c.name||'', c.eco||'', c.price||0, c.wage||0, c.dur||0, c.groups||0, c.fill||0, c.single||0, c.visits||1, c.groupSize||0]);
+  }
+  _put_(ss, v+' · Курсы', rows);
+}
+
+function _sheetGrid_(ss, v, st){
+  var DAYS = ['','Пн','Вт','Ср','Чт','Пт','Сб','Вс'];
+  var rows = [['День','Начало','Конец','Кабинет','Курс','Педагог','Учеников','Новый набор','Примечание']];
+  var grid = st.grid || [];
+  for(var i=0;i<grid.length;i++){
+    var l = grid[i];
+    rows.push([ DAYS[l.day]||l.day||'', l.start||'', l.end||'', l.room||'', l.course||'', l.teacher||'', l.students||0, l.newIntake?'да':'', l.note||'' ]);
+  }
+  _put_(ss, v+' · Расписание', rows);
+}
+
+function _sheetStaff_(ss, v, st){
+  var rows = [['Педагог','Ведёт курсы','Режим ЗП','Фикс-ставка']];
+  var staff = st.staff || [];
+  for(var i=0;i<staff.length;i++){
+    var s = staff[i];
+    var teaches = (s.canTeach && s.canTeach.join) ? s.canTeach.join(', ') : '';
+    rows.push([ s.name||'', teaches, s.wageMode||'', s.fixedRate||0 ]);
+  }
+  // фикс-ставки по педагогу+длительности (из _fixRates)
+  var fr = st._fixRates || {};
+  var frNames = Object.keys(fr);
+  if(frNames.length){
+    rows.push(['','','','']);
+    rows.push(['Фикс-ставки (педагог × длительность, мин):','','','']);
+    for(var j=0;j<frNames.length;j++){
+      var pdata = fr[frNames[j]];
+      var parts = [];
+      for(var d in pdata){ parts.push(d+' мин = '+pdata[d]); }
+      rows.push([ frNames[j], parts.join('; '), '', '' ]);
+    }
+  }
+  _put_(ss, v+' · Педсостав', rows);
+}
+
+function _sheetExpenses_(ss, v, st){
+  var GRP = {1:'Общие (аренда, сервисы)', 2:'Админ-команда'};
+  var rows = [['Статья','Сумма/мес','Группа']];
+  var fixed = st.fixed || {};
+  var fg = st.fixedGroup || {};
+  for(var name in fixed){
+    rows.push([ name, fixed[name]||0, GRP[fg[name]] || 'Общие' ]);
+  }
+  // расходы в % от оборота
+  var pct = st.fixedPct || [];
+  if(pct.length){
+    rows.push(['','','']);
+    rows.push(['Расходы в % от оборота:','','']);
+    for(var k=0;k<pct.length;k++){ rows.push([ pct[k].name||'', pct[k].pct+' %', '' ]); }
+  }
+  _put_(ss, v+' · Расходы', rows);
+}
+
+function _sheetSettings_(ss, v, st){
+  var tax = st.tax || {};
+  var as = st.assume || {};
+  var rows = [
+    ['Параметр','Значение'],
+    ['УСН, %', tax.usn!=null?tax.usn:''],
+    ['ФСЗН, %', tax.fszn!=null?tax.fszn:''],
+    ['Белгосстрах, %', tax.belgosstrah!=null?tax.belgosstrah:''],
+    ['Эквайринг, %', tax.acquiring!=null?tax.acquiring:''],
+    ['ФОТ на НПД, р/мес', st._npdMonth!=null?st._npdMonth:0],
+    ['Модель ЗП', st._wageMode||'kpi'],
+    ['Недель в месяце', as.weeksPerMonth!=null?as.weeksPerMonth:4],
+    ['Целевая доля прибыли, %', as.targetProfitShare!=null?as.targetProfitShare:''],
+    ['Зарплата собственника, р/мес', as.ownerSalary!=null?as.ownerSalary:0]
+  ];
+  _put_(ss, v+' · Настройки', rows);
+}
+`;
 
 /* ===== РАСЧЁТЫ ===== */
 /* Фикс-ЗП/зан для отображения в таблице курсов (Вариант 3):
