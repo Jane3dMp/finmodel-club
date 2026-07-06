@@ -635,7 +635,9 @@ async function connectGas(){
     if(j && j.ok && j.data && j.data.scenarios){
       // новый формат: набор сценариев
       saveScenarioList(j.data.scenarios);
-      const cur=j.data.current||Object.keys(j.data.scenarios)[0];
+      let cur=j.data.current||Object.keys(j.data.scenarios)[0];
+      // защита: если current указывает на несуществующую версию — берём первую доступную
+      if(!j.data.scenarios[cur]) cur=Object.keys(j.data.scenarios)[0];
       if(j.data.scenarios[cur]){ _loadState(j.data.scenarios[cur]); }
       S.gasUrl=url; if(!S.meta)S.meta={}; S.meta.name=cur;
       persistLocal(); renderAll(); setSync("ok","Google-таблица"); toast("Загружено из таблицы ("+Object.keys(j.data.scenarios).length+" сценариев)");
@@ -2466,7 +2468,12 @@ function saveAsScenario(){
   if(S.gasUrl) pushGas(true); else toast("Создана версия: "+name);
 }
 function duplicateScenario(){
-  const name=prompt("Название копии:", currentScenarioName()+" (копия)");
+  // базовое имя без накопившихся суффиксов «(копия)»
+  const cleanName=currentScenarioName().replace(/\s*\(копия\)(\s*\(копия\))*\s*$/,"").trim();
+  let suggested=cleanName+" (копия)";
+  const existing=loadScenarioList();
+  if(existing[suggested]){ let n=2; while(existing[suggested]){ suggested=cleanName+" (копия "+(n++)+")"; } }
+  const name=prompt("Название копии:", suggested);
   if(!name) return;
   // сначала зафиксируем ТЕКУЩУЮ версию в списке, чтобы она не потерялась
   const list=ensureCurrentInList();
@@ -2610,7 +2617,9 @@ if(S.gasUrl){
         merged[name]=(lt>=rt)?loc:rem;
       });
       saveScenarioList(merged);
-      const cur=j.data.current||Object.keys(merged)[0];
+      let cur=j.data.current||Object.keys(merged)[0];
+      // защита: если current указывает на несуществующую версию — берём первую доступную
+      if(!merged[cur]) cur=Object.keys(merged)[0];
       if(merged[cur]) S=_loadState(merged[cur]);
       if(!S.meta)S.meta={}; S.meta.name=cur;
       persistLocal(); setSync("ok","Google-таблица"); renderAll();
