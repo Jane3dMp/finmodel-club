@@ -2249,8 +2249,8 @@ function renderStaff(){
   const _ssm=S._staffSort||"wage";
   const _arrName=_ssm==="name"?" ▼":"";
   const _arrWage=_ssm==="wage"?" ▼":(_ssm==="wage_asc"?" ▲":"");
-  let h=`<thead><tr><th>Педагог${_arrName}</th><th>Курсы</th><th>Занятий/нед</th><th>Детей-мест</th>
-    <th>ЗП/нед${_arrWage}</th><th>ЗП/мес</th><th></th></tr></thead><tbody>`;
+  let h=`<thead><tr><th>Педагог${_arrName}</th><th>Курсы</th><th class="num">Занятий/нед</th><th class="num">Детей-мест</th>
+    <th class="num">ЗП/нед${_arrWage}</th><th class="num">ЗП/мес</th><th></th></tr></thead><tbody>`;
   const _ss=S._staffSort||"wage";
   if(_ss==="name"){ st.sort((a,b)=>String(a.name).localeCompare(String(b.name),"ru")); }
   else if(_ss==="wage_asc"){ st.sort((a,b)=>a.wageWeek-b.wageWeek); }
@@ -2426,7 +2426,7 @@ function renderWageRef(){
   const box=document.getElementById("wageRef");
   if(!box) return;
   let h=`<thead><tr><th>Курс</th>`;
-  for(let n=4;n<=12;n++) h+=`<th>${n}</th>`;
+  for(let n=4;n<=12;n++) h+=`<th class="num">${n}</th>`;
   h+=`<th></th></tr></thead><tbody>`;
   Object.keys(S.wageTable).sort().forEach(name=>{
     const t=S.wageTable[name].tiers;
