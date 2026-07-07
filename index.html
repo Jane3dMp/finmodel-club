@@ -1579,9 +1579,9 @@ function renderPlanner(){
     h+=`<tr class="${lk?'rowlocked':''}" draggable="${lk?'false':'true'}" ${lk?'':`ondragstart="rowDragStart(event,'plan',${i})" ondragend="rowDragEnd(event)"`} ondragover="rowDragOver(event)" ondrop="rowDrop(event,'plan',${i},renderPlanner)">
       <td class="dragh" title="${lk?'Закреплено':'Перетащите'}">${rowLockBtn('plan',i,'renderPlanner')}</td>
       <td><select class="cell wide" ${da} onchange="updPlan(${i},'name',this.value)">${opts}</select></td>
-      <td><input class="cell" type="number" value="${cg}" ${da} onchange="updPlan(${i},'perGroup',this.value)"></td>
+      <td class="num"><input class="cell" type="number" value="${cg}" ${da} onchange="updPlan(${i},'perGroup',this.value)"></td>
       <td class="num muted" title="из библиотеки курсов">${fmt(pr)}</td>
-      <td><input class="cell" type="number" value="${g}" ${da} onchange="updPlan(${i},'groups',this.value)"></td>
+      <td class="num"><input class="cell" type="number" value="${g}" ${da} onchange="updPlan(${i},'groups',this.value)"></td>
       <td class="num muted" title="из библиотеки курсов">${v}×</td>
       <td class="num">${fmt(rev)}</td>
       <td class="num">${fmt1(kids)}</td>
