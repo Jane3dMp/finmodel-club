@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Платные посещения · Прознание</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Geologica:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --ink:#151617; --paper:#fffdf6; --paper-warm:#FBF6EC; --white:#fff;
+    --yellow:#FED634; --yellow-deep:#C9A800; --moss:#8FA370; --moss-deep:#6f8052;
+    --terra:#C77E5E; --line:#e7e1d2; --muted:#7a746a;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--paper);color:var(--ink);font-family:'Inter',system-ui,sans-serif;font-size:15px;line-height:1.5}
+  h1,h2{font-family:'Geologica',sans-serif;margin:0}
+  .wrap{max-width:900px;margin:0 auto;padding:28px 20px 60px}
+  .eyebrow{font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);font-weight:600}
+  h1{font-size:26px;margin:4px 0 6px}
+  .sub{color:var(--muted);margin-bottom:22px}
+  .bar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:18px}
+  button{font-family:inherit;font-size:14px;font-weight:600;border-radius:10px;padding:10px 16px;cursor:pointer;border:1.5px solid transparent}
+  .btn-primary{background:var(--yellow);color:#161617}
+  .btn-primary:hover{background:var(--yellow-deep)}
+  .btn-primary:disabled{background:var(--line);color:var(--muted);cursor:not-allowed}
+  .btn-ghost{background:transparent;color:var(--ink);border-color:var(--line)}
+  .btn-ghost:hover{border-color:var(--terra);color:var(--terra)}
+  .status{margin-left:auto;font-size:13px;color:var(--muted);display:flex;align-items:center;gap:8px}
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--moss)}
+  .dot.run{background:var(--yellow-deep);animation:pulse 1s infinite}
+  @keyframes pulse{50%{opacity:.35}}
+  .card{background:var(--white);border:1px solid var(--line);border-radius:14px;overflow:hidden}
+  table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}
+  th,td{padding:11px 14px;text-align:right;border-bottom:1px solid var(--line)}
+  th:first-child,td:first-child{text-align:left}
+  thead th{background:var(--paper-warm);font-size:12px;letter-spacing:.03em;color:var(--muted);font-weight:600;position:sticky;top:0}
+  tbody tr:last-child td{border-bottom:none}
+  tbody tr:hover{background:#fcfaf3}
+  tfoot td{font-weight:700;background:var(--paper-warm);border-top:2px solid var(--ink)}
+  .month{font-weight:600}
+  .empty{padding:40px 20px;text-align:center;color:var(--muted)}
+  .hint{font-size:12px;color:var(--muted);margin-top:12px}
+  .progress{height:6px;background:var(--line);border-radius:4px;overflow:hidden;margin-top:14px;display:none}
+  .progress.show{display:block}
+  .progress > i{display:block;height:100%;background:var(--moss);transition:width .4s}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="eyebrow">Прознание · аналитика</div>
+  <h1>Платные посещения</h1>
+  <div class="sub">Реальные приходы (is_attend = 1) по месяцам, комиссия за приход по корзинам: 0 / 1–15 / 16+.</div>
+
+  <div class="bar">
+    <button class="btn-primary" id="btn-run" onclick="runCollect()">Посчитать</button>
+    <button class="btn-ghost" id="btn-reset" onclick="resetAll()">Сбросить</button>
+    <div class="status"><span class="dot" id="dot"></span><span id="status-text">—</span></div>
+  </div>
+  <div class="progress" id="progress"><i id="progress-bar" style="width:0%"></i></div>
+
+  <div class="card" style="margin-top:16px">
+    <div id="table-host">
+      <div class="empty" id="empty">Данных пока нет. Нажми «Посчитать» — сбор идёт помесячно в фоне (~1 минута на месяц).</div>
+    </div>
+  </div>
+  <div class="hint">Сбор идёт по одному месяцу в минуту (ограничение Apps Script). Страница обновляется сама, пока сбор не закончится.</div>
+</div>
+
+<script>
+  const LIBRARY_URL = 'https://script.google.com/macros/s/AKfycbxb6EEzzl-FguxjpIO5YthGLj-QXh7puCD_DO4HL4wVPziHL1pEtVeuo3uNEi2i2yXq/exec';
+  let pollTimer = null;
+
+  const MONTH_RU = {'01':'янв','02':'фев','03':'мар','04':'апр','05':'май','06':'июн','07':'июл','08':'авг','09':'сен','10':'окт','11':'ноя','12':'дек'};
+  function fmtMonth(s){
+    const m = String(s).match(/^(\d{4})-(\d{2})/);
+    if (!m) return s;
+    return (MONTH_RU[m[2]] || m[2]) + ' ' + m[1];
+  }
+  function fmtNum(n){ return (Math.round(Number(n)*100)/100).toLocaleString('ru-RU'); }
+
+  async function fetchStats(){
+    const r = await fetch(LIBRARY_URL + '?action=getPaidStats').then(r=>r.json());
+    return (r && r.result) ? r.result : r;
+  }
+
+  function render(st){
+    const done = st.monthsDone || 0, total = st.monthsTotal || 0;
+    const dot = document.getElementById('dot');
+    const txt = document.getElementById('status-text');
+    const prog = document.getElementById('progress');
+    const bar = document.getElementById('progress-bar');
+    const btnRun = document.getElementById('btn-run');
+
+    if (st.running){
+      dot.className = 'dot run';
+      txt.textContent = 'Идёт сбор · готово ' + done + ' из ' + total + ' мес.';
+      btnRun.disabled = true; btnRun.textContent = 'Считаю…';
+      prog.classList.add('show'); bar.style.width = (total ? Math.round(done/total*100) : 0) + '%';
+    } else {
+      dot.className = 'dot';
+      btnRun.disabled = false; btnRun.textContent = st.rows && st.rows.length ? 'Пересчитать' : 'Посчитать';
+      if (st.rows && st.rows.length){
+        txt.textContent = 'Готово · ' + done + ' из ' + total + ' мес.';
+        prog.classList.remove('show');
+      } else {
+        txt.textContent = 'Сбор не запускался';
+        prog.classList.remove('show');
+      }
+    }
+
+    const host = document.getElementById('table-host');
+    if (!st.rows || !st.rows.length){
+      host.innerHTML = '<div class="empty">' +
+        (st.running ? 'Считаю первый месяц…' : 'Данных пока нет. Нажми «Посчитать».') + '</div>';
+      return;
+    }
+
+    const tot = st.rows.reduce((a,x)=>({
+      visits:a.visits+x.visits, bin0:a.bin0+x.bin0, bin15:a.bin15+x.bin15,
+      bin16:a.bin16+x.bin16, sumRub:a.sumRub+x.sumRub
+    }), {visits:0,bin0:0,bin15:0,bin16:0,sumRub:0});
+
+    let h = '<table><thead><tr>' +
+      '<th>Месяц</th><th>Приходов</th><th>Корзина 0</th><th>1–15</th><th>16+</th><th>Сумма, ₽</th>' +
+      '</tr></thead><tbody>';
+    st.rows.forEach(x=>{
+      h += '<tr><td class="month">' + fmtMonth(x.month) + '</td>' +
+        '<td>' + fmtNum(x.visits) + '</td>' +
+        '<td>' + fmtNum(x.bin0) + '</td>' +
+        '<td>' + fmtNum(x.bin15) + '</td>' +
+        '<td>' + fmtNum(x.bin16) + '</td>' +
+        '<td>' + fmtNum(x.sumRub) + '</td></tr>';
+    });
+    h += '</tbody><tfoot><tr><td>Итого</td>' +
+      '<td>' + fmtNum(tot.visits) + '</td>' +
+      '<td>' + fmtNum(tot.bin0) + '</td>' +
+      '<td>' + fmtNum(tot.bin15) + '</td>' +
+      '<td>' + fmtNum(tot.bin16) + '</td>' +
+      '<td>' + fmtNum(tot.sumRub) + '</td></tr></tfoot></table>';
+    host.innerHTML = h;
+  }
+
+  async function loadStats(){
+    try {
+      const st = await fetchStats();
+      render(st);
+      if (pollTimer){ clearTimeout(pollTimer); pollTimer = null; }
+      if (st.running){ pollTimer = setTimeout(loadStats, 15000); }
+    } catch(e){
+      document.getElementById('status-text').textContent = 'Ошибка загрузки: ' + e.message;
+    }
+  }
+
+  async function runCollect(){
+    const st = await fetchStats().catch(()=>({rows:[]}));
+    if (st.rows && st.rows.length && !confirm('Пересчитать заново? Текущая таблица будет перезаписана.')) return;
+    const btn = document.getElementById('btn-run');
+    btn.disabled = true; btn.textContent = 'Запускаю…';
+    try {
+      await fetch(LIBRARY_URL, {method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'},
+        body: JSON.stringify({action:'startPaidStats'})}).then(r=>r.json());
+      setTimeout(loadStats, 1500);
+    } catch(e){
+      document.getElementById('status-text').textContent = 'Не удалось запустить: ' + e.message;
+      btn.disabled = false; btn.textContent = 'Посчитать';
+    }
+  }
+
+  async function resetAll(){
+    if (!confirm('Сбросить статистику? Лист «Платные_посещения» будет удалён.')) return;
+    try {
+      await fetch(LIBRARY_URL, {method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'},
+        body: JSON.stringify({action:'resetPaidStats'})}).then(r=>r.json());
+      if (pollTimer){ clearTimeout(pollTimer); pollTimer = null; }
+      loadStats();
+    } catch(e){
+      document.getElementById('status-text').textContent = 'Не удалось сбросить: ' + e.message;
+    }
+  }
+
+  loadStats();
+</script>
+</body>
+</html>
