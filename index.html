@@ -1331,7 +1331,7 @@ function renderNetCalc(){
     return `<tr><td class="num">${fmt1(n)}</td><td class="num">${fmt1(g)}</td><td class="num">${fmt1(c)}</td></tr>`;
   }).join("");
   const t=document.getElementById("netCalcTable");
-  if(t) t.innerHTML=`<thead><tr><th>На руки, р</th><th>Начислить, р</th><th>Стоимость для клуба, р</th></tr></thead><tbody>${rows}</tbody>`;
+  if(t) t.innerHTML=`<thead><tr><th>На руки, р</th><th class="num">Начислить, р</th><th class="num">Стоимость для клуба, р</th></tr></thead><tbody>${rows}</tbody>`;
 }
 function updNetInput(v){ S._netInput=parseFloat(v)||0; persistLocal(); renderNetCalc(); }
 function updTax(k,v){ S.tax[k]=parseFloat(v)||0; persistLocal(); renderAll(); }
@@ -1463,7 +1463,7 @@ function renderBreak(){
    ${kpi("Сейчас по модели",fmt(T.rev)+" р",T.rev>=bep?"green":"red",T.rev>=bep?"выше точки — плюс":"ниже точки — минус")}
    ${kpi("Запас прочности",fmt1(safety)+"%",safety<20?"red":"green","на сколько можно просесть")}`;
   // мин наполняемость
-  let h=`<thead><tr><th>Курс</th><th>Цена</th><th>ЗП/зан</th><th>Мин детей</th><th>Цель</th><th>Факт</th><th>Статус</th></tr></thead><tbody>`;
+  let h=`<thead><tr><th>Курс</th><th class="num">Цена</th><th class="num">ЗП/зан</th><th class="num">Мин детей</th><th class="num">Цель</th><th class="num">Факт</th><th>Статус</th></tr></thead><tbody>`;
   S.courses.forEach(c=>{ const r=applyScn(c);
     let st="—",cls="";
     if(c.groups>0&&c.fill>0){ if(r.fillN>=r.minFill){st="✓ ок";cls="g";}else{st="ниже порога";cls="r";} }
@@ -1565,8 +1565,8 @@ function renderPlanner(){
 
   // таблица плана
   let h=`<thead><tr>
-    <th style="width:24px"></th><th>Курс</th><th>Чел/гр</th><th title="из библиотеки курсов">Цена 📚</th><th>Групп/нед</th>
-    <th title="из библиотеки курсов">Визиты 📚</th><th>Оборот/нед</th><th>Детей-мест</th><th></th></tr></thead><tbody>`;
+    <th style="width:24px"></th><th>Курс</th><th class="num">Чел/гр</th><th class="num" title="из библиотеки курсов">Цена 📚</th><th class="num">Групп/нед</th>
+    <th class="num" title="из библиотеки курсов">Визиты 📚</th><th class="num">Оборот/нед</th><th class="num">Детей-мест</th><th></th></tr></thead><tbody>`;
   S.plan.forEach((p,i)=>{
     const lib=courseFromLib(p.name);
     const g=+p.groups||0, cg=+p.perGroup||0;
