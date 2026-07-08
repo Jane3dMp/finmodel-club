@@ -331,6 +331,7 @@ tr.rowlocked input,tr.rowlocked select{background:#EAF3EC;border-color:#cfe3d4;c
   <span class="hd-sep"></span>
   <span class="hd-grp">
    <button class="btn sm" onclick="printSchedule()" title="Распечатать расписание для менеджеров">🖨 Печать</button>
+   <button class="btn sm" onclick="exportKidsByDay()" title="Выгрузить Excel: дети по дням со статусами">📥 Дети по дням (Excel)</button>
   </span>
  </div>
  <div class="dayTabs" id="dayTabs"></div>
@@ -402,13 +403,6 @@ tr.rowlocked input,tr.rowlocked select{background:#EAF3EC;border-color:#cfe3d4;c
  <div class="row2">
   <div class="card"><h3>Ставки</h3><div id="taxRates"></div></div>
   <div class="card"><h3>Расчёт налоговой нагрузки</h3><table id="taxCalc"></table></div>
- </div>
- <div class="card" style="margin-top:12px">
-  <h3>Калькулятор ЗП: «на руки» → начислить</h3>
-  <div class="sec-desc">Из зарплаты работника удерживается 14% (подоходный 13% + 1% ФСЗН). Чтобы человек получил нужную сумму на руки, начисляем больше: <b>начислить = на руки ÷ 0,86</b>. Сверху клуб доплачивает взносы нанимателя (ФСЗН + Белгосстрах).</div>
-  <div id="netCalcBox"></div>
-  <div class="tscroll" style="margin-top:10px"><table id="netCalcTable"></table></div>
-  <div class="sec-desc" style="margin-top:8px">⚠️ Расчёт по плоским 14%. Если у педагога есть стандартный вычет (на детей и т.п.), подоходный будет чуть меньше — точную цифру считает бухгалтер по месячному доходу человека.</div>
  </div>
 </section>
 
@@ -550,7 +544,6 @@ const DEFAULT_STATE = {
   fixedPct: [],  // расходы в % от оборота: [{name, pct}]
   fotTaxable: 100, // (устаревшее) % ФОТ по трудовым; теперь база = весь ФОТ − НПД
   _npdMonth: 0,   // сумма ФОТ на НПД (видеограф, СММ) — НЕ облагается взносами
-  _netInput: 35,  // калькулятор: желаемая сумма «на руки»
   _wageMode: "kpi", // модель ЗП: kpi | fix
   _fixRates: {},    // фикс-ставки: {педагог: {длительность_мин: ставка}}
   assume: { weeksPerMonth:4, targetProfitShare:18, ownerSalary:0 },
@@ -1109,24 +1102,8 @@ function renderCourses(){
   t.innerHTML=h;
 }
 function esc(s){return String(s).replace(/"/g,"&quot;");}
-/* нормализация имени (без учёта регистра и лишних пробелов) */
-function _normName(s){return String(s||"").trim().toLowerCase().replace(/\s+/g," ");}
-/* устойчивый список <option> для выпадашек по именам:
-   - value задаётся явно (браузер не срезает хвостовые пробелы),
-   - выбранная опция ищется без учёта регистра/пробелов,
-   - если текущего значения нет в списке — добавляем его первым (выбранным). */
-function optList(names, current){
-  const key=_normName(current); let matched=false;
-  let h=(names||[]).map(n=>{
-    const sel = !matched && _normName(n)===key;
-    if(sel) matched=true;
-    return `<option value="${esc(n)}"${sel?" selected":""}>${esc(n)}</option>`;
-  }).join("");
-  if(current && !matched) h=`<option value="${esc(current)}" selected>${esc(current)}</option>`+h;
-  return h;
-}
 function upd(i,k,v){
-  if(k==="name"||k==="eco") S.courses[i][k]=String(v).trim().replace(/\s+/g," ");
+  if(k==="name"||k==="eco") S.courses[i][k]=v;
   else S.courses[i][k]=parseFloat(v)||0;
   persistLocal(); renderAll();
 }
@@ -1301,39 +1278,7 @@ function renderTax(){
    <tr class="totrow"><td>Итого налоги и взносы</td><td class="num">${fmt(T.taxTotal)} р</td></tr>
    <tr><td>Налоговая нагрузка к выручке</td><td class="num">${T.rev>0?fmt1(T.taxTotal/T.rev*100):0}%</td></tr>
   </tbody>`;
-  renderNetCalc();
 }
-/* калькулятор: «на руки» → начислить → стоимость для клуба */
-const PN_RATE=13, FSZN_EMP=1;               // удержания из ЗП работника, %
-function netToGross(net){ return net/(1-(PN_RATE+FSZN_EMP)/100); }        // ÷0,86
-function grossToClub(gross){ return gross*(1+(S.tax.fszn+S.tax.belgosstrah)/100); } // ×1,346
-function renderNetCalc(){
-  const net=+S._netInput||0;
-  const gross=netToGross(net);
-  const pn=gross*PN_RATE/100, fw=gross*FSZN_EMP/100;
-  const club=grossToClub(gross);
-  const emp=gross*(S.tax.fszn+S.tax.belgosstrah)/100;
-  const box=document.getElementById("netCalcBox");
-  if(box) box.innerHTML=`
-   <div class="field" style="max-width:280px"><label>Сколько человек получает «на руки», р</label>
-     <input type="number" value="${net}" onchange="updNetInput(this.value)"></div>
-   <table style="margin-top:6px"><tbody>
-     <tr><td>Начислить (грязными)</td><td class="num"><b>${fmt1(gross)} р</b></td></tr>
-     <tr><td>− Подоходный (${PN_RATE}%)</td><td class="num neg">−${fmt1(pn)} р</td></tr>
-     <tr><td>− ФСЗН работника (${FSZN_EMP}%)</td><td class="num neg">−${fmt1(fw)} р</td></tr>
-     <tr class="totrow"><td>На руки</td><td class="num"><b>${fmt1(net)} р</b></td></tr>
-     <tr><td>+ Взносы нанимателя (ФСЗН ${S.tax.fszn}% + Белгосстрах ${S.tax.belgosstrah}%)</td><td class="num neg">+${fmt1(emp)} р</td></tr>
-     <tr class="totrow"><td><b>Полная стоимость для клуба</b></td><td class="num"><b>${fmt1(club)} р</b></td></tr>
-   </tbody></table>`;
-  // справочная таблица под типовые ставки
-  const rows=[35,40,45,50].map(n=>{
-    const g=netToGross(n), c=grossToClub(g);
-    return `<tr><td class="num">${fmt1(n)}</td><td class="num">${fmt1(g)}</td><td class="num">${fmt1(c)}</td></tr>`;
-  }).join("");
-  const t=document.getElementById("netCalcTable");
-  if(t) t.innerHTML=`<thead><tr><th>На руки, р</th><th class="num">Начислить, р</th><th class="num">Стоимость для клуба, р</th></tr></thead><tbody>${rows}</tbody>`;
-}
-function updNetInput(v){ S._netInput=parseFloat(v)||0; persistLocal(); renderNetCalc(); }
 function updTax(k,v){ S.tax[k]=parseFloat(v)||0; persistLocal(); renderAll(); }
 function updNpd(v){ S._npdMonth=parseFloat(v)||0; persistLocal(); renderAll(); }
 
@@ -1463,7 +1408,7 @@ function renderBreak(){
    ${kpi("Сейчас по модели",fmt(T.rev)+" р",T.rev>=bep?"green":"red",T.rev>=bep?"выше точки — плюс":"ниже точки — минус")}
    ${kpi("Запас прочности",fmt1(safety)+"%",safety<20?"red":"green","на сколько можно просесть")}`;
   // мин наполняемость
-  let h=`<thead><tr><th>Курс</th><th class="num">Цена</th><th class="num">ЗП/зан</th><th class="num">Мин детей</th><th class="num">Цель</th><th class="num">Факт</th><th>Статус</th></tr></thead><tbody>`;
+  let h=`<thead><tr><th>Курс</th><th>Цена</th><th>ЗП/зан</th><th>Мин детей</th><th>Цель</th><th>Факт</th><th>Статус</th></tr></thead><tbody>`;
   S.courses.forEach(c=>{ const r=applyScn(c);
     let st="—",cls="";
     if(c.groups>0&&c.fill>0){ if(r.fillN>=r.minFill){st="✓ ок";cls="g";}else{st="ниже порога";cls="r";} }
@@ -1565,8 +1510,8 @@ function renderPlanner(){
 
   // таблица плана
   let h=`<thead><tr>
-    <th style="width:24px"></th><th>Курс</th><th class="num">Чел/гр</th><th class="num" title="из библиотеки курсов">Цена 📚</th><th class="num">Групп/нед</th>
-    <th class="num" title="из библиотеки курсов">Визиты 📚</th><th class="num">Оборот/нед</th><th class="num">Детей-мест</th><th></th></tr></thead><tbody>`;
+    <th style="width:24px"></th><th>Курс</th><th>Чел/гр</th><th title="из библиотеки курсов">Цена 📚</th><th>Групп/нед</th>
+    <th title="из библиотеки курсов">Визиты 📚</th><th>Оборот/нед</th><th>Детей-мест</th><th></th></tr></thead><tbody>`;
   S.plan.forEach((p,i)=>{
     const lib=courseFromLib(p.name);
     const g=+p.groups||0, cg=+p.perGroup||0;
@@ -1575,13 +1520,13 @@ function renderPlanner(){
     const rev=cg*pr*g*v, kids=cg*g;
     const lk=isLocked('plan',i), da=lk?'disabled':'';
     // выпадающий список курсов из библиотеки
-    const opts=optList(S.courses.map(c=>c.name), p.name);
+    const opts=S.courses.map(c=>`<option ${c.name===p.name?"selected":""}>${esc(c.name)}</option>`).join("");
     h+=`<tr class="${lk?'rowlocked':''}" draggable="${lk?'false':'true'}" ${lk?'':`ondragstart="rowDragStart(event,'plan',${i})" ondragend="rowDragEnd(event)"`} ondragover="rowDragOver(event)" ondrop="rowDrop(event,'plan',${i},renderPlanner)">
       <td class="dragh" title="${lk?'Закреплено':'Перетащите'}">${rowLockBtn('plan',i,'renderPlanner')}</td>
-      <td><select class="cell wide" ${da} onchange="updPlan(${i},'name',this.value)">${opts}</select></td>
-      <td class="num"><input class="cell" type="number" value="${cg}" ${da} onchange="updPlan(${i},'perGroup',this.value)"></td>
+      <td><select class="cell wide" ${da} onchange="updPlan(${i},'name',this.value)">${opts}${lib?'':`<option selected>${esc(p.name)}</option>`}</select></td>
+      <td><input class="cell" type="number" value="${cg}" ${da} onchange="updPlan(${i},'perGroup',this.value)"></td>
       <td class="num muted" title="из библиотеки курсов">${fmt(pr)}</td>
-      <td class="num"><input class="cell" type="number" value="${g}" ${da} onchange="updPlan(${i},'groups',this.value)"></td>
+      <td><input class="cell" type="number" value="${g}" ${da} onchange="updPlan(${i},'groups',this.value)"></td>
       <td class="num muted" title="из библиотеки курсов">${v}×</td>
       <td class="num">${fmt(rev)}</td>
       <td class="num">${fmt1(kids)}</td>
@@ -2064,9 +2009,11 @@ function addMin(t,min){ const[h,m]=t.split(":").map(Number); let tot=h*60+m+min;
   return String(Math.floor(tot/60)).padStart(2,"0")+":"+String(tot%60).padStart(2,"0"); }
 function editLes(idx){
   const l=S.grid[idx];
-  let courseOpts=optList(S.courses.map(c=>c.name), l.course);
-  let teacherOpts=`<option value="">— педагог —</option>`+optList(S.staff.map(s=>s.name), l.teacher);
-  const roomOpts=`<option value="">— кабинет —</option>`+optList(ROOMS, l.room);
+  let courseOpts=S.courses.map(c=>`<option ${c.name===l.course?"selected":""}>${esc(c.name)}</option>`).join("");
+  if(l.course && !S.courses.some(c=>c.name===l.course)) courseOpts=`<option selected>${esc(l.course)}</option>`+courseOpts;
+  let teacherOpts=`<option value="">— педагог —</option>`+S.staff.map(s=>`<option ${s.name===l.teacher?"selected":""}>${esc(s.name)}</option>`).join("");
+  if(l.teacher && !S.staff.some(s=>s.name===l.teacher)) teacherOpts+=`<option selected>${esc(l.teacher)} (нет в списке)</option>`;
+  const roomOpts=`<option value="">— кабинет —</option>`+ROOMS.map(r=>`<option ${r===l.room?"selected":""}>${esc(r)}</option>`).join("");
   document.getElementById("lesModalBody").innerHTML=`
     <label>Курс</label><select id="mCourse" class="cell wide">${courseOpts}</select>
     <label>Педагог</label><select id="mTeacher" class="cell wide">${teacherOpts}</select>
@@ -2249,8 +2196,8 @@ function renderStaff(){
   const _ssm=S._staffSort||"wage";
   const _arrName=_ssm==="name"?" ▼":"";
   const _arrWage=_ssm==="wage"?" ▼":(_ssm==="wage_asc"?" ▲":"");
-  let h=`<thead><tr><th>Педагог${_arrName}</th><th>Курсы</th><th class="num">Занятий/нед</th><th class="num">Детей-мест</th>
-    <th class="num">ЗП/нед${_arrWage}</th><th class="num">ЗП/мес</th><th></th></tr></thead><tbody>`;
+  let h=`<thead><tr><th>Педагог${_arrName}</th><th>Курсы</th><th>Занятий/нед</th><th>Детей-мест</th>
+    <th>ЗП/нед${_arrWage}</th><th>ЗП/мес</th><th></th></tr></thead><tbody>`;
   const _ss=S._staffSort||"wage";
   if(_ss==="name"){ st.sort((a,b)=>String(a.name).localeCompare(String(b.name),"ru")); }
   else if(_ss==="wage_asc"){ st.sort((a,b)=>a.wageWeek-b.wageWeek); }
@@ -2426,7 +2373,7 @@ function renderWageRef(){
   const box=document.getElementById("wageRef");
   if(!box) return;
   let h=`<thead><tr><th>Курс</th>`;
-  for(let n=4;n<=12;n++) h+=`<th class="num">${n}</th>`;
+  for(let n=4;n<=12;n++) h+=`<th>${n}</th>`;
   h+=`<th></th></tr></thead><tbody>`;
   Object.keys(S.wageTable).sort().forEach(name=>{
     const t=S.wageTable[name].tiers;
@@ -2557,6 +2504,65 @@ function applyImport(mode){
   toast(mode==="replace"?("Загружено "+parsed.lessons.length+" занятий"):("Добавлено "+parsed.lessons.length+" занятий"));
 }
 function closeImport(){ document.getElementById("impModal").classList.remove("show"); }
+
+/* ====== ВЫГРУЗКА ДЕТЕЙ ПО ДНЯМ (Excel со статусами) ====== */
+const KID_STATUSES=["точно придет","ждет расписание в школе","думают","нет денег (не придет точно)","ждет расписание другого кружка","уговаривает ребенка","в комментах"];
+function parseKidsFromNote(note){
+  if(!note) return [];
+  let t=String(note);
+  if(!/\b\d+\s*\.\s*[А-ЯЁA-Z][а-яёa-z]/.test(t)) return [];
+  const firstNum=t.search(/\b1\s*\.\s*[А-ЯЁA-Z]/);
+  if(firstNum>0) t=t.slice(firstNum);
+  const parts=t.split(/\s*\d+\s*\.\s*/).filter(x=>x.trim());
+  const stop=/^(новый набор|после|min|scr|класс|года?|лет)/i;
+  const kids=[];
+  for(let p of parts){
+    p=p.replace(/\d+[.,]\d{2}/g," ").replace(/\bи после\b.*/i," ").replace(/\(.*?\)/g," ").replace(/[«»"]/g," ").replace(/\s+/g," ").trim();
+    if(stop.test(p)) continue;
+    const words=p.split(" ").filter(w=>/^[А-ЯЁA-Z][а-яёa-z-]+$/.test(w));
+    if(words.length) kids.push(words.slice(0,3).join(" "));
+  }
+  return kids;
+}
+async function exportKidsByDay(){
+  if(typeof XLSX==="undefined"){ toast("Загрузка библиотеки..."); await loadSheetJS(); }
+  const DAYS=["","Понедельник","Вторник","Среда","Четверг","Пятница","Суббота","Воскресенье"];
+  const wb=XLSX.utils.book_new();
+  let totalKids=0;
+  for(let d=1; d<=7; d++){
+    const lessons=(S.grid||[]).filter(l=>l.day===d).sort((a,b)=>(a.start||"").localeCompare(b.start||""));
+    const rows=[["День","Время","Кабинет","Курс","Педагог","Ребёнок","Статус","Комментарий"]];
+    lessons.forEach(l=>{
+      const kids=parseKidsFromNote(l.note);
+      const time=(l.start||"")+(l.end?("–"+l.end):"");
+      if(kids.length){
+        kids.forEach(k=>{ rows.push([DAYS[d],time,l.room||"",l.course||"",shortName(l.teacher)||l.teacher||"",k,"",""]); totalKids++; });
+      }
+    });
+    if(rows.length<=1) continue; // нет детей в этот день — лист не создаём
+    const ws=XLSX.utils.aoa_to_sheet(rows);
+    ws["!cols"]=[{wch:14},{wch:12},{wch:10},{wch:24},{wch:18},{wch:26},{wch:26},{wch:30}];
+    XLSX.utils.book_append_sheet(wb, ws, DAYS[d].slice(0,31));
+  }
+  if(totalKids===0){ toast("Не нашла детей в примечаниях занятий"); return; }
+  // лист статусов + инструкция как включить выпадашку
+  const refRows=[
+    ["СТАТУСЫ — список для выпадашки"],
+    ["Как включить выпадашку в Google Sheets:"],
+    ["1) На листе дня выдели колонку «Статус»"],
+    ["2) Меню Данные → Проверка данных → + Правило"],
+    ["3) Критерий: «Раскрывающийся список (из диапазона)»"],
+    ["4) Укажи диапазон: Статусы!A9:A15  → Готово"],
+    [""],
+    ["Значения:"],
+    ...KID_STATUSES.map(s=>[s])
+  ];
+  const ref=XLSX.utils.aoa_to_sheet(refRows);
+  ref["!cols"]=[{wch:48}];
+  XLSX.utils.book_append_sheet(wb, ref, "Статусы");
+  XLSX.writeFile(wb, "Дети_по_дням.xlsx");
+  toast("Выгружено детей: "+totalKids);
+}
 
 function loadSheetJS(){
   return new Promise((res,rej)=>{
