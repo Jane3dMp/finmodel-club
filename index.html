@@ -2813,7 +2813,17 @@ const KID_FLAGS=[
   {k:"no",    ic:"❌", lab:"Не придёт"},
   {k:"call",  ic:"📵", lab:"Недозвон"}
 ];
-function _blankKid(n){ return {n:n||"", may:false, sched:false, no:false, call:false, c:""}; }
+function _blankKid(n){ return {n:cleanKidName(n), may:false, sched:false, no:false, call:false, c:""}; }
+/* «Азаренок Леон36,00», «Богданович Степан #34,00» → «Азаренок Леон» */
+function cleanKidName(s){
+  return String(s||"")
+    .replace(/\d+\s*[.,]\s*\d{2}/g," ")   // 36,00  34.00
+    .replace(/\d+/g," ")                  // остальные цифры
+    .replace(/[#!]+/g," ")
+    .replace(/\s+/g," ").trim()
+    .replace(/[\s.,;:–—-]+$/,"")
+    .trim();
+}
 /* разбор старого note: строки вида "1. Иванов Пётр" → дети, остальное → шапка */
 function migrateLessonKids(l){
   if(Array.isArray(l.kids)) return false;
@@ -2821,16 +2831,29 @@ function migrateLessonKids(l){
   const head=[], kids=[];
   lines.forEach(ln=>{
     const m=ln.match(/^\s*\d+\s*[.)]\s*(.+?)\s*$/);
-    if(m && m[1]) kids.push(_blankKid(m[1]));
+    const nm=m&&m[1]?cleanKidName(m[1]):"";
+    if(nm) kids.push(_blankKid(nm));
     else head.push(ln);
   });
   l.kids=kids;
   l.note=head.join("\n").replace(/\n{3,}/g,"\n\n").trim();
   return true;
 }
+/* одноразовая перечистка уже мигрированных детей (имена с приклеенными суммами) */
+function cleanupKidNames(){
+  let n=0;
+  (S.grid||[]).forEach(l=>{
+    kidsOf(l).forEach(k=>{
+      const c=cleanKidName(k.n);
+      if(c && c!==k.n){ k.n=c; n++; }
+    });
+  });
+  return n;
+}
 function migrateAllKids(){
   let n=0;
   (S.grid||[]).forEach(l=>{ if(migrateLessonKids(l)) n++; });
+  n+=cleanupKidNames();
   if(n) persistLocal();
 }
 function kidsOf(l){ return Array.isArray(l.kids)?l.kids:[]; }
@@ -2841,12 +2864,9 @@ function kidIcons(k){
 /* ===== ИМПОРТ «КУПИЛ МАЙСКИЙ» ===== */
 let _mayRows=[], _mayCourses=[];
 function _normName(s){
-  return String(s||"")
-    .replace(/\(.*?\)/g," ")                 // скобки с пометками
-    .replace(/[#!]/g," ")
-    .replace(/\bрезерв\w*\b/gi," ")
+  return cleanKidName(String(s||"").replace(/\(.*?\)/g," ").replace(/\bрезерв\w*\b/gi," "))
     .replace(/ё/gi,"е")
-    .replace(/\s+/g," ").trim().toLowerCase()
+    .toLowerCase()
     .split(" ").slice(0,2).join(" ");        // Фамилия Имя
 }
 function _normCourse(s){
