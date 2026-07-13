@@ -377,6 +377,7 @@ tr.rowlocked input,tr.rowlocked select{background:#EAF3EC;border-color:#cfe3d4;c
   <span class="hd-grp">
    <button class="btn sm" onclick="printSchedule()" title="Распечатать расписание для менеджеров">🖨 Печать</button>
    <button class="btn sm" onclick="exportKidsByDay()" title="Выгрузить Excel: дети по дням со статусами">📥 Дети по дням (Excel)</button>
+   <button class="btn sm" onclick="openMayImport()" title="Вставить список оплативших майский — проставит 💰 детям на совпавших курсах">💰 Импорт майских</button>
   </span>
  </div>
  <div class="dayTabs" id="dayTabs"></div>
@@ -539,6 +540,17 @@ tr.rowlocked input,tr.rowlocked select{background:#EAF3EC;border-color:#cfe3d4;c
    <button class="btn ghost sm" onclick="togglePinModal()" id="pinBtn">Закрепить</button>
    <button class="btn gray sm" onclick="delLes()">Удалить</button>
    <button class="btn ghost sm" onclick="closeLes()">Отмена</button>
+  </div>
+ </div>
+</div>
+
+<div class="modal-bg" id="mayModal">
+ <div class="modal" style="max-width:760px">
+  <h3>💰 Импорт оплативших майский</h3>
+  <div id="mayBody"></div>
+  <div class="hd-actions les-foot" style="margin-top:14px">
+   <button class="btn sm" id="mayBtn" onclick="mayNext()">Разобрать</button>
+   <button class="btn ghost sm" onclick="closeMay()">Закрыть</button>
   </div>
  </div>
 </div>
@@ -2824,6 +2836,121 @@ function migrateAllKids(){
 function kidsOf(l){ return Array.isArray(l.kids)?l.kids:[]; }
 function kidIcons(k){
   return KID_FLAGS.filter(f=>k[f.k]).map(f=>f.ic).join("");
+}
+
+/* ===== ИМПОРТ «КУПИЛ МАЙСКИЙ» ===== */
+let _mayRows=[], _mayCourses=[];
+function _normName(s){
+  return String(s||"")
+    .replace(/\(.*?\)/g," ")                 // скобки с пометками
+    .replace(/[#!]/g," ")
+    .replace(/\bрезерв\w*\b/gi," ")
+    .replace(/ё/gi,"е")
+    .replace(/\s+/g," ").trim().toLowerCase()
+    .split(" ").slice(0,2).join(" ");        // Фамилия Имя
+}
+function _normCourse(s){
+  return String(s||"").replace(/ё/gi,"е").replace(/[^а-яa-z0-9]/gi,"").toLowerCase();
+}
+function openMayImport(){
+  _mayRows=[]; _mayCourses=[];
+  document.getElementById("mayBody").innerHTML=`
+    <p style="font-size:12px;color:var(--muted);margin:0 0 8px">
+      Вставь таблицу как есть: <b>ФИО ⇥ пометка ⇥ курс ⇥ баланс</b> (можно прямо из Excel/Альфы, строка заголовка не мешает).
+      Галочка 💰 ставится только на тех занятиях, где <b>курс совпал</b>.
+    </p>
+    <textarea id="mayText" class="cell wide" rows="10" style="font-size:12px;font-family:monospace" placeholder="Найденок Богдан	майский 26	3D Blender	510&#10;Воюнков Семен	майский 26	3D Blender	278"></textarea>`;
+  document.getElementById("mayBtn").textContent="Разобрать";
+  document.getElementById("mayBtn").onclick=mayParse;
+  document.getElementById("mayModal").classList.add("show");
+}
+function closeMay(){ document.getElementById("mayModal").classList.remove("show"); }
+
+function mayParse(){
+  const raw=(document.getElementById("mayText").value||"").trim();
+  if(!raw){ toast("Пустая вставка"); return; }
+  _mayRows=[];
+  raw.split(/\r?\n/).forEach(ln=>{
+    const p=ln.split("\t").map(x=>x.trim());
+    if(p.length<3) return;
+    const fio=p[0], course=p[2];
+    if(!fio||!course) return;
+    if(/^фио$/i.test(fio)) return;            // заголовок
+    _mayRows.push({fio, course, key:_normName(fio)});
+  });
+  if(!_mayRows.length){ toast("Не нашла строк. Нужны колонки через табуляцию."); return; }
+
+  // уникальные курсы из вставки + автоподбор к курсам сетки
+  const gridCourses=[...new Set((S.grid||[]).map(l=>l.course).filter(Boolean))].sort((a,b)=>a.localeCompare(b,"ru"));
+  const uniq=[...new Set(_mayRows.map(r=>r.course))].sort((a,b)=>a.localeCompare(b,"ru"));
+  _mayCourses=uniq.map(c=>{
+    const n=_normCourse(c);
+    let guess=gridCourses.find(g=>_normCourse(g)===n);
+    if(!guess) guess=gridCourses.find(g=>{const gn=_normCourse(g); return gn.startsWith(n)||n.startsWith(gn);});
+    return {src:c, dst:guess||"", cnt:_mayRows.filter(r=>r.course===c).length};
+  });
+
+  const opts=g=>`<option value="">— пропустить —</option>`+gridCourses.map(x=>`<option ${x===g?"selected":""}>${esc(x)}</option>`).join("");
+  document.getElementById("mayBody").innerHTML=`
+    <p style="font-size:12px;color:var(--muted);margin:0 0 8px">
+      Строк разобрано: <b>${_mayRows.length}</b>. Сопоставь курсы из списка с курсами в расписании.
+      Подобранное автоматически — проверь. «— пропустить —» = детей этого курса не трогаем.
+    </p>
+    <div style="max-height:46vh;overflow:auto;border:1px solid var(--line);border-radius:8px">
+    <table style="width:100%;border-collapse:collapse;font-size:12px">
+      <thead><tr>
+        <th style="background:var(--coal);color:#fff;padding:6px 8px;text-align:left;position:sticky;top:0">Курс из списка</th>
+        <th style="background:var(--coal);color:#fff;padding:6px 8px;width:52px;position:sticky;top:0">Детей</th>
+        <th style="background:var(--coal);color:#fff;padding:6px 8px;text-align:left;position:sticky;top:0">Курс в расписании</th>
+      </tr></thead>
+      <tbody>${_mayCourses.map((c,i)=>`<tr>
+        <td style="border:1px solid var(--line);padding:4px 8px">${esc(c.src)}</td>
+        <td style="border:1px solid var(--line);padding:4px 8px;text-align:center">${c.cnt}</td>
+        <td style="border:1px solid var(--line);padding:2px 4px">
+          <select class="cell may-map" data-i="${i}" style="width:100%;${c.dst?"":"border-color:var(--red)"}">${opts(c.dst)}</select>
+        </td></tr>`).join("")}</tbody>
+    </table></div>`;
+  document.getElementById("mayBtn").textContent="💰 Проставить";
+  document.getElementById("mayBtn").onclick=mayApply;
+}
+
+function mayApply(){
+  document.querySelectorAll(".may-map").forEach(s=>{ _mayCourses[+s.dataset.i].dst=s.value; });
+  const map={};
+  _mayCourses.forEach(c=>{ if(c.dst) map[c.src]=c.dst; });
+  if(!Object.keys(map).length){ toast("Ни один курс не сопоставлен"); return; }
+
+  migrateAllKids();
+  let hits=0;
+  const notFound=[];
+  _mayRows.forEach(r=>{
+    const dst=map[r.course];
+    if(!dst){ return; }                       // курс пропущен — не считаем потерей
+    let found=false;
+    (S.grid||[]).forEach(l=>{
+      if(l.course!==dst) return;
+      kidsOf(l).forEach(k=>{
+        if(_normName(k.n)===r.key){ if(!k.may){ k.may=true; hits++; } found=true; }
+      });
+    });
+    if(!found) notFound.push(r);
+  });
+  persistLocal(); renderGrid();
+
+  const skipped=_mayCourses.filter(c=>!c.dst);
+  document.getElementById("mayBody").innerHTML=`
+    <div class="callout" style="margin-bottom:10px">
+      Проставлено 💰: <b>${hits}</b> · не найдено в расписании: <b>${notFound.length}</b> · курсов пропущено: <b>${skipped.length}</b>
+    </div>
+    ${notFound.length?`
+      <label>Не нашла этих детей на сопоставленном курсе — проверь вручную:</label>
+      <div style="max-height:40vh;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:6px 10px;font-size:12px;line-height:1.6">
+        ${notFound.map(r=>`<div>• ${esc(r.fio)} <span style="color:var(--muted)">— ${esc(r.course)} → ${esc(map[r.course])}</span></div>`).join("")}
+      </div>`:`<p style="font-size:13px;color:var(--green);font-weight:600">Все дети найдены.</p>`}
+    ${skipped.length?`<p style="font-size:11px;color:var(--muted);margin-top:8px">Пропущены курсы: ${skipped.map(c=>esc(c.src)).join(", ")}</p>`:""}`;
+  document.getElementById("mayBtn").textContent="Готово";
+  document.getElementById("mayBtn").onclick=closeMay;
+  toast("Проставлено 💰: "+hits);
 }
 
 function parseKidsFromNote(note){
