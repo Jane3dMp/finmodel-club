@@ -178,6 +178,29 @@ small.note{font-size:11px;color:var(--muted)}
 #courseTable td input[type="number"]{width:62px}
 #courseTable .iconbtn{padding:2px 6px;font-size:11px;line-height:1.2;min-width:0}
 #courseTable .ly-col{background:rgba(120,90,60,.05);border-left:1px dashed var(--line)}
+#courseTable th.sortable{cursor:pointer;user-select:none;white-space:nowrap}
+#courseTable th.sortable:hover{background:var(--terra);color:#fff}
+#courseTable th.sorted{color:#FED634}
+/* выравнивание: шапка = значения */
+#courseTable th.a-left,#courseTable td.a-left{text-align:left}
+#courseTable th.a-right,#courseTable td.a-right{text-align:right}
+#courseTable th.a-center,#courseTable td.a-center{text-align:center}
+#courseTable td.a-right input[type="number"]{text-align:right}
+#courseTable td.a-right .cell{text-align:right}
+/* ширины числовых столбцов — чтобы шапка и число не разъезжались */
+#courseTable th.c-price,#courseTable td.c-price,
+#courseTable th.c-wage,#courseTable td.c-wage,
+#courseTable th.c-groups,#courseTable td.c-groups,
+#courseTable th.c-ingrid,#courseTable td.c-ingrid,
+#courseTable th.c-fill,#courseTable td.c-fill,
+#courseTable th.c-min,#courseTable td.c-min{width:78px}
+#courseTable th.c-visits,#courseTable td.c-visits{width:64px}
+#courseTable th.c-rev,#courseTable td.c-rev,
+#courseTable th.c-margin,#courseTable td.c-margin,
+#courseTable th.c-mpct,#courseTable td.c-mpct,
+#courseTable th.c-lyfill,#courseTable td.c-lyfill,
+#courseTable th.c-lyrev,#courseTable td.c-lyrev{width:96px}
+#courseTable td.c-price input,#courseTable td.c-groups input,#courseTable td.c-fill input{width:100%}
 
 .pin{cursor:pointer;font-size:13px;user-select:none;opacity:.6}
 .pin:hover{opacity:1}
@@ -1061,11 +1084,22 @@ function renderCourses(){
 
   const t=document.getElementById("courseTable");
   let h=`<thead><tr>
-    <th style="width:24px"></th><th class="col-name">Курс</th><th class="col-eco" title="Экосистема: П — Прознание, C — CODDY, Д — Детали">Эко</th><th>Цена</th><th>ЗП/зан</th>
-    <th>Групп/нед</th><th title="Сколько групп этого курса уже стоит в расписании (занятия÷визиты). Обновляется из сетки">В расписании</th><th title="Сколько раз в неделю ходит группа">Визиты</th><th title="Моделируемое вами число детей в группе">Факт детей</th>
-    <th>Оборот/мес</th><th title="Оборот минус зарплата педагога. НЕ учтены аренда, налоги, команда — это не прибыль">Маржа после ЗП, р</th><th title="Маржа после ЗП ÷ оборот">Маржа после ЗП, %</th>
-    <th class="ly-col" title="Средняя наполняемость прошлого года (неизменно, из Альфы)">Факт детей 25/26</th><th class="ly-col" title="Реальный оборот по курсу в среднем за месяц 2025/2026 (неизменно)">Факт/мес 25/26</th>
-    <th>Мин</th><th></th></tr></thead><tbody>`;
+    <th style="width:24px"></th>
+    ${_sortTh("name",{cls:"col-name"})}
+    ${_sortTh("eco",{cls:"col-eco",title:"Экосистема: П — Прознание, C — CODDY, Д — Детали"})}
+    ${_sortTh("price")}
+    ${_sortTh("wage")}
+    ${_sortTh("groups")}
+    ${_sortTh("ingrid",{title:"Сколько групп этого курса уже стоит в расписании (занятия÷визиты). Обновляется из сетки"})}
+    ${_sortTh("visits",{title:"Сколько раз в неделю ходит группа"})}
+    ${_sortTh("fill",{title:"Моделируемое вами число детей в группе"})}
+    ${_sortTh("rev")}
+    ${_sortTh("margin",{title:"Оборот минус зарплата педагога. НЕ учтены аренда, налоги, команда — это не прибыль"})}
+    ${_sortTh("mpct",{title:"Маржа после ЗП ÷ оборот"})}
+    ${_sortTh("lyfill",{cls:"ly-col",title:"Средняя наполняемость прошлого года (неизменно, из Альфы)"})}
+    ${_sortTh("lyrev",{cls:"ly-col",title:"Реальный оборот по курсу в среднем за месяц 2025/2026 (неизменно)"})}
+    ${_sortTh("min")}
+    <th></th></tr></thead><tbody>`;
   S.courses.forEach((c,i)=>{
     const r=applyScn(c);
     let sig="", cls="";
@@ -1077,23 +1111,23 @@ function renderCourses(){
     const lk=isLocked('courses',i), da=lk?'disabled':'';
     h+=`<tr class="${lk?'rowlocked':''}" draggable="${lk?'false':'true'}" ${lk?'':`ondragstart="rowDragStart(event,'courses',${i})" ondragend="rowDragEnd(event)"`} ondragover="rowDragOver(event)" ondrop="rowDrop(event,'courses',${i},renderCourses)">
       <td class="dragh" title="${lk?'Закреплено':'Перетащите'}">${rowLockBtn('courses',i,'renderCourses')}</td>
-      <td class="col-name"><input class="cell wide" value="${esc(c.name)}" ${da} onchange="upd(${i},'name',this.value)"></td>
-      <td class="col-eco"><select class="cell eco-sel" ${da} title="${esc(c.eco)}" onchange="upd(${i},'eco',this.value)">
+      <td class="col-name c-name a-left"><input class="cell wide" value="${esc(c.name)}" ${da} onchange="upd(${i},'name',this.value)"></td>
+      <td class="col-eco c-eco a-center"><select class="cell eco-sel" ${da} title="${esc(c.eco)}" onchange="upd(${i},'eco',this.value)">
         ${[["Прознание","П"],["CODDY","C"],["Детали","Д"]].map(([v,lab])=>`<option value="${v}" ${c.eco===v?"selected":""}>${lab}</option>`).join("")}</select></td>
-      <td><input class="cell" type="number" value="${c.price}" ${da} onchange="upd(${i},'price',this.value)"></td>
-      <td class="num" title="${S._wageMode==='fix'?'фикс-ставка педагога курса (прочерк = один педагог не назначен или ставка не задана)':'из справочника ставок по '+(r.fillN||c.fill||4)+' детям'}"><b>${(()=>{ if(S._wageMode==='fix'){ const fw=courseFixWageDisplay(c.name); return fw!=null?fmt(fw):'—'; } return fmt(r.wage); })()}</b></td>
-      <td><input class="cell" type="number" value="${c.groups}" ${da} onchange="upd(${i},'groups',this.value)"></td>
-      <td class="num" title="групп в расписании (из сетки)">${(()=>{ const g=courseGroupsInGrid(c.name,c.visits); const plan=+c.groups||0; const cls=g===plan?'pos':(g<plan?'neg':''); return `<b class="${cls}">${g}</b>`; })()}</td>
-      <td><select class="cell" ${da} onchange="upd(${i},'visits',this.value)">
+      <td class="c-price a-right"><input class="cell" type="number" value="${c.price}" ${da} onchange="upd(${i},'price',this.value)"></td>
+      <td class="num c-wage a-right" title="${S._wageMode==='fix'?'фикс-ставка педагога курса (прочерк = один педагог не назначен или ставка не задана)':'из справочника ставок по '+(r.fillN||c.fill||4)+' детям'}"><b>${(()=>{ if(S._wageMode==='fix'){ const fw=courseFixWageDisplay(c.name); return fw!=null?fmt(fw):'—'; } return fmt(r.wage); })()}</b></td>
+      <td class="c-groups a-right"><input class="cell" type="number" value="${c.groups}" ${da} onchange="upd(${i},'groups',this.value)"></td>
+      <td class="num c-ingrid a-right" title="групп в расписании (из сетки)">${(()=>{ const g=courseGroupsInGrid(c.name,c.visits); const plan=+c.groups||0; const cls=g===plan?'pos':(g<plan?'neg':''); return `<b class="${cls}">${g}</b>`; })()}</td>
+      <td class="c-visits a-center"><select class="cell" ${da} onchange="upd(${i},'visits',this.value)">
         <option value="1" ${(+c.visits||1)==1?"selected":""}>1×</option>
         <option value="2" ${(+c.visits||1)==2?"selected":""}>2×</option></select></td>
-      <td><input class="cell" type="number" value="${c.fill}" ${da} onchange="upd(${i},'fill',this.value)"></td>
-      <td class="num">${fmt(r.revenue)}</td>
-      <td class="num ${r.margin>=0?'pos':'neg'}">${fmt(r.margin)}</td>
-      <td class="num">${r.revenue>0?fmt1(r.marginPct)+'%':'—'}</td>
-      <td class="num muted ly-col" title="наполняемость прошлого года">${(()=>{const f=lastYearFillFor(c.name);return f?f.toFixed(1):"—";})()}</td>
-      <td class="num muted ly-col" title="оборот прошлого года">${(()=>{const f=lastYearIncomeMonth(c.name);return f?fmt(f):"—";})()}</td>
-      <td class="num"><span class="sig ${cls}">${sig}</span> ${r.minFill||'—'}</td>
+      <td class="c-fill a-right"><input class="cell" type="number" value="${c.fill}" ${da} onchange="upd(${i},'fill',this.value)"></td>
+      <td class="num c-rev a-right">${fmt(r.revenue)}</td>
+      <td class="num c-margin a-right ${r.margin>=0?'pos':'neg'}">${fmt(r.margin)}</td>
+      <td class="num c-mpct a-right">${r.revenue>0?fmt1(r.marginPct)+'%':'—'}</td>
+      <td class="num muted ly-col c-lyfill a-right" title="наполняемость прошлого года">${(()=>{const f=lastYearFillFor(c.name);return f?f.toFixed(1):"—";})()}</td>
+      <td class="num muted ly-col c-lyrev a-right" title="оборот прошлого года">${(()=>{const f=lastYearIncomeMonth(c.name);return f?fmt(f):"—";})()}</td>
+      <td class="num c-min a-right"><span class="sig ${cls}">${sig}</span> ${r.minFill||'—'}</td>
       <td style="white-space:nowrap">${lk?'<span class="muted" style="font-size:11px">🔒</span>':`<button class="btn ghost iconbtn" onclick="rowDup('courses',${i},renderCourses)" title="Копировать строку">⧉</button><button class="btn gray iconbtn" onclick="delCourse(${i})" title="Удалить">×</button>`}</td>
     </tr>`;
   });
@@ -1103,20 +1137,20 @@ function renderCourses(){
   const _totLastYear=fmt(Object.values(LASTYEAR_INCOME.month).reduce((a,b)=>a+b,0));
   h+=`<tr class="totrow">`+
     `<td></td>`+
-    `<td>ИТОГО (${S.courses.length} курсов)</td>`+
-    `<td></td>`+
-    `<td></td>`+
-    `<td></td>`+
-    `<td class="num" title="Всего групп в неделю по всем курсам">${_totGroups}</td>`+
-    `<td class="num" title="Всего групп в расписании (из сетки)">${S.courses.reduce((a,c)=>a+courseGroupsInGrid(c.name,c.visits),0)}</td>`+
-    `<td></td>`+
-    `<td class="num" title="Всего детей-мест: по каждому курсу «факт детей × группы», затем сложено">${T.kids}</td>`+
-    `<td class="num" title="Сумма оборотов всех курсов">${fmt(T.rev)}</td>`+
-    `<td class="num" title="Оборот минус ФАКТИЧЕСКИЙ ФОТ из расписания">${fmt(T.rev-T.wage-T.mat)}</td>`+
-    `<td></td>`+
-    `<td class="ly-col"></td>`+
-    `<td class="num muted ly-col" title="Сумма факта прошлого года из Альфы">${_totLastYear}</td>`+
-    `<td></td>`+
+    `<td class="c-name a-left">ИТОГО (${S.courses.length} курсов)</td>`+
+    `<td class="c-eco"></td>`+
+    `<td class="c-price"></td>`+
+    `<td class="c-wage"></td>`+
+    `<td class="num c-groups a-right" title="Всего групп в неделю по всем курсам">${_totGroups}</td>`+
+    `<td class="num c-ingrid a-right" title="Всего групп в расписании (из сетки)">${S.courses.reduce((a,c)=>a+courseGroupsInGrid(c.name,c.visits),0)}</td>`+
+    `<td class="c-visits"></td>`+
+    `<td class="num c-fill a-right" title="Всего детей-мест: по каждому курсу «факт детей × группы», затем сложено">${T.kids}</td>`+
+    `<td class="num c-rev a-right" title="Сумма оборотов всех курсов">${fmt(T.rev)}</td>`+
+    `<td class="num c-margin a-right" title="Оборот минус ФАКТИЧЕСКИЙ ФОТ из расписания">${fmt(T.rev-T.wage-T.mat)}</td>`+
+    `<td class="c-mpct"></td>`+
+    `<td class="ly-col c-lyfill"></td>`+
+    `<td class="num muted ly-col c-lyrev a-right" title="Сумма факта прошлого года из Альфы">${_totLastYear}</td>`+
+    `<td class="c-min"></td>`+
     `<td></td>`+
   `</tr>`;
   h+="</tbody>";
@@ -1125,22 +1159,51 @@ function renderCourses(){
 function esc(s){return String(s).replace(/"/g,"&quot;");}
 
 /* ===== ПЕЧАТЬ ТАБЛИЦЫ КУРСОВ (выбор столбцов) ===== */
+const _ECO_ORDER={"Прознание":0,"CODDY":1,"Детали":2};
 const COURSE_PRINT_COLS=[
-  {k:"name",   lab:"Курс",              al:"left", get:(c,r)=>esc(c.name)},
-  {k:"eco",    lab:"Эко",               al:"center", get:(c,r)=>({"Прознание":"П","CODDY":"C","Детали":"Д"}[c.eco]||"")},
-  {k:"price",  lab:"Цена",              al:"right", get:(c,r)=>fmt(+c.price||0)},
-  {k:"wage",   lab:"ЗП/зан",            al:"right", get:(c,r)=>{ if(S._wageMode==="fix"){ const fw=courseFixWageDisplay(c.name); return fw!=null?fmt(fw):"—"; } return fmt(r.wage); }},
-  {k:"groups", lab:"Групп/нед",         al:"right", get:(c,r)=>String(+c.groups||0)},
-  {k:"ingrid", lab:"В расписании",      al:"right", get:(c,r)=>String(courseGroupsInGrid(c.name,c.visits))},
-  {k:"visits", lab:"Визиты",            al:"center", get:(c,r)=>(+c.visits||1)+"×"},
-  {k:"fill",   lab:"Факт детей",        al:"right", get:(c,r)=>String(+c.fill||0)},
-  {k:"rev",    lab:"Оборот/мес",        al:"right", get:(c,r)=>fmt(r.revenue)},
-  {k:"margin", lab:"Маржа после ЗП, р", al:"right", get:(c,r)=>fmt(r.margin)},
-  {k:"mpct",   lab:"Маржа после ЗП, %", al:"right", get:(c,r)=>r.revenue>0?fmt1(r.marginPct)+"%":"—"},
-  {k:"lyfill", lab:"Факт детей 25/26",  al:"right", get:(c,r)=>{const f=lastYearFillFor(c.name);return f?f.toFixed(1):"—";}},
-  {k:"lyrev",  lab:"Факт/мес 25/26",    al:"right", get:(c,r)=>{const f=lastYearIncomeMonth(c.name);return f?fmt(f):"—";}},
-  {k:"min",    lab:"Мин",               al:"right", get:(c,r)=>String(r.minFill||"—")}
+  {k:"name",   lab:"Курс",              al:"left", get:(c,r)=>esc(c.name), val:(c,r)=>c.name||""},
+  {k:"eco",    lab:"Эко",               al:"center", get:(c,r)=>({"Прознание":"П","CODDY":"C","Детали":"Д"}[c.eco]||""), val:(c,r)=>_ECO_ORDER[c.eco]??9},
+  {k:"price",  lab:"Цена",              al:"right", get:(c,r)=>fmt(+c.price||0), val:(c,r)=>+c.price||0},
+  {k:"wage",   lab:"ЗП/зан",            al:"right", get:(c,r)=>{ if(S._wageMode==="fix"){ const fw=courseFixWageDisplay(c.name); return fw!=null?fmt(fw):"—"; } return fmt(r.wage); }, val:(c,r)=>{ if(S._wageMode==="fix"){ const fw=courseFixWageDisplay(c.name); return fw!=null?+fw:-1; } return +r.wage||0; }},
+  {k:"groups", lab:"Групп/нед",         al:"right", get:(c,r)=>String(+c.groups||0), val:(c,r)=>+c.groups||0},
+  {k:"ingrid", lab:"В расписании",      al:"right", get:(c,r)=>String(courseGroupsInGrid(c.name,c.visits)), val:(c,r)=>courseGroupsInGrid(c.name,c.visits)},
+  {k:"visits", lab:"Визиты",            al:"center", get:(c,r)=>(+c.visits||1)+"×", val:(c,r)=>+c.visits||1},
+  {k:"fill",   lab:"Факт детей",        al:"right", get:(c,r)=>String(+c.fill||0), val:(c,r)=>+c.fill||0},
+  {k:"rev",    lab:"Оборот/мес",        al:"right", get:(c,r)=>fmt(r.revenue), val:(c,r)=>+r.revenue||0},
+  {k:"margin", lab:"Маржа после ЗП, р", al:"right", get:(c,r)=>fmt(r.margin), val:(c,r)=>+r.margin||0},
+  {k:"mpct",   lab:"Маржа после ЗП, %", al:"right", get:(c,r)=>r.revenue>0?fmt1(r.marginPct)+"%":"—", val:(c,r)=>r.revenue>0?(+r.marginPct||0):-1},
+  {k:"lyfill", lab:"Факт детей 25/26",  al:"right", get:(c,r)=>{const f=lastYearFillFor(c.name);return f?f.toFixed(1):"—";}, val:(c,r)=>lastYearFillFor(c.name)||-1},
+  {k:"lyrev",  lab:"Факт/мес 25/26",    al:"right", get:(c,r)=>{const f=lastYearIncomeMonth(c.name);return f?fmt(f):"—";}, val:(c,r)=>lastYearIncomeMonth(c.name)||-1},
+  {k:"min",    lab:"Мин",               al:"right", get:(c,r)=>String(r.minFill||"—"), val:(c,r)=>+r.minFill||0}
 ];
+const COURSE_COL=Object.fromEntries(COURSE_PRINT_COLS.map(c=>[c.k,c]));
+
+/* ===== СОРТИРОВКА ТАБЛИЦЫ КУРСОВ ПО ЛЮБОМУ СТОЛБЦУ ===== */
+let _courseSort={k:null,dir:1};
+function sortCoursesBy(key){
+  const col=COURSE_COL[key];
+  if(!col) return;
+  _courseSort = (_courseSort.k===key) ? {k:key,dir:-_courseSort.dir} : {k:key,dir:1};
+  const d=_courseSort.dir;
+  S.courses.sort((a,b)=>{
+    const va=col.val(a,applyScn(a)), vb=col.val(b,applyScn(b));
+    let r;
+    if(typeof va==="string"||typeof vb==="string") r=String(va).localeCompare(String(vb),"ru");
+    else r=va-vb;
+    if(r===0) r=String(a.name).localeCompare(String(b.name),"ru");
+    return r*d;
+  });
+  persistLocal(); renderCourses();
+  toast(`Сортировка: ${col.lab} ${d>0?"↑":"↓"}`);
+}
+function _sortTh(key,extra){
+  const col=COURSE_COL[key];
+  const on=_courseSort.k===key;
+  const arrow=on?(_courseSort.dir>0?" ▲":" ▼"):"";
+  const cls=(extra&&extra.cls?extra.cls+" ":"")+"c-"+key+" a-"+col.al+" sortable"+(on?" sorted":"");
+  const ttl=(extra&&extra.title)?extra.title+" · клик — сортировка":"Клик — сортировка";
+  return `<th class="${cls}" title="${esc(ttl)}" onclick="sortCoursesBy('${key}')">${col.lab}${arrow}</th>`;
+}
 const COURSE_PRINT_PRESETS={
   teachers:["name","eco","groups","visits","fill","ingrid"],
   finance:["name","price","groups","fill","rev","margin","mpct"],
