@@ -271,6 +271,7 @@ tr.rowlocked input,tr.rowlocked select{background:#EAF3EC;border-color:#cfe3d4;c
   <button class="btn ghost sm" onclick="fillTarget()">Заполнить целевой наполняемостью</button>
   <button class="btn ghost sm" onclick="checkCourseNames()" title="Сверить названия курсов в таблице и в расписании">🔍 Проверить названия</button>
   <button class="btn ghost sm" onclick="unlockAllCourses()" title="Снять закрепление со всех строк курсов, чтобы их можно было редактировать">🔓 Разблокировать все</button>
+  <button class="btn sm" onclick="openCoursesPrint()" title="Распечатать таблицу курсов с выбором столбцов">🖨 Печать</button>
   <button class="btn gray sm" onclick="exportJSON()">Экспорт JSON</button>
   <button class="btn gray sm" onclick="document.getElementById('impFile').click()">Импорт JSON</button>
   <input type="file" id="impFile" hidden accept=".json" onchange="importJSON(event)">
@@ -494,6 +495,26 @@ tr.rowlocked input,tr.rowlocked select{background:#EAF3EC;border-color:#cfe3d4;c
    <button class="btn ghost sm" onclick="togglePinModal()" id="pinBtn">Закрепить</button>
    <button class="btn gray sm" onclick="delLes()">Удалить</button>
    <button class="btn ghost sm" onclick="closeLes()">Отмена</button>
+  </div>
+ </div>
+</div>
+
+<div class="modal-bg" id="prnColModal">
+ <div class="modal" style="max-width:560px">
+  <h3>Печать таблицы курсов</h3>
+  <p style="font-size:13px;color:var(--muted);margin-bottom:10px">Отметьте столбцы, которые попадут в печать. Выбор запоминается.</p>
+  <div class="hd-actions" style="margin-bottom:10px">
+   <button class="btn ghost sm" onclick="prnPreset('teachers')">Для педагогов</button>
+   <button class="btn ghost sm" onclick="prnPreset('finance')">Финансовая сводка</button>
+   <button class="btn ghost sm" onclick="prnPreset('all')">Всё</button>
+  </div>
+  <div id="prnColList" style="display:grid;grid-template-columns:1fr 1fr;gap:4px 14px;margin-bottom:12px"></div>
+  <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);font-weight:600;margin:0 0 4px">
+   <input type="checkbox" id="prnTotals" style="width:auto;margin:0" checked> Печатать строку ИТОГО
+  </label>
+  <div class="hd-actions" style="margin-top:14px">
+   <button class="btn sm" onclick="doPrintCourses()">🖨 Печать</button>
+   <button class="btn gray sm" onclick="closeCoursesPrint()">Отмена</button>
   </div>
  </div>
 </div>
@@ -1102,6 +1123,120 @@ function renderCourses(){
   t.innerHTML=h;
 }
 function esc(s){return String(s).replace(/"/g,"&quot;");}
+
+/* ===== ПЕЧАТЬ ТАБЛИЦЫ КУРСОВ (выбор столбцов) ===== */
+const COURSE_PRINT_COLS=[
+  {k:"name",   lab:"Курс",              al:"left", get:(c,r)=>esc(c.name)},
+  {k:"eco",    lab:"Эко",               al:"center", get:(c,r)=>({"Прознание":"П","CODDY":"C","Детали":"Д"}[c.eco]||"")},
+  {k:"price",  lab:"Цена",              al:"right", get:(c,r)=>fmt(+c.price||0)},
+  {k:"wage",   lab:"ЗП/зан",            al:"right", get:(c,r)=>{ if(S._wageMode==="fix"){ const fw=courseFixWageDisplay(c.name); return fw!=null?fmt(fw):"—"; } return fmt(r.wage); }},
+  {k:"groups", lab:"Групп/нед",         al:"right", get:(c,r)=>String(+c.groups||0)},
+  {k:"ingrid", lab:"В расписании",      al:"right", get:(c,r)=>String(courseGroupsInGrid(c.name,c.visits))},
+  {k:"visits", lab:"Визиты",            al:"center", get:(c,r)=>(+c.visits||1)+"×"},
+  {k:"fill",   lab:"Факт детей",        al:"right", get:(c,r)=>String(+c.fill||0)},
+  {k:"rev",    lab:"Оборот/мес",        al:"right", get:(c,r)=>fmt(r.revenue)},
+  {k:"margin", lab:"Маржа после ЗП, р", al:"right", get:(c,r)=>fmt(r.margin)},
+  {k:"mpct",   lab:"Маржа после ЗП, %", al:"right", get:(c,r)=>r.revenue>0?fmt1(r.marginPct)+"%":"—"},
+  {k:"lyfill", lab:"Факт детей 25/26",  al:"right", get:(c,r)=>{const f=lastYearFillFor(c.name);return f?f.toFixed(1):"—";}},
+  {k:"lyrev",  lab:"Факт/мес 25/26",    al:"right", get:(c,r)=>{const f=lastYearIncomeMonth(c.name);return f?fmt(f):"—";}},
+  {k:"min",    lab:"Мин",               al:"right", get:(c,r)=>String(r.minFill||"—")}
+];
+const COURSE_PRINT_PRESETS={
+  teachers:["name","eco","groups","visits","fill","ingrid"],
+  finance:["name","price","groups","fill","rev","margin","mpct"],
+  all:COURSE_PRINT_COLS.map(c=>c.k)
+};
+function _prnLoadCols(){
+  try{ const v=JSON.parse(localStorage.getItem("fm_prn_cols")||"null"); if(Array.isArray(v)&&v.length) return v; }catch(e){}
+  return COURSE_PRINT_PRESETS.finance.slice();
+}
+function _prnRenderList(sel){
+  document.getElementById("prnColList").innerHTML=COURSE_PRINT_COLS.map(c=>
+    `<label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--coal);font-weight:500;margin:0">
+      <input type="checkbox" class="prn-col" value="${c.k}" style="width:auto;margin:0" ${sel.includes(c.k)?"checked":""}> ${c.lab}
+    </label>`).join("");
+}
+function _prnSelected(){
+  return [...document.querySelectorAll(".prn-col:checked")].map(x=>x.value);
+}
+function openCoursesPrint(){
+  _prnRenderList(_prnLoadCols());
+  document.getElementById("prnColModal").classList.add("show");
+}
+function closeCoursesPrint(){ document.getElementById("prnColModal").classList.remove("show"); }
+function prnPreset(p){ _prnRenderList(COURSE_PRINT_PRESETS[p]||[]); }
+function doPrintCourses(){
+  const keys=_prnSelected();
+  if(!keys.length){ toast("Выберите хотя бы один столбец"); return; }
+  try{ localStorage.setItem("fm_prn_cols",JSON.stringify(keys)); }catch(e){}
+  const cols=COURSE_PRINT_COLS.filter(c=>keys.includes(c.k));
+  const withTot=document.getElementById("prnTotals").checked;
+
+  const head=`<tr>${cols.map(c=>`<th class="a-${c.al}">${c.lab}</th>`).join("")}</tr>`;
+  const rows=S.courses.map(c=>{
+    const r=applyScn(c);
+    return `<tr>${cols.map(col=>`<td class="a-${col.al}">${col.get(c,r)}</td>`).join("")}</tr>`;
+  }).join("");
+
+  let tot="";
+  if(withTot){
+    const T=totals();
+    const V={
+      name:`ИТОГО (${S.courses.length} курсов)`,
+      groups:String(S.courses.reduce((a,c)=>a+(+c.groups||0),0)),
+      ingrid:String(S.courses.reduce((a,c)=>a+courseGroupsInGrid(c.name,c.visits),0)),
+      fill:String(T.kids),
+      rev:fmt(T.rev),
+      margin:fmt(T.rev-T.wage-T.mat),
+      lyrev:fmt(Object.values(LASTYEAR_INCOME.month).reduce((a,b)=>a+b,0))
+    };
+    tot=`<tr class="pr-tot">${cols.map(c=>`<td class="a-${c.al}">${V[c.k]||""}</td>`).join("")}</tr>`;
+  }
+
+  const T2=totals();
+  const marginPct=T2.rev>0?Math.round((T2.rev-T2.wage-T2.mat)/T2.rev*1000)/10:0;
+  const meta=`<div class="pr-meta">
+    Оборот/мес: <b>${fmt(Math.round(T2.rev))} р</b> ·
+    ФОТ педагогов: <b>${fmt(Math.round(T2.wage))} р</b> ·
+    Маржа после ЗП: <b>${fmt(Math.round(T2.rev-T2.wage-T2.mat))} р (${marginPct}%)</b> ·
+    Модель ЗП: <b>${S._wageMode==="fix"?"фикс-ставка":"KPI"}</b>
+  </div>`;
+
+  const d=new Date();
+  const dd=String(d.getDate()).padStart(2,"0")+"."+String(d.getMonth()+1).padStart(2,"0")+"."+d.getFullYear();
+  const scn=(typeof currentScenarioName==="function")?currentScenarioName():"";
+
+  const css=`
+    @page{size:landscape;margin:10mm}
+    *{box-sizing:border-box;font-family:Arial,Helvetica,sans-serif}
+    body{margin:0;color:#1c1410}
+    h1{font-size:17px;margin:0 0 3px;border-bottom:2px solid #b5532a;padding-bottom:4px}
+    .pr-sub{font-size:11px;color:#666;margin:0 0 8px}
+    .pr-meta{font-size:11px;color:#333;background:#f6f1ea;border:1px solid #e2d7c9;border-radius:6px;padding:6px 8px;margin-bottom:8px}
+    table{width:100%;border-collapse:collapse}
+    th,td{border:1px solid #ccc;font-size:10px;padding:3px 5px}
+    th{background:#2a211b;color:#fff;font-size:10px}
+    tr.pr-tot td{background:#f3ece4;font-weight:700}
+    .a-left{text-align:left}.a-right{text-align:right}.a-center{text-align:center}
+    tbody tr:nth-child(even) td{background:#faf7f3}
+    tbody tr.pr-tot td{background:#f3ece4}
+  `;
+  const html=`<!doctype html><html><head><meta charset="utf-8"><title>Курсы и маржа</title><style>${css}</style></head><body>
+    <h1>Курсы и продуктовая матрица</h1>
+    <div class="pr-sub">Прознание + CODDY · учебный год 2026/2027 · версия модели: ${esc(scn)} · напечатано ${dd}</div>
+    ${meta}
+    <table><thead>${head}</thead><tbody>${rows}${tot}</tbody></table>
+  </body></html>`;
+
+  const w=window.open("","_printCourses");
+  if(!w){ toast("Разрешите всплывающие окна для печати"); return; }
+  w.document.write(html);
+  w.document.close();
+  w.focus();
+  closeCoursesPrint();
+  setTimeout(()=>{ w.print(); },300);
+}
+
 function upd(i,k,v){
   if(k==="name"||k==="eco") S.courses[i][k]=v;
   else S.courses[i][k]=parseFloat(v)||0;
