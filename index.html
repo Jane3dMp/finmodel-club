@@ -163,7 +163,25 @@ small.note{font-size:11px;color:var(--muted)}
 #gridTable{table-layout:fixed}
 #gridTable tbody tr{height:52px}
 .les-note{cursor:help;font-size:12px;opacity:.8}
-.les-notet{display:block;font-size:10px;line-height:1.15;color:var(--terra-d);font-style:italic;margin-top:1px;overflow:hidden;text-overflow:ellipsis}
+.les-notet{display:block;font-size:10px;line-height:1.25;color:var(--terra-d);font-style:italic;margin-top:1px;white-space:pre-line;word-break:break-word}
+.les-kids{display:block;margin-top:2px}
+.les-kids .lk{display:block;font-size:10px;line-height:1.3;color:var(--coal);word-break:break-word}
+.les-kids .lk-no{color:var(--muted);text-decoration:line-through}
+.les-kids .lk-ic{font-size:10px;letter-spacing:1px}
+/* редактор детей в модалке занятия */
+#kidsTable{width:100%;border-collapse:collapse;margin-top:4px}
+#kidsTable th{background:var(--coal);color:#fff;font-size:10px;font-weight:600;padding:4px 3px;text-align:center;line-height:1.1}
+#kidsTable th.k-name{text-align:left;padding-left:6px}
+#kidsTable td{border:1px solid var(--line);padding:2px 3px;text-align:center;vertical-align:middle}
+#kidsTable td.k-name{text-align:left}
+#kidsTable td input[type="text"]{width:100%;border:none;background:transparent;font-size:12px;padding:2px 4px;font-family:inherit}
+#kidsTable td input[type="text"]:focus{outline:2px solid var(--terra);border-radius:3px;background:#fff}
+#kidsTable td input[type="checkbox"]{width:auto;margin:0;cursor:pointer}
+#kidsTable tr.k-off td{background:#f6f4f1;color:var(--muted)}
+#kidsTable tr.k-off td.k-name input{text-decoration:line-through;color:var(--muted)}
+.k-del{cursor:pointer;color:var(--muted);font-weight:700;user-select:none}
+.k-del:hover{color:var(--red)}
+.k-num{font-size:11px;color:var(--muted);width:22px}
 #gridTable tbody td{height:52px;box-sizing:border-box;vertical-align:top}
 #gridTable td.tslot{height:52px;font-size:12px}
 
@@ -1890,6 +1908,7 @@ function printSchedule(){
   setTimeout(()=>{ w.print(); }, 300);
 }
 function renderGrid(){
+  migrateAllKids();
   let dt="";
   for(let d=1;d<=7;d++){
     const cnt=S.grid.filter(l=>l.day===d).length;
@@ -1938,6 +1957,10 @@ function renderGrid(){
             <span>${les.start}–${les.end}</span>
             <span class="lt">${esc(shortName(les.teacher))} · ${les.students}👤 · ${w}р</span>
             ${les.note?`<span class="les-notet" title="${esc(les.note)}">📝 ${esc(les.note)}</span>`:""}
+            ${kidsOf(les).length?`<span class="les-kids">${kidsOf(les).map((k,ki)=>{
+                const ic=kidIcons(k);
+                return `<span class="lk${k.no?' lk-no':''}">${ki+1}. ${esc(k.n)}${ic?` <span class="lk-ic">${ic}</span>`:""}</span>`;
+              }).join("")}</span>`:""}
           </div></td>`;
       } else {
         h+=`<td class="cell-empty" ondragover="dragOver(event)" ondrop="dropLes(event,'${slot}','${esc(room)}')" onclick="addLes('${slot}','${esc(room)}')"></td>`;
@@ -2207,6 +2230,8 @@ function addMin(t,min){ const[h,m]=t.split(":").map(Number); let tot=h*60+m+min;
   return String(Math.floor(tot/60)).padStart(2,"0")+":"+String(tot%60).padStart(2,"0"); }
 function editLes(idx){
   const l=S.grid[idx];
+  migrateLessonKids(l);
+  _editKids=kidsOf(l).map(k=>Object.assign(_blankKid(),k));
   let courseOpts=S.courses.map(c=>`<option ${c.name===l.course?"selected":""}>${esc(c.name)}</option>`).join("");
   if(l.course && !S.courses.some(c=>c.name===l.course)) courseOpts=`<option selected>${esc(l.course)}</option>`+courseOpts;
   let teacherOpts=`<option value="">— педагог —</option>`+S.staff.map(s=>`<option ${s.name===l.teacher?"selected":""}>${esc(s.name)}</option>`).join("");
@@ -2223,11 +2248,21 @@ function editLes(idx){
      <div><label>Кабинет</label><select id="mRoom" class="cell wide">${roomOpts}</select></div>
      <div><label>Учеников</label><input id="mStud" type="number" class="cell wide" value="${l.students}"></div>
     </div>
-    <label>Примечание</label><textarea id="mNote" class="cell wide" rows="6" placeholder="например: замена, пробное, перенос с пятницы…">${esc(l.note||"")}</textarea>
-    <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-top:8px">
+    <label>Примечание (шапка карточки)</label><textarea id="mNote" class="cell wide" rows="3" placeholder="например: ХВЗ 8 · 1г до школы · замена, перенос с пятницы…">${esc(l.note||"")}</textarea>
+
+    <label style="margin-top:10px">Дети</label>
+    <div id="kidsBox"></div>
+    <div class="hd-actions" style="margin-top:6px">
+      <button type="button" class="btn ghost sm" onclick="kidAdd()">+ Ребёнок</button>
+      <button type="button" class="btn ghost sm" onclick="kidPasteList()">📋 Вставить список</button>
+      <span style="font-size:11px;color:var(--muted);align-self:center">Комментарии в основную сетку не выводятся</span>
+    </div>
+
+    <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-top:10px">
       <input type="checkbox" id="mNewIntake" ${l.newIntake?"checked":""} style="width:auto">
       <span>🟠 Новый набор (подсветить оранжевым)</span></label>
     <div class="callout">ЗП за это занятие: <b id="mWage">${wageForLesson(l.course,l.students,l)} р</b> ${S._wageMode==="fix"?"(фикс-ставка)":"(по ставке для "+l.students+" детей)"}</div>`;
+  renderKidsEditor();
   document.getElementById("lesModal").classList.add("show");
   document.getElementById("lesModal").dataset.idx=idx;
   // live-пересчёт ЗП
@@ -2245,9 +2280,59 @@ function editLes(idx){
   if(document.getElementById("mEnd")) document.getElementById("mEnd").oninput=upd;
   const pb=document.getElementById("pinBtn"); if(pb) pb.textContent=S.grid[idx].pinned?"Открепить":"Закрепить";
 }
+
+/* ---- редактор списка детей ---- */
+let _editKids=[];
+function _kidsFromDOM(){
+  const rows=[...document.querySelectorAll("#kidsTable tbody tr")];
+  if(!rows.length) return;
+  _editKids=rows.map(tr=>{
+    const o=_blankKid(tr.querySelector(".k-in-name").value.trim());
+    KID_FLAGS.forEach(f=>{ o[f.k]=tr.querySelector(".k-in-"+f.k).checked; });
+    o.c=tr.querySelector(".k-in-c").value.trim();
+    return o;
+  });
+}
+function renderKidsEditor(){
+  const box=document.getElementById("kidsBox");
+  if(!box) return;
+  if(!_editKids.length){
+    box.innerHTML=`<div style="font-size:12px;color:var(--muted);padding:8px 0">Детей пока нет. «+ Ребёнок» или «📋 Вставить список».</div>`;
+    return;
+  }
+  const th=KID_FLAGS.map(f=>`<th title="${f.lab}">${f.ic}<br>${f.lab.split(" ")[0]}</th>`).join("");
+  box.innerHTML=`<table id="kidsTable"><thead><tr>
+      <th class="k-num"></th><th class="k-name">ФИО</th>${th}<th style="min-width:130px">Комментарий</th><th style="width:22px"></th>
+    </tr></thead><tbody>${
+    _editKids.map((k,i)=>`<tr class="${k.no?'k-off':''}">
+      <td class="k-num">${i+1}</td>
+      <td class="k-name"><input type="text" class="k-in-name" value="${esc(k.n)}" placeholder="Фамилия Имя"></td>
+      ${KID_FLAGS.map(f=>`<td><input type="checkbox" class="k-in-${f.k}" ${k[f.k]?"checked":""} title="${f.lab}" onchange="kidFlagChanged()"></td>`).join("")}
+      <td><input type="text" class="k-in-c" value="${esc(k.c||"")}" placeholder="—"></td>
+      <td><span class="k-del" title="Удалить" onclick="kidDel(${i})">×</span></td>
+    </tr>`).join("")
+  }</tbody></table>`;
+}
+function kidFlagChanged(){ _kidsFromDOM(); renderKidsEditor(); }
+function kidAdd(){ _kidsFromDOM(); _editKids.push(_blankKid("")); renderKidsEditor();
+  const inp=document.querySelectorAll("#kidsTable .k-in-name"); if(inp.length) inp[inp.length-1].focus(); }
+function kidDel(i){ _kidsFromDOM(); _editKids.splice(i,1); renderKidsEditor(); }
+function kidPasteList(){
+  const t=prompt("Вставьте список детей (по одному в строку, нумерация не обязательна):","");
+  if(t===null) return;
+  _kidsFromDOM();
+  String(t).split(/\r?\n/).forEach(ln=>{
+    const nm=ln.replace(/^\s*\d+\s*[.)]\s*/,"").trim();
+    if(nm) _editKids.push(_blankKid(nm));
+  });
+  renderKidsEditor();
+  toast("Добавлено детей: "+_editKids.length);
+}
+
 function saveLes(){
   const idx=+document.getElementById("lesModal").dataset.idx;
   const l=S.grid[idx];
+  _kidsFromDOM();
   l.course=document.getElementById("mCourse").value;
   l.teacher=document.getElementById("mTeacher").value;
   l.start=document.getElementById("mStart").value;
@@ -2255,6 +2340,7 @@ function saveLes(){
   l.room=document.getElementById("mRoom").value;
   l.students=+document.getElementById("mStud").value||0;
   l.note=(document.getElementById("mNote").value||"").trim();
+  l.kids=_editKids.filter(k=>k.n);
   l.newIntake=!!document.getElementById("mNewIntake")?.checked;
   persistLocal(); closeLes(); renderGrid(); renderStaff();
 }
@@ -2705,6 +2791,38 @@ function closeImport(){ document.getElementById("impModal").classList.remove("sh
 
 /* ====== ВЫГРУЗКА ДЕТЕЙ ПО ДНЯМ (Excel со статусами) ====== */
 const KID_STATUSES=["точно придет","ждет расписание в школе","думают","нет денег (не придет точно)","ждет расписание другого кружка","уговаривает ребенка","в комментах"];
+/* ===== ДЕТИ В ЗАНЯТИИ: структура l.kids=[{n,may,sched,no,call,c}] ===== */
+const KID_FLAGS=[
+  {k:"may",   ic:"💰", lab:"Купил майский"},
+  {k:"sched", ic:"🗓", lab:"Подходит расписание"},
+  {k:"no",    ic:"❌", lab:"Не придёт"},
+  {k:"call",  ic:"📵", lab:"Недозвон"}
+];
+function _blankKid(n){ return {n:n||"", may:false, sched:false, no:false, call:false, c:""}; }
+/* разбор старого note: строки вида "1. Иванов Пётр" → дети, остальное → шапка */
+function migrateLessonKids(l){
+  if(Array.isArray(l.kids)) return false;
+  const lines=String(l.note||"").split(/\r?\n/);
+  const head=[], kids=[];
+  lines.forEach(ln=>{
+    const m=ln.match(/^\s*\d+\s*[.)]\s*(.+?)\s*$/);
+    if(m && m[1]) kids.push(_blankKid(m[1]));
+    else head.push(ln);
+  });
+  l.kids=kids;
+  l.note=head.join("\n").replace(/\n{3,}/g,"\n\n").trim();
+  return true;
+}
+function migrateAllKids(){
+  let n=0;
+  (S.grid||[]).forEach(l=>{ if(migrateLessonKids(l)) n++; });
+  if(n) persistLocal();
+}
+function kidsOf(l){ return Array.isArray(l.kids)?l.kids:[]; }
+function kidIcons(k){
+  return KID_FLAGS.filter(f=>k[f.k]).map(f=>f.ic).join("");
+}
+
 function parseKidsFromNote(note){
   if(!note) return [];
   let t=String(note);
@@ -2729,17 +2847,21 @@ async function exportKidsByDay(){
   let totalKids=0;
   for(let d=1; d<=7; d++){
     const lessons=(S.grid||[]).filter(l=>l.day===d).sort((a,b)=>(a.start||"").localeCompare(b.start||""));
-    const rows=[["День","Время","Кабинет","Курс","Педагог","Ребёнок","Статус","Комментарий"]];
+    const rows=[["День","Время","Кабинет","Курс","Педагог","Ребёнок",...KID_FLAGS.map(f=>f.lab),"Комментарий"]];
     lessons.forEach(l=>{
-      const kids=parseKidsFromNote(l.note);
+      const kids=kidsOf(l);
       const time=(l.start||"")+(l.end?("–"+l.end):"");
       if(kids.length){
-        kids.forEach(k=>{ rows.push([DAYS[d],time,l.room||"",l.course||"",shortName(l.teacher)||l.teacher||"",k,"",""]); totalKids++; });
+        kids.forEach(k=>{
+          rows.push([DAYS[d],time,l.room||"",l.course||"",shortName(l.teacher)||l.teacher||"",k.n,
+            ...KID_FLAGS.map(f=>k[f.k]?"да":""), k.c||""]);
+          totalKids++;
+        });
       }
     });
     if(rows.length<=1) continue; // нет детей в этот день — лист не создаём
     const ws=XLSX.utils.aoa_to_sheet(rows);
-    ws["!cols"]=[{wch:14},{wch:12},{wch:10},{wch:24},{wch:18},{wch:26},{wch:26},{wch:30}];
+    ws["!cols"]=[{wch:14},{wch:12},{wch:10},{wch:24},{wch:18},{wch:26},...KID_FLAGS.map(()=>({wch:11})),{wch:30}];
     XLSX.utils.book_append_sheet(wb, ws, DAYS[d].slice(0,31));
   }
   if(totalKids===0){ toast("Не нашла детей в примечаниях занятий"); return; }
