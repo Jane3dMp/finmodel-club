@@ -190,6 +190,9 @@ small.note{font-size:11px;color:var(--muted)}
 .les.les-hl{outline:3px solid var(--terra);outline-offset:1px;box-shadow:0 0 0 3px rgba(181,83,42,.35),0 0 12px 3px rgba(181,83,42,.45);position:relative;z-index:3}
 /* название/номер группы на плитке занятия */
 .les .les-grp{display:block;font-size:10px;font-weight:700;color:var(--terra);line-height:1.25;margin-top:1px}
+/* редактируемое название группы на вкладке «Группы» */
+.grp-name{cursor:pointer;border-bottom:1px dashed var(--muted)}
+.grp-name:hover{color:var(--terra);border-bottom-color:var(--terra)}
 /* редактор детей в модалке занятия */
 #kidsTable{width:100%;border-collapse:collapse;margin-top:4px}
 #kidsTable th{background:var(--coal);color:#fff;font-size:10px;font-weight:600;padding:4px 3px;text-align:center;line-height:1.1}
@@ -3110,8 +3113,25 @@ function mayApply(){
 }
 
 /* ===== ВКЛАДКА «ГРУППЫ» — обзор групп, собранный из расписания ===== */
-let _groupsQuery="";
+let _groupsQuery="", _groupsShown=[];
 function grpRerenderKeepFocus(){ renderGroups(); const el=document.getElementById("grpQ"); if(el){ const v=el.value; el.focus(); el.value=""; el.value=v; } }
+function grpEditName(i){
+  const g=_groupsShown[i]; if(!g) return;
+  const cell=document.getElementById("grpNameCell"+i); if(!cell) return;
+  cell.innerHTML=`<input type="text" id="grpNameInp${i}" class="cell" style="width:100%;font-weight:600" value="${esc(g.group||"")}" placeholder="напр. 7 навыков №3">`;
+  const inp=document.getElementById("grpNameInp"+i);
+  inp.focus(); inp.select();
+  inp.onkeydown=(e)=>{ if(e.key==="Enter"){ inp.blur(); } else if(e.key==="Escape"){ inp.dataset.cancel="1"; renderGroups(); } };
+  inp.onblur=()=>{ if(inp.dataset.cancel) return; grpSaveName(i, inp.value); };
+}
+function grpSaveName(i, val){
+  const g=_groupsShown[i]; if(!g) return;
+  const nm=(val||"").trim();
+  if(nm===(g.group||"")){ renderGroups(); return; }
+  g.idxs.forEach(idx=>{ if(S.grid[idx]) S.grid[idx].group=nm; });
+  persistLocal(); renderGrid(); renderGroups();
+  toast(nm?("Группа: "+nm):"Номер группы очищен");
+}
 function renderGroups(){
   const box=document.getElementById("groupsBody"); if(!box) return;
   const map={}, order=[];
@@ -3147,9 +3167,10 @@ function renderGroups(){
     <div class="tscroll"><table id="groupsTable"><thead><tr>
       <th style="text-align:left">Группа</th><th style="text-align:left">Курс</th><th style="text-align:left">Педагог</th><th style="text-align:left">Расписание</th><th>Каб.</th><th>Детей</th><th>💰</th><th></th>
     </tr></thead><tbody>`;
-  shown.forEach(g=>{
+  _groupsShown=shown;
+  shown.forEach((g,i)=>{
     html+=`<tr>
-      <td style="text-align:left"><b>${esc(g.name)}</b></td>
+      <td style="text-align:left" id="grpNameCell${i}"><span class="grp-name" title="Нажмите, чтобы изменить номер группы" onclick="grpEditName(${i})"><b>${esc(g.name)}</b></span></td>
       <td style="text-align:left">${esc(g.course)}</td>
       <td style="text-align:left">${esc(g.teacherText||"—")}</td>
       <td style="text-align:left">${esc(g.schedText||"—")}</td>
