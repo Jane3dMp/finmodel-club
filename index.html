@@ -3492,7 +3492,7 @@ function openAlfaSync(){
     </div>
     <div id="alfaCheckOut" style="font-size:12px"></div>`;
   const b=document.getElementById("alfaBtn");
-  b.textContent="Загрузить из Альфы"; b.onclick=alfaFetch; b.disabled=false;
+  b.textContent="Загрузить из Альфы"; b.onclick=alfaFetch; b.disabled=false; b.style.display="";
   document.getElementById("alfaModal").classList.add("show");
 }
 function closeAlfa(){ document.getElementById("alfaModal").classList.remove("show"); }
@@ -3627,8 +3627,9 @@ function alfaApply(){
     <div class="callout" style="border-color:var(--green)">
       Готово. Телефон проставлен у <b>${updated}</b> записей детей.
     </div>
-    <p style="font-size:12px;color:var(--muted)">Телефоны сохранились в модели и ушли в Firebase.</p>`;
-  const b=document.getElementById("alfaBtn"); b.textContent="Закрыть"; b.onclick=closeAlfa;
+    <p style="font-size:12px;color:var(--muted)">Телефоны сохранились в модели и ушли в Firebase.
+    Теперь в карточке занятия у ребёнка активна кнопка 📨 — написать родителю в Viber.</p>`;
+  const b=document.getElementById("alfaBtn"); b.style.display="none";   // остаётся одна «Закрыть» в футере
   toast("Телефонов проставлено: "+updated);
 }
 
