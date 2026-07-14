@@ -199,8 +199,13 @@ small.note{font-size:11px;color:var(--muted)}
 .vbtodo-body .vt-item:last-child{border-bottom:none}
 .vbtodo-body .vt-send{padding:2px 8px;border:1px solid var(--line);border-radius:6px;background:#fff;cursor:pointer;font-size:14px;line-height:1.2}
 .vbtodo-body .vt-send:hover{background:#eef7f0;border-color:#66bb6a}
-.vbtodo-body .vt-name{font-size:13px;font-weight:600;color:var(--coal)}
+.vbtodo-body .vt-info{display:flex;flex-direction:column;gap:2px;flex:1;min-width:0}
+.vbtodo-body .vt-name{font-size:13px;font-weight:600;color:var(--coal);cursor:pointer}
+.vbtodo-body .vt-name:hover{text-decoration:underline;color:var(--terra)}
+.vbtodo-body .vt-ic{font-size:12px;letter-spacing:1px}
 .vbtodo-body .vt-meta{font-size:11px;color:var(--muted)}
+.vbtodo-body .vt-comment{font-size:11px;color:var(--terra-d);background:#fbf3ee;border-radius:5px;padding:2px 7px;align-self:flex-start;max-width:100%}
+.vbtodo-body .vt-noph-ic{font-size:11px;color:var(--muted);white-space:nowrap;padding:2px 4px}
 .vbtodo-body .vt-nophone{font-size:11px;color:var(--muted);font-style:italic}
 .vbtodo-body .vt-empty{font-size:13px;color:var(--green);font-weight:600;padding:8px 4px}
 .vbtodo-body .vt-note{font-size:11px;color:var(--muted);padding:6px 4px 2px}
@@ -3863,6 +3868,18 @@ function kidViberReset(i){
 let _vbTodoOpen=false;
 try{ _vbTodoOpen = localStorage.getItem("vbTodoOpen")==="1"; }catch(e){}
 function vbTodoToggle(){ _vbTodoOpen=!_vbTodoOpen; try{localStorage.setItem("vbTodoOpen",_vbTodoOpen?"1":"0");}catch(e){} renderVbTodo(); }
+function _vbItem(it,canSend){
+  const left = canSend
+    ? `<button class="vt-send" title="Отправить в Viber" onclick="vbTodoSend(${it.li},${it.ki})">📨</button>`
+    : `<span class="vt-noph-ic" title="Нет телефона">☎✖</span>`;
+  return `<div class="vt-item">${left}
+    <div class="vt-info">
+      <div><span class="vt-name" title="Открыть карточку занятия" onclick="editLes(${it.li})">${esc(it.name)}</span>`
+        +(it.icons?` <span class="vt-ic">${it.icons}</span>`:``)
+        +` <span class="vt-meta">— ${esc(it.course||"")}${it.time?', '+esc(it.time):''}</span></div>`
+        +(it.c?`<div class="vt-comment">💬 ${esc(it.c)}</div>`:``)
+    +`</div></div>`;
+}
 function renderVbTodo(){
   const box=document.getElementById("vbTodo"); if(!box) return;
   const toSend=[], noPhone=[];
@@ -3870,7 +3887,8 @@ function renderVbTodo(){
     if(l.day!==curDay) return;
     kidsOf(l).forEach(k=>{
       if(k.no || k.vbSent) return;                 // «не придёт» и уже отправленные — не показываем
-      const it={name:k.n, course:l.course, time:l.start, li:S.grid.indexOf(l), ki:l.kids.indexOf(k)};
+      const it={name:k.n, course:l.course, time:l.start, li:S.grid.indexOf(l), ki:l.kids.indexOf(k),
+                icons:kidIcons(k), c:(k.c||"")};
       if(_viberNumber(k.phone)) toSend.push(it); else noPhone.push(it);
     });
   });
@@ -3885,14 +3903,10 @@ function renderVbTodo(){
     if(!n && !noPhone.length){
       h+=`<div class="vt-empty">На этот день всем отправлено ✅</div>`;
     }else{
-      h+=toSend.map(it=>`<div class="vt-item">
-          <button class="vt-send" title="Отправить в Viber" onclick="vbTodoSend(${it.li},${it.ki})">📨</button>
-          <span class="vt-name">${esc(it.name)}</span>
-          <span class="vt-meta">— ${esc(it.course||"")}${it.time?', '+esc(it.time):''}</span>
-        </div>`).join("");
+      h+=toSend.map(it=>_vbItem(it,true)).join("");
       if(noPhone.length){
         h+=`<div class="vt-note">Без телефона (${noPhone.length}) — сначала «📞 Контакты из Альфы»:</div>`;
-        h+=noPhone.map(it=>`<div class="vt-item"><span class="vt-nophone">• ${esc(it.name)} — ${esc(it.course||"")}${it.time?', '+esc(it.time):''}</span></div>`).join("");
+        h+=noPhone.map(it=>_vbItem(it,false)).join("");
       }
     }
     h+=`</div>`;
