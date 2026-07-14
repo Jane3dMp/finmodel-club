@@ -824,7 +824,8 @@ function fbPush(){
     .catch(e=>{ setSync("err","⚠ Firebase: "+((e&&e.message)||"ошибка")); });
 }
 /* ---- вход / регистрация / одобрение доступа ---- */
-const FB_ADMIN="proznanie.mogilev@gmail.com";
+const FB_ADMINS=["proznanie.mogilev@gmail.com","smalprince@gmail.com"];
+function _isAdminEmail(e){ return FB_ADMINS.indexOf(e)>=0; }
 let _fbMode="login", _fbApprRef=null, _fbGranted=false, _fbIsAdmin=false, _fbPendRef=null;
 function _fbAuth(){ return (typeof firebase!=="undefined" && firebase.auth) ? firebase.auth() : null; }
 function fbStart(){
@@ -836,7 +837,7 @@ function fbStart(){
     _fbGranted=false; _fbIsAdmin=false;
     if(_fbApprRef){ try{_fbApprRef.off();}catch(e){} _fbApprRef=null; }
     if(!user){ _fbUpdateAdminUI(); _fbShowLogin(); return; }
-    if(user.email===FB_ADMIN){ _fbGrant(true); return; }       // админ — доступ по почте
+    if(_isAdminEmail(user.email)){ _fbGrant(true); return; }    // админ — доступ по почте
     _fbWatchApproval(user);                                     // остальные — по одобрению
   });
 }
@@ -907,7 +908,7 @@ function fbSignup(){
   auth.createUserWithEmailAndPassword(c.email,c.pass).then(function(cred){
     try{ localStorage.setItem("fb_email",c.email); }catch(x){}
     document.getElementById("fbPass").value="";
-    if(c.email===FB_ADMIN) return;   // админ не оставляет заявку
+    if(_isAdminEmail(c.email)) return;   // админ не оставляет заявку
     return _fbDb.ref("pending/"+cred.user.uid).set({email:c.email, at: firebase.database.ServerValue.TIMESTAMP});
   }).catch(function(e){ if(c.err) c.err.textContent="Не удалось: "+((e&&e.message)||"ошибка"); });
 }
