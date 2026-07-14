@@ -217,3 +217,17 @@ function alfa_call(string $entity, string $cmd, array $body, bool $global = fals
     $path   = $global ? "/v2api/$entity/$cmd" : '/v2api/' . alfa_branch() . "/$entity/$cmd";
     return alfa_http('POST', 'https://' . alfa_host() . $path, $body, $token);
 }
+
+// Вызов в контексте конкретного филиала.
+function alfa_call_branch(int $branch, string $entity, string $cmd, array $body): array {
+    return alfa_http('POST', 'https://' . alfa_host() . "/v2api/$branch/$entity/$cmd", $body, alfa_token());
+}
+
+// Список id всех активных филиалов (клиенты в Alfa привязаны к филиалам).
+function alfa_all_branch_ids(): array {
+    $r = alfa_http('POST', 'https://' . alfa_host() . '/v2api/branch/index',
+        ['is_active' => 1, 'page' => 0], alfa_token());
+    $ids = [];
+    foreach (($r['items'] ?? []) as $b) { if (isset($b['id'])) $ids[] = (int)$b['id']; }
+    return $ids ?: [alfa_branch()];
+}

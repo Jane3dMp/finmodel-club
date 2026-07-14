@@ -37,37 +37,47 @@ switch ($action) {
 
     // --- ученики/клиенты ---
     case 'customers':
-        // По умолчанию тянем действующих учеников (is_study=1). Клиент может переопределить.
+        @set_time_limit(180);   // обход всех филиалов может занять время
+
+        // По умолчанию берём всех НЕ удалённых (и учеников is_study=1, и лидов is_study=0 —
+        // у части детей контакт лежит в лиде). Клиент может переопределить фильтр.
         $filter = is_array($in['filter'] ?? null) ? $in['filter'] : [];
-        if (!array_key_exists('is_study', $filter)) $filter['is_study'] = 1;
         $filter['removed'] = $filter['removed'] ?? 0;
 
-        $all      = [];
-        $page     = 0;
-        $count    = 500;              // сколько за страницу
-        $maxPages = 60;               // предохранитель
-        do {
-            $body = array_merge($filter, ['page' => $page, 'count' => $count]);
-            $r = alfa_call('customer', 'index', $body);
-            $items = $r['items'] ?? [];
-            foreach ($items as $c) {
-                $phones = $c['phone'] ?? [];
-                if (is_string($phones)) $phones = $phones === '' ? [] : [$phones];
-                $all[] = [
-                    'id'       => $c['id'] ?? null,
-                    'name'     => trim((string)($c['name'] ?? '')),
-                    'phones'   => array_values(array_filter(array_map('strval', (array)$phones))),
-                    'is_study' => (int)($c['is_study'] ?? 0),
-                    'status'   => $c['study_status_id'] ?? null,
-                    'balance'  => $c['balance'] ?? null,
-                    'note'     => (string)($c['note'] ?? ''),
-                ];
-            }
-            $total = (int)($r['total'] ?? count($all));
-            $page++;
-        } while (count($items) === $count && count($all) < $total && $page < $maxPages);
+        $branches = alfa_all_branch_ids();
+        $byId     = [];          // дедуп по id (один ребёнок может быть в нескольких филиалах)
+        $perPage  = 50;          // Alfa отдаёт максимум ~50 на страницу
+        $maxPages = 200;         // предохранитель на филиал
+        $perBranch = [];
 
-        json_out(['ok' => true, 'count' => count($all), 'customers' => $all]);
+        foreach ($branches as $bid) {
+            $page = 0; $before = count($byId);
+            do {
+                $body = array_merge($filter, ['page' => $page, 'count' => $perPage]);
+                $r = alfa_call_branch((int)$bid, 'customer', 'index', $body);
+                $items = $r['items'] ?? [];
+                foreach ($items as $c) {
+                    $id = $c['id'] ?? null;
+                    if ($id === null || isset($byId[$id])) continue;
+                    $phones = $c['phone'] ?? [];
+                    if (is_string($phones)) $phones = $phones === '' ? [] : [$phones];
+                    $byId[$id] = [
+                        'id'       => $id,
+                        'name'     => trim((string)($c['name'] ?? '')),
+                        'phones'   => array_values(array_filter(array_map('strval', (array)$phones))),
+                        'is_study' => (int)($c['is_study'] ?? 0),
+                    ];
+                }
+                $total = (int)($r['total'] ?? 0);
+                $page++;
+                // продолжаем, пока страница полная И не выбрали весь total филиала
+            } while (count($items) === $perPage && ($page * $perPage) < $total && $page < $maxPages);
+            $perBranch[$bid] = count($byId) - $before;
+        }
+
+        $all = array_values($byId);
+        json_out(['ok' => true, 'count' => count($all), 'customers' => $all,
+                  'branches' => count($branches), 'per_branch' => $perBranch]);
         break;
 
     default:
