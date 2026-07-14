@@ -187,6 +187,23 @@ small.note{font-size:11px;color:var(--muted)}
 .kidsearch-res .ksr-name mark{background:#ffe08a;color:inherit;border-radius:2px;padding:0 1px}
 .kidsearch-res .ksr-meta{font-size:11px;color:var(--muted)}
 .kidsearch-res .ksr-empty{font-size:13px;color:var(--muted);padding:8px 4px}
+/* блок «кому ещё не отправлено в Viber» под днями */
+.vbtodo{margin:8px 0 2px}
+.vbtodo-head{display:flex;align-items:center;gap:8px;width:100%;box-sizing:border-box;padding:9px 12px;border:1px solid var(--line);border-left:3px solid var(--terra);border-radius:8px;background:#fff;cursor:pointer;font-size:13px;font-weight:600;color:var(--coal);text-align:left}
+.vbtodo-head:hover{background:#fbf6f2}
+.vbtodo-head .cnt{background:var(--terra);color:#fff;border-radius:10px;padding:1px 9px;font-size:12px;font-weight:700}
+.vbtodo-head .cnt.zero{background:#66bb6a}
+.vbtodo-head .car{margin-left:auto;color:var(--muted);font-size:12px}
+.vbtodo-body{border:1px solid var(--line);border-top:none;border-radius:0 0 8px 8px;padding:6px 8px;max-height:44vh;overflow:auto}
+.vbtodo-body .vt-item{display:flex;align-items:center;gap:8px;padding:6px 6px;border-bottom:1px solid #f0ebe4}
+.vbtodo-body .vt-item:last-child{border-bottom:none}
+.vbtodo-body .vt-send{padding:2px 8px;border:1px solid var(--line);border-radius:6px;background:#fff;cursor:pointer;font-size:14px;line-height:1.2}
+.vbtodo-body .vt-send:hover{background:#eef7f0;border-color:#66bb6a}
+.vbtodo-body .vt-name{font-size:13px;font-weight:600;color:var(--coal)}
+.vbtodo-body .vt-meta{font-size:11px;color:var(--muted)}
+.vbtodo-body .vt-nophone{font-size:11px;color:var(--muted);font-style:italic}
+.vbtodo-body .vt-empty{font-size:13px;color:var(--green);font-weight:600;padding:8px 4px}
+.vbtodo-body .vt-note{font-size:11px;color:var(--muted);padding:6px 4px 2px}
 /* подсветка найденного занятия в сетке */
 .les.les-hl{outline:3px solid var(--terra);outline-offset:1px;box-shadow:0 0 0 3px rgba(181,83,42,.35),0 0 12px 3px rgba(181,83,42,.45);position:relative;z-index:3}
 /* название/номер группы на плитке занятия */
@@ -408,6 +425,7 @@ tr.rowlocked input,tr.rowlocked select{background:#EAF3EC;border-color:#cfe3d4;c
   <div id="kidSearchResults" class="kidsearch-res"></div>
  </div>
  <div class="dayTabs" id="dayTabs"></div>
+ <div id="vbTodo" class="vbtodo"></div>
  <div id="conflictBanner"></div>
  <div class="card">
   <h3 id="gridDayTitle">День</h3>
@@ -2348,6 +2366,7 @@ function renderGrid(){
   }
   document.getElementById("dayTabs").innerHTML=dt;
   document.getElementById("gridDayTitle").textContent=DAY_FULL[curDay];
+  renderVbTodo();
 
   const dayL=S.grid.filter(l=>l.day===curDay);
   let h=`<thead><tr><th style="width:54px">Время</th>`;
@@ -3838,6 +3857,60 @@ function kidViberReset(i){
   _commitEditKids(les); persistLocal(); if(typeof fbSchedulePush==="function") fbSchedulePush();
   renderKidsEditor();
   toast("Отметка «отправлено» снята");
+}
+
+/* ---- Блок под днями: кому в этот день ещё не отправлено сообщение ---- */
+let _vbTodoOpen=false;
+try{ _vbTodoOpen = localStorage.getItem("vbTodoOpen")==="1"; }catch(e){}
+function vbTodoToggle(){ _vbTodoOpen=!_vbTodoOpen; try{localStorage.setItem("vbTodoOpen",_vbTodoOpen?"1":"0");}catch(e){} renderVbTodo(); }
+function renderVbTodo(){
+  const box=document.getElementById("vbTodo"); if(!box) return;
+  const toSend=[], noPhone=[];
+  (S.grid||[]).forEach(l=>{
+    if(l.day!==curDay) return;
+    kidsOf(l).forEach(k=>{
+      if(k.no || k.vbSent) return;                 // «не придёт» и уже отправленные — не показываем
+      const it={name:k.n, course:l.course, time:l.start, li:S.grid.indexOf(l), ki:l.kids.indexOf(k)};
+      if(_viberNumber(k.phone)) toSend.push(it); else noPhone.push(it);
+    });
+  });
+  toSend.sort((a,b)=> (a.time||"").localeCompare(b.time||"") || a.name.localeCompare(b.name,"ru"));
+  const n=toSend.length;
+  let h=`<button type="button" class="vbtodo-head" onclick="vbTodoToggle()">
+     <span>📨 Не отправлено за ${esc(DAY_FULL[curDay])}</span>
+     <span class="cnt ${n?'':'zero'}">${n}</span>
+     <span class="car">${_vbTodoOpen?'▾ свернуть':'▸ раскрыть'}</span></button>`;
+  if(_vbTodoOpen){
+    h+=`<div class="vbtodo-body">`;
+    if(!n && !noPhone.length){
+      h+=`<div class="vt-empty">На этот день всем отправлено ✅</div>`;
+    }else{
+      h+=toSend.map(it=>`<div class="vt-item">
+          <button class="vt-send" title="Отправить в Viber" onclick="vbTodoSend(${it.li},${it.ki})">📨</button>
+          <span class="vt-name">${esc(it.name)}</span>
+          <span class="vt-meta">— ${esc(it.course||"")}${it.time?', '+esc(it.time):''}</span>
+        </div>`).join("");
+      if(noPhone.length){
+        h+=`<div class="vt-note">Без телефона (${noPhone.length}) — сначала «📞 Контакты из Альфы»:</div>`;
+        h+=noPhone.map(it=>`<div class="vt-item"><span class="vt-nophone">• ${esc(it.name)} — ${esc(it.course||"")}${it.time?', '+esc(it.time):''}</span></div>`).join("");
+      }
+    }
+    h+=`</div>`;
+  }
+  box.innerHTML=h;
+}
+async function vbTodoSend(li,ki){
+  const les=S.grid[li]; if(!les) return;
+  const k=(les.kids||[])[ki]; if(!k) return;
+  const num=_viberNumber(k.phone);
+  if(!num){ toast("У ребёнка нет телефона"); return; }
+  const msg=_buildViberMsg(k,les);
+  const copied=await _copyText(msg);
+  _openViber(num);
+  k.vbSent=true; k.vbSentAt=new Date().toISOString();
+  persistLocal(); if(typeof fbSchedulePush==="function") fbSchedulePush();
+  renderVbTodo();
+  toast(copied?"Текст в буфере — вставьте в Viber (Ctrl+V). Отмечено ✅":"Открываю Viber. Отмечено ✅");
 }
 function editViberTpl(){
   document.getElementById("vtplText").value=S.viberTpl||VIBER_TPL_DEFAULT;
