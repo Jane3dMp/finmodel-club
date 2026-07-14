@@ -32,7 +32,7 @@ switch ($action) {
         $r = alfa_call('branch', 'index', ['is_active' => 1, 'page' => 0], true);
         $items = $r['items'] ?? [];
         $out = array_map(fn($b) => ['id' => $b['id'] ?? null, 'name' => $b['name'] ?? ''], $items);
-        json_out(['ok' => true, 'branches' => $out, 'current_branch' => (int)(cfg()['alfa']['branch'] ?? 1)]);
+        json_out(['ok' => true, 'branches' => $out, 'current_branch' => alfa_branch()]);
         break;
 
     // --- ученики/клиенты ---

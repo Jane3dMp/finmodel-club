@@ -193,10 +193,27 @@ function alfa_http(string $method, string $url, array $body, ?string $token): ar
     return $data;
 }
 
+// ID филиала. Если в конфиге 0/пусто — определяем сам (первый активный филиал).
+function alfa_branch(): int {
+    static $resolved = null;
+    if ($resolved !== null) return $resolved;
+    $b = (int)(cfg()['alfa']['branch'] ?? 0);
+    if ($b > 0) { $resolved = $b; return $resolved; }
+    $cacheFile = cache_dir() . '/alfa_branch.json';
+    if (is_file($cacheFile)) {
+        $c = json_decode((string)file_get_contents($cacheFile), true);
+        if (is_array($c) && ($c['exp'] ?? 0) > time() && !empty($c['branch'])) { $resolved = (int)$c['branch']; return $resolved; }
+    }
+    $r = alfa_http('POST', 'https://' . alfa_host() . '/v2api/branch/index',
+        ['is_active' => 1, 'page' => 0], alfa_token());
+    $resolved = (int)($r['items'][0]['id'] ?? 1);
+    @file_put_contents($cacheFile, json_encode(['exp' => time() + 86400, 'branch' => $resolved]));
+    return $resolved;
+}
+
 // Вызов сущности Alfa: POST /v2api/{branch}/{entity}/{cmd}. $global=true → без branch.
 function alfa_call(string $entity, string $cmd, array $body, bool $global = false): array {
     $token  = alfa_token();
-    $branch = (int)(cfg()['alfa']['branch'] ?? 1);
-    $path   = $global ? "/v2api/$entity/$cmd" : "/v2api/$branch/$entity/$cmd";
+    $path   = $global ? "/v2api/$entity/$cmd" : '/v2api/' . alfa_branch() . "/$entity/$cmd";
     return alfa_http('POST', 'https://' . alfa_host() . $path, $body, $token);
 }

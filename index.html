@@ -3486,7 +3486,11 @@ function openAlfaSync(){
       Подтянет учеников из AlfaCRM и сопоставит их с детьми в расписании по ФИО
       (Фамилия + Имя). Совпавшим проставит телефон родителя. Ничего в Альфе не меняется —
       только читаем.
-    </p>`;
+    </p>
+    <div class="hd-actions" style="margin:0 0 8px">
+      <button type="button" class="btn ghost sm" onclick="alfaCheck()">🔌 Проверить связь с Альфой</button>
+    </div>
+    <div id="alfaCheckOut" style="font-size:12px"></div>`;
   const b=document.getElementById("alfaBtn");
   b.textContent="Загрузить из Альфы"; b.onclick=alfaFetch; b.disabled=false;
   document.getElementById("alfaModal").classList.add("show");
@@ -3497,6 +3501,23 @@ async function _alfaIdToken(){
   const au=_fbAuth();
   if(!au||!au.currentUser) throw new Error("Нужно войти в модель (Firebase).");
   return await au.currentUser.getIdToken();
+}
+async function alfaCheck(){
+  const out=document.getElementById("alfaCheckOut"); if(!out) return;
+  out.innerHTML='<span style="color:var(--muted)">Проверяю связь…</span>';
+  try{
+    const token=await _alfaIdToken();
+    const r=await fetch(ALFA_PROXY+"?action=branches",{headers:{"Authorization":"Bearer "+token}});
+    const j=await r.json().catch(()=>({ok:false,error:"Ответ не JSON (код "+r.status+")"}));
+    if(!r.ok||!j.ok) throw new Error(j.error||("Ошибка "+r.status));
+    const list=(j.branches||[]).map(b=>"#"+b.id+" "+esc(b.name)).join(", ")||"—";
+    out.innerHTML=`<div class="callout" style="border-color:var(--green)">
+      Связь с Альфой есть ✅<br>Филиалы: ${list}<br>Используется филиал: <b>#${j.current_branch}</b></div>`;
+  }catch(e){
+    out.innerHTML=`<div class="callout" style="border-color:var(--red)"><b>Нет связи:</b> ${esc(e.message||String(e))}
+      <p style="font-size:11px;color:var(--muted);margin-top:6px">
+      «config.php не найден» → файл не создан на сервере. «AlfaCRM не выдал токен» → проверьте email/api_key в config.php.</p></div>`;
+  }
 }
 async function alfaFetch(){
   const b=document.getElementById("alfaBtn"); b.disabled=true; b.textContent="Загружаю…";
