@@ -285,6 +285,7 @@ tr.rowlocked input,tr.rowlocked select{background:#EAF3EC;border-color:#cfe3d4;c
  <button class="tab" data-t="courses">Курсы и маржа</button>
  <button class="tab" data-t="planner">Планировщик загрузки</button>
  <button class="tab" data-t="grid">Расписание (сетка)</button>
+ <button class="tab" data-t="groups">Группы</button>
  <button class="tab" data-t="may">Майский 💰</button>
  <button class="tab" data-t="staff">Педсостав и ФОТ</button>
  <button class="tab" data-t="fixed">Постоянные расходы</button>
@@ -415,6 +416,13 @@ tr.rowlocked input,tr.rowlocked select{background:#EAF3EC;border-color:#cfe3d4;c
   <div class="tscroll"><table id="gridTable"></table></div>
   <small class="note">Клик по пустой ячейке — добавить занятие. Клик по занятию — редактировать. ЗП за занятие зависит от числа детей (вкладка «Педсостав» → справочник ставок).</small>
  </div>
+</section>
+
+<!-- ===== ГРУППЫ (обзор из расписания) ===== -->
+<section class="panel" id="groups">
+ <h2 class="sec">Группы</h2>
+ <div class="sec-desc">Все группы, собранные из расписания: курс, педагог, дни и время, сколько детей вписано (из «мест») и сколько с 💰. Клик по «→» открывает группу в сетке.</div>
+ <div id="groupsBody"></div>
 </section>
 
 <!-- ===== МАЙСКИЙ (сверка оплат) ===== -->
@@ -2966,6 +2974,15 @@ function renderKidSearch(){
 function gotoKidLesson(idx){
   const les=(S.grid||[])[idx];
   if(!les) return;
+  // если открыта другая вкладка — переключимся на сетку
+  const gridPanel=document.getElementById("grid");
+  if(gridPanel && !gridPanel.classList.contains("active")){
+    const tb=document.querySelector('.tab[data-t="grid"]');
+    document.querySelectorAll(".tab").forEach(x=>x.classList.remove("active"));
+    document.querySelectorAll(".panel").forEach(x=>x.classList.remove("active"));
+    if(tb) tb.classList.add("active");
+    gridPanel.classList.add("active");
+  }
   if(les.day) curDay=les.day;
   renderGrid();
   setTimeout(()=>{
@@ -3090,6 +3107,61 @@ function mayApply(){
   document.getElementById("mayBtn").textContent="Готово";
   document.getElementById("mayBtn").onclick=closeMay;
   toast("Проставлено 💰: "+hits);
+}
+
+/* ===== ВКЛАДКА «ГРУППЫ» — обзор групп, собранный из расписания ===== */
+let _groupsQuery="";
+function grpRerenderKeepFocus(){ renderGroups(); const el=document.getElementById("grpQ"); if(el){ const v=el.value; el.focus(); el.value=""; el.value=v; } }
+function renderGroups(){
+  const box=document.getElementById("groupsBody"); if(!box) return;
+  const map={}, order=[];
+  (S.grid||[]).forEach((l,idx)=>{
+    if(!l.course) return;
+    const gk=l.course+"||"+(l.group||("__"+l.day+"_"+l.start+"_"+l.room));
+    if(!map[gk]){ map[gk]={course:l.course, group:l.group||"", newIntake:!!l.newIntake, teachers:new Set(), sched:[], rooms:new Set(), idxs:[], firstIdx:idx}; order.push(gk); }
+    const g=map[gk];
+    if(l.teacher) g.teachers.add(l.teacher);
+    if(l.room) g.rooms.add(l.room);
+    g.sched.push({day:l.day,start:l.start});
+    g.idxs.push(idx);
+  });
+  const groups=order.map(k=>{ const g=map[k];
+    const names=new Set(), paid=new Set();
+    g.idxs.forEach(i=>kidsOf(S.grid[i]).forEach(kd=>{ const n=_normName(kd.n); if(!n) return; names.add(n); if(kd.may) paid.add(n); }));
+    g.kids=names.size; g.paid=paid.size;
+    g.cap=Math.max(0,...g.idxs.map(i=>+S.grid[i].students||0));
+    const seen=new Set(), sc=[];
+    g.sched.sort((a,b)=>(a.day-b.day)||String(a.start).localeCompare(String(b.start))).forEach(s=>{ const t=(DAY_NAMES[s.day]||"")+" "+(s.start||""); if(!seen.has(t)){seen.add(t); sc.push(t);} });
+    g.schedText=sc.join(", ");
+    g.teacherText=[...g.teachers].map(shortName).join(", ");
+    g.roomText=[...g.rooms].join(", ");
+    g.name=g.group || ((g.newIntake?"🆕 ":"")+([...g.teachers][0]?shortName([...g.teachers][0]):"без номера"));
+    return g;
+  });
+  groups.sort((a,b)=> a.course.localeCompare(b.course,"ru") || String(a.name).localeCompare(String(b.name),"ru",{numeric:true}));
+  const q=_ksNorm(_groupsQuery);
+  const shown = q.length>=2 ? groups.filter(g=>_ksNorm(g.course+" "+g.name).includes(q)) : groups;
+  const totKids=groups.reduce((a,g)=>a+g.kids,0), totPaid=groups.reduce((a,g)=>a+g.paid,0);
+  let html=`<div class="callout" style="margin-bottom:10px">Групп: <b>${groups.length}</b> · детей вписано: <b>${totKids}</b> · с 💰: <b style="color:var(--green)">${totPaid}</b></div>
+    <div class="hd-actions" style="margin-bottom:8px"><span class="hd-grp"><input type="search" id="grpQ" class="cell" style="width:260px" placeholder="🔍 Поиск по группе или курсу" value="${esc(_groupsQuery)}" oninput="_groupsQuery=this.value;grpRerenderKeepFocus()"></span></div>
+    <div class="tscroll"><table id="groupsTable"><thead><tr>
+      <th style="text-align:left">Группа</th><th style="text-align:left">Курс</th><th style="text-align:left">Педагог</th><th style="text-align:left">Расписание</th><th>Каб.</th><th>Детей</th><th>💰</th><th></th>
+    </tr></thead><tbody>`;
+  shown.forEach(g=>{
+    html+=`<tr>
+      <td style="text-align:left"><b>${esc(g.name)}</b></td>
+      <td style="text-align:left">${esc(g.course)}</td>
+      <td style="text-align:left">${esc(g.teacherText||"—")}</td>
+      <td style="text-align:left">${esc(g.schedText||"—")}</td>
+      <td style="text-align:center">${esc(g.roomText||"—")}</td>
+      <td style="text-align:center">${g.kids}${g.cap?(" / "+g.cap):""}</td>
+      <td style="text-align:center">${g.paid?('<b style="color:var(--green)">'+g.paid+'</b>'):'0'}</td>
+      <td style="text-align:center"><button class="btn ghost sm" onclick="gotoKidLesson(${g.firstIdx})" title="Открыть группу в сетке">→</button></td>
+    </tr>`;
+  });
+  if(!shown.length) html+=`<tr><td colspan="8" style="padding:12px;color:var(--muted)">Групп не найдено.</td></tr>`;
+  html+=`</tbody></table></div>`;
+  box.innerHTML=html;
 }
 
 /* ===== ВКЛАДКА «МАЙСКИЙ» — постоянная сверка оплат с расписанием ===== */
@@ -3489,7 +3561,7 @@ function deleteScenario(){
 
 
 function renderAll(){
-  renderCourses(); renderPlanner(); renderGrid(); renderMay(); renderStaff(); renderFixed(); renderTax(); renderBreak(); renderSettings(); renderDash(); onSlider(); renderConflictBanner(); renderScenarioBar(); updateNavHeightDelayed();
+  renderCourses(); renderPlanner(); renderGrid(); renderGroups(); renderMay(); renderStaff(); renderFixed(); renderTax(); renderBreak(); renderSettings(); renderDash(); onSlider(); renderConflictBanner(); renderScenarioBar(); updateNavHeightDelayed();
 }
 function toast(m){ const t=document.getElementById("toast"); t.textContent=m; t.classList.add("show");
   clearTimeout(t._h); t._h=setTimeout(()=>t.classList.remove("show"),2200); }
