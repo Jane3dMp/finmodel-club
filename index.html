@@ -23,7 +23,8 @@ header .wrap{padding:0 16px}
 .sub{font-size:12px;color:#C9BBA6;margin-top:2px}
 .syncbox{display:flex;align-items:center;gap:8px;font-size:12px}
 .dot{width:9px;height:9px;border-radius:50%;background:#888}
-.dot.ok{background:var(--green)} .dot.err{background:var(--red)} .dot.local{background:var(--terra)}
+.dot.ok{background:var(--green)} .dot.err{background:var(--red)} .dot.local{background:var(--terra)} .dot.warn{background:#e6a417;animation:dotpulse 1s infinite}
+@keyframes dotpulse{50%{opacity:.35}}
 .btn{background:var(--terra);color:#fff;border:none;padding:8px 14px;border-radius:7px;
   font-size:13px;font-weight:600;cursor:pointer;transition:.15s}
 .btn:hover{background:var(--terra-d)}
@@ -690,6 +691,12 @@ let _undoStack = [];      // снимки прошлых состояний (JSO
 let _lastSnap = null;     // последнее сохранённое состояние S (для отката на шаг назад)
 let _histLock = false;    // true = не писать в историю (загрузка/импорт/смена версии/сам undo)
 const UNDO_MAX = 30;
+/* ===== АВТОСОХРАНЕНИЕ ===== */
+let _dirty=false;         // есть несохранённые в таблицу изменения
+let _ready=false;         // стартовая загрузка завершена (чтобы не автосохранять при старте)
+let _autoSaveTimer=null;
+function scheduleAutoSave(){ clearTimeout(_autoSaveTimer); _autoSaveTimer=setTimeout(()=>{ if(_dirty && S.gasUrl) pushGas(true); }, 2500); }
+function markReady(){ _ready=true; _dirty=false; }
 function _snap(){ try{ return JSON.stringify(S); }catch(e){ return null; } }
 function updateUndoBtn(){ const b=document.getElementById("undoBtn"); if(b) b.disabled = _undoStack.length===0; }
 function persistLocal(){
@@ -711,6 +718,13 @@ function persistLocal(){
       saveScenarioList(list);
     }
   }catch(e){}
+  // пометить как несохранённое и запланировать автовыгрузку в таблицу
+  // (только в режиме таблицы: в локальном режиме localStorage и так источник правды)
+  if(!_histLock && S.gasUrl){
+    _dirty=true;
+    if(_ready) scheduleAutoSave();
+    setSync("warn","● Сохраняю…");
+  }
 }
 function undo(){
   if(_undoStack.length===0){ toast("Нечего отменять"); return; }
@@ -799,9 +813,9 @@ async function pushGas(silent){
     if(ok && trimmed.charAt(0)==="{"){
       try{ const jr=JSON.parse(trimmed); if(jr && jr.ok===false) ok=false; }catch(e){}
     }
-    if(ok){ setSync("ok","Google-таблица"); if(!silent) toast("Выгружено в таблицу"); else toast("Сохранено в таблицу"); }
-    else { setSync("err","Таблица отклонила сохранение"); toast("Ошибка сохранения"); }
-  }catch(e){ setSync("err","Ошибка связи"); toast("Ошибка сохранения"); }
+    if(ok){ _dirty=false; clearTimeout(_autoSaveTimer); setSync("ok","✓ Сохранено в таблицу"); if(!silent) toast("Выгружено в таблицу"); }
+    else { setSync("err","⚠ НЕ сохранено — таблица отклонила"); toast("Ошибка сохранения"); }
+  }catch(e){ setSync("err","⚠ НЕ сохранено — нет связи"); toast("Ошибка сохранения"); }
 }
 
 const GAS_CODE = `// ХРАНЕНИЕ v2: служебный лист DB (технический JSON, источник правды для модели)
@@ -3698,7 +3712,7 @@ if(S.gasUrl){
       const m=txt&&txt.match(/\{[\s\S]*\}/);
       if(m){ try{ j=JSON.parse(m[0]); }catch(e2){} }
     }
-    if(!j){ setSync("err","Таблица ответила не JSON — локальный режим"); renderAll(); return; }
+    if(!j){ setSync("err","Таблица ответила не JSON — локальный режим"); renderAll(); markReady(); return; }
     if(j && j.ok && j.data && j.data.scenarios){
       const localList=loadScenarioList();
       const remoteList=j.data.scenarios;
@@ -3717,17 +3731,21 @@ if(S.gasUrl){
       if(!merged[cur]) cur=Object.keys(merged)[0];
       if(merged[cur]) S=_loadState(merged[cur]);
       if(!S.meta)S.meta={}; S.meta.name=cur;
-      persistLocal(); setSync("ok","Google-таблица"); renderAll();
+      persistLocal(); setSync("ok","Google-таблица"); renderAll(); markReady();
     } else if(j && j.ok && j.data && j.data.courses){
       S=_loadState(j.data);
-      persistLocal(); setSync("ok","Google-таблица"); renderAll();
+      persistLocal(); setSync("ok","Google-таблица"); renderAll(); markReady();
     } else {
-      ensureCurrentInList(); setSync("ok","Google-таблица (пусто)"); renderAll();
+      ensureCurrentInList(); setSync("ok","Google-таблица (пусто)"); renderAll(); markReady();
     }
-  }).catch(e=>{ setSync("err","Нет связи — локальный режим"); renderAll(); });
-} else { ensureCurrentInList(); setSync("local","Локальный режим"); renderAll(); }
+  }).catch(e=>{ setSync("err","Нет связи — локальный режим"); renderAll(); markReady(); });
+} else { ensureCurrentInList(); setSync("local","Локальный режим"); renderAll(); markReady(); }
 /* инициализация истории отмены после старта */
 setTimeout(()=>{ if(_lastSnap===null) _lastSnap=_snap(); updateUndoBtn(); }, 0);
+/* защита от потери: предупредить перед уходом, если есть несохранённое */
+window.addEventListener("beforeunload", function(e){
+  if(_dirty){ e.preventDefault(); e.returnValue="Есть несохранённые изменения — они пропадут. Уйти?"; return e.returnValue; }
+});
 
 </script>
 </body>
