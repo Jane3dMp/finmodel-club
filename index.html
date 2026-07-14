@@ -2745,6 +2745,8 @@ function _kidsFromDOM(){
     o.c=tr.querySelector(".k-in-c").value.trim();
     o.phone=prev.phone||"";                              // поля из Альфы в строке не показаны —
     o.alfaId=(prev.alfaId!==undefined?prev.alfaId:null); // переносим их из текущего состояния
+    o.vbSent=!!prev.vbSent;                              // отметка «отправлено в Viber»
+    o.vbSentAt=prev.vbSentAt||"";
     return o;
   });
 }
@@ -2758,14 +2760,14 @@ function renderKidsEditor(){
   }
   const th=KID_FLAGS.map(f=>`<th title="${f.lab}">${f.ic}<br>${f.lab.split(" ")[0]}</th>`).join("");
   box.innerHTML=`<table id="kidsTable"><thead><tr>
-      <th class="k-num"></th><th class="k-name">ФИО</th>${th}<th style="min-width:130px">Комментарий</th><th title="Написать в Viber родителю">📨</th><th style="width:22px"></th>
+      <th class="k-num"></th><th class="k-name">ФИО</th>${th}<th style="min-width:130px">Комментарий</th><th title="Написать в Viber родителю. ✅ = уже отправлено (правый клик — снять отметку)">📨</th><th style="width:22px"></th>
     </tr></thead><tbody>${
     _editKids.map((k,i)=>`<tr class="${k.no?'k-off':''}">
       <td class="k-num">${i+1}</td>
       <td class="k-name"><input type="text" class="k-in-name" value="${esc(k.n)}" placeholder="Фамилия Имя" oninput="refreshLesWage()"></td>
       ${KID_FLAGS.map(f=>`<td><input type="checkbox" class="k-in-${f.k}" ${k[f.k]?"checked":""} title="${f.lab}" onchange="kidFlagChanged()"></td>`).join("")}
       <td><input type="text" class="k-in-c" value="${esc(k.c||"")}" placeholder="—"></td>
-      <td><button type="button" class="btn ghost sm" style="padding:1px 6px" ${k.phone?"":"disabled"} title="${k.phone?('Viber → '+esc(k.phone)):'Нет телефона — сначала «📞 Контакты из Альфы»'}" onclick="kidViber(${i})">📨</button></td>
+      <td><button type="button" class="btn ghost sm" style="padding:1px 6px${k.vbSent?';background:#e6f4ea;border-color:#66bb6a':''}" ${k.phone?"":"disabled"} title="${k.phone?(k.vbSent?('Отправлено'+(k.vbSentAt?' '+_vbDate(k.vbSentAt):'')+' · клик — отправить снова, правый клик — снять отметку'):('Viber → '+esc(k.phone))):'Нет телефона — сначала «📞 Контакты из Альфы»'}" onclick="kidViber(${i})" oncontextmenu="event.preventDefault();kidViberReset(${i});return false">${k.vbSent?'✅':'📨'}</button></td>
       <td><span class="k-del" title="Удалить" onclick="kidDel(${i})">×</span></td>
     </tr>`).join("")
   }</tbody></table>`;
@@ -3267,7 +3269,7 @@ const KID_FLAGS=[
   {k:"no",    ic:"❌", lab:"Не придёт"},
   {k:"call",  ic:"📵", lab:"Недозвон"}
 ];
-function _blankKid(n){ return {n:cleanKidName(n), may:false, sched:false, no:false, call:false, c:"", phone:"", alfaId:null}; }
+function _blankKid(n){ return {n:cleanKidName(n), may:false, sched:false, no:false, call:false, c:"", phone:"", alfaId:null, vbSent:false, vbSentAt:"" }; }
 /* «Азаренок Леон36,00», «Богданович Степан #34,00» → «Азаренок Леон» */
 function cleanKidName(s){
   return String(s||"")
@@ -3809,6 +3811,10 @@ function _openViber(num){
   a.href="viber://chat?number="+encodeURIComponent(num);
   document.body.appendChild(a); a.click(); a.remove();
 }
+function _vbDate(iso){ try{ const d=new Date(iso); return d.toLocaleDateString("ru-RU",{day:"2-digit",month:"2-digit"}); }catch(e){ return ""; } }
+/* зафиксировать текущий список детей карточки в модель (чтобы отметка «отправлено» сохранилась
+   сразу, не дожидаясь «Сохранить»); прочие поля занятия не трогаем */
+function _commitEditKids(les){ if(les) les.kids=_editKids.filter(x=>x.n); }
 async function kidViber(i){
   _kidsFromDOM();
   const idx=+(document.getElementById("lesModal").dataset.idx);
@@ -3819,7 +3825,19 @@ async function kidViber(i){
   const msg=_buildViberMsg(k,les);
   const copied=await _copyText(msg);
   _openViber(num);
-  toast(copied?"Текст в буфере — вставьте в Viber (Ctrl+V)":"Открываю Viber — текст скопировать не вышло");
+  k.vbSent=true; k.vbSentAt=new Date().toISOString();   // пометить как отправленное
+  _commitEditKids(les); persistLocal(); if(typeof fbSchedulePush==="function") fbSchedulePush();
+  renderKidsEditor();
+  toast(copied?"Текст в буфере — вставьте в Viber (Ctrl+V). Отмечено ✅":"Открываю Viber. Отмечено ✅");
+}
+function kidViberReset(i){
+  _kidsFromDOM();
+  const les=S.grid[+(document.getElementById("lesModal").dataset.idx)]; const k=_editKids[i];
+  if(!k) return;
+  k.vbSent=false; k.vbSentAt="";
+  _commitEditKids(les); persistLocal(); if(typeof fbSchedulePush==="function") fbSchedulePush();
+  renderKidsEditor();
+  toast("Отметка «отправлено» снята");
 }
 function editViberTpl(){
   document.getElementById("vtplText").value=S.viberTpl||VIBER_TPL_DEFAULT;
