@@ -193,6 +193,12 @@ small.note{font-size:11px;color:var(--muted)}
 /* редактируемое название группы на вкладке «Группы» */
 .grp-name{cursor:pointer;border-bottom:1px dashed var(--muted)}
 .grp-name:hover{color:var(--terra);border-bottom-color:var(--terra)}
+/* закреп (готово) группы */
+.grp-pin{cursor:pointer;opacity:.3;filter:grayscale(1);font-size:14px}
+.grp-pin.on{opacity:1;filter:none}
+.grp-pin:hover{opacity:.75}
+#groupsTable tr.grp-done td{opacity:.55}
+#groupsTable tr.grp-done .grp-name b{text-decoration:line-through}
 /* редактор детей в модалке занятия */
 #kidsTable{width:100%;border-collapse:collapse;margin-top:4px}
 #kidsTable th{background:var(--coal);color:#fff;font-size:10px;font-weight:600;padding:4px 3px;text-align:center;line-height:1.1}
@@ -3113,9 +3119,10 @@ function mayApply(){
 }
 
 /* ===== ВКЛАДКА «ГРУППЫ» — обзор групп, собранный из расписания ===== */
-let _groupsQuery="", _groupsSort={col:"course",dir:1};
+let _groupsQuery="", _groupsSort={col:"course",dir:1}, _groupsHideDone=false, _groupsShown=[];
 function grpRerenderKeepFocus(){ renderGroups(); const el=document.getElementById("grpQ"); if(el){ const v=el.value; el.focus(); el.value=""; el.value=v; } }
 function grpSort(col){ if(_groupsSort.col===col) _groupsSort.dir*=-1; else _groupsSort={col,dir:1}; renderGroups(); }
+function grpToggleDone(i){ const g=_groupsShown[i]; if(!g) return; if(!S.groupsDone) S.groupsDone={}; if(S.groupsDone[g.key]) delete S.groupsDone[g.key]; else S.groupsDone[g.key]=1; persistLocal(); renderGroups(); }
 function _grpTh(col,lab,align){ const a=_groupsSort.col===col?(_groupsSort.dir>0?" ▲":" ▼"):""; return `<th style="text-align:${align};cursor:pointer;user-select:none;white-space:nowrap" onclick="grpSort('${col}')" title="Сортировать">${lab}${a}</th>`; }
 function renderGroups(){
   const box=document.getElementById("groupsBody"); if(!box) return;
@@ -3131,6 +3138,7 @@ function renderGroups(){
     g.idxs.push(idx);
   });
   const groups=order.map(k=>{ const g=map[k];
+    g.key=k; g.done=!!(S.groupsDone||{})[k];
     const names=new Set(), paid=new Set();
     g.idxs.forEach(i=>kidsOf(S.grid[i]).forEach(kd=>{ const n=_normName(kd.n); if(!n) return; names.add(n); if(kd.may) paid.add(n); }));
     g.kids=names.size; g.paid=paid.size;
@@ -3153,15 +3161,22 @@ function renderGroups(){
     return r*_groupsSort.dir;
   });
   const q=_ksNorm(_groupsQuery);
-  const shown = q.length>=2 ? groups.filter(g=>_ksNorm(g.course+" "+g.name).includes(q)) : groups;
-  const totKids=groups.reduce((a,g)=>a+g.kids,0), totPaid=groups.reduce((a,g)=>a+g.paid,0);
-  let html=`<div class="callout" style="margin-bottom:10px">Групп: <b>${groups.length}</b> · детей вписано: <b>${totKids}</b> · с 💰: <b style="color:var(--green)">${totPaid}</b></div>
-    <div class="hd-actions" style="margin-bottom:8px"><span class="hd-grp"><input type="search" id="grpQ" class="cell" style="width:260px" placeholder="🔍 Поиск по группе или курсу" value="${esc(_groupsQuery)}" oninput="_groupsQuery=this.value;grpRerenderKeepFocus()"></span></div>
+  let shown = q.length>=2 ? groups.filter(g=>_ksNorm(g.course+" "+g.name).includes(q)) : groups.slice();
+  if(_groupsHideDone) shown=shown.filter(g=>!g.done);
+  _groupsShown=shown;
+  const totKids=groups.reduce((a,g)=>a+g.kids,0), totPaid=groups.reduce((a,g)=>a+g.paid,0), doneCount=groups.filter(g=>g.done).length;
+  let html=`<div class="callout" style="margin-bottom:10px">Групп: <b>${groups.length}</b> · детей вписано: <b>${totKids}</b> · с 💰: <b style="color:var(--green)">${totPaid}</b> · готово: <b>${doneCount}</b></div>
+    <div class="hd-actions" style="margin-bottom:8px">
+      <span class="hd-grp"><input type="search" id="grpQ" class="cell" style="width:260px" placeholder="🔍 Поиск по группе или курсу" value="${esc(_groupsQuery)}" oninput="_groupsQuery=this.value;grpRerenderKeepFocus()"></span>
+      <span class="hd-sep"></span>
+      <span class="hd-grp"><button class="btn ${_groupsHideDone?'':'ghost'} sm" onclick="_groupsHideDone=!_groupsHideDone;renderGroups()" title="Спрятать/показать закреплённые (готовые) группы">${_groupsHideDone?'👁 Показать готовые':'📌 Скрыть готовые'} (${doneCount})</button></span>
+    </div>
     <div class="tscroll"><table id="groupsTable"><thead><tr>
-      ${_grpTh("name","Группа","left")}${_grpTh("course","Курс","left")}${_grpTh("teacher","Педагог","left")}${_grpTh("sched","Расписание","left")}${_grpTh("room","Каб.","center")}${_grpTh("kids","Детей","center")}${_grpTh("paid","💰","center")}<th></th>
+      <th style="width:30px" title="Закреп (готово)">📌</th>${_grpTh("name","Группа","left")}${_grpTh("course","Курс","left")}${_grpTh("teacher","Педагог","left")}${_grpTh("sched","Расписание","left")}${_grpTh("room","Каб.","center")}${_grpTh("kids","Детей","center")}${_grpTh("paid","💰","center")}<th></th>
     </tr></thead><tbody>`;
-  shown.forEach((g)=>{
-    html+=`<tr>
+  shown.forEach((g,i)=>{
+    html+=`<tr class="${g.done?'grp-done':''}">
+      <td style="text-align:center"><span class="grp-pin${g.done?' on':''}" title="${g.done?'Готова — снять закреп':'Отметить готовой (закрепить)'}" onclick="grpToggleDone(${i})">📌</span></td>
       <td style="text-align:left"><span class="grp-name" title="Открыть карточку занятия" onclick="editLes(${g.firstIdx})"><b>${esc(g.name)}</b></span></td>
       <td style="text-align:left">${esc(g.course)}</td>
       <td style="text-align:left">${esc(g.teacherText||"—")}</td>
@@ -3172,7 +3187,7 @@ function renderGroups(){
       <td style="text-align:center"><button class="btn ghost sm" onclick="gotoKidLesson(${g.firstIdx})" title="Открыть группу в сетке">→</button></td>
     </tr>`;
   });
-  if(!shown.length) html+=`<tr><td colspan="8" style="padding:12px;color:var(--muted)">Групп не найдено.</td></tr>`;
+  if(!shown.length) html+=`<tr><td colspan="9" style="padding:12px;color:var(--muted)">${_groupsHideDone&&doneCount?'Все группы под фильтром закреплены (готовы). Нажмите «Показать готовые».':'Групп не найдено.'}</td></tr>`;
   html+=`</tbody></table></div>`;
   box.innerHTML=html;
 }
