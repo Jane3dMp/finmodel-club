@@ -3101,12 +3101,15 @@ function mayGroupsOf(courseName){
   (S.grid||[]).forEach((l,idx)=>{
     if(l.course!==courseName) return;
     const gk = l.group || ("__"+l.day+"_"+l.start+"_"+l.room);
-    if(!groups[gk]){ groups[gk]={key:gk,label:l.group||"",day:l.day,start:l.start,room:l.room,idxs:[]}; order.push(gk); }
+    if(!groups[gk]){ groups[gk]={key:gk,label:l.group||"",teacher:l.teacher||"",newIntake:!!l.newIntake,day:l.day,start:l.start,room:l.room,idxs:[]}; order.push(gk); }
     groups[gk].idxs.push(idx);
   });
   return order.map(k=>{ const g=groups[k];
     g.count=new Set(g.idxs.flatMap(i=>kidsOf(S.grid[i]).map(k=>_normName(k.n)))).size;
-    g.text=(g.label||"б/группы")+" · "+(DAY_NAMES[g.day]||"")+" "+(g.start||"")+(g.room?(" · каб. "+g.room):"")+" · "+g.count+"👤";
+    // если номера группы нет — подписываем педагогом (и пометкой «новый набор»), чтобы занятие было узнаваемо
+    let nm=g.label;
+    if(!nm) nm=(g.newIntake?"🆕 ":"")+(g.teacher?shortName(g.teacher):"без номера группы");
+    g.text=nm+" · "+(DAY_NAMES[g.day]||"")+" "+(g.start||"")+(g.room?(" · каб. "+g.room):"")+" · "+g.count+"👤";
     return g; });
 }
 function mayFindChild(key,courseName){
