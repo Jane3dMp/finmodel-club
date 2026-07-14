@@ -2669,9 +2669,14 @@ function renderGridSummary(){
 }
 
 /* ====== РЕДАКТИРОВАНИЕ ЗАНЯТИЯ ====== */
+/* ссылка на только что созданное занятие — если карточку закрыть «Отмена»,
+   не сохранив, оно должно исчезнуть (а не остаться в расписании). */
+let _newLesRef=null;
 function addLes(slot,room){
   const courseNames=S.courses.map(c=>c.name);
-  S.grid.push({day:curDay,start:slot,end:addMin(slot,90),course:courseNames[0]||"",teacher:"",students:6,room:room});
+  const les={day:curDay,start:slot,end:addMin(slot,90),course:courseNames[0]||"",teacher:"",students:6,room:room};
+  S.grid.push(les);
+  _newLesRef=les;
   persistLocal(); renderGrid(); editLes(S.grid.length-1);
 }
 function addMin(t,min){ const[h,m]=t.split(":").map(Number); let tot=h*60+m+min;
@@ -2796,6 +2801,7 @@ function kidPasteList(){
 }
 
 function saveLes(){
+  _newLesRef=null;                 // занятие подтверждено — при закрытии не удалять
   const idx=+document.getElementById("lesModal").dataset.idx;
   const l=S.grid[idx];
   _kidsFromDOM();
@@ -2812,6 +2818,7 @@ function saveLes(){
   persistLocal(); closeLes(); renderGrid(); renderStaff(); renderGroups(); renderMay();
 }
 function delLes(){
+  _newLesRef=null;                 // удаляем явно — пометку снять, чтобы closeLes не дублировал
   const idx=+document.getElementById("lesModal").dataset.idx;
   S.grid.splice(idx,1); persistLocal(); closeLes(); renderGrid(); renderStaff(); renderGroups(); renderMay();
 }
@@ -2823,7 +2830,15 @@ function togglePinModal(){
   document.getElementById("pinBtn").textContent=l.pinned?"Открепить":"Закрепить";
 }
 
-function closeLes(){ document.getElementById("lesModal").classList.remove("show"); if(_fbPending){ const p=_fbPending; _fbPending=null; _applyRemote(p); } }
+function closeLes(){
+  if(_newLesRef){                  // закрыли новое занятие без «Сохранить» — убрать его
+    const i=(S.grid||[]).indexOf(_newLesRef);
+    _newLesRef=null;
+    if(i>=0){ S.grid.splice(i,1); persistLocal(); renderGrid(); }
+  }
+  document.getElementById("lesModal").classList.remove("show");
+  if(_fbPending){ const p=_fbPending; _fbPending=null; _applyRemote(p); }
+}
 
 /* перенос сетки → план (считаем группы по расставленным занятиям) */
 function gridToPlan(){
