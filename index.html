@@ -2157,8 +2157,8 @@ function renderPlanner(){
 
   // таблица плана
   let h=`<thead><tr>
-    <th style="width:24px"></th><th>Курс</th><th>Чел/гр</th><th title="из библиотеки курсов">Цена 📚</th><th>Групп/нед</th>
-    <th title="из библиотеки курсов">Визиты 📚</th><th>Оборот/нед</th><th>Детей-мест</th><th></th></tr></thead><tbody>`;
+    <th style="width:24px"></th><th>Курс</th><th>Чел/гр</th><th class="num" title="из библиотеки курсов">Цена 📚</th><th>Групп/нед</th>
+    <th class="num" title="из библиотеки курсов">Визиты 📚</th><th class="num">Оборот/нед</th><th class="num">Детей-мест</th><th></th></tr></thead><tbody>`;
   S.plan.forEach((p,i)=>{
     const lib=courseFromLib(p.name);
     const g=+p.groups||0, cg=+p.perGroup||0;
