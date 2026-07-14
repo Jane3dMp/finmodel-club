@@ -281,6 +281,7 @@ tr.rowlocked input,tr.rowlocked select{background:#EAF3EC;border-color:#cfe3d4;c
   <div class="syncbox">
    <span class="dot local" id="syncDot"></span>
    <span id="syncTxt">Локальный режим</span>
+   <button class="btn ghost sm" id="fbAdminBtn" onclick="openAdminPanel()" title="Заявки на доступ" style="display:none">🔑 Доступы<span id="fbAdminBadge"></span></button>
    <select id="scnSelect" class="cell" style="max-width:160px" onchange="switchScenario(this.value)" title="Сценарий / год"></select>
    <button class="btn ghost sm" onclick="openScnMenu()" title="Управление сценариями">⋮</button>
    <button class="btn ghost sm" onclick="openSync()">Хранилище</button>
@@ -644,13 +645,32 @@ tr.rowlocked input,tr.rowlocked select{background:#EAF3EC;border-color:#cfe3d4;c
 </div>
 
 <div id="fbLogin" style="display:none;position:fixed;inset:0;z-index:9999;background:#f3ece4;align-items:center;justify-content:center">
-  <div style="background:#fff;border:1px solid #e0d8cf;border-radius:12px;padding:24px;max-width:340px;width:90%;box-shadow:0 10px 44px rgba(0,0,0,.18)">
-    <div style="font-weight:700;font-size:18px;margin-bottom:2px">Вход в финмодель</div>
-    <div style="font-size:12px;color:#8a8178;margin-bottom:14px">Общий доступ для команды «Прознание»</div>
-    <input id="fbEmail" type="email" placeholder="email" autocomplete="username" style="width:100%;box-sizing:border-box;padding:9px 12px;border:1px solid #ccc;border-radius:8px;margin-bottom:8px;font-size:14px">
-    <input id="fbPass" type="password" placeholder="пароль" autocomplete="current-password" onkeydown="if(event.key==='Enter')fbLogin()" style="width:100%;box-sizing:border-box;padding:9px 12px;border:1px solid #ccc;border-radius:8px;margin-bottom:12px;font-size:14px">
-    <button onclick="fbLogin()" style="width:100%;padding:10px;border:none;border-radius:8px;background:#b5532a;color:#fff;font-size:14px;font-weight:600;cursor:pointer">Войти</button>
-    <div id="fbLoginErr" style="color:#c0392b;font-size:12px;margin-top:8px;min-height:15px"></div>
+  <div style="background:#fff;border:1px solid #e0d8cf;border-radius:12px;padding:24px;max-width:360px;width:90%;box-shadow:0 10px 44px rgba(0,0,0,.18)">
+    <div id="fbAuthTitle" style="font-weight:700;font-size:18px;margin-bottom:2px">Вход в финмодель</div>
+    <div id="fbAuthSub" style="font-size:12px;color:#8a8178;margin-bottom:14px">Команда «Прознание»</div>
+    <div id="fbAuthForm">
+      <input id="fbEmail" type="email" placeholder="email" autocomplete="username" style="width:100%;box-sizing:border-box;padding:9px 12px;border:1px solid #ccc;border-radius:8px;margin-bottom:8px;font-size:14px">
+      <input id="fbPass" type="password" placeholder="пароль" autocomplete="current-password" onkeydown="if(event.key==='Enter')fbAuthSubmit()" style="width:100%;box-sizing:border-box;padding:9px 12px;border:1px solid #ccc;border-radius:8px;margin-bottom:12px;font-size:14px">
+      <button id="fbAuthBtn" onclick="fbAuthSubmit()" style="width:100%;padding:10px;border:none;border-radius:8px;background:#b5532a;color:#fff;font-size:14px;font-weight:600;cursor:pointer">Войти</button>
+      <div id="fbLoginErr" style="color:#c0392b;font-size:12px;margin-top:8px;min-height:15px"></div>
+      <div style="text-align:center;margin-top:6px"><a id="fbAuthToggle" href="#" onclick="fbToggleMode();return false" style="font-size:12px;color:#b5532a;text-decoration:none">Нет аккаунта? Зарегистрироваться</a></div>
+    </div>
+    <div id="fbPendingBox" style="display:none">
+      <div style="font-size:13px;color:#5a5049;line-height:1.5;margin-bottom:14px">Заявка на доступ отправлена. Доступ откроет администратор — как только одобрит, вы войдёте автоматически.</div>
+      <button onclick="fbLogout()" style="width:100%;padding:9px;border:1px solid #ccc;border-radius:8px;background:#fff;font-size:13px;cursor:pointer">Выйти / войти другим аккаунтом</button>
+    </div>
+  </div>
+</div>
+
+<div id="fbAdminModal" style="display:none;position:fixed;inset:0;z-index:9998;background:rgba(0,0,0,.35);align-items:center;justify-content:center">
+  <div style="background:#fff;border-radius:12px;padding:22px;max-width:460px;width:92%;max-height:80vh;overflow:auto;box-shadow:0 10px 44px rgba(0,0,0,.25)">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+      <div style="font-weight:700;font-size:17px">Доступы — заявки</div>
+      <span onclick="closeAdminPanel()" style="cursor:pointer;font-size:20px;color:#999">×</span>
+    </div>
+    <div style="font-size:12px;color:#8a8178;margin-bottom:12px">Кто зарегистрировался и ждёт доступа. «Одобрить» — открыть доступ, «Отклонить» — убрать заявку.</div>
+    <div id="fbPendingList"></div>
+    <div style="margin-top:12px;display:flex;gap:8px"><button onclick="fbLoadPending()" style="padding:8px 12px;border:1px solid #ccc;border-radius:8px;background:#fff;cursor:pointer;font-size:13px">↻ Обновить</button></div>
   </div>
 </div>
 
@@ -803,7 +823,9 @@ function fbPush(){
   _fbRef.update(updates).then(()=>{ _dirty=false; setSync("ok","✓ Firebase · живая синхронизация"); })
     .catch(e=>{ setSync("err","⚠ Firebase: "+((e&&e.message)||"ошибка")); });
 }
-/* ---- вход (общий логин команды) ---- */
+/* ---- вход / регистрация / одобрение доступа ---- */
+const FB_ADMIN="proznanie.mogilev@gmail.com";
+let _fbMode="login", _fbApprRef=null, _fbGranted=false, _fbIsAdmin=false, _fbPendRef=null;
 function _fbAuth(){ return (typeof firebase!=="undefined" && firebase.auth) ? firebase.auth() : null; }
 function fbStart(){
   if(!FB_CONFIG.databaseURL) return;
@@ -811,33 +833,126 @@ function fbStart(){
   const auth=_fbAuth();
   if(!auth){ fbConnect(); return; }   // auth SDK не загрузился — работаем без входа
   auth.onAuthStateChanged(function(user){
-    if(user){ _fbHideLogin(); fbConnect(); }
-    else { _fbShowLogin(); }
+    _fbGranted=false; _fbIsAdmin=false;
+    if(_fbApprRef){ try{_fbApprRef.off();}catch(e){} _fbApprRef=null; }
+    if(!user){ _fbUpdateAdminUI(); _fbShowLogin(); return; }
+    if(user.email===FB_ADMIN){ _fbGrant(true); return; }       // админ — доступ по почте
+    _fbWatchApproval(user);                                     // остальные — по одобрению
   });
+}
+function _fbWatchApproval(user){
+  _fbApprRef=_fbDb.ref("approved/"+user.uid);
+  _fbApprRef.on("value", function(s){
+    if(s.val()===true){ _fbGrant(false); }
+    else if(!_fbGranted){ _fbShowPending(); }
+  }, function(){ if(!_fbGranted) _fbShowPending(); });
+}
+function _fbGrant(isAdmin){
+  _fbIsAdmin=isAdmin;
+  _fbHideLogin();
+  _fbUpdateAdminUI();
+  if(!_fbGranted){ _fbGranted=true; fbConnect(); }
 }
 function _fbShowLogin(){
   const o=document.getElementById("fbLogin"); if(!o) return;
   o.style.display="flex";
+  document.getElementById("fbPendingBox").style.display="none";
+  document.getElementById("fbAuthForm").style.display="block";
   const e=document.getElementById("fbEmail");
   if(e && !e.value){ try{ e.value=localStorage.getItem("fb_email")||""; }catch(x){} }
-  (e && !e.value ? e : document.getElementById("fbPass")).focus();
+  _fbRenderAuthMode();
   setSync("warn","Нужен вход");
 }
+function _fbShowPending(){
+  const o=document.getElementById("fbLogin"); if(!o) return;
+  o.style.display="flex";
+  document.getElementById("fbAuthForm").style.display="none";
+  document.getElementById("fbPendingBox").style.display="block";
+  document.getElementById("fbAuthTitle").textContent="Ждите одобрения";
+  const au=_fbAuth(); document.getElementById("fbAuthSub").textContent=(au&&au.currentUser&&au.currentUser.email)||"";
+  setSync("warn","Ждёт одобрения");
+}
 function _fbHideLogin(){ const o=document.getElementById("fbLogin"); if(o) o.style.display="none"; }
+function _fbRenderAuthMode(){
+  const t=document.getElementById("fbAuthTitle"), sub=document.getElementById("fbAuthSub"),
+        btn=document.getElementById("fbAuthBtn"), tg=document.getElementById("fbAuthToggle"),
+        err=document.getElementById("fbLoginErr");
+  if(err) err.textContent="";
+  if(_fbMode==="signup"){
+    t.textContent="Регистрация"; sub.textContent="Заявка на доступ для нового сотрудника";
+    btn.textContent="Зарегистрироваться"; tg.textContent="Уже есть аккаунт? Войти";
+  } else {
+    t.textContent="Вход в финмодель"; sub.textContent="Команда «Прознание»";
+    btn.textContent="Войти"; tg.textContent="Нет аккаунта? Зарегистрироваться";
+  }
+}
+function fbToggleMode(){ _fbMode=(_fbMode==="login")?"signup":"login"; _fbRenderAuthMode(); }
+function fbAuthSubmit(){ if(_fbMode==="signup") fbSignup(); else fbLogin(); }
+function _fbCreds(){ return { email:(document.getElementById("fbEmail").value||"").trim(), pass:document.getElementById("fbPass").value||"", err:document.getElementById("fbLoginErr") }; }
 function fbLogin(){
   const auth=_fbAuth(); if(!auth) return;
-  const email=(document.getElementById("fbEmail").value||"").trim();
-  const pass=document.getElementById("fbPass").value||"";
-  const err=document.getElementById("fbLoginErr");
-  if(!email||!pass){ if(err) err.textContent="Введите email и пароль"; return; }
-  if(err) err.textContent="Вход…";
-  auth.signInWithEmailAndPassword(email,pass).then(function(){
-    try{ localStorage.setItem("fb_email",email); }catch(x){}
+  const c=_fbCreds();
+  if(!c.email||!c.pass){ if(c.err) c.err.textContent="Введите email и пароль"; return; }
+  if(c.err) c.err.textContent="Вход…";
+  auth.signInWithEmailAndPassword(c.email,c.pass).then(function(){
+    try{ localStorage.setItem("fb_email",c.email); }catch(x){}
     document.getElementById("fbPass").value="";
-    if(err) err.textContent="";
-  }).catch(function(e){ if(err) err.textContent="Не удалось войти: "+((e&&e.message)||"проверьте email/пароль"); });
+  }).catch(function(e){ if(c.err) c.err.textContent="Не удалось войти: "+((e&&e.message)||"проверьте email/пароль"); });
+}
+function fbSignup(){
+  const auth=_fbAuth(); if(!auth) return;
+  const c=_fbCreds();
+  if(!c.email||c.pass.length<6){ if(c.err) c.err.textContent="Введите email и пароль (от 6 символов)"; return; }
+  if(c.err) c.err.textContent="Регистрация…";
+  auth.createUserWithEmailAndPassword(c.email,c.pass).then(function(cred){
+    try{ localStorage.setItem("fb_email",c.email); }catch(x){}
+    document.getElementById("fbPass").value="";
+    if(c.email===FB_ADMIN) return;   // админ не оставляет заявку
+    return _fbDb.ref("pending/"+cred.user.uid).set({email:c.email, at: firebase.database.ServerValue.TIMESTAMP});
+  }).catch(function(e){ if(c.err) c.err.textContent="Не удалось: "+((e&&e.message)||"ошибка"); });
 }
 function fbLogout(){ const auth=_fbAuth(); if(auth) auth.signOut(); }
+/* --- админ-панель «Доступы» --- */
+function _fbUpdateAdminUI(){
+  const btn=document.getElementById("fbAdminBtn");
+  if(btn) btn.style.display=_fbIsAdmin?"":"none";
+  if(_fbPendRef){ try{_fbPendRef.off();}catch(e){} _fbPendRef=null; }
+  if(_fbIsAdmin && _fbDb){
+    _fbPendRef=_fbDb.ref("pending");
+    _fbPendRef.on("value", function(s){
+      const v=s.val()||{}; const n=Object.keys(v).length;
+      const b=document.getElementById("fbAdminBadge"); if(b) b.textContent=n?(" ("+n+")"):"";
+      const m=document.getElementById("fbAdminModal"); if(m && m.style.display==="flex") _renderPending(v);
+    }, function(){});
+  }
+}
+function openAdminPanel(){ document.getElementById("fbAdminModal").style.display="flex"; fbLoadPending(); }
+function closeAdminPanel(){ document.getElementById("fbAdminModal").style.display="none"; }
+function fbLoadPending(){ if(_fbDb) _fbDb.ref("pending").once("value").then(function(s){ _renderPending(s.val()||{}); }).catch(function(){}); }
+function _renderPending(v){
+  const box=document.getElementById("fbPendingList"); if(!box) return;
+  const ids=Object.keys(v||{});
+  if(!ids.length){ box.innerHTML='<div style="color:#8a8178;font-size:13px;padding:8px 0">Новых заявок нет.</div>'; return; }
+  box.innerHTML=ids.map(function(uid){
+    const em=(v[uid]&&v[uid].email)||uid;
+    return '<div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid #eee">'
+      +'<span style="flex:1;font-size:13px">'+esc(em)+'</span>'
+      +'<button onclick="fbApprove(\''+uid+'\')" style="padding:6px 10px;border:none;border-radius:6px;background:#2e7d32;color:#fff;font-size:12px;cursor:pointer">Одобрить</button>'
+      +'<button onclick="fbReject(\''+uid+'\')" style="padding:6px 10px;border:1px solid #ccc;border-radius:6px;background:#fff;font-size:12px;cursor:pointer">Отклонить</button>'
+      +'</div>';
+  }).join("");
+}
+function fbApprove(uid){
+  if(!_fbDb) return;
+  _fbDb.ref("approved/"+uid).set(true).then(function(){ return _fbDb.ref("pending/"+uid).remove(); })
+    .then(function(){ toast("Доступ открыт"); fbLoadPending(); })
+    .catch(function(e){ toast("Ошибка: "+((e&&e.message)||"")); });
+}
+function fbReject(uid){
+  if(!_fbDb) return;
+  _fbDb.ref("pending/"+uid).remove().then(function(){ toast("Заявка отклонена"); fbLoadPending(); })
+    .catch(function(e){ toast("Ошибка: "+((e&&e.message)||"")); });
+}
 function _snap(){ try{ return JSON.stringify(S); }catch(e){ return null; } }
 function updateUndoBtn(){ const b=document.getElementById("undoBtn"); if(b) b.disabled = _undoStack.length===0; }
 function persistLocal(){
