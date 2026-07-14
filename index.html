@@ -620,6 +620,33 @@ tr.rowlocked input,tr.rowlocked select{background:#EAF3EC;border-color:#cfe3d4;c
  </div>
 </div>
 
+<div class="modal-bg" id="vtplModal">
+ <div class="modal" style="max-width:820px">
+  <h3>✍️ Шаблон сообщения в Viber</h3>
+  <p style="font-size:12px;color:var(--muted);margin:0 0 8px">
+   Подстановки (можно вставлять в текст): <code>{имя}</code> <code>{фио}</code>
+   <code>{группа}</code> <code>{курс}</code> <code>{день}</code> <code>{время}</code>
+   <code>{педагог}</code>. Абзацы и эмодзи сохраняются. Viber не умеет жирный шрифт —
+   выделяем структурой и эмодзи.
+  </p>
+  <div class="row2" style="gap:12px;align-items:stretch">
+   <div>
+    <label>Текст шаблона</label>
+    <textarea id="vtplText" class="cell wide" rows="15" style="font-size:13px;line-height:1.45;font-family:inherit" oninput="renderVtplPreview()"></textarea>
+   </div>
+   <div>
+    <label>Предпросмотр (пример)</label>
+    <div id="vtplPreview" style="white-space:pre-wrap;border:1px solid var(--line);border-radius:10px;padding:10px 12px;font-size:13px;line-height:1.5;background:#f7f4f0;min-height:120px;height:calc(100% - 24px);overflow:auto"></div>
+   </div>
+  </div>
+  <div class="hd-actions les-foot" style="margin-top:14px">
+   <button class="btn sm" onclick="saveViberTpl()">Сохранить</button>
+   <button class="btn ghost sm" onclick="resetViberTpl()" title="Вернуть стандартный текст">↺ Сбросить</button>
+   <button class="btn ghost sm" onclick="closeVtpl()">Закрыть</button>
+  </div>
+ </div>
+</div>
+
 <div class="modal-bg" id="prnColModal">
  <div class="modal" style="max-width:560px">
   <h3>Печать таблицы курсов</h3>
@@ -3636,7 +3663,22 @@ function alfaApply(){
 /* ===== ОТПРАВКА РОДИТЕЛЮ В VIBER ===== */
 /* Полуавтомат: текст кладём в буфер обмена, открываем Viber на номере родителя из Альфы.
    Viber не умеет предзаполнять текст ссылкой — поэтому копируем, а вставляет менеджер (Ctrl+V). */
-const VIBER_TPL_DEFAULT="Здравствуйте! Группа «{группа}» ({курс}) начинает занятия {день} в {время}. Мы ожидаем {имя} в группе. Подтверждаете ли вы своё участие в продолжении обучения в школе Коди?";
+const VIBER_TPL_DEFAULT=[
+"Здравствуйте! 🌟",
+"",
+"Пишем вам из школы программирования «Коди». Новый учебный год уже совсем близко, и мы очень рады, что {имя} снова будет заниматься с нами!",
+"",
+"Вот детали группы:",
+"📘 Курс: {курс}",
+"👥 Группа: «{группа}»",
+"🗓 {день}, {время}",
+"",
+"Впереди много интересного — новые проекты, идеи и открытия 🚀",
+"",
+"Подскажите, пожалуйста, планируете ли вы продолжить обучение? Как только подтвердите — {имя} сможет продолжить в своей группе 💙",
+"",
+"Хорошего вам дня и до скорой встречи!"
+].join("\n");
 
 function _viberNumber(p){
   let d=String(p||"").replace(/\D/g,"");
@@ -3646,8 +3688,8 @@ function _viberNumber(p){
   // если уже 375XXXXXXXXX (12 цифр) — оставляем как есть
   return "+"+d;
 }
-function _buildViberMsg(k,les){
-  const tpl=S.viberTpl||VIBER_TPL_DEFAULT;
+function _buildViberMsg(k,les,tpl){
+  tpl=tpl||S.viberTpl||VIBER_TPL_DEFAULT;
   const parts=String(k.n||"").trim().split(/\s+/);
   const imya=parts.length>1?parts[1]:(parts[0]||"");
   const time=les.start?(les.start+(les.end?("–"+les.end):"")):"";
@@ -3685,12 +3727,28 @@ async function kidViber(i){
   toast(copied?"Текст в буфере — вставьте в Viber (Ctrl+V)":"Открываю Viber — текст скопировать не вышло");
 }
 function editViberTpl(){
-  const cur=S.viberTpl||VIBER_TPL_DEFAULT;
-  const t=prompt("Шаблон сообщения в Viber. Подстановки:\n{имя} {фио} {группа} {курс} {день} {время} {педагог}\n\n(пусто = вернуть стандартный)",cur);
-  if(t===null) return;
-  S.viberTpl=t.trim()||VIBER_TPL_DEFAULT;
+  document.getElementById("vtplText").value=S.viberTpl||VIBER_TPL_DEFAULT;
+  renderVtplPreview();
+  document.getElementById("vtplModal").classList.add("show");
+}
+function closeVtpl(){ document.getElementById("vtplModal").classList.remove("show"); }
+function resetViberTpl(){ document.getElementById("vtplText").value=VIBER_TPL_DEFAULT; renderVtplPreview(); }
+/* образец для предпросмотра: реальные данные открытого занятия + условное имя ребёнка */
+function _vtplSampleLes(){
+  const im=document.getElementById("lesModal");
+  if(im && im.classList.contains("show")){ const idx=+im.dataset.idx; if(S.grid&&S.grid[idx]) return S.grid[idx]; }
+  return {group:"Minecraft №1",course:"Minecraft",day:1,start:"11:00",end:"12:30",teacher:"Анна"};
+}
+function renderVtplPreview(){
+  const tpl=document.getElementById("vtplText").value;
+  const msg=_buildViberMsg({n:"Иванов Кирилл"},_vtplSampleLes(),tpl);
+  document.getElementById("vtplPreview").textContent=msg;
+}
+function saveViberTpl(){
+  const t=(document.getElementById("vtplText").value||"").trim();
+  S.viberTpl=t||VIBER_TPL_DEFAULT;
   persistLocal(); if(typeof fbSchedulePush==="function") fbSchedulePush();
-  toast("Шаблон Viber сохранён");
+  closeVtpl(); toast("Шаблон Viber сохранён");
 }
 
 /* ===== ВКЛАДКА «ГРУППЫ» — обзор групп, собранный из расписания ===== */
