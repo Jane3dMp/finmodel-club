@@ -287,6 +287,8 @@ tr.rowlocked input,tr.rowlocked select{background:#EAF3EC;border-color:#cfe3d4;c
    <button class="btn ghost sm" onclick="openSync()">Хранилище</button>
    <button class="btn ghost sm" id="undoBtn" onclick="undo()" title="Отменить последнее изменение" disabled>↩ Отменить</button>
    <button class="btn sm" id="saveBtn" onclick="saveAll()">Сохранить</button>
+   <span id="fbWhoami" style="font-size:11px;color:var(--muted);margin-left:6px"></span>
+   <button class="btn ghost sm" id="fbLogoutBtn" onclick="fbLogout()" title="Выйти из аккаунта" style="display:none">Выйти</button>
   </div>
  </div>
 </header>
@@ -852,11 +854,16 @@ function _fbGrant(isAdmin){
   _fbIsAdmin=isAdmin;
   _fbHideLogin();
   _fbUpdateAdminUI();
+  const lo=document.getElementById("fbLogoutBtn"); if(lo) lo.style.display="";
+  const who=document.getElementById("fbWhoami"); const au=_fbAuth();
+  if(who) who.textContent=(au&&au.currentUser&&au.currentUser.email)||"";
   if(!_fbGranted){ _fbGranted=true; fbConnect(); }
 }
 function _fbShowLogin(){
   const o=document.getElementById("fbLogin"); if(!o) return;
   o.style.display="flex";
+  const lo=document.getElementById("fbLogoutBtn"); if(lo) lo.style.display="none";
+  const who=document.getElementById("fbWhoami"); if(who) who.textContent="";
   document.getElementById("fbPendingBox").style.display="none";
   document.getElementById("fbAuthForm").style.display="block";
   const e=document.getElementById("fbEmail");
