@@ -188,6 +188,8 @@ small.note{font-size:11px;color:var(--muted)}
 .kidsearch-res .ksr-empty{font-size:13px;color:var(--muted);padding:8px 4px}
 /* подсветка найденного занятия в сетке */
 .les.les-hl{outline:3px solid var(--terra);outline-offset:1px;box-shadow:0 0 0 3px rgba(181,83,42,.35),0 0 12px 3px rgba(181,83,42,.45);position:relative;z-index:3}
+/* название/номер группы на плитке занятия */
+.les .les-grp{display:block;font-size:10px;font-weight:700;color:var(--terra);line-height:1.25;margin-top:1px}
 /* редактор детей в модалке занятия */
 #kidsTable{width:100%;border-collapse:collapse;margin-top:4px}
 #kidsTable th{background:var(--coal);color:#fff;font-size:10px;font-weight:600;padding:4px 3px;text-align:center;line-height:1.1}
@@ -1999,6 +2001,7 @@ function renderGrid(){
               <span class="lt-btn lt-del" onclick="event.stopPropagation();delLesByIdx(${idx})" title="Удалить занятие">×</span>
             </div>
             <b>${newintake?'<span class="ni-badge" title="Новый набор">🟠</span> ':''}${esc(les.course)}${les.note?` <span class="les-note" title="${esc(les.note)}">📝</span>`:""}</b>
+            ${les.group?`<span class="les-grp">${esc(les.group)}</span>`:""}
             <span>${les.start}–${les.end}</span>
             <span class="lt">${esc(shortName(les.teacher))} · ${lesN(les)}👤 · ${w}р</span>
             ${les.note?`<span class="les-notet" title="${esc(les.note)}">📝 ${esc(les.note)}</span>`:""}
