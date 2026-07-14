@@ -889,7 +889,7 @@ function _sheetGrid_(ss, v, st){
   var grid = st.grid || [];
   for(var i=0;i<grid.length;i++){
     var l = grid[i];
-    rows.push([ DAYS[l.day]||l.day||'', l.start||'', l.end||'', l.room||'', l.course||'', l.teacher||'', l.students||0, l.newIntake?'да':'', l.note||'' ]);
+    rows.push([ DAYS[l.day]||l.day||'', l.start||'', l.end||'', l.room||'', l.course||'', l.teacher||'', lesN(l), l.newIntake?'да':'', l.note||'' ]);
   }
   _put_(ss, v+' · Расписание', rows);
 }
@@ -1902,7 +1902,7 @@ function _printDayTableHTML(day){
         let span=Math.round(dur/SLOTMIN); if(span<1) span=1;
         if(si+span>TIME_SLOTS.length) span=TIME_SLOTS.length-si;
         for(let k=1;k<span;k++){ covered[(si+k)+"_"+room]=true; }
-        tds+=`<td class="pr-les" rowspan="${span}"><b>${esc(les.course)}</b><span>${les.start}–${les.end}</span><span class="pr-t">${esc(shortName(les.teacher))} · ${les.students||0} чел.</span>${les.note?`<span class="pr-note">📝 ${esc(les.note)}</span>`:""}</td>`;
+        tds+=`<td class="pr-les" rowspan="${span}"><b>${esc(les.course)}</b><span>${les.start}–${les.end}</span><span class="pr-t">${esc(shortName(les.teacher))} · ${lesN(les)} чел.</span>${les.note?`<span class="pr-note">📝 ${esc(les.note)}</span>`:""}</td>`;
       } else {
         tds+=`<td class="pr-empty-cell"></td>`;
       }
@@ -1970,7 +1970,7 @@ function renderGrid(){
       if(covered[si+"_"+room]) return; // ячейка занята растянутым сверху занятием — пропускаем
       const les=dayL.find(l=>l.start===slot && l.room===room);
       if(les){
-        const w=wageForLesson(les.course,les.students,les);
+        const w=wageForLesson(les.course,lesN(les),les);
         const idx=S.grid.indexOf(les);
         drawn.add(idx);
         const pinned=!!les.pinned;
@@ -1992,7 +1992,7 @@ function renderGrid(){
             </div>
             <b>${newintake?'<span class="ni-badge" title="Новый набор">🟠</span> ':''}${esc(les.course)}${les.note?` <span class="les-note" title="${esc(les.note)}">📝</span>`:""}</b>
             <span>${les.start}–${les.end}</span>
-            <span class="lt">${esc(shortName(les.teacher))} · ${les.students}👤 · ${w}р</span>
+            <span class="lt">${esc(shortName(les.teacher))} · ${lesN(les)}👤 · ${w}р</span>
             ${les.note?`<span class="les-notet" title="${esc(les.note)}">📝 ${esc(les.note)}</span>`:""}
             ${kidsOf(les).length?`<span class="les-kids">${kidsOf(les).map((k,ki)=>{
                 const ic=kidIcons(k);
@@ -2013,7 +2013,7 @@ function renderGrid(){
   if(noRoom.length){
     let u=`<div class="callout"><b>Занятий без кабинета: ${noRoom.length}.</b> Перетащите карточку в нужную ячейку сетки (или кликните для выбора кабинета).</div><div class="chips" ondragover="dragOver(event)">`;
     noRoom.forEach(l=>{ const idx=S.grid.indexOf(l);
-      u+=`<div class="chip" draggable="true" ondragstart="dragStart(event,${idx})" ondragend="dragEnd(event)" onclick="editLes(${idx})">${esc(l.course)} · ${l.start} · ${shortName(l.teacher)} · ${l.students}👤</div>`; });
+      u+=`<div class="chip" draggable="true" ondragstart="dragStart(event,${idx})" ondragend="dragEnd(event)" onclick="editLes(${idx})">${esc(l.course)} · ${l.start} · ${shortName(l.teacher)} · ${lesN(l)}👤</div>`; });
     box.innerHTML=u+"</div>";
   } else box.innerHTML="";
 
@@ -2238,11 +2238,12 @@ function gridStats(){
   let lessons=S.grid.length, students=0, wageWeek=0, revWeek=0;
   const groupsByCourse={};
   S.grid.forEach(l=>{
-    students+=l.students||0;
-    wageWeek += wageForLesson(l.course,l.students,l);
+    const n=lesN(l);
+    students+=n;
+    wageWeek += wageForLesson(l.course,n,l);
     const c=S.courses.find(x=>x.name===l.course);
     const price=c?(+c.price||0):0;
-    revWeek += price*(l.students||0);
+    revWeek += price*n;
     groupsByCourse[l.course]=(groupsByCourse[l.course]||0)+1;
   });
   return {lessons,students,wageWeek,revWeek,groupsByCourse};
@@ -2299,24 +2300,33 @@ function editLes(idx){
     <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-top:10px">
       <input type="checkbox" id="mNewIntake" ${l.newIntake?"checked":""} style="width:auto">
       <span>🟠 Новый набор (подсветить оранжевым)</span></label>
-    <div class="callout">ЗП за это занятие: <b id="mWage">${wageForLesson(l.course,l.students,l)} р</b> ${S._wageMode==="fix"?"(фикс-ставка)":"(по ставке для "+l.students+" детей)"}</div>`;
+    <div class="callout">ЗП за это занятие: <b id="mWage">${wageForLesson(l.course,lesN(l),l)} р</b> <span id="mWageLbl">${S._wageMode==="fix"?"(фикс-ставка)":("(по ставке для "+lesN(l)+(kidsOf(l).length>0?" детей — по списку":" детей — поле «Ученики», список пуст")+")")}</span></div>`;
   renderKidsEditor();
   document.getElementById("lesModal").classList.add("show");
   document.getElementById("lesModal").dataset.idx=idx;
-  // live-пересчёт ЗП
-  const upd=()=>{ const cs=document.getElementById("mCourse").value;
-    const n=+document.getElementById("mStud").value;
-    const tch=document.getElementById("mTeacher")?document.getElementById("mTeacher").value:l.teacher;
-    const st=document.getElementById("mStart")?document.getElementById("mStart").value:l.start;
-    const en=document.getElementById("mEnd")?document.getElementById("mEnd").value:l.end;
-    const lesObj={course:cs,students:n,teacher:tch,start:st,end:en};
-    document.getElementById("mWage").textContent=wageForLesson(cs,n,lesObj)+" р"; };
-  document.getElementById("mCourse").onchange=upd;
-  document.getElementById("mStud").oninput=upd;
-  if(document.getElementById("mTeacher")) document.getElementById("mTeacher").onchange=upd;
-  if(document.getElementById("mStart")) document.getElementById("mStart").oninput=upd;
-  if(document.getElementById("mEnd")) document.getElementById("mEnd").oninput=upd;
+  document.getElementById("mCourse").onchange=refreshLesWage;
+  document.getElementById("mStud").oninput=refreshLesWage;
+  if(document.getElementById("mTeacher")) document.getElementById("mTeacher").onchange=refreshLesWage;
+  if(document.getElementById("mStart")) document.getElementById("mStart").oninput=refreshLesWage;
+  if(document.getElementById("mEnd")) document.getElementById("mEnd").oninput=refreshLesWage;
+  refreshLesWage();
   const pb=document.getElementById("pinBtn"); if(pb) pb.textContent=S.grid[idx].pinned?"Открепить":"Закрепить";
+}
+/* Пересчёт ЗП в открытой карточке. Число детей = сколько имён вписано в список;
+   если имён нет — берём поле «Ученики». */
+function refreshLesWage(){
+  const mw=document.getElementById("mWage");
+  if(!mw) return; // карточка не открыта
+  const cs=document.getElementById("mCourse").value;
+  const listCnt=[...document.querySelectorAll("#kidsTable .k-in-name")].filter(inp=>inp.value.trim()).length;
+  const n = listCnt>0 ? listCnt : (+document.getElementById("mStud").value||0);
+  const tch=document.getElementById("mTeacher")?document.getElementById("mTeacher").value:"";
+  const st=document.getElementById("mStart")?document.getElementById("mStart").value:"";
+  const en=document.getElementById("mEnd")?document.getElementById("mEnd").value:"";
+  mw.textContent=wageForLesson(cs,n,{course:cs,students:n,teacher:tch,start:st,end:en})+" р";
+  const lbl=document.getElementById("mWageLbl");
+  if(lbl) lbl.textContent = S._wageMode==="fix" ? "(фикс-ставка)"
+    : ("(по ставке для "+n+(listCnt>0?" детей — по списку":" детей — поле «Ученики», список пуст")+")");
 }
 
 /* ---- редактор списка детей ---- */
@@ -2336,6 +2346,7 @@ function renderKidsEditor(){
   if(!box) return;
   if(!_editKids.length){
     box.innerHTML=`<div style="font-size:12px;color:var(--muted);padding:8px 0">Детей пока нет. «+ Ребёнок» или «📋 Вставить список».</div>`;
+    refreshLesWage();
     return;
   }
   const th=KID_FLAGS.map(f=>`<th title="${f.lab}">${f.ic}<br>${f.lab.split(" ")[0]}</th>`).join("");
@@ -2344,12 +2355,13 @@ function renderKidsEditor(){
     </tr></thead><tbody>${
     _editKids.map((k,i)=>`<tr class="${k.no?'k-off':''}">
       <td class="k-num">${i+1}</td>
-      <td class="k-name"><input type="text" class="k-in-name" value="${esc(k.n)}" placeholder="Фамилия Имя"></td>
+      <td class="k-name"><input type="text" class="k-in-name" value="${esc(k.n)}" placeholder="Фамилия Имя" oninput="refreshLesWage()"></td>
       ${KID_FLAGS.map(f=>`<td><input type="checkbox" class="k-in-${f.k}" ${k[f.k]?"checked":""} title="${f.lab}" onchange="kidFlagChanged()"></td>`).join("")}
       <td><input type="text" class="k-in-c" value="${esc(k.c||"")}" placeholder="—"></td>
       <td><span class="k-del" title="Удалить" onclick="kidDel(${i})">×</span></td>
     </tr>`).join("")
   }</tbody></table>`;
+  refreshLesWage();
 }
 function kidFlagChanged(){ _kidsFromDOM(); renderKidsEditor(); }
 function kidAdd(){ _kidsFromDOM(); _editKids.push(_blankKid("")); renderKidsEditor();
@@ -2402,7 +2414,7 @@ function gridToPlan(){
   const st=gridStats();
   // средняя наполняемость по курсу из сетки
   const fillByCourse={};
-  S.grid.forEach(l=>{ if(!fillByCourse[l.course]) fillByCourse[l.course]=[]; fillByCourse[l.course].push(l.students||0); });
+  S.grid.forEach(l=>{ if(!fillByCourse[l.course]) fillByCourse[l.course]=[]; fillByCourse[l.course].push(lesN(l)); });
   for(const name in st.groupsByCourse){
     let p=S.plan.find(x=>x.name===name);
     const groups=st.groupsByCourse[name];
@@ -2423,9 +2435,9 @@ function staffStats(){
   S.grid.forEach(l=>{
     if(!l.teacher) return;
     if(!map[l.teacher]) map[l.teacher]={name:l.teacher,lessons:0,students:0,wageWeek:0,courses:new Set()};
-    const w=wageForLesson(l.course,l.students,l);
+    const w=wageForLesson(l.course,lesN(l),l);
     map[l.teacher].lessons++;
-    map[l.teacher].students+=l.students||0;
+    map[l.teacher].students+=lesN(l);
     map[l.teacher].wageWeek+=w;
     map[l.teacher].courses.add(l.course);
   });
@@ -2880,6 +2892,10 @@ function migrateAllKids(){
   if(n) persistLocal();
 }
 function kidsOf(l){ return Array.isArray(l.kids)?l.kids:[]; }
+/* Число детей для расчётов = сколько ФАКТИЧЕСКИ вписано в список.
+   Если список пуст (имена ещё не заносили) — берём поле «Ученики» как запасной вариант,
+   чтобы такие занятия не обнулялись. */
+function lesN(les){ const k=kidsOf(les).length; return k>0 ? k : (+((les&&les.students))||0); }
 function kidIcons(k){
   return KID_FLAGS.filter(f=>k[f.k]).map(f=>f.ic).join("");
 }
