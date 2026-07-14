@@ -1,0 +1,32 @@
+name: Deploy finmodel to hosting
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  ftp-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Deploy to app.proznanie.club/finmodel via FTPS
+        uses: SamKirkland/FTP-Deploy-Action@v4.3.5
+        with:
+          server: ${{ secrets.FTP_HOST }}
+          username: ${{ secrets.FTP_USER }}
+          password: ${{ secrets.FTP_PASSWORD }}
+          protocol: ftps
+          port: 21
+          # FTP-аккаунт «заперт» в папке finmodel, поэтому заливаем в его корень
+          server-dir: ./
+          # заливаем только фронтенд; всё лишнее исключаем
+          exclude: |
+            **/.git*
+            **/.git*/**
+            **/.github/**
+            **/backend/**
+            **/docs/**
+            **/*.md
