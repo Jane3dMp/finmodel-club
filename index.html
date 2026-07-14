@@ -283,6 +283,7 @@ tr.rowlocked input,tr.rowlocked select{background:#EAF3EC;border-color:#cfe3d4;c
  <button class="tab" data-t="courses">Курсы и маржа</button>
  <button class="tab" data-t="planner">Планировщик загрузки</button>
  <button class="tab" data-t="grid">Расписание (сетка)</button>
+ <button class="tab" data-t="may">Майский 💰</button>
  <button class="tab" data-t="staff">Педсостав и ФОТ</button>
  <button class="tab" data-t="fixed">Постоянные расходы</button>
  <button class="tab" data-t="tax">Налоги РБ и ФОТ</button>
@@ -412,6 +413,13 @@ tr.rowlocked input,tr.rowlocked select{background:#EAF3EC;border-color:#cfe3d4;c
   <div class="tscroll"><table id="gridTable"></table></div>
   <small class="note">Клик по пустой ячейке — добавить занятие. Клик по занятию — редактировать. ЗП за занятие зависит от числа детей (вкладка «Педсостав» → справочник ставок).</small>
  </div>
+</section>
+
+<!-- ===== МАЙСКИЙ (сверка оплат) ===== -->
+<section class="panel" id="may">
+ <h2 class="sec">Майский — сверка оплат 💰</h2>
+ <div class="sec-desc">Вставьте список оплативших (<b>ФИО ⇥ пометка ⇥ курс</b>). По каждому ребёнку видно, вписан ли он в сетку и куда — или выберите группу и впишите. Отметка 💰 ставится прямо в расписании. Разобранные строки можно убирать.</div>
+ <div id="mayReconBody"></div>
 </section>
 
 <!-- ===== ПЕДСОСТАВ ===== -->
@@ -3078,6 +3086,159 @@ function mayApply(){
   toast("Проставлено 💰: "+hits);
 }
 
+/* ===== ВКЛАДКА «МАЙСКИЙ» — постоянная сверка оплат с расписанием ===== */
+let _mayFilter="all", _mayQuery="";
+function mayCourseMatch(pc){
+  const gc=[...new Set((S.grid||[]).map(l=>l.course).filter(Boolean))];
+  const n=_normCourse(pc);
+  let g=gc.find(x=>_normCourse(x)===n);
+  if(!g) g=gc.find(x=>{const gn=_normCourse(x); return gn.startsWith(n)||n.startsWith(gn);});
+  return g||"";
+}
+function mayCleanFio(fio){ return cleanKidName(String(fio).replace(/\(.*?\)/g," ").replace(/резерв\w*/gi," ").replace(/[#!]/g," ")); }
+function mayGroupsOf(courseName){
+  const groups={}, order=[];
+  (S.grid||[]).forEach((l,idx)=>{
+    if(l.course!==courseName) return;
+    const gk = l.group || ("__"+l.day+"_"+l.start+"_"+l.room);
+    if(!groups[gk]){ groups[gk]={key:gk,label:l.group||"",day:l.day,start:l.start,room:l.room,idxs:[]}; order.push(gk); }
+    groups[gk].idxs.push(idx);
+  });
+  return order.map(k=>{ const g=groups[k];
+    g.count=new Set(g.idxs.flatMap(i=>kidsOf(S.grid[i]).map(k=>_normName(k.n)))).size;
+    g.text=(g.label||"б/группы")+" · "+(DAY_NAMES[g.day]||"")+" "+(g.start||"")+(g.room?(" · каб. "+g.room):"")+" · "+g.count+"👤";
+    return g; });
+}
+function mayFindChild(key,courseName){
+  const kids=[], groups=new Set();
+  (S.grid||[]).forEach(l=>{ if(l.course!==courseName) return;
+    kidsOf(l).forEach(k=>{ if(_normName(k.n)===key){ kids.push(k); groups.add(l.group||((DAY_NAMES[l.day]||"")+" "+(l.start||""))); } }); });
+  return {found:kids.length>0, kids, groups:[...groups].join(", "), anyMay:kids.some(k=>k.may), allMay:kids.length>0&&kids.every(k=>k.may)};
+}
+function mayLoadDoc(){
+  const ta=document.getElementById("mayDocText"); if(!ta) return;
+  const raw=(ta.value||"").trim();
+  if(!raw){ toast("Пусто"); return; }
+  const rows=[];
+  raw.split(/\r?\n/).forEach(ln=>{
+    const p=ln.split("\t").map(x=>x.trim());
+    if(p.length<3) return;
+    const fio=p[0], note=p[1], course=p[2];
+    if(!fio||!course) return;
+    if(/^фио$/i.test(fio)) return;
+    rows.push({fio, note, course});
+  });
+  if(!rows.length){ toast("Не нашла строк — нужны колонки через табуляцию"); return; }
+  S.mayList=rows; persistLocal(); renderMay(); toast("Загружено: "+rows.length);
+}
+function mayReplaceDoc(){ if(!confirm("Заменить список? Отметки 💰 в расписании останутся, сбросится только этот список.")) return; S.mayList=[]; persistLocal(); renderMay(); }
+function mayFilter(k){ _mayFilter=k; renderMay(); }
+function mayRerenderKeepFocus(){ renderMay(); const el=document.getElementById("mayQ"); if(el){ const v=el.value; el.focus(); el.value=""; el.value=v; } }
+function mayDelRow(i){ if(!S.mayList) return; S.mayList.splice(i,1); persistLocal(); renderMay(); }
+function mayMarkPaid(i){
+  const r=(S.mayList||[])[i]; if(!r) return;
+  const dst=mayCourseMatch(r.course); const f=mayFindChild(_normName(r.fio),dst);
+  if(!f.found){ toast("Не найден в сетке"); renderMay(); return; }
+  f.kids.forEach(k=>k.may=true); persistLocal(); renderGrid(); renderMay(); toast("💰 отмечено: "+mayCleanFio(r.fio));
+}
+function mayPlace(i){
+  const r=(S.mayList||[])[i]; if(!r) return;
+  const dst=mayCourseMatch(r.course); if(!dst){ toast("Курс не сопоставлен"); return; }
+  const sel=document.getElementById("mayGrp"+i); const gk=sel?sel.value:"";
+  if(!gk){ toast("Выберите группу"); return; }
+  const g=mayGroupsOf(dst).find(x=>x.key===gk); if(!g){ toast("Группа не найдена"); return; }
+  const key=_normName(r.fio), nm=mayCleanFio(r.fio);
+  g.idxs.forEach(idx=>{ const l=S.grid[idx]; if(!Array.isArray(l.kids)) l.kids=[];
+    const k=l.kids.find(x=>_normName(x.n)===key);
+    if(k){ k.may=true; } else { l.kids.push(Object.assign(_blankKid(nm),{may:true})); }
+  });
+  persistLocal(); renderGrid(); renderMay(); toast("Вписан(а) с 💰: "+nm);
+}
+function mayMarkAllFound(){
+  let n=0;
+  (S.mayList||[]).forEach(r=>{ const dst=mayCourseMatch(r.course); if(!dst) return;
+    const f=mayFindChild(_normName(r.fio),dst);
+    if(f.found && !f.allMay) f.kids.forEach(k=>{ if(!k.may){k.may=true;n++;} });
+  });
+  persistLocal(); renderGrid(); renderMay(); toast("Проставлено 💰: "+n);
+}
+function mayClearDone(){
+  const before=(S.mayList||[]).length;
+  S.mayList=(S.mayList||[]).filter(r=>{ const dst=mayCourseMatch(r.course); if(!dst) return true;
+    const f=mayFindChild(_normName(r.fio),dst); return !(f.found && f.anyMay); });
+  persistLocal(); renderMay(); toast("Убрано разобранных: "+(before-(S.mayList||[]).length));
+}
+function renderMay(){
+  const box=document.getElementById("mayReconBody"); if(!box) return;
+  const list=S.mayList||[];
+  if(!list.length){
+    box.innerHTML=`<div class="card">
+        <h3>Загрузить список оплативших</h3>
+        <p style="font-size:12px;color:var(--muted)">Скопируйте из вашего документа три колонки через табуляцию: <b>ФИО ⇥ пометка ⇥ курс</b>. Заголовок и пустые строки не мешают.</p>
+        <textarea id="mayDocText" class="cell wide" rows="10" style="font-size:12px;font-family:monospace" placeholder="Найденок Богдан&#9;майский 26&#9;3D Blender и Unity"></textarea>
+        <div style="margin-top:10px"><button class="btn" onclick="mayLoadDoc()">Загрузить список</button></div>
+      </div>`;
+    return;
+  }
+  // сопоставление курсов один раз за рендер
+  const gcSet=[...new Set((S.grid||[]).map(l=>l.course).filter(Boolean))];
+  const matchC=(pc)=>{ const n=_normCourse(pc); let g=gcSet.find(x=>_normCourse(x)===n); if(!g) g=gcSet.find(x=>{const gn=_normCourse(x); return gn.startsWith(n)||n.startsWith(gn);}); return g||""; };
+  const cnt={all:list.length, missing:0, found:0, done:0, nocourse:0};
+  const states=list.map(r=>{
+    const dst=matchC(r.course);
+    if(!dst){ cnt.nocourse++; return {dst:"", state:"nocourse"}; }
+    const f=mayFindChild(_normName(r.fio),dst);
+    if(!f.found){ cnt.missing++; return {dst, state:"missing", f}; }
+    if(f.anyMay){ cnt.done++; return {dst, state:"done", f}; }
+    cnt.found++; return {dst, state:"found", f};
+  });
+  const q=_ksNorm(_mayQuery);
+  const fbtn=(k,lab)=>`<button class="btn ${_mayFilter===k?'':'ghost'} sm" onclick="mayFilter('${k}')">${lab}</button>`;
+  let html=`<div class="callout" style="margin-bottom:10px">
+      Всего: <b>${cnt.all}</b> · в сетке: <b>${cnt.found+cnt.done}</b> · с 💰: <b style="color:var(--green)">${cnt.done}</b> · не вписаны: <b style="color:${cnt.missing?'var(--red)':'inherit'}">${cnt.missing}</b> · курс не найден: <b>${cnt.nocourse}</b>
+    </div>
+    <div class="hd-actions" style="margin-bottom:8px">
+      <span class="hd-grp">${fbtn('all','Все ('+cnt.all+')')}${fbtn('missing','Не вписаны ('+cnt.missing+')')}${fbtn('found','Без 💰 ('+cnt.found+')')}${fbtn('done','Готово ('+cnt.done+')')}${fbtn('nocourse','Курс не найден ('+cnt.nocourse+')')}</span>
+      <span class="hd-sep"></span>
+      <span class="hd-grp"><input type="search" id="mayQ" class="cell" style="width:200px" placeholder="🔍 Поиск по ФИО" value="${esc(_mayQuery)}" oninput="_mayQuery=this.value;mayRerenderKeepFocus()"></span>
+      <span class="hd-sep"></span>
+      <span class="hd-grp">
+        <button class="btn sm" onclick="mayMarkAllFound()" title="Проставить 💰 всем, кто уже вписан в сетку">💰 Отметить всех в сетке (${cnt.found})</button>
+        <button class="btn ghost sm" onclick="mayClearDone()" title="Убрать из списка строки, которые уже с 💰">🧹 Убрать готовые (${cnt.done})</button>
+        <button class="btn ghost sm" onclick="mayReplaceDoc()">↻ Заменить список</button>
+      </span>
+    </div>
+    <div class="tscroll"><table id="mayTable"><thead><tr>
+      <th style="width:34px">#</th><th style="text-align:left">ФИО</th><th style="text-align:left">Курс</th><th style="text-align:left">Статус / действие</th><th style="width:34px"></th>
+    </tr></thead><tbody>`;
+  let shownN=0;
+  list.forEach((r,i)=>{
+    const st=states[i];
+    if(_mayFilter!=="all" && st.state!==_mayFilter) return;
+    if(q.length>=2 && !_ksNorm(r.fio).includes(q)) return;
+    shownN++;
+    let courseCell=esc(r.course);
+    if(st.state==="nocourse") courseCell=`<span style="color:var(--red)">${esc(r.course)} — нет в расписании</span>`;
+    else if(st.dst && _normCourse(st.dst)!==_normCourse(r.course)) courseCell=`${esc(r.course)} <span style="color:var(--muted)">→ ${esc(st.dst)}</span>`;
+    let action="";
+    if(st.state==="nocourse") action=`<span style="color:var(--muted);font-size:12px">Курс не сопоставлен — проверьте название курса</span>`;
+    else if(st.state==="done") action=`<span style="color:var(--green);font-weight:600">✓ в сетке · 💰 стоит</span> <span style="color:var(--muted);font-size:11px">${esc(st.f.groups)}</span>`;
+    else if(st.state==="found") action=`<span>в сетке: <b>${esc(st.f.groups)}</b>, но без 💰</span> <button class="btn sm" style="margin-left:6px" onclick="mayMarkPaid(${i})">Поставить 💰</button>`;
+    else { const groups=mayGroupsOf(st.dst); const opts=groups.map(g=>`<option value="${esc(g.key)}">${esc(g.text)}</option>`).join("");
+      action=`<select class="cell may-grp" id="mayGrp${i}" style="min-width:220px">${opts||'<option value="">нет групп в сетке</option>'}</select> <button class="btn sm" style="margin-left:6px" onclick="mayPlace(${i})">＋ Вписать с 💰</button>`; }
+    html+=`<tr>
+      <td style="text-align:center;color:var(--muted)">${i+1}</td>
+      <td style="text-align:left">${esc(r.fio)}</td>
+      <td style="text-align:left">${courseCell}</td>
+      <td style="text-align:left">${action}</td>
+      <td style="text-align:center"><span class="k-del" title="Убрать строку" onclick="mayDelRow(${i})">×</span></td>
+    </tr>`;
+  });
+  if(!shownN) html+=`<tr><td colspan="5" style="padding:12px;color:var(--muted)">Нет строк под фильтром.</td></tr>`;
+  html+=`</tbody></table></div>`;
+  box.innerHTML=html;
+}
+
 function parseKidsFromNote(note){
   if(!note) return [];
   let t=String(note);
@@ -3291,7 +3452,7 @@ function deleteScenario(){
 
 
 function renderAll(){
-  renderCourses(); renderPlanner(); renderGrid(); renderStaff(); renderFixed(); renderTax(); renderBreak(); renderSettings(); renderDash(); onSlider(); renderConflictBanner(); renderScenarioBar(); updateNavHeightDelayed();
+  renderCourses(); renderPlanner(); renderGrid(); renderMay(); renderStaff(); renderFixed(); renderTax(); renderBreak(); renderSettings(); renderDash(); onSlider(); renderConflictBanner(); renderScenarioBar(); updateNavHeightDelayed();
 }
 function toast(m){ const t=document.getElementById("toast"); t.textContent=m; t.classList.add("show");
   clearTimeout(t._h); t._h=setTimeout(()=>t.classList.remove("show"),2200); }
