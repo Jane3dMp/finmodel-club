@@ -2673,6 +2673,7 @@ function editLes(idx){
     <div class="hd-actions" style="margin-top:6px">
       <button type="button" class="btn ghost sm" onclick="kidAdd()">+ Ребёнок</button>
       <button type="button" class="btn ghost sm" onclick="kidPasteList()">📋 Вставить список</button>
+      <button type="button" class="btn ghost sm" onclick="editViberTpl()" title="Текст сообщения, который копируется в Viber">✍️ Шаблон Viber</button>
       <span style="font-size:11px;color:var(--muted);align-self:center">Комментарии в основную сетку не выводятся</span>
     </div>
 
@@ -2713,10 +2714,13 @@ let _editKids=[];
 function _kidsFromDOM(){
   const rows=[...document.querySelectorAll("#kidsTable tbody tr")];
   if(!rows.length) return;
-  _editKids=rows.map(tr=>{
+  _editKids=rows.map((tr,i)=>{
+    const prev=_editKids[i]||{};
     const o=_blankKid(tr.querySelector(".k-in-name").value.trim());
     KID_FLAGS.forEach(f=>{ o[f.k]=tr.querySelector(".k-in-"+f.k).checked; });
     o.c=tr.querySelector(".k-in-c").value.trim();
+    o.phone=prev.phone||"";                              // поля из Альфы в строке не показаны —
+    o.alfaId=(prev.alfaId!==undefined?prev.alfaId:null); // переносим их из текущего состояния
     return o;
   });
 }
@@ -2730,13 +2734,14 @@ function renderKidsEditor(){
   }
   const th=KID_FLAGS.map(f=>`<th title="${f.lab}">${f.ic}<br>${f.lab.split(" ")[0]}</th>`).join("");
   box.innerHTML=`<table id="kidsTable"><thead><tr>
-      <th class="k-num"></th><th class="k-name">ФИО</th>${th}<th style="min-width:130px">Комментарий</th><th style="width:22px"></th>
+      <th class="k-num"></th><th class="k-name">ФИО</th>${th}<th style="min-width:130px">Комментарий</th><th title="Написать в Viber родителю">📨</th><th style="width:22px"></th>
     </tr></thead><tbody>${
     _editKids.map((k,i)=>`<tr class="${k.no?'k-off':''}">
       <td class="k-num">${i+1}</td>
       <td class="k-name"><input type="text" class="k-in-name" value="${esc(k.n)}" placeholder="Фамилия Имя" oninput="refreshLesWage()"></td>
       ${KID_FLAGS.map(f=>`<td><input type="checkbox" class="k-in-${f.k}" ${k[f.k]?"checked":""} title="${f.lab}" onchange="kidFlagChanged()"></td>`).join("")}
       <td><input type="text" class="k-in-c" value="${esc(k.c||"")}" placeholder="—"></td>
+      <td><button type="button" class="btn ghost sm" style="padding:1px 6px" ${k.phone?"":"disabled"} title="${k.phone?('Viber → '+esc(k.phone)):'Нет телефона — сначала «📞 Контакты из Альфы»'}" onclick="kidViber(${i})">📨</button></td>
       <td><span class="k-del" title="Удалить" onclick="kidDel(${i})">×</span></td>
     </tr>`).join("")
   }</tbody></table>`;
@@ -3604,6 +3609,66 @@ function alfaApply(){
     <p style="font-size:12px;color:var(--muted)">Телефоны сохранились в модели и ушли в Firebase.</p>`;
   const b=document.getElementById("alfaBtn"); b.textContent="Закрыть"; b.onclick=closeAlfa;
   toast("Телефонов проставлено: "+updated);
+}
+
+/* ===== ОТПРАВКА РОДИТЕЛЮ В VIBER ===== */
+/* Полуавтомат: текст кладём в буфер обмена, открываем Viber на номере родителя из Альфы.
+   Viber не умеет предзаполнять текст ссылкой — поэтому копируем, а вставляет менеджер (Ctrl+V). */
+const VIBER_TPL_DEFAULT="Здравствуйте! Группа «{группа}» ({курс}) начинает занятия {день} в {время}. Мы ожидаем {имя} в группе. Подтверждаете ли вы своё участие в продолжении обучения в школе Коди?";
+
+function _viberNumber(p){
+  let d=String(p||"").replace(/\D/g,"");
+  if(!d) return "";
+  if(d.length===9 && /^(25|29|33|44)/.test(d)) d="375"+d;          // 29xxxxxxx → +37529…
+  else if(d.length===11 && d.slice(0,2)==="80") d="375"+d.slice(2); // 80xx… → +375xx…
+  // если уже 375XXXXXXXXX (12 цифр) — оставляем как есть
+  return "+"+d;
+}
+function _buildViberMsg(k,les){
+  const tpl=S.viberTpl||VIBER_TPL_DEFAULT;
+  const parts=String(k.n||"").trim().split(/\s+/);
+  const imya=parts.length>1?parts[1]:(parts[0]||"");
+  const time=les.start?(les.start+(les.end?("–"+les.end):"")):"";
+  return tpl
+    .replace(/\{группа\}/g, les.group||les.course||"")
+    .replace(/\{курс\}/g,   les.course||"")
+    .replace(/\{день\}/g,   DAY_FULL[les.day]||"")
+    .replace(/\{время\}/g,  time)
+    .replace(/\{имя\}/g,    imya)
+    .replace(/\{фио\}/g,    k.n||"")
+    .replace(/\{педагог\}/g,les.teacher||"");
+}
+async function _copyText(t){
+  try{ if(navigator.clipboard&&window.isSecureContext){ await navigator.clipboard.writeText(t); return true; } }catch(e){}
+  try{ const ta=document.createElement("textarea"); ta.value=t;
+    ta.style.position="fixed"; ta.style.opacity="0"; document.body.appendChild(ta);
+    ta.focus(); ta.select(); const ok=document.execCommand("copy"); ta.remove(); return ok;
+  }catch(e){ return false; }
+}
+function _openViber(num){
+  const a=document.createElement("a");
+  a.href="viber://chat?number="+encodeURIComponent(num);
+  document.body.appendChild(a); a.click(); a.remove();
+}
+async function kidViber(i){
+  _kidsFromDOM();
+  const idx=+(document.getElementById("lesModal").dataset.idx);
+  const les=S.grid[idx]; const k=_editKids[i];
+  if(!les||!k) return;
+  const num=_viberNumber(k.phone);
+  if(!num){ toast("У ребёнка нет телефона — сначала «📞 Контакты из Альфы»"); return; }
+  const msg=_buildViberMsg(k,les);
+  const copied=await _copyText(msg);
+  _openViber(num);
+  toast(copied?"Текст в буфере — вставьте в Viber (Ctrl+V)":"Открываю Viber — текст скопировать не вышло");
+}
+function editViberTpl(){
+  const cur=S.viberTpl||VIBER_TPL_DEFAULT;
+  const t=prompt("Шаблон сообщения в Viber. Подстановки:\n{имя} {фио} {группа} {курс} {день} {время} {педагог}\n\n(пусто = вернуть стандартный)",cur);
+  if(t===null) return;
+  S.viberTpl=t.trim()||VIBER_TPL_DEFAULT;
+  persistLocal(); if(typeof fbSchedulePush==="function") fbSchedulePush();
+  toast("Шаблон Viber сохранён");
 }
 
 /* ===== ВКЛАДКА «ГРУППЫ» — обзор групп, собранный из расписания ===== */
