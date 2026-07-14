@@ -412,6 +412,7 @@ tr.rowlocked input,tr.rowlocked select{background:#EAF3EC;border-color:#cfe3d4;c
    <button class="btn sm" onclick="printSchedule()" title="Распечатать расписание для менеджеров">🖨 Печать</button>
    <button class="btn sm" onclick="exportKidsByDay()" title="Выгрузить Excel: дети по дням со статусами">📥 Дети по дням (Excel)</button>
    <button class="btn sm" onclick="openMayImport()" title="Вставить список оплативших майский — проставит 💰 детям на совпавших курсах">💰 Импорт майских</button>
+   <button class="btn sm" id="alfaSyncBtn" style="display:none" onclick="openAlfaSync()" title="Подтянуть телефоны родителей из AlfaCRM и сопоставить с детьми в модели">📞 Контакты из Альфы</button>
   </span>
  </div>
  <div class="kidsearch">
@@ -604,6 +605,17 @@ tr.rowlocked input,tr.rowlocked select{background:#EAF3EC;border-color:#cfe3d4;c
   <div class="hd-actions les-foot" style="margin-top:14px">
    <button class="btn sm" id="mayBtn" onclick="mayNext()">Разобрать</button>
    <button class="btn ghost sm" onclick="closeMay()">Закрыть</button>
+  </div>
+ </div>
+</div>
+
+<div class="modal-bg" id="alfaModal">
+ <div class="modal" style="max-width:760px">
+  <h3>📞 Контакты из AlfaCRM</h3>
+  <div id="alfaBody"></div>
+  <div class="hd-actions les-foot" style="margin-top:14px">
+   <button class="btn sm" id="alfaBtn" onclick="alfaFetch()">Загрузить из Альфы</button>
+   <button class="btn ghost sm" onclick="closeAlfa()">Закрыть</button>
   </div>
  </div>
 </div>
@@ -947,6 +959,8 @@ function fbLogout(){ const auth=_fbAuth(); if(auth) auth.signOut(); }
 function _fbUpdateAdminUI(){
   const btn=document.getElementById("fbAdminBtn");
   if(btn) btn.style.display=_fbIsAdmin?"":"none";
+  const asy=document.getElementById("alfaSyncBtn");
+  if(asy) asy.style.display=_fbIsAdmin?"":"none";
   if(_fbPendRef){ try{_fbPendRef.off();}catch(e){} _fbPendRef=null; }
   if(_fbIsAdmin && _fbDb){
     _fbPendRef=_fbDb.ref("pending");
@@ -3214,7 +3228,7 @@ const KID_FLAGS=[
   {k:"no",    ic:"❌", lab:"Не придёт"},
   {k:"call",  ic:"📵", lab:"Недозвон"}
 ];
-function _blankKid(n){ return {n:cleanKidName(n), may:false, sched:false, no:false, call:false, c:""}; }
+function _blankKid(n){ return {n:cleanKidName(n), may:false, sched:false, no:false, call:false, c:"", phone:"", alfaId:null}; }
 /* «Азаренок Леон36,00», «Богданович Степан #34,00» → «Азаренок Леон» */
 function cleanKidName(s){
   return String(s||"")
@@ -3452,6 +3466,144 @@ function mayApply(){
   document.getElementById("mayBtn").textContent="Готово";
   document.getElementById("mayBtn").onclick=closeMay;
   toast("Проставлено 💰: "+hits);
+}
+
+/* ===== СИНХРОНИЗАЦИЯ КОНТАКТОВ С ALFACRM ===== */
+/* Прокси на хостинге держит ключ Альфы и проверяет Firebase-токен. На GitHub Pages
+   PHP не выполняется — прокси всегда абсолютный, на app.proznanie.club (CORS открыт). */
+const ALFA_PROXY="https://app.proznanie.club/finmodel/api/alfa/";
+let _alfaMatch=null;   // результат сопоставления для шага «Проставить»
+
+function openAlfaSync(){
+  if(!_fbIsAdmin){ toast("Только для админа"); return; }
+  document.getElementById("alfaBody").innerHTML=`
+    <p style="font-size:13px;color:var(--muted);margin:0 0 8px">
+      Подтянет учеников из AlfaCRM и сопоставит их с детьми в расписании по ФИО
+      (Фамилия + Имя). Совпавшим проставит телефон родителя. Ничего в Альфе не меняется —
+      только читаем.
+    </p>`;
+  const b=document.getElementById("alfaBtn");
+  b.textContent="Загрузить из Альфы"; b.onclick=alfaFetch; b.disabled=false;
+  document.getElementById("alfaModal").classList.add("show");
+}
+function closeAlfa(){ document.getElementById("alfaModal").classList.remove("show"); }
+
+async function _alfaIdToken(){
+  const au=_fbAuth();
+  if(!au||!au.currentUser) throw new Error("Нужно войти в модель (Firebase).");
+  return await au.currentUser.getIdToken();
+}
+async function alfaFetch(){
+  const b=document.getElementById("alfaBtn"); b.disabled=true; b.textContent="Загружаю…";
+  try{
+    const token=await _alfaIdToken();
+    const r=await fetch(ALFA_PROXY+"?action=customers",{
+      method:"POST",
+      headers:{"Content-Type":"application/json","Authorization":"Bearer "+token},
+      body:JSON.stringify({})
+    });
+    const j=await r.json().catch(()=>({ok:false,error:"Ответ не JSON (код "+r.status+")"}));
+    if(!r.ok||!j.ok){ throw new Error(j.error||("Ошибка прокси "+r.status)); }
+    alfaBuildMatch(j.customers||[]);
+  }catch(e){
+    document.getElementById("alfaBody").innerHTML=
+      `<div class="callout" style="border-color:var(--red)"><b>Не получилось:</b> ${esc(e.message||String(e))}
+       <p style="font-size:12px;color:var(--muted);margin-top:6px">
+        Если это первый запуск — проверь, что на сервере создан <code>api/alfa/config.php</code>
+        с ключом Альфы. Подробнее — <code>api/alfa/README.md</code>.</p></div>`;
+    b.disabled=false; b.textContent="Повторить";
+  }
+}
+
+/* Строим сопоставление: клиенты Альфы (по ФИО) ↔ уникальные дети расписания */
+function alfaBuildMatch(customers){
+  migrateAllKids();
+  // индекс Альфы: нормимя → список клиентов с телефоном
+  const idx=new Map();
+  customers.forEach(c=>{
+    const key=_normName(c.name); if(!key) return;
+    const phone=(c.phones&&c.phones.find(p=>String(p).replace(/\D/g,"").length>=6))||"";
+    if(!idx.has(key)) idx.set(key,[]);
+    idx.get(key).push({id:c.id,name:c.name,phone:phone});
+  });
+  // уникальные дети модели
+  const kids=new Map();
+  (S.grid||[]).forEach(l=>kidsOf(l).forEach(k=>{
+    const key=_normName(k.n); if(!key) return;
+    if(!kids.has(key)) kids.set(key,{key,name:k.n,hasPhone:false});
+    if(k.phone) kids.get(key).hasPhone=true;
+  }));
+
+  const willSet=[], ambiguous=[], notFound=[];
+  kids.forEach(kid=>{
+    const m=idx.get(kid.key)||[];
+    const withPhone=m.filter(x=>x.phone);
+    if(withPhone.length===0){ if(m.length){ willSet.push({kid,pick:m[0]}); } else notFound.push(kid); return; }
+    const phones=[...new Set(withPhone.map(x=>x.phone))];
+    if(phones.length===1) willSet.push({kid,pick:withPhone[0]});
+    else ambiguous.push({kid,options:withPhone});
+  });
+
+  _alfaMatch={willSet,ambiguous,notFound,total:kids.size,alfaCount:customers.length};
+  alfaRenderMatch();
+}
+
+function alfaRenderMatch(){
+  const M=_alfaMatch;
+  const newPhones=M.willSet.filter(w=>w.pick.phone).length;
+  document.getElementById("alfaBody").innerHTML=`
+    <div class="callout" style="margin-bottom:10px">
+      Из Альфы: <b>${M.alfaCount}</b> · детей в расписании: <b>${M.total}</b><br>
+      Проставим телефон: <b>${newPhones}</b> · неоднозначных: <b>${M.ambiguous.length}</b> ·
+      не найдено в Альфе: <b>${M.notFound.length}</b>
+    </div>
+    ${M.ambiguous.length?`
+      <label>Несколько разных телефонов на одно ФИО — выбери нужный:</label>
+      <div style="max-height:26vh;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:6px 10px;margin-bottom:8px">
+        ${M.ambiguous.map((a,i)=>`<div style="padding:5px 0;border-bottom:1px solid #eee;font-size:12px">
+          <b>${esc(a.kid.name)}</b>
+          <select class="cell alfa-amb" data-i="${i}" style="margin-left:6px">
+            <option value="-1">— пропустить —</option>
+            ${a.options.map((o,j)=>`<option value="${j}">${esc(o.phone)} (${esc(o.name)})</option>`).join("")}
+          </select></div>`).join("")}
+      </div>`:""}
+    ${M.notFound.length?`
+      <label style="color:var(--muted)">Не найдены в Альфе (${M.notFound.length}) — сверь имена вручную:</label>
+      <div style="max-height:22vh;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:6px 10px;font-size:12px;line-height:1.6;color:var(--muted)">
+        ${M.notFound.map(k=>`• ${esc(k.name)}`).join("<br>")}
+      </div>`:""}`;
+  const b=document.getElementById("alfaBtn");
+  b.disabled=false;
+  b.textContent="📞 Проставить телефоны";
+  b.onclick=alfaApply;
+}
+
+function alfaApply(){
+  const M=_alfaMatch; if(!M) return;
+  // подобрать выбор по неоднозначным
+  document.querySelectorAll(".alfa-amb").forEach(s=>{
+    const a=M.ambiguous[+s.dataset.i], j=+s.value;
+    if(j>=0) M.willSet.push({kid:a.kid,pick:a.options[j]});
+  });
+  // карта нормимя → {phone,id}
+  const set=new Map();
+  M.willSet.forEach(w=>{ if(w.pick&&w.pick.phone) set.set(w.kid.key,{phone:w.pick.phone,id:w.pick.id}); });
+
+  let updated=0;
+  (S.grid||[]).forEach(l=>kidsOf(l).forEach(k=>{
+    const v=set.get(_normName(k.n)); if(!v) return;
+    if(k.phone!==v.phone || k.alfaId!==v.id){ k.phone=v.phone; k.alfaId=v.id; updated++; }
+  }));
+  persistLocal(); if(typeof fbSchedulePush==="function") fbSchedulePush();
+  if(typeof renderGrid==="function") renderGrid(); refreshKidSearch();
+
+  document.getElementById("alfaBody").innerHTML=`
+    <div class="callout" style="border-color:var(--green)">
+      Готово. Телефон проставлен у <b>${updated}</b> записей детей.
+    </div>
+    <p style="font-size:12px;color:var(--muted)">Телефоны сохранились в модели и ушли в Firebase.</p>`;
+  const b=document.getElementById("alfaBtn"); b.textContent="Закрыть"; b.onclick=closeAlfa;
+  toast("Телефонов проставлено: "+updated);
 }
 
 /* ===== ВКЛАДКА «ГРУППЫ» — обзор групп, собранный из расписания ===== */
