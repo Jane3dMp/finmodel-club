@@ -643,6 +643,20 @@ tr.rowlocked input,tr.rowlocked select{background:#EAF3EC;border-color:#cfe3d4;c
  </div>
 </div>
 
+<div id="fbLogin" style="display:none;position:fixed;inset:0;z-index:9999;background:#f3ece4;align-items:center;justify-content:center">
+  <div style="background:#fff;border:1px solid #e0d8cf;border-radius:12px;padding:24px;max-width:340px;width:90%;box-shadow:0 10px 44px rgba(0,0,0,.18)">
+    <div style="font-weight:700;font-size:18px;margin-bottom:2px">Вход в финмодель</div>
+    <div style="font-size:12px;color:#8a8178;margin-bottom:14px">Общий доступ для команды «Прознание»</div>
+    <input id="fbEmail" type="email" placeholder="email" autocomplete="username" style="width:100%;box-sizing:border-box;padding:9px 12px;border:1px solid #ccc;border-radius:8px;margin-bottom:8px;font-size:14px">
+    <input id="fbPass" type="password" placeholder="пароль" autocomplete="current-password" onkeydown="if(event.key==='Enter')fbLogin()" style="width:100%;box-sizing:border-box;padding:9px 12px;border:1px solid #ccc;border-radius:8px;margin-bottom:12px;font-size:14px">
+    <button onclick="fbLogin()" style="width:100%;padding:10px;border:none;border-radius:8px;background:#b5532a;color:#fff;font-size:14px;font-weight:600;cursor:pointer">Войти</button>
+    <div id="fbLoginErr" style="color:#c0392b;font-size:12px;margin-top:8px;min-height:15px"></div>
+  </div>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-database-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js"></script>
 <script>
 /* ===== СИД (курсы из Excel) ===== */
 const LASTYEAR_FILL={"Blender": 6.9, "Blender + Unity": 6.6, "Digital art": 6.1, "Minecraft": 6.1, "Python": 5.9, "Roblox": 6.4, "Roblox + Blender": 6.5, "Scratch": 4.2, "TinkerCad": 4.1, "Английский язык": 4.7, "Арт-Студия (1 час)": 6.0, "Говорилка": 4.3, "Живая азбука": 5.0, "Каллиграфия": 6.3, "Клуб математической стратегии": 6.2, "Лепка из глины (1 час)": 6.9, "Лепка из полимерной глины": 6.0, "Логика": 4.1, "Мир научных открытий": 6.3, "Нейрогимнастика": 6.2, "Песок": 4.5, "Почемучка": 5.1, "Рисование": 7.1, "Робототехника": 5.4, "Финансовая грамотность": 4.1, "Хочу все знать! выходной": 5.4, "Электроника": 3.7, "7 навыков уверенных детей": 7.3};
@@ -696,7 +710,134 @@ let _dirty=false;         // есть несохранённые в таблиц
 let _ready=false;         // стартовая загрузка завершена (чтобы не автосохранять при старте)
 let _autoSaveTimer=null;
 function scheduleAutoSave(){ clearTimeout(_autoSaveTimer); _autoSaveTimer=setTimeout(()=>{ if(_dirty && S.gasUrl) pushGas(true); }, 2500); }
-function markReady(){ _ready=true; _dirty=false; }
+function markReady(){ _ready=true; _dirty=false; fbStart(); }
+
+/* ===== FIREBASE — живая синхронизация между устройствами ===== */
+const FB_CONFIG={
+  apiKey:"AIzaSyAQQUtvjJHsb72ChXa3at-U33u4HV60IgQ",
+  authDomain:"proznanie-finmodel.firebaseapp.com",
+  databaseURL:"https://proznanie-finmodel-default-rtdb.europe-west1.firebasedatabase.app",
+  projectId:"proznanie-finmodel",
+  storageBucket:"proznanie-finmodel.firebasestorage.app",
+  messagingSenderId:"333617872434",
+  appId:"1:333617872434:web:0027d097641f06fb66062b"
+};
+let FB_ON=false,_fbDb=null,_fbRef=null,_fbLast={},_fbApplying=false,_fbPending=null,_fbPushTimer=null;
+const FB_SKIP={gasUrl:1};
+function _lid(){ return "L"+Date.now().toString(36)+Math.random().toString(36).slice(2,7); }
+function _ensureLessonIds(){ (S.grid||[]).forEach(l=>{ if(l && !l.id) l.id=_lid(); }); }
+function _fbKey(name){ return String(name||"Основной").replace(/[.#$\[\]\/]/g,"_"); }
+/* Синхронизация: grid — по занятиям (карта {id:занятие}, гранулярно = правки в разные
+   занятия не затирают друг друга); всё остальное — одним JSON-блобом (иначе имена-ключи
+   с точками, напр. курс «3D Unity 2.0», ломают запись в Firebase). */
+function _gridMap(){ const g={}; (S.grid||[]).forEach(l=>{ if(l && l.id) g[l.id]=JSON.parse(JSON.stringify(l)); }); return g; }
+function _restStr(){ const r={}; for(const k in S){ if(FB_SKIP[k]||k[0]==="_"||k==="grid") continue; r[k]=S[k]; } return JSON.stringify(r); }
+function fbInit(){
+  if(_fbDb) return true;
+  if(typeof firebase==="undefined"){ return false; }
+  try{
+    if(!firebase.apps || !firebase.apps.length) firebase.initializeApp(FB_CONFIG);
+    _fbDb=firebase.database();
+    return true;
+  }catch(e){ return false; }
+}
+function _normalizeRemote(val){
+  const grid={}; const gv=(val&&val.grid)||{};
+  for(const id in gv){ const l=gv[id]; if(l){ l.id=id; grid[id]=l; } }
+  return { grid:grid, rest:(val&&val.rest)||"" };
+}
+function fbConnect(){
+  if(!FB_CONFIG.databaseURL) return;
+  if(!fbInit()){ setSync("err","Firebase не загрузился — локальный режим"); return; }
+  clearTimeout(_fbPushTimer);
+  if(_fbRef){ try{ _fbRef.off(); }catch(e){} _fbRef=null; }
+  _ensureLessonIds();
+  _fbRef=_fbDb.ref("scenarios/"+_fbKey(currentScenarioName()));
+  FB_ON=true;
+  setSync("warn","● Подключаюсь к Firebase…");
+  _fbRef.once("value").then(snap=>{
+    const val=snap.val();
+    if(val && (val.grid || val.rest)){
+      _applyRemote(_normalizeRemote(val));      // в облаке уже есть данные — они главные
+    } else {
+      _fbLast={grid:{},rest:""}; fbPush();       // пусто — заливаем текущие как стартовые
+    }
+    setSync("ok","✓ Firebase · живая синхронизация");
+    _fbRef.on("value", onRemoteModel);
+  }).catch(e=>{ FB_ON=false; setSync("err","Firebase: нет связи"); });
+}
+function onRemoteModel(snap){
+  if(_fbApplying) return;
+  const val=snap.val(); if(!val) return;
+  const remote=_normalizeRemote(val);
+  if(JSON.stringify(remote)===JSON.stringify(_fbLast)) return; // наше же эхо
+  const modal=document.getElementById("lesModal");
+  if(modal && modal.classList.contains("show")){ _fbPending=remote; return; } // не рвать открытую карточку
+  _applyRemote(remote);
+}
+function _applyRemote(remote){
+  _fbApplying=true;
+  try{
+    S.grid=Object.values(remote.grid||{});
+    if(remote.rest){ let rest={}; try{ rest=JSON.parse(remote.rest); }catch(e){} for(const k in rest){ if(k==="gasUrl") continue; S[k]=rest[k]; } }
+    _ensureLessonIds();
+    _fbLast={ grid: JSON.parse(JSON.stringify(remote.grid||{})), rest: remote.rest||"" };
+    _persistLocalRaw();
+    if(typeof renderAll==="function") renderAll();
+  }catch(e){}
+  _fbApplying=false;
+}
+function fbSchedulePush(){ clearTimeout(_fbPushTimer); _fbPushTimer=setTimeout(fbPush, 700); }
+function fbPush(){
+  if(!FB_ON || !_fbRef) return;
+  _ensureLessonIds();
+  const newG=_gridMap(), newRest=_restStr();
+  const oldG=_fbLast.grid||{};
+  const updates={};
+  for(const id in newG){ if(JSON.stringify(newG[id])!==JSON.stringify(oldG[id])) updates["grid/"+id]=newG[id]; }
+  for(const id in oldG){ if(!newG[id]) updates["grid/"+id]=null; }       // удалённые занятия
+  if(newRest!==(_fbLast.rest||"")) updates["rest"]=newRest;
+  _fbLast={ grid:newG, rest:newRest };
+  if(!Object.keys(updates).length) return;
+  setSync("warn","● Сохраняю…");
+  _fbRef.update(updates).then(()=>{ _dirty=false; setSync("ok","✓ Firebase · живая синхронизация"); })
+    .catch(e=>{ setSync("err","⚠ Firebase: "+((e&&e.message)||"ошибка")); });
+}
+/* ---- вход (общий логин команды) ---- */
+function _fbAuth(){ return (typeof firebase!=="undefined" && firebase.auth) ? firebase.auth() : null; }
+function fbStart(){
+  if(!FB_CONFIG.databaseURL) return;
+  if(!fbInit()){ setSync("err","Firebase не загрузился — локальный режим"); return; }
+  const auth=_fbAuth();
+  if(!auth){ fbConnect(); return; }   // auth SDK не загрузился — работаем без входа
+  auth.onAuthStateChanged(function(user){
+    if(user){ _fbHideLogin(); fbConnect(); }
+    else { _fbShowLogin(); }
+  });
+}
+function _fbShowLogin(){
+  const o=document.getElementById("fbLogin"); if(!o) return;
+  o.style.display="flex";
+  const e=document.getElementById("fbEmail");
+  if(e && !e.value){ try{ e.value=localStorage.getItem("fb_email")||""; }catch(x){} }
+  (e && !e.value ? e : document.getElementById("fbPass")).focus();
+  setSync("warn","Нужен вход");
+}
+function _fbHideLogin(){ const o=document.getElementById("fbLogin"); if(o) o.style.display="none"; }
+function fbLogin(){
+  const auth=_fbAuth(); if(!auth) return;
+  const email=(document.getElementById("fbEmail").value||"").trim();
+  const pass=document.getElementById("fbPass").value||"";
+  const err=document.getElementById("fbLoginErr");
+  if(!email||!pass){ if(err) err.textContent="Введите email и пароль"; return; }
+  if(err) err.textContent="Вход…";
+  auth.signInWithEmailAndPassword(email,pass).then(function(){
+    try{ localStorage.setItem("fb_email",email); }catch(x){}
+    document.getElementById("fbPass").value="";
+    if(err) err.textContent="";
+  }).catch(function(e){ if(err) err.textContent="Не удалось войти: "+((e&&e.message)||"проверьте email/пароль"); });
+}
+function fbLogout(){ const auth=_fbAuth(); if(auth) auth.signOut(); }
 function _snap(){ try{ return JSON.stringify(S); }catch(e){ return null; } }
 function updateUndoBtn(){ const b=document.getElementById("undoBtn"); if(b) b.disabled = _undoStack.length===0; }
 function persistLocal(){
@@ -718,12 +859,10 @@ function persistLocal(){
       saveScenarioList(list);
     }
   }catch(e){}
-  // пометить как несохранённое и запланировать автовыгрузку в таблицу
-  // (только в режиме таблицы: в локальном режиме localStorage и так источник правды)
-  if(!_histLock && S.gasUrl){
-    _dirty=true;
-    if(_ready) scheduleAutoSave();
-    setSync("warn","● Сохраняю…");
+  // пометить как несохранённое и запланировать выгрузку
+  if(!_histLock && !_fbApplying){
+    if(FB_ON){ _dirty=true; fbSchedulePush(); setSync("warn","● Сохраняю…"); }
+    else if(S.gasUrl){ _dirty=true; if(_ready) scheduleAutoSave(); setSync("warn","● Сохраняю…"); }
   }
 }
 function undo(){
@@ -2451,7 +2590,7 @@ function togglePinModal(){
   document.getElementById("pinBtn").textContent=l.pinned?"Открепить":"Закрепить";
 }
 
-function closeLes(){ document.getElementById("lesModal").classList.remove("show"); }
+function closeLes(){ document.getElementById("lesModal").classList.remove("show"); if(_fbPending){ const p=_fbPending; _fbPending=null; _applyRemote(p); } }
 
 /* перенос сетки → план (считаем группы по расставленным занятиям) */
 function gridToPlan(){
@@ -2932,6 +3071,7 @@ function cleanupKidNames(){
 }
 function migrateAllKids(){
   let n=0;
+  _ensureLessonIds();
   (S.grid||[]).forEach(l=>{ if(migrateLessonKids(l)) n++; });
   n+=cleanupKidNames();
   if(n) persistLocal();
@@ -3557,6 +3697,7 @@ function switchScenario(name){
     S=_loadState(list[name]);
     if(!S.meta)S.meta={}; S.meta.name=name;
     persistLocal(); renderAll();
+    if(FB_ON) fbConnect();   // переподключиться к новому сценарию в Firebase
     toast("Открыт сценарий: "+name);
   }
 }
