@@ -3087,7 +3087,7 @@ function mayApply(){
 }
 
 /* ===== ВКЛАДКА «МАЙСКИЙ» — постоянная сверка оплат с расписанием ===== */
-let _mayFilter="all", _mayQuery="";
+let _mayFilter="all", _mayQuery="", _mayAddOpen=false;
 function mayCourseMatch(pc){
   const gc=[...new Set((S.grid||[]).map(l=>l.course).filter(Boolean))];
   const n=_normCourse(pc);
@@ -3131,7 +3131,28 @@ function mayLoadDoc(){
   if(!rows.length){ toast("Не нашла строк — нужны колонки через табуляцию"); return; }
   S.mayList=rows; persistLocal(); renderMay(); toast("Загружено: "+rows.length);
 }
-function mayReplaceDoc(){ if(!confirm("Заменить список? Отметки 💰 в расписании останутся, сбросится только этот список.")) return; S.mayList=[]; persistLocal(); renderMay(); }
+function mayReplaceDoc(){ if(!confirm("Заменить список? Отметки 💰 в расписании останутся, сбросится только этот список.")) return; S.mayList=[]; _mayAddOpen=false; persistLocal(); renderMay(); }
+function mayToggleAdd(){ _mayAddOpen=!_mayAddOpen; renderMay(); if(_mayAddOpen){ const t=document.getElementById("mayAddText"); if(t) t.focus(); } }
+function mayAppendDoc(){
+  const ta=document.getElementById("mayAddText"); if(!ta) return;
+  const raw=(ta.value||"").trim(); if(!raw){ toast("Пусто"); return; }
+  if(!Array.isArray(S.mayList)) S.mayList=[];
+  const seen=new Set(S.mayList.map(r=>_normName(r.fio)+"|"+_normCourse(r.course)));
+  let added=0, dup=0;
+  raw.split(/\r?\n/).forEach(ln=>{
+    const p=ln.split("\t").map(x=>x.trim());
+    if(p.length<3) return;
+    const fio=p[0], note=p[1], course=p[2];
+    if(!fio||!course) return;
+    if(/^фио$/i.test(fio)) return;
+    const k=_normName(fio)+"|"+_normCourse(course);
+    if(seen.has(k)){ dup++; return; }
+    seen.add(k); S.mayList.push({fio,note,course}); added++;
+  });
+  if(!added){ toast(dup?("Все "+dup+" уже в списке"):"Не нашла новых строк"); return; }
+  _mayAddOpen=false; persistLocal(); renderMay();
+  toast("Добавлено: "+added+(dup?(" · дублей пропущено: "+dup):""));
+}
 function mayFilter(k){ _mayFilter=k; renderMay(); }
 function mayRerenderKeepFocus(){ renderMay(); const el=document.getElementById("mayQ"); if(el){ const v=el.value; el.focus(); el.value=""; el.value=v; } }
 function mayDelRow(i){ if(!S.mayList) return; S.mayList.splice(i,1); persistLocal(); renderMay(); }
@@ -3205,9 +3226,16 @@ function renderMay(){
       <span class="hd-grp">
         <button class="btn sm" onclick="mayMarkAllFound()" title="Проставить 💰 всем, кто уже вписан в сетку">💰 Отметить всех в сетке (${cnt.found})</button>
         <button class="btn ghost sm" onclick="mayClearDone()" title="Убрать из списка строки, которые уже с 💰">🧹 Убрать готовые (${cnt.done})</button>
+        <button class="btn sm" onclick="mayToggleAdd()" title="Дописать ещё детей, не трогая уже загруженных">＋ Добавить в список</button>
         <button class="btn ghost sm" onclick="mayReplaceDoc()">↻ Заменить список</button>
       </span>
     </div>
+    ${_mayAddOpen?`<div class="card" style="margin-bottom:10px;border-left:4px solid var(--terra)">
+      <h3 style="margin-top:0">Дописать детей в список</h3>
+      <p style="font-size:12px;color:var(--muted);margin:0 0 8px">Вставьте ещё строки: <b>ФИО ⇥ пометка ⇥ курс</b>. Уже загруженные (в т.ч. непроставленные) останутся — новые допишутся снизу. Дубли (то же ФИО+курс) пропускаются.</p>
+      <textarea id="mayAddText" class="cell wide" rows="6" style="font-size:12px;font-family:monospace" placeholder="Иванов Иван&#9;майский 26&#9;Рисование"></textarea>
+      <div style="margin-top:8px"><button class="btn" onclick="mayAppendDoc()">Добавить в список</button> <button class="btn ghost" onclick="mayToggleAdd()">Отмена</button></div>
+    </div>`:""}
     <div class="tscroll"><table id="mayTable"><thead><tr>
       <th style="width:34px">#</th><th style="text-align:left">ФИО</th><th style="text-align:left">Курс</th><th style="text-align:left">Статус / действие</th><th style="width:34px"></th>
     </tr></thead><tbody>`;
