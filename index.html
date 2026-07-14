@@ -667,12 +667,16 @@ tr.rowlocked input,tr.rowlocked select{background:#EAF3EC;border-color:#cfe3d4;c
 <div id="fbAdminModal" style="display:none;position:fixed;inset:0;z-index:9998;background:rgba(0,0,0,.35);align-items:center;justify-content:center">
   <div style="background:#fff;border-radius:12px;padding:22px;max-width:460px;width:92%;max-height:80vh;overflow:auto;box-shadow:0 10px 44px rgba(0,0,0,.25)">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
-      <div style="font-weight:700;font-size:17px">Доступы — заявки</div>
+      <div style="font-weight:700;font-size:17px">Доступы</div>
       <span onclick="closeAdminPanel()" style="cursor:pointer;font-size:20px;color:#999">×</span>
     </div>
-    <div style="font-size:12px;color:#8a8178;margin-bottom:12px">Кто зарегистрировался и ждёт доступа. «Одобрить» — открыть доступ, «Отклонить» — убрать заявку.</div>
+    <div style="font-weight:600;font-size:13px;margin:6px 0 2px">Новые заявки</div>
+    <div style="font-size:11px;color:#8a8178;margin-bottom:6px">«Одобрить» — открыть базовый доступ (Расписание, Группы, Майский). Потом ниже можно добавить вкладки.</div>
     <div id="fbPendingList"></div>
-    <div style="margin-top:12px;display:flex;gap:8px"><button onclick="fbLoadPending()" style="padding:8px 12px;border:1px solid #ccc;border-radius:8px;background:#fff;cursor:pointer;font-size:13px">↻ Обновить</button></div>
+    <div style="font-weight:600;font-size:13px;margin:16px 0 2px">Пользователи и их вкладки</div>
+    <div style="font-size:11px;color:#8a8178;margin-bottom:6px">Отметьте галочками, какие вкладки видит каждый. Меняется сразу.</div>
+    <div id="fbUsersList"></div>
+    <div style="margin-top:14px;display:flex;gap:8px"><button onclick="fbLoadAccess()" style="padding:8px 12px;border:1px solid #ccc;border-radius:8px;background:#fff;cursor:pointer;font-size:13px">↻ Обновить</button></div>
   </div>
 </div>
 
@@ -828,7 +832,7 @@ function fbPush(){
 /* ---- вход / регистрация / одобрение доступа ---- */
 const FB_ADMINS=["proznanie.mogilev@gmail.com","smalprince@gmail.com"];
 function _isAdminEmail(e){ return FB_ADMINS.indexOf(e)>=0; }
-let _fbMode="login", _fbApprRef=null, _fbGranted=false, _fbIsAdmin=false, _fbPendRef=null;
+let _fbMode="login", _fbApprRef=null, _fbGranted=false, _fbIsAdmin=false, _fbPendRef=null, _fbPendingData={}, _fbUsersData={};
 function _fbAuth(){ return (typeof firebase!=="undefined" && firebase.auth) ? firebase.auth() : null; }
 function fbStart(){
   if(!FB_CONFIG.databaseURL) return;
@@ -843,17 +847,36 @@ function fbStart(){
     _fbWatchApproval(user);                                     // остальные — по одобрению
   });
 }
+/* ---- вкладки по ролям ---- */
+const TAB_DEFS=[["dash","Дашборд"],["courses","Курсы и маржа"],["planner","Планировщик загрузки"],["grid","Расписание (сетка)"],["groups","Группы"],["may","Майский"],["staff","Педсостав и ФОТ"],["fixed","Постоянные расходы"],["tax","Налоги РБ и ФОТ"],["break","Точка безубыточности"],["scenario","Сценарии"],["settings","Параметры"]];
+const MANAGER_DEFAULT_TABS=["grid","groups","may"];
+function _defaultTabsMap(){ const m={}; MANAGER_DEFAULT_TABS.forEach(function(k){ m[k]=true; }); return m; }
+function _applyTabAccess(tabsMap){
+  // tabsMap === null → админ (показать все вкладки)
+  TAB_DEFS.forEach(function(t){
+    const btn=document.querySelector('.tab[data-t="'+t[0]+'"]');
+    if(!btn) return;
+    btn.style.display = (!tabsMap || tabsMap[t[0]]===true) ? "" : "none";
+  });
+  const active=document.querySelector('.tab.active');
+  if(active && active.style.display==="none"){
+    const vis=[...document.querySelectorAll('.tab')].find(function(b){ return b.style.display!=="none"; });
+    if(vis) vis.click();
+  }
+}
 function _fbWatchApproval(user){
   _fbApprRef=_fbDb.ref("approved/"+user.uid);
   _fbApprRef.on("value", function(s){
-    if(s.val()===true){ _fbGrant(false); }
+    const v=s.val();
+    if(v){ _fbGrant(false, (v&&v.tabs)||_defaultTabsMap()); }
     else if(!_fbGranted){ _fbShowPending(); }
   }, function(){ if(!_fbGranted) _fbShowPending(); });
 }
-function _fbGrant(isAdmin){
+function _fbGrant(isAdmin, tabs){
   _fbIsAdmin=isAdmin;
   _fbHideLogin();
   _fbUpdateAdminUI();
+  _applyTabAccess(isAdmin ? null : (tabs||_defaultTabsMap()));
   const lo=document.getElementById("fbLogoutBtn"); if(lo) lo.style.display="";
   const who=document.getElementById("fbWhoami"); const au=_fbAuth();
   if(who) who.textContent=(au&&au.currentUser&&au.currentUser.email)||"";
@@ -934,15 +957,20 @@ function _fbUpdateAdminUI(){
     }, function(){});
   }
 }
-function openAdminPanel(){ document.getElementById("fbAdminModal").style.display="flex"; fbLoadPending(); }
+function openAdminPanel(){ document.getElementById("fbAdminModal").style.display="flex"; fbLoadAccess(); }
 function closeAdminPanel(){ document.getElementById("fbAdminModal").style.display="none"; }
-function fbLoadPending(){ if(_fbDb) _fbDb.ref("pending").once("value").then(function(s){ _renderPending(s.val()||{}); }).catch(function(){}); }
+function fbLoadAccess(){
+  if(!_fbDb) return;
+  _fbDb.ref("pending").once("value").then(function(s){ _renderPending(s.val()||{}); }).catch(function(){});
+  _fbDb.ref("approved").once("value").then(function(s){ _renderUsers(s.val()||{}); }).catch(function(){});
+}
 function _renderPending(v){
+  _fbPendingData=v||{};
   const box=document.getElementById("fbPendingList"); if(!box) return;
-  const ids=Object.keys(v||{});
-  if(!ids.length){ box.innerHTML='<div style="color:#8a8178;font-size:13px;padding:8px 0">Новых заявок нет.</div>'; return; }
+  const ids=Object.keys(_fbPendingData);
+  if(!ids.length){ box.innerHTML='<div style="color:#8a8178;font-size:13px;padding:6px 0">Новых заявок нет.</div>'; return; }
   box.innerHTML=ids.map(function(uid){
-    const em=(v[uid]&&v[uid].email)||uid;
+    const em=(_fbPendingData[uid]&&_fbPendingData[uid].email)||uid;
     return '<div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid #eee">'
       +'<span style="flex:1;font-size:13px">'+esc(em)+'</span>'
       +'<button onclick="fbApprove(\''+uid+'\')" style="padding:6px 10px;border:none;border-radius:6px;background:#2e7d32;color:#fff;font-size:12px;cursor:pointer">Одобрить</button>'
@@ -950,15 +978,46 @@ function _renderPending(v){
       +'</div>';
   }).join("");
 }
+function _renderUsers(v){
+  _fbUsersData=v||{};
+  const box=document.getElementById("fbUsersList"); if(!box) return;
+  const ids=Object.keys(_fbUsersData);
+  if(!ids.length){ box.innerHTML='<div style="color:#8a8178;font-size:13px;padding:6px 0">Пока нет пользователей с доступом.</div>'; return; }
+  box.innerHTML=ids.map(function(uid){
+    const u=_fbUsersData[uid]||{}; const em=(u&&u.email)||uid; const tabs=(u&&u.tabs)||{};
+    const checks=TAB_DEFS.map(function(t){
+      return '<label style="display:inline-flex;align-items:center;gap:3px;font-size:11px;margin:2px 8px 2px 0;white-space:nowrap;cursor:pointer">'
+        +'<input type="checkbox" '+(tabs[t[0]]===true?"checked":"")+' onchange="fbSetUserTab(\''+uid+'\',\''+t[0]+'\',this.checked)"> '+esc(t[1])+'</label>';
+    }).join("");
+    return '<div style="padding:10px 0;border-bottom:1px solid #eee">'
+      +'<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><b style="flex:1;font-size:13px">'+esc(em)+'</b>'
+      +'<button onclick="fbRemoveAccess(\''+uid+'\')" style="padding:5px 9px;border:1px solid #ddd;border-radius:6px;background:#fff;font-size:11px;cursor:pointer;color:#c0392b">Убрать доступ</button></div>'
+      +'<div>'+checks+'</div></div>';
+  }).join("");
+}
 function fbApprove(uid){
   if(!_fbDb) return;
-  _fbDb.ref("approved/"+uid).set(true).then(function(){ return _fbDb.ref("pending/"+uid).remove(); })
-    .then(function(){ toast("Доступ открыт"); fbLoadPending(); })
+  const em=(_fbPendingData[uid]&&_fbPendingData[uid].email)||"";
+  _fbDb.ref("approved/"+uid).set({email:em, tabs:_defaultTabsMap()}).then(function(){ return _fbDb.ref("pending/"+uid).remove(); })
+    .then(function(){ toast("Доступ открыт (базовые вкладки)"); fbLoadAccess(); })
     .catch(function(e){ toast("Ошибка: "+((e&&e.message)||"")); });
 }
 function fbReject(uid){
   if(!_fbDb) return;
-  _fbDb.ref("pending/"+uid).remove().then(function(){ toast("Заявка отклонена"); fbLoadPending(); })
+  _fbDb.ref("pending/"+uid).remove().then(function(){ toast("Заявка отклонена"); fbLoadAccess(); })
+    .catch(function(e){ toast("Ошибка: "+((e&&e.message)||"")); });
+}
+function fbSetUserTab(uid,k,val){
+  if(!_fbDb) return;
+  _fbDb.ref("approved/"+uid+"/tabs/"+k).set(val?true:null)
+    .then(function(){ if(_fbUsersData[uid]){ if(!_fbUsersData[uid].tabs)_fbUsersData[uid].tabs={}; if(val)_fbUsersData[uid].tabs[k]=true; else delete _fbUsersData[uid].tabs[k]; } })
+    .catch(function(e){ toast("Ошибка: "+((e&&e.message)||"")); });
+}
+function fbRemoveAccess(uid){
+  if(!_fbDb) return;
+  const em=(_fbUsersData[uid]&&_fbUsersData[uid].email)||uid;
+  if(!confirm("Убрать доступ у "+em+"? Он снова окажется в режиме «ждите одобрения».")) return;
+  _fbDb.ref("approved/"+uid).remove().then(function(){ toast("Доступ убран"); fbLoadAccess(); })
     .catch(function(e){ toast("Ошибка: "+((e&&e.message)||"")); });
 }
 function _snap(){ try{ return JSON.stringify(S); }catch(e){ return null; } }
