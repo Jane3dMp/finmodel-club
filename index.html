@@ -2295,6 +2295,8 @@ function editLes(idx){
      <div><label>Кабинет</label><select id="mRoom" class="cell wide">${roomOpts}</select></div>
      <div><label>Учеников</label><input id="mStud" type="number" class="cell wide" value="${l.students}"></div>
     </div>
+    <label>Группа <span class="hint">название/номер группы — используется в «Майском» и печати; можно оставить пустым</span></label>
+    <input id="mGroup" class="cell wide" value="${esc(l.group||"")}" placeholder="напр. 7 навыков №3">
     <label>Примечание (шапка карточки)</label><textarea id="mNote" class="cell wide" rows="3" placeholder="например: ХВЗ 8 · 1г до школы · замена, перенос с пятницы…">${esc(l.note||"")}</textarea>
 
     <label style="margin-top:10px">Дети</label>
@@ -2396,6 +2398,7 @@ function saveLes(){
   l.start=document.getElementById("mStart").value;
   l.end=document.getElementById("mEnd").value;
   l.room=document.getElementById("mRoom").value;
+  { const gEl=document.getElementById("mGroup"); if(gEl) l.group=(gEl.value||"").trim(); }
   l.students=+document.getElementById("mStud").value||0;
   l.note=(document.getElementById("mNote").value||"").trim();
   l.kids=_editKids.filter(k=>k.n);
