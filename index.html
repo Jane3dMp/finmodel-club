@@ -388,12 +388,6 @@ tr.rowlocked input,tr.rowlocked select{background:#EAF3EC;border-color:#cfe3d4;c
  <div class="kpigrid" id="gridSummary"></div>
  <div class="hd-actions">
   <span class="hd-grp">
-   <button class="btn sm" onclick="triggerAlphaImport(false)" title="Импорт всей недели из выгрузки Альфы">📂 Импорт недели</button>
-   <button class="btn ghost sm" onclick="triggerAlphaImport(true)" title="Импорт только активного дня из выгрузки Альфы">📂 Импорт 1 дня</button>
-   <input type="file" id="alphaFile" hidden accept=".xlsx,.xls" onchange="importAlphaFile(event)">
-  </span>
-  <span class="hd-sep"></span>
-  <span class="hd-grp">
    <button class="btn ghost sm" onclick="gridToPlan()" title="Пересчитать планировщик из текущего расписания">↻ Пересчитать план</button>
   </span>
   <span class="hd-sep"></span>
@@ -404,14 +398,8 @@ tr.rowlocked input,tr.rowlocked select{background:#EAF3EC;border-color:#cfe3d4;c
   </span>
   <span class="hd-sep"></span>
   <span class="hd-grp">
-   <button class="btn sm" onclick="autoPlaceConfirm()">✨ Авторазложить</button>
-   <button class="btn ghost sm" onclick="clearRooms()" title="Убрать кабинеты только за активный день">🧽 Очистить день</button>
-  </span>
-  <span class="hd-sep"></span>
-  <span class="hd-grp">
    <button class="btn sm" onclick="printSchedule()" title="Распечатать расписание для менеджеров">🖨 Печать</button>
    <button class="btn sm" onclick="exportKidsByDay()" title="Выгрузить Excel: дети по дням со статусами">📥 Дети по дням (Excel)</button>
-   <button class="btn sm" onclick="openMayImport()" title="Вставить список оплативших майский — проставит 💰 детям на совпавших курсах">💰 Импорт майских</button>
    <button class="btn sm" id="alfaSyncBtn" style="display:none" onclick="openAlfaSync()" title="Подтянуть телефоны родителей из AlfaCRM и сопоставить с детьми в модели">📞 Контакты из Альфы</button>
   </span>
  </div>
