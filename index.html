@@ -2802,16 +2802,21 @@ function editLes(idx,focusKi){
   let teacherOpts=`<option value="">— педагог —</option>`+S.staff.map(s=>`<option ${s.name===l.teacher?"selected":""}>${esc(s.name)}</option>`).join("");
   if(l.teacher && !S.staff.some(s=>s.name===l.teacher)) teacherOpts+=`<option selected>${esc(l.teacher)} (нет в списке)</option>`;
   const roomOpts=`<option value="">— кабинет —</option>`+ROOMS.map(r=>`<option ${r===l.room?"selected":""}>${esc(r)}</option>`).join("");
+  let dayOpts=""; for(let d=1;d<=7;d++) dayOpts+=`<option value="${d}" ${l.day===d?"selected":""}>${DAY_FULL[d]}</option>`;
   document.getElementById("lesModalBody").innerHTML=`
     <label>Курс</label><select id="mCourse" class="cell wide">${courseOpts}</select>
     <label>Педагог</label><select id="mTeacher" class="cell wide">${teacherOpts}</select>
+    <div class="row2">
+     <div><label>День</label><select id="mDay" class="cell wide">${dayOpts}</select></div>
+     <div><label>Кабинет</label><select id="mRoom" class="cell wide">${roomOpts}</select></div>
+    </div>
     <div class="row2">
      <div><label>Начало</label><input id="mStart" class="cell wide" value="${l.start}"></div>
      <div><label>Конец</label><input id="mEnd" class="cell wide" value="${l.end}"></div>
     </div>
     <div class="row2">
-     <div><label>Кабинет</label><select id="mRoom" class="cell wide">${roomOpts}</select></div>
      <div><label>Учеников</label><input id="mStud" type="number" class="cell wide" value="${l.students}"></div>
+     <div><label></label><span></span></div>
     </div>
     <label>Группа <span class="hint">название/номер группы — используется в «Майском» и печати; можно оставить пустым</span></label>
     <input id="mGroup" class="cell wide" value="${esc(l.group||"")}" placeholder="напр. 7 навыков №3">
@@ -2942,6 +2947,7 @@ function saveLes(){
   _kidsFromDOM();
   l.course=document.getElementById("mCourse").value;
   l.teacher=document.getElementById("mTeacher").value;
+  { const dEl=document.getElementById("mDay"); if(dEl) l.day=+dEl.value||l.day; }
   l.start=document.getElementById("mStart").value;
   l.end=document.getElementById("mEnd").value;
   l.room=document.getElementById("mRoom").value;
@@ -4183,7 +4189,7 @@ function saveViberTpl(){
 }
 
 /* ===== ВКЛАДКА «ГРУППЫ» — обзор групп, собранный из расписания ===== */
-let _groupsQuery="", _groupsSort={col:"course",dir:1}, _groupsHideDone=false, _groupsShown=[];
+let _groupsQuery="", _groupsSort={col:"course",dir:1}, _groupsHideDone=false, _groupsShown=[], _groupsCourse="";
 function grpRerenderKeepFocus(){ renderGroups(); const el=document.getElementById("grpQ"); if(el){ const v=el.value; el.focus(); el.value=""; el.value=v; } }
 function grpSort(col){ if(_groupsSort.col===col) _groupsSort.dir*=-1; else _groupsSort={col,dir:1}; renderGroups(); }
 function grpToggleDone(i){ const g=_groupsShown[i]; if(!g) return; if(!S.groupsDone) S.groupsDone={}; if(S.groupsDone[g.key]) delete S.groupsDone[g.key]; else S.groupsDone[g.key]=1; persistLocal(); renderGroups(); }
@@ -4226,12 +4232,16 @@ function renderGroups(){
   });
   const q=_ksNorm(_groupsQuery);
   let shown = q.length>=2 ? groups.filter(g=>_ksNorm(g.course+" "+g.name).includes(q)) : groups.slice();
+  if(_groupsCourse) shown=shown.filter(g=>g.course===_groupsCourse);
   if(_groupsHideDone) shown=shown.filter(g=>!g.done);
+  const courseList=[...new Set(groups.map(g=>g.course))].sort((a,b)=>a.localeCompare(b,"ru"));
+  if(_groupsCourse && !courseList.includes(_groupsCourse)) _groupsCourse="";   // курс исчез — сброс
   _groupsShown=shown;
   const totKids=groups.reduce((a,g)=>a+g.kids,0), totPaid=groups.reduce((a,g)=>a+g.paid,0), doneCount=groups.filter(g=>g.done).length;
   let html=`<div class="callout" style="margin-bottom:10px">Групп: <b>${groups.length}</b> · детей вписано: <b>${totKids}</b> · с 💰: <b style="color:var(--green)">${totPaid}</b> · готово: <b>${doneCount}</b></div>
     <div class="hd-actions" style="margin-bottom:8px">
-      <span class="hd-grp"><input type="search" id="grpQ" class="cell" style="width:260px" placeholder="🔍 Поиск по группе или курсу" value="${esc(_groupsQuery)}" oninput="_groupsQuery=this.value;grpRerenderKeepFocus()"></span>
+      <span class="hd-grp"><input type="search" id="grpQ" class="cell" style="width:230px" placeholder="🔍 Поиск по группе или курсу" value="${esc(_groupsQuery)}" oninput="_groupsQuery=this.value;grpRerenderKeepFocus()"></span>
+      <span class="hd-grp"><select id="grpCourse" class="cell" style="max-width:230px" title="Показать только выбранный курс" onchange="_groupsCourse=this.value;renderGroups()"><option value="">📚 Все курсы (${courseList.length})</option>${courseList.map(c=>`<option ${c===_groupsCourse?"selected":""}>${esc(c)}</option>`).join("")}</select></span>
       <span class="hd-sep"></span>
       <span class="hd-grp"><button class="btn ${_groupsHideDone?'':'ghost'} sm" onclick="_groupsHideDone=!_groupsHideDone;renderGroups()" title="Спрятать/показать закреплённые (готовые) группы">${_groupsHideDone?'👁 Показать готовые':'📌 Скрыть готовые'} (${doneCount})</button></span>
     </div>
