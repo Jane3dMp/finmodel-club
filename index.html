@@ -4111,6 +4111,7 @@ async function openAlfaHistory(alfaId,name){
         <div style="max-height:40vh;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:6px 10px;margin-top:4px">
         ${h.map(x=>`<div style="padding:5px 0;border-bottom:1px solid #f0ebe4">
           <div style="font-weight:600">${esc(x.group)}</div>
+          ${x.sched?`<div style="font-size:12px;color:var(--terra-d)">🗓 ${esc(x.sched)}</div>`:''}
           <div style="font-size:11px;color:var(--muted)">${dOnly(x.b_date)}${x.e_date?' – '+dOnly(x.e_date):''}</div></div>`).join("")}</div>`;
     }else{
       const dbg=j.debug||{};

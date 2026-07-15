@@ -123,19 +123,37 @@ switch ($action) {
             ['customer_id' => $cid, 'date_from' => $from, 'date_to' => $to, 'b_date' => $from, 'e_date' => $to, 'page' => 0, 'count' => 500],
             $token, true, 30);
         $lesItems = isset($les['__err']) ? [] : ($les['items'] ?? []);
+        $gsched = [];   // group_id => набор слотов "деньНедели|начало|конец" (из фактических уроков)
+        $hm = function ($v) { return preg_match('/(\d{1,2}:\d{2})/', (string)$v, $m) ? $m[1] : ''; };
         foreach ($lesItems as $ls) {
             $d = $ls['date'] ?? ($ls['lesson_date'] ?? null);
             if (!$inWin($d ? substr($d, 0, 10) : null)) continue;
-            foreach ((array)($ls['group_ids'] ?? []) as $g) $note($gid, $g, $d);
-            if (isset($ls['group_id'])) $note($gid, $ls['group_id'], $d);
+            $dn = 0; if ($d) { $ts = strtotime(substr($d, 0, 10)); if ($ts) $dn = (int)date('N', $ts); }
+            $slot = $dn . '|' . $hm($ls['time_from'] ?? '') . '|' . $hm($ls['time_to'] ?? '');
+            $gs = (array)($ls['group_ids'] ?? []); if (isset($ls['group_id'])) $gs[] = $ls['group_id'];
+            foreach ($gs as $g) { if (!$g) continue; $note($gid, $g, $d); if (!isset($gsched[$g])) $gsched[$g] = []; $gsched[$g][$slot] = ($gsched[$g][$slot] ?? 0) + 1; }
         }
+        // расписание группы из слотов (самые частые сверху)
+        $dnames = ['', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
+        $schedOf = function ($id) use ($gsched, $dnames) {
+            if (empty($gsched[$id])) return '';
+            $slots = $gsched[$id]; arsort($slots);
+            $out = [];
+            foreach (array_keys($slots) as $slot) {
+                [$dn, $f, $t] = array_pad(explode('|', $slot), 3, '');
+                $s = trim(($dnames[(int)$dn] ?? '') . ' ' . $f . ($t ? '–' . $t : ''));
+                if ($s !== '' && !in_array($s, $out, true)) $out[] = $s;
+                if (count($out) >= 2) break;   // максимум 2 слота (напр. 2×/нед)
+            }
+            return implode(', ', $out);
+        };
         // имена групп по id (ЗАПРОС ПО ID отдаёт и архивные) — мягко, с ограничением
         $history = []; $cap = 0;
         foreach ($gid as $id => $dr) {
             if ($cap++ > 40) break;
             $gr = alfa_http('POST', "$host/group/index", ['id' => (int)$id, 'page' => 0], $token, true, 12);
             $nm = $gr['items'][0]['name'] ?? ('Группа #' . $id);
-            $history[] = ['group' => $nm, 'b_date' => $dr['b'], 'e_date' => $dr['e']];
+            $history[] = ['group' => $nm, 'b_date' => $dr['b'], 'e_date' => $dr['e'], 'sched' => $schedOf($id)];
         }
         // краткая сводка из карточки клиента
         $cu = alfa_http('POST', "$host/customer/index", ['id' => $cid, 'page' => 0], $token, true);
