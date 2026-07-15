@@ -4694,8 +4694,14 @@ function renderMay(){
         <button class="btn ghost sm" style="padding:1px 7px" title="Скрыть эту подсказку — вписывать не нужно" onclick="maySetDismiss(${i},true)">✕ не нужно</button></div>`;
     } else if(dst && !st.inDst && r.placeDismiss){   // подсказка скрыта — дать вернуть
       action+=`<div style="${occ.length?'margin-top:4px;':''}font-size:11px;color:var(--muted)">Подсказка «вписать в «${esc(dst)}»» скрыта · <a href="#" onclick="maySetDismiss(${i},false);return false" style="color:var(--terra)">вернуть</a></div>`;
-    } else if(!dst){   // курс не распознан — выбрать вручную
-      action+=`<div style="${occ.length?'margin-top:5px;':''}font-size:12px"><span style="color:var(--muted)">Курс не найден в расписании — выберите: </span><select class="cell" style="min-width:200px" onchange="maySetCourse(${i},this.value)"><option value="">— курс из расписания —</option>${gcSorted.map(c=>`<option>${esc(c)}</option>`).join("")}</select></div>`;
+    } else if(!dst && !occ.length){   // не в сетке и курс не распознан — выбрать вручную (с подсказкой похожего)
+      const guess=_courseGuess(r.course,gcSorted);
+      action+=`<div style="font-size:12px">`
+        +(guess?`<div style="color:var(--muted);margin-bottom:2px">Курс «${esc(r.course)}» не найден точно. Похоже на «<b style="color:var(--terra)">${esc(guess)}</b>».</div>`
+               :`<span style="color:var(--muted)">Курс «${esc(r.course)}» не найден в расписании. </span>`)
+        +`Выберите: <select class="cell" style="min-width:220px" onchange="maySetCourse(${i},this.value)"><option value="">— курс из расписания —</option>${gcSorted.map(c=>`<option ${c===guess?'selected':''}>${esc(c)}</option>`).join("")}</select>`
+        +(guess?` <button class="btn sm" onclick="maySetCourse(${i},this.previousElementSibling.value)">Применить</button>`:'')
+        +`</div>`;
     }
     if(!action) action=`<span style="color:var(--muted);font-size:12px">—</span>`;
     html+=`<tr>
