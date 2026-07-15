@@ -685,14 +685,17 @@ tr.rowlocked input,tr.rowlocked select{background:#EAF3EC;border-color:#cfe3d4;c
 <div class="modal-bg" id="vtplModal">
  <div class="modal" style="max-width:820px">
   <h3>✍️ Шаблон сообщения в Viber</h3>
+  <div class="hd-actions" style="margin-bottom:8px;align-items:center;gap:8px">
+   <button id="vtplTabReg" class="btn sm" onclick="vtplSetMode('reg')" title="Тем, кто ещё не оплатил — приглашение подтвердить">Обычное (приглашение)</button>
+   <button id="vtplTabMay" class="btn ghost sm" onclick="vtplSetMode('may')" title="Тем, у кого уже 💰 куплен майский — приветствие и расписание">💰 Оплатившим майский</button>
+   <span style="margin-left:auto;font-size:12px;color:var(--muted)">Начало занятий: <input id="vtplStart" class="cell" style="width:150px" oninput="renderVtplPreview()" placeholder="2 сентября 2026"></span>
+  </div>
   <p style="font-size:12px;color:var(--muted);margin:0 0 8px;line-height:1.5">
+   Система сама шлёт нужный текст: детям с 💰 (майский куплен) — «Оплатившим», остальным — «Обычное».<br>
    <b>Данные:</b> <code>{имя}</code> <code>{фио}</code> <code>{группа}</code>
-   <code>{курс}</code> <code>{день}</code> <code>{время}</code> <code>{педагог}</code><br>
-   <b>Умные (подставляются сами):</b>
-   <code>{бренд}</code> — CODDY / «Прознание» / «Детали» по курсу ·
-   <code>{нотка}</code> — фраза в тему курса ·
-   <code>{привет}</code> <code>{вступление}</code> <code>{призыв}</code> <code>{прощание}</code>
-   — варьируются, чтобы у разных детей и курсов сообщения отличались.<br>
+   <code>{курс}</code> <code>{день}</code> <code>{время}</code> <code>{педагог}</code> <code>{старт}</code><br>
+   <b>Умные:</b> <code>{бренд}</code> · <code>{нотка}</code> ·
+   <code>{привет}</code> <code>{вступление}</code> <code>{призыв}</code> <code>{прощание}</code> — варьируются.<br>
    Абзацы и эмодзи сохраняются. Viber не умеет жирный шрифт — выделяем структурой и эмодзи.
   </p>
   <div class="row2" style="gap:12px;align-items:stretch">
@@ -3920,6 +3923,25 @@ const VIBER_TPL_DEFAULT=[
 "",
 "{прощание}"
 ].join("\n");
+/* второй шаблон — для тех, у кого УЖЕ куплен майский (k.may): не спрашиваем «планируете ли»,
+   а подтверждаем место и зовём на занятия по расписанию. */
+const VIBER_TPL_MAY_DEFAULT=[
+"{привет}",
+"",
+"Спасибо, что остаётесь с нами! 💙 Место в группе уже закреплено — {имя} снова будет заниматься в новом учебном году.",
+"",
+"Вот детали занятий:",
+"📘 Курс: {курс}",
+"👥 Группа: «{группа}»",
+"🗓 {день}, {время}",
+"📅 Начало занятий: {старт}",
+"",
+"{нотка}",
+"",
+"Ждём вас на занятиях — до скорой встречи! 🚀"
+].join("\n");
+/* {старт} — дата начала занятий (можно поменять кнопкой «✍️ Шаблон Viber») */
+const VIBER_START_DEFAULT="2 сентября 2026";
 
 function _viberNumber(p){
   let d=String(p||"").replace(/\D/g,"");
@@ -3985,7 +4007,8 @@ function _viberFlavor(course){ for(const it of VIBER_FLAVORS){ if(it[0].test(cou
 function _hashIdx(s,n){ let h=5381; for(let i=0;i<s.length;i++){ h=((h*33)^s.charCodeAt(i))>>>0; } return n>0?h%n:h; }
 
 function _buildViberMsg(k,les,tpl){
-  tpl=tpl||S.viberTpl||VIBER_TPL_DEFAULT;
+  // без явного шаблона: у оплативших майский (k.may) — приветственный шаблон, у остальных — обычный
+  if(!tpl) tpl = k.may ? (S.viberTplMay||VIBER_TPL_MAY_DEFAULT) : (S.viberTpl||VIBER_TPL_DEFAULT);
   const parts=String(k.n||"").trim().split(/\s+/);
   const imya=parts.length>1?parts[1]:(parts[0]||"");
   const time=les.start?(les.start+(les.end?("–"+les.end):"")):"";
@@ -4007,7 +4030,8 @@ function _buildViberMsg(k,les,tpl){
     .replace(/\{время\}/g,  time)
     .replace(/\{имя\}/g,    imya)
     .replace(/\{фио\}/g,    k.n||"")
-    .replace(/\{педагог\}/g,les.teacher||"");
+    .replace(/\{педагог\}/g,les.teacher||"")
+    .replace(/\{старт\}/g,  S.viberStart||VIBER_START_DEFAULT);
 }
 /* старые версии дефолтного шаблона — если у пользователя сохранён один из них
    (или пусто), автоматически меняем на новый. Кастомный текст не трогаем. */
@@ -4302,13 +4326,24 @@ function printReport(){
     ${_reportHTML()}</body></html>`);
   w.document.close(); w.focus(); setTimeout(()=>{ try{ w.print(); }catch(e){} },350);
 }
+let _vtplMode="reg", _vtplEdit={reg:"",may:"",start:""};
 function editViberTpl(){
-  document.getElementById("vtplText").value=S.viberTpl||VIBER_TPL_DEFAULT;
-  renderVtplPreview();
+  _vtplEdit={ reg:(S.viberTpl||VIBER_TPL_DEFAULT), may:(S.viberTplMay||VIBER_TPL_MAY_DEFAULT), start:(S.viberStart||VIBER_START_DEFAULT) };
+  _vtplMode="reg"; _vtplLoad();
   document.getElementById("vtplModal").classList.add("show");
 }
+function _vtplSaveDraft(){ _vtplEdit[_vtplMode]=document.getElementById("vtplText").value; const sd=document.getElementById("vtplStart"); if(sd) _vtplEdit.start=sd.value; }
+function _vtplLoad(){
+  document.getElementById("vtplText").value=_vtplEdit[_vtplMode];
+  const sd=document.getElementById("vtplStart"); if(sd) sd.value=_vtplEdit.start;
+  const rb=document.getElementById("vtplTabReg"), mb=document.getElementById("vtplTabMay");
+  if(rb) rb.className="btn "+(_vtplMode==="reg"?"":"ghost")+" sm";
+  if(mb) mb.className="btn "+(_vtplMode==="may"?"":"ghost")+" sm";
+  renderVtplPreview();
+}
+function vtplSetMode(m){ _vtplSaveDraft(); _vtplMode=m; _vtplLoad(); }
 function closeVtpl(){ document.getElementById("vtplModal").classList.remove("show"); }
-function resetViberTpl(){ document.getElementById("vtplText").value=VIBER_TPL_DEFAULT; renderVtplPreview(); }
+function resetViberTpl(){ const def=_vtplMode==="may"?VIBER_TPL_MAY_DEFAULT:VIBER_TPL_DEFAULT; _vtplEdit[_vtplMode]=def; document.getElementById("vtplText").value=def; renderVtplPreview(); }
 /* образец для предпросмотра: реальные данные открытого занятия + условное имя ребёнка */
 function _vtplSampleLes(){
   const im=document.getElementById("lesModal");
@@ -4317,14 +4352,19 @@ function _vtplSampleLes(){
 }
 function renderVtplPreview(){
   const tpl=document.getElementById("vtplText").value;
-  const msg=_buildViberMsg({n:"Иванов Кирилл"},_vtplSampleLes(),tpl);
+  const sd=document.getElementById("vtplStart");
+  const savedStart=S.viberStart; S.viberStart=(sd&&sd.value)||VIBER_START_DEFAULT;   // временно для {старт}
+  const msg=_buildViberMsg({n:"Иванов Кирилл", may:(_vtplMode==="may")},_vtplSampleLes(),tpl);
+  S.viberStart=savedStart;
   document.getElementById("vtplPreview").textContent=msg;
 }
 function saveViberTpl(){
-  const t=(document.getElementById("vtplText").value||"").trim();
-  S.viberTpl=t||VIBER_TPL_DEFAULT;
+  _vtplSaveDraft();
+  S.viberTpl=(_vtplEdit.reg||"").trim()||VIBER_TPL_DEFAULT;
+  S.viberTplMay=(_vtplEdit.may||"").trim()||VIBER_TPL_MAY_DEFAULT;
+  S.viberStart=(_vtplEdit.start||"").trim()||VIBER_START_DEFAULT;
   persistLocal(); if(typeof fbSchedulePush==="function") fbSchedulePush();
-  closeVtpl(); toast("Шаблон Viber сохранён");
+  closeVtpl(); toast("Шаблоны Viber сохранены");
 }
 
 /* ===== ВКЛАДКА «ГРУППЫ» — обзор групп, собранный из расписания ===== */
