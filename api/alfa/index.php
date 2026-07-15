@@ -325,20 +325,26 @@ switch ($action) {
         $probe = null;
         if ($scanned === 0) {
             $rc = alfa_http('POST', "$host/v2api/" . alfa_branch() . "/customer/index",
-                ['removed' => 0, 'page' => 0, 'count' => 5], $token, true, 15);
+                ['removed' => 0, 'page' => 0, 'count' => 3], $token, true, 15);
+            $cand = ['customer-tariff', 'pay', 'cgi', 'tariff', 'invoice', 'balance'];
             $pout = [];
-            foreach (array_slice(($rc['items'] ?? []), 0, 3) as $c) {
+            foreach (array_slice(($rc['items'] ?? []), 0, 2) as $c) {
                 $pid = (int)($c['id'] ?? 0); if (!$pid) continue;
-                $pr = alfa_http('POST', "$host/v2api/" . alfa_branch() . "/customer-tariff/index",
-                    ['customer_id' => $pid, 'page' => 0, 'count' => 20], $token, true, 15);
-                $pitems = isset($pr['__err']) ? [] : ($pr['items'] ?? []);
-                $pout[] = ['customer_id' => $pid, 'name' => trim((string)($c['name'] ?? '')),
-                           'total' => $pr['total'] ?? null, 'items' => count($pitems),
-                           'err' => $pr['__err'] ?? null,
-                           'keys' => $pitems ? array_keys($pitems[0]) : [],
-                           'sample' => $pitems[0] ?? null];
+                $eps = [];
+                foreach ($cand as $ent) {
+                    $pr = alfa_http('POST', "$host/v2api/" . alfa_branch() . "/$ent/index",
+                        ['customer_id' => $pid, 'page' => 0, 'count' => 10], $token, true, 8);
+                    $items = (is_array($pr) && isset($pr['items']) && is_array($pr['items'])) ? $pr['items'] : null;
+                    $eps[$ent] = ['top_keys' => is_array($pr) ? array_keys($pr) : [],
+                                  'total' => is_array($pr) ? ($pr['total'] ?? null) : null,
+                                  'count' => $items !== null ? count($items) : 0,
+                                  'first' => $items[0] ?? null,
+                                  'err'   => is_array($pr) ? ($pr['__err'] ?? null) : null,
+                                  'raw'   => ($items === null) ? $pr : null];
+                }
+                $pout[] = ['customer_id' => $pid, 'name' => trim((string)($c['name'] ?? '')), 'endpoints' => $eps];
             }
-            $probe = ['note' => 'bulk дал 0 — проба по customer_id', 'results' => $pout];
+            $probe = ['note' => 'bulk дал 0 — сырые ответы кандидатов по клиентам', 'results' => $pout];
         }
 
         json_out(['ok' => true, 'count' => count($rows), 'subs' => $rows,
