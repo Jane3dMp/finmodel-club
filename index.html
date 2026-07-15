@@ -4738,7 +4738,11 @@ let _mayFilter="all", _mayQuery="", _mayAddOpen=false;
 function mayCourseMatch(pc){
   const gc=[...new Set((S.grid||[]).map(l=>l.course).filter(Boolean))];
   const n=_normCourse(pc);
-  return gc.find(x=>_normCourse(x)===n)||"";   // только точное совпадение (без догадок)
+  const exact=gc.find(x=>_normCourse(x)===n); if(exact) return exact;   // точное совпадение
+  // мягко — по семейству (без «(1 час)»/«(2 часа)»): майский из Excel/Альфы часто без длительности,
+  // а в сетке курс с длительностью. Семейство не путает разные курсы (режет только скобки/длительность).
+  const fam=_courseBase(pc);
+  return fam ? (gc.find(x=>_courseBase(x)===fam)||"") : "";
 }
 /* курс строки с учётом ручного выбора (courseManual), иначе точное совпадение */
 function mayRowCourse(r){ return (r&&r.courseManual && (S.grid||[]).some(l=>l.course===r.courseManual)) ? r.courseManual : mayCourseMatch(r.course); }
@@ -4764,10 +4768,19 @@ function mayOccurrences(fio){
   } }));
   return Object.values(map).map(o=>Object.assign(o,{paid:o.kids.length>0&&o.kids.every(k=>k.may), sched:[...o.slots].join(", ")}));
 }
-/* отметить 💰 в одной конкретной группе ребёнка (по индексу занятия в mayOccurrences) */
+/* Группы ребёнка ТОЛЬКО по купленному майскому курсу (семейство: час/2 часа/…).
+   Прочие (годовые) группы, на которые майский НЕ куплен, в «Майский» не показываем
+   и майскими не считаем — иначе годовые дети «подтягиваются» в майские. */
+function mayOccFor(r){
+  const dst=mayRowCourse(r);
+  if(!dst) return [];
+  const fam=_courseBase(dst);
+  return mayOccurrences(r.fio).filter(o=>_courseBase(o.course)===fam);
+}
+/* отметить 💰 в одной конкретной группе ребёнка (по индексу в mayOccFor — только майский курс) */
 function mayMarkOcc(i,gi){
   const r=(S.mayList||[])[i]; if(!r) return;
-  const occ=mayOccurrences(r.fio)[gi]; if(!occ) return;
+  const occ=mayOccFor(r)[gi]; if(!occ) return;
   let n=0; occ.kids.forEach(k=>{ if(!k.may){ k.may=true; n++; } });
   persistLocal(); if(typeof fbSchedulePush==="function") fbSchedulePush(); renderGrid(); renderMay();
   toast(n?("💰 отмечено: "+occ.group):"Уже стоит");
@@ -4859,11 +4872,14 @@ function mayAppendDoc(){
 function mayFilter(k){ _mayFilter=k; renderMay(); }
 function mayRerenderKeepFocus(){ renderMay(); const el=document.getElementById("mayQ"); if(el){ const v=el.value; el.focus(); el.value=""; el.value=v; } }
 function mayDelRow(i){ if(!S.mayList) return; S.mayList.splice(i,1); persistLocal(); renderMay(); }
-function mayMarkPaid(i){   // проставить 💰 во ВСЕ группы, где ребёнок уже вписан (его текущие)
+function mayMarkPaid(i){   // проставить 💰 только в группе КУПЛЕННОГО майского курса (не в годовых)
   const r=(S.mayList||[])[i]; if(!r) return;
-  let n=0;
-  (S.grid||[]).forEach(l=>kidsOf(l).forEach(k=>{ if(_sameKid(k.n, r.fio) && !k.may){ k.may=true; n++; } }));
-  if(!n){ toast("Не найден в сетке или уже с 💰"); renderMay(); return; }
+  const dst=mayRowCourse(r);
+  if(!dst){ toast("Курс майского не распознан — выберите его в строке"); renderMay(); return; }
+  const fam=_courseBase(dst); let n=0;
+  (S.grid||[]).forEach(l=>{ if(_courseBase(l.course)!==fam) return;
+    kidsOf(l).forEach(k=>{ if(_sameKid(k.n, r.fio) && !k.may){ k.may=true; n++; } }); });
+  if(!n){ toast("Не найден в группе майского курса или уже с 💰"); renderMay(); return; }
   persistLocal(); if(typeof fbSchedulePush==="function") fbSchedulePush(); renderGrid(); renderMay(); toast("💰 отмечено: "+mayCleanFio(r.fio));
 }
 function mayPlace(i){
@@ -4904,10 +4920,11 @@ function mayMoveGroup(i, sel){
   persistLocal(); if(typeof fbSchedulePush==="function") fbSchedulePush(); renderGrid(); renderMay();
   toast("Переведён(а) в группу: "+(g.label||"выбранную"));
 }
-function mayMarkAllFound(){   // всем, кто уже в сетке (в любой группе) — проставить 💰
+function mayMarkAllFound(){   // всем из списка — 💰 ТОЛЬКО в группе их купленного майского курса
   let n=0;
-  (S.mayList||[]).forEach(r=>{
-    (S.grid||[]).forEach(l=>kidsOf(l).forEach(k=>{ if(_sameKid(k.n, r.fio) && !k.may){ k.may=true; n++; } })); });
+  (S.mayList||[]).forEach(r=>{ const dst=mayRowCourse(r); if(!dst) return; const fam=_courseBase(dst);
+    (S.grid||[]).forEach(l=>{ if(_courseBase(l.course)!==fam) return;
+      kidsOf(l).forEach(k=>{ if(_sameKid(k.n, r.fio) && !k.may){ k.may=true; n++; } }); }); });
   persistLocal(); if(typeof fbSchedulePush==="function") fbSchedulePush(); renderGrid(); renderMay(); toast("Проставлено 💰: "+n);
 }
 function mayResetAll(){
@@ -4922,7 +4939,8 @@ function mayResetAll(){
 }
 function mayClearDone(){
   const before=(S.mayList||[]).length;
-  S.mayList=(S.mayList||[]).filter(r=>{ const f=mayFindAnywhere(r.fio); return !(f.found && f.anyMay); });
+  // «готово» = группа купленного майского курса вписана и с 💰 (годовые группы не считаем)
+  S.mayList=(S.mayList||[]).filter(r=>{ const occ=mayOccFor(r); const done=occ.length>0 && occ.every(o=>o.paid); return !done; });
   persistLocal(); renderMay(); toast("Убрано разобранных: "+(before-(S.mayList||[]).length));
 }
 /* Подтянуть список майских прямо из AlfaCRM (надёжнее ручного переноса из Excel).
@@ -4979,24 +4997,21 @@ function renderMay(){
       </div>`;
     return;
   }
-  // сопоставление курсов один раз за рендер
+  // список курсов сетки для ручного выбора (курс майского теперь сопоставляет mayCourseMatch)
   const gcSet=[...new Set((S.grid||[]).map(l=>l.course).filter(Boolean))];
-  // ТОЛЬКО точное совпадение названия курса (без догадок по началу строки).
-  const matchC=(pc)=>{ const n=_normCourse(pc); return gcSet.find(x=>_normCourse(x)===n)||""; };
   const gcSorted=gcSet.slice().sort((a,b)=>a.localeCompare(b,"ru"));
   const cnt={all:list.length, missing:0, found:0, done:0, nocourse:0};
   const states=list.map(r=>{
-    const occ=mayOccurrences(r.fio);                                 // все группы ребёнка (столбиком)
-    const dst=(r.courseManual && gcSet.includes(r.courseManual)) ? r.courseManual : matchC(r.course); // курс этого абонемента
-    const inDst=dst && occ.some(o=>_normCourse(o.course)===_normCourse(dst));
-    const dstPaid=dst && occ.some(o=>_normCourse(o.course)===_normCourse(dst) && o.paid);
+    const dst=mayRowCourse(r);                                       // курс купленного майского (точное совпадение)
+    const occ=mayOccFor(r);                                          // ТОЛЬКО группы этого курса (годовые скрыты)
+    const inDst=occ.length>0;
     const anyUnpaid=occ.some(o=>!o.paid);
-    const needPlace = dst && !inDst && !r.placeDismiss;             // предложить вписать в курс абонемента
+    const needPlace = dst && !inDst && !r.placeDismiss;             // куплен майский, но в группу этого курса ещё не вписан
     let state;
-    if(needPlace) state="missing";                                  // абонемент на курс, куда ещё НЕ вписан
-    else if(!dst && !occ.length && !r.placeDismiss) state="nocourse"; // курс не распознан и нигде не в сетке
-    else if(occ.length) state=anyUnpaid?"found":"done";             // в сетке: есть что отметить / всё с 💰
-    else state="done";                                              // вписывать не нужно (скрыто) — разобрано
+    if(needPlace) state="missing";
+    else if(!dst && !r.placeDismiss) state="nocourse";              // курс майского не распознан
+    else if(occ.length) state=anyUnpaid?"found":"done";
+    else state="done";
     if(state==="missing") cnt.missing++; else if(state==="done") cnt.done++; else if(state==="nocourse") cnt.nocourse++; else cnt.found++;
     return {state, dst, occ, inDst, needPlace};
   });
