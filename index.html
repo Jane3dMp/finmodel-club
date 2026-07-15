@@ -209,6 +209,13 @@ small.note{font-size:11px;color:var(--muted)}
 .vbtodo-body .vt-nophone{font-size:11px;color:var(--muted);font-style:italic}
 .vbtodo-body .vt-empty{font-size:13px;color:var(--green);font-weight:600;padding:8px 4px}
 .vbtodo-body .vt-note{font-size:11px;color:var(--muted);padding:6px 4px 2px}
+.vbtodo-head .vt-funnel{font-size:11px;color:var(--muted);font-weight:600}
+.vbtodo-head .vt-funnel b{color:var(--coal)}
+.vbtodo-body .vt-sec{font-size:11px;font-weight:700;color:var(--terra);text-transform:uppercase;letter-spacing:.03em;margin:8px 2px 3px;border-bottom:1px solid #f0ebe4;padding-bottom:2px}
+.vbtodo-body .vt-reps{display:flex;gap:2px;white-space:nowrap}
+.vbtodo-body .vt-rep{border:1px solid var(--line);background:#fff;border-radius:6px;padding:2px 5px;font-size:14px;line-height:1.1;cursor:pointer;filter:grayscale(.55);opacity:.7}
+.vbtodo-body .vt-rep:hover{filter:none;opacity:1}
+.vbtodo-body .vt-rep.on{filter:none;opacity:1;border-color:#66bb6a;background:#eef7f0}
 /* подсветка найденного занятия в сетке */
 .les.les-hl{outline:3px solid var(--terra);outline-offset:1px;box-shadow:0 0 0 3px rgba(181,83,42,.35),0 0 12px 3px rgba(181,83,42,.45);position:relative;z-index:3}
 /* название/номер группы на плитке занятия */
@@ -232,6 +239,7 @@ small.note{font-size:11px;color:var(--muted)}
 #kidsTable td input[type="text"]:focus{outline:2px solid var(--terra);border-radius:3px;background:#fff}
 #kidsTable td input[type="checkbox"]{width:auto;margin:0;cursor:pointer}
 #kidsTable tr.k-off td{background:#f6f4f1;color:var(--muted)}
+#kidsTable tr.k-focus td{background:#fff2c2 !important;box-shadow:inset 0 0 0 2px #f0c000;transition:background .4s}
 #kidsTable tr.k-off td.k-name input{text-decoration:line-through;color:var(--muted)}
 .k-del{cursor:pointer;color:var(--muted);font-weight:700;user-select:none}
 .k-del:hover{color:var(--red)}
@@ -2692,7 +2700,7 @@ function addLes(slot,room){
 }
 function addMin(t,min){ const[h,m]=t.split(":").map(Number); let tot=h*60+m+min;
   return String(Math.floor(tot/60)).padStart(2,"0")+":"+String(tot%60).padStart(2,"0"); }
-function editLes(idx){
+function editLes(idx,focusKi){
   const l=S.grid[idx];
   migrateLessonKids(l);
   _editKids=kidsOf(l).map(k=>Object.assign(_blankKid(),k));
@@ -2739,6 +2747,12 @@ function editLes(idx){
   if(document.getElementById("mEnd")) document.getElementById("mEnd").oninput=refreshLesWage;
   refreshLesWage();
   const pb=document.getElementById("pinBtn"); if(pb) pb.textContent=S.grid[idx].pinned?"Открепить":"Закрепить";
+  if(typeof focusKi==="number" && focusKi>=0){   // подсветить конкретного ребёнка (клик из списка)
+    const rows=document.querySelectorAll("#kidsTable tbody tr");
+    const tr=rows[focusKi];
+    if(tr){ tr.classList.add("k-focus"); try{ tr.scrollIntoView({block:"center",behavior:"smooth"}); }catch(e){}
+      setTimeout(()=>{ tr.classList.remove("k-focus"); }, 2600); }
+  }
 }
 /* Пересчёт ЗП в открытой карточке. Число детей = сколько имён вписано в список;
    если имён нет — берём поле «Ученики». */
@@ -2771,6 +2785,9 @@ function _kidsFromDOM(){
     o.alfaId=(prev.alfaId!==undefined?prev.alfaId:null); // переносим их из текущего состояния
     o.vbSent=!!prev.vbSent;                              // отметка «отправлено в Viber»
     o.vbSentAt=prev.vbSentAt||"";
+    const rep=tr.querySelector(".k-in-reply");           // ответ родителя (select в строке)
+    o.vbReply = rep ? rep.value : (prev.vbReply||"");
+    o.vbReplyAt = (o.vbReply!==(prev.vbReply||"")) ? (o.vbReply?new Date().toISOString():"") : (prev.vbReplyAt||"");
     return o;
   });
 }
@@ -2783,8 +2800,19 @@ function renderKidsEditor(){
     return;
   }
   const th=KID_FLAGS.map(f=>`<th title="${f.lab}">${f.ic}<br>${f.lab.split(" ")[0]}</th>`).join("");
-  box.innerHTML=`<table id="kidsTable"><thead><tr>
-      <th class="k-num"></th><th class="k-name">ФИО</th>${th}<th style="min-width:130px">Комментарий</th><th title="Написать в Viber родителю. ✅ = уже отправлено (правый клик — снять отметку)">📨</th><th style="width:22px"></th>
+  // сводка по группе (детей «не придёт» не считаем)
+  const act=_editKids.filter(k=>!k.no);
+  const cSent=act.filter(k=>k.vbSent).length;
+  const cy=act.filter(k=>k.vbReply==="yes").length, cn=act.filter(k=>k.vbReply==="no").length, cm=act.filter(k=>k.vbReply==="maybe").length;
+  const cNo=act.filter(k=>k.vbSent&&!k.vbReply).length;
+  const summary=`<div style="font-size:12px;color:var(--coal);margin:2px 0 6px;display:flex;gap:12px;flex-wrap:wrap">
+      <span>📨 Отправлено: <b>${cSent}</b>/${act.length}</span>
+      <span>🟢 Подтвердили: <b>${cy}</b></span>
+      <span>🔴 Отказ: <b>${cn}</b></span>
+      <span>🟡 Думают: <b>${cm}</b></span>
+      <span style="color:var(--muted)">без ответа: <b>${cNo}</b></span></div>`;
+  box.innerHTML=summary+`<table id="kidsTable"><thead><tr>
+      <th class="k-num"></th><th class="k-name">ФИО</th>${th}<th style="min-width:120px">Комментарий</th><th title="Написать в Viber родителю. ✅ = уже отправлено (правый клик — снять отметку)">📨</th><th title="Ответ родителя на приглашение">Ответ</th><th style="width:22px"></th>
     </tr></thead><tbody>${
     _editKids.map((k,i)=>`<tr class="${k.no?'k-off':''}">
       <td class="k-num">${i+1}</td>
@@ -2792,6 +2820,7 @@ function renderKidsEditor(){
       ${KID_FLAGS.map(f=>`<td><input type="checkbox" class="k-in-${f.k}" ${k[f.k]?"checked":""} title="${f.lab}" onchange="kidFlagChanged()"></td>`).join("")}
       <td><input type="text" class="k-in-c" value="${esc(k.c||"")}" placeholder="—"></td>
       <td><button type="button" class="btn ghost sm" style="padding:1px 6px${k.vbSent?';background:#e6f4ea;border-color:#66bb6a':''}" ${k.phone?"":"disabled"} title="${k.phone?(k.vbSent?('Отправлено'+(k.vbSentAt?' '+_vbDate(k.vbSentAt):'')+' · клик — отправить снова, правый клик — снять отметку'):('Viber → '+esc(k.phone))):'Нет телефона — сначала «📞 Контакты из Альфы»'}" onclick="kidViber(${i})" oncontextmenu="event.preventDefault();kidViberReset(${i});return false">${k.vbSent?'✅':'📨'}</button></td>
+      <td><select class="k-in-reply cell" style="font-size:11px;padding:3px 2px;min-width:96px" onchange="kidFlagChanged()">${VB_REPLY.map(r=>`<option value="${r[0]}" ${k.vbReply===r[0]?'selected':''}>${r[1]}</option>`).join("")}</select></td>
       <td><span class="k-del" title="Удалить" onclick="kidDel(${i})">×</span></td>
     </tr>`).join("")
   }</tbody></table>`;
@@ -3293,7 +3322,10 @@ const KID_FLAGS=[
   {k:"no",    ic:"❌", lab:"Не придёт"},
   {k:"call",  ic:"📵", lab:"Недозвон"}
 ];
-function _blankKid(n){ return {n:cleanKidName(n), may:false, sched:false, no:false, call:false, c:"", phone:"", alfaId:null, vbSent:false, vbSentAt:"" }; }
+function _blankKid(n){ return {n:cleanKidName(n), may:false, sched:false, no:false, call:false, c:"", phone:"", alfaId:null, vbSent:false, vbSentAt:"", vbReply:"", vbReplyAt:"" }; }
+/* ответ родителя на приглашение: "" не ответил · yes подтвердил · no отказ · maybe думает */
+const VB_REPLY=[["","— нет ответа"],["yes","🟢 Подтвердил"],["no","🔴 Отказ"],["maybe","🟡 Думает"]];
+function _vbReplyIcon(v){ return v==="yes"?"🟢":v==="no"?"🔴":v==="maybe"?"🟡":""; }
 /* «Азаренок Леон36,00», «Богданович Степан #34,00» → «Азаренок Леон» */
 function cleanKidName(s){
   return String(s||"")
@@ -3868,46 +3900,69 @@ function kidViberReset(i){
 let _vbTodoOpen=false;
 try{ _vbTodoOpen = localStorage.getItem("vbTodoOpen")==="1"; }catch(e){}
 function vbTodoToggle(){ _vbTodoOpen=!_vbTodoOpen; try{localStorage.setItem("vbTodoOpen",_vbTodoOpen?"1":"0");}catch(e){} renderVbTodo(); }
+function _vbName(it){
+  return `<span class="vt-name" title="Открыть карточку занятия" onclick="editLes(${it.li},${it.ki})">${esc(it.name)}</span>`
+    +(it.icons?` <span class="vt-ic">${it.icons}</span>`:``)
+    +` <span class="vt-meta">— ${esc(it.course||"")}${it.time?', '+esc(it.time):''}</span>`;
+}
 function _vbItem(it,canSend){
   const left = canSend
     ? `<button class="vt-send" title="Отправить в Viber" onclick="vbTodoSend(${it.li},${it.ki})">📨</button>`
     : `<span class="vt-noph-ic" title="Нет телефона">☎✖</span>`;
-  return `<div class="vt-item">${left}
-    <div class="vt-info">
-      <div><span class="vt-name" title="Открыть карточку занятия" onclick="editLes(${it.li})">${esc(it.name)}</span>`
-        +(it.icons?` <span class="vt-ic">${it.icons}</span>`:``)
-        +` <span class="vt-meta">— ${esc(it.course||"")}${it.time?', '+esc(it.time):''}</span></div>`
-        +(it.c?`<div class="vt-comment">💬 ${esc(it.c)}</div>`:``)
-    +`</div></div>`;
+  return `<div class="vt-item">${left}<div class="vt-info"><div>${_vbName(it)}</div>`
+    +(it.c?`<div class="vt-comment">💬 ${esc(it.c)}</div>`:``)+`</div></div>`;
+}
+function _vbAwaitItem(it){
+  const b=(val,ic,lab)=>`<button class="vt-rep${it.reply===val?' on':''}" title="${lab}" onclick="vbReplySet(${it.li},${it.ki},'${val}')">${ic}</button>`;
+  return `<div class="vt-item"><span class="vt-reps">${b('yes','🟢','Подтвердил')}${b('no','🔴','Отказ')}${b('maybe','🟡','Думает')}</span>`
+    +`<div class="vt-info"><div>${_vbName(it)}</div>`
+    +(it.c?`<div class="vt-comment">💬 ${esc(it.c)}</div>`:``)+`</div></div>`;
+}
+function vbReplySet(li,ki,val){
+  const les=S.grid[li]; if(!les) return;
+  const k=(les.kids||[])[ki]; if(!k) return;
+  k.vbReply=(k.vbReply===val?"":val);            // повторный клик по тому же — снять
+  k.vbReplyAt=k.vbReply?new Date().toISOString():"";
+  persistLocal(); if(typeof fbSchedulePush==="function") fbSchedulePush();
+  renderVbTodo();
 }
 function renderVbTodo(){
   const box=document.getElementById("vbTodo"); if(!box) return;
-  const toSend=[], noPhone=[];
+  const toSend=[], noPhone=[], awaiting=[];
+  let cy=0,cn=0,cm=0;
   (S.grid||[]).forEach(l=>{
     if(l.day!==curDay) return;
     kidsOf(l).forEach(k=>{
-      if(k.no || k.vbSent) return;                 // «не придёт» и уже отправленные — не показываем
+      if(k.no) return;                              // «не придёт» — не в рассылке
+      if(k.vbReply==="yes") cy++; else if(k.vbReply==="no") cn++; else if(k.vbReply==="maybe") cm++;
       const it={name:k.n, course:l.course, time:l.start, li:S.grid.indexOf(l), ki:l.kids.indexOf(k),
-                icons:kidIcons(k), c:(k.c||"")};
-      if(_viberNumber(k.phone)) toSend.push(it); else noPhone.push(it);
+                icons:kidIcons(k), c:(k.c||""), reply:(k.vbReply||"")};
+      if(!k.vbSent){ if(_viberNumber(k.phone)) toSend.push(it); else noPhone.push(it); }
+      else if(!k.vbReply){ awaiting.push(it); }     // отправлено, но родитель ещё не ответил
     });
   });
-  toSend.sort((a,b)=> (a.time||"").localeCompare(b.time||"") || a.name.localeCompare(b.name,"ru"));
-  const n=toSend.length;
+  const srt=(a,b)=>(a.time||"").localeCompare(b.time||"")||a.name.localeCompare(b.name,"ru");
+  toSend.sort(srt); noPhone.sort(srt); awaiting.sort(srt);
+  const n=toSend.length, m=awaiting.length;
   let h=`<button type="button" class="vbtodo-head" onclick="vbTodoToggle()">
-     <span>📨 Не отправлено за ${esc(DAY_FULL[curDay])}</span>
-     <span class="cnt ${n?'':'zero'}">${n}</span>
+     <span>📨 ${esc(DAY_FULL[curDay])}</span>
+     <span class="cnt ${n?'':'zero'}" title="Не отправлено">${n}</span>
+     <span class="vt-funnel">ждут ответа <b>${m}</b> · 🟢<b>${cy}</b> 🔴<b>${cn}</b> 🟡<b>${cm}</b></span>
      <span class="car">${_vbTodoOpen?'▾ свернуть':'▸ раскрыть'}</span></button>`;
   if(_vbTodoOpen){
     h+=`<div class="vbtodo-body">`;
-    if(!n && !noPhone.length){
-      h+=`<div class="vt-empty">На этот день всем отправлено ✅</div>`;
-    }else{
+    h+=`<div class="vt-sec">Не отправлено (${n})</div>`;
+    if(!n && !noPhone.length){ h+=`<div class="vt-empty">Всем отправлено ✅</div>`; }
+    else{
       h+=toSend.map(it=>_vbItem(it,true)).join("");
       if(noPhone.length){
         h+=`<div class="vt-note">Без телефона (${noPhone.length}) — сначала «📞 Контакты из Альфы»:</div>`;
         h+=noPhone.map(it=>_vbItem(it,false)).join("");
       }
+    }
+    if(m){
+      h+=`<div class="vt-sec">Ждут ответа (${m}) — отметьте ответ родителя:</div>`;
+      h+=awaiting.map(it=>_vbAwaitItem(it)).join("");
     }
     h+=`</div>`;
   }
