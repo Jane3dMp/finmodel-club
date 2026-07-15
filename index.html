@@ -1489,6 +1489,43 @@ function _sheetSettings_(ss, v, st){
 /* ===== РАСЧЁТЫ ===== */
 /* Фикс-ЗП/зан для отображения в таблице курсов (Вариант 3):
    один педагог курса с заданной ставкой → число; иначе → null (прочерк). */
+let _ncGridOnly=[];
+/* авто-подсказка целевого названия: среди кандидатов ищем самое похожее по нормализованной строке */
+function _courseGuess(c, candidates){
+  const n=_normCourse(c); if(!n) return "";
+  let best="", bestScore=0;
+  (candidates||[]).forEach(t=>{ const tn=_normCourse(t); let s=0;
+    if(tn===n) s=100;
+    else if(tn.startsWith(n)||n.startsWith(tn)) s=60+Math.min(n.length,tn.length);
+    else if(tn.includes(n)||n.includes(tn)) s=40+Math.min(n.length,tn.length);
+    if(s>bestScore){ bestScore=s; best=t; } });
+  return bestScore>=40 ? best : "";
+}
+/* переименовать курс ВЕЗДЕ: расписание, план набора, справочник ставок, «готовые» группы, ручной выбор в майском */
+function renameCourseEverywhere(oldName,newName){
+  if(!oldName||!newName||oldName===newName) return 0;
+  let n=0;
+  (S.grid||[]).forEach(l=>{ if(l.course===oldName){ l.course=newName; n++; } });
+  (S.plan||[]).forEach(p=>{ if(p.name===oldName) p.name=newName; });
+  if(S.wageTable && Object.prototype.hasOwnProperty.call(S.wageTable,oldName)){
+    if(!Object.prototype.hasOwnProperty.call(S.wageTable,newName)) S.wageTable[newName]=S.wageTable[oldName];
+    delete S.wageTable[oldName];
+  }
+  if(S.groupsDone){ const nd={}; for(const k in S.groupsDone){ nd[(k===oldName||k.indexOf(oldName+"||")===0)?(newName+k.slice(oldName.length)):k]=S.groupsDone[k]; } S.groupsDone=nd; }
+  (S.mayList||[]).forEach(r=>{ if(r.courseManual===oldName) r.courseManual=newName; });
+  persistLocal(); if(typeof fbSchedulePush==="function") fbSchedulePush();
+  if(typeof renderAll==="function") renderAll();
+  return n;
+}
+function applyCourseRename(i){
+  const oldName=_ncGridOnly[i]; if(oldName===undefined) return;
+  const sel=document.getElementById("ncSel"+i); const newName=sel?sel.value:"";
+  if(!newName){ toast("Выберите, в какой курс переименовать"); return; }
+  if(!confirm("Переименовать «"+oldName+"» → «"+newName+"» во всём расписании и связанных местах?")) return;
+  const n=renameCourseEverywhere(oldName,newName);
+  toast("Переименовано занятий: "+n);
+  checkCourseNames();   // обновить панель
+}
 function checkCourseNames(){
   const box=document.getElementById("nameCheckResult"); if(!box) return;
   const gridSet={}; (S.grid||[]).forEach(l=>{ if(l.course) gridSet[l.course]=1; });
@@ -1505,9 +1542,22 @@ function checkCourseNames(){
     html+='<p style="color:var(--green);font-weight:600">✓ Все названия совпадают. Расхождений нет.</p>';
   } else {
     if(inGridNotTable.length){
-      html+='<p style="font-weight:600;margin-top:10px">🟡 Есть в расписании, но НЕТ точного совпадения в таблице курсов ('+inGridNotTable.length+'):</p><ul style="margin:4px 0 0 18px">';
-      inGridNotTable.forEach(c=>{ html+='<li>«'+esc(c)+'»</li>'; });
-      html+='</ul>';
+      _ncGridOnly=inGridNotTable.slice();
+      const optsFor=(c)=>{ const guess=_courseGuess(c,inTableNotGrid);
+        return '<option value="">— переименовать в… —</option>'
+          + tableCourses.slice().sort((a,b)=>a.localeCompare(b,"ru")).map(t=>'<option '+(t===guess?'selected':'')+'>'+esc(t)+'</option>').join(''); };
+      html+='<p style="font-weight:600;margin-top:10px">🟡 Есть в расписании, но НЕТ точного совпадения в таблице курсов ('+inGridNotTable.length+'):</p>';
+      html+='<div style="margin:4px 0 0 8px">';
+      inGridNotTable.forEach((c,i)=>{
+        const cnt=(S.grid||[]).filter(l=>l.course===c).length;
+        html+='<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:5px 0;border-bottom:1px solid #f0ebe4">'
+          +'<b style="min-width:150px">«'+esc(c)+'»</b> <span style="color:var(--muted);font-size:12px">'+cnt+' занят.</span>'
+          +'<span style="color:var(--muted)">→</span>'
+          +'<select id="ncSel'+i+'" class="cell" style="min-width:240px">'+optsFor(c)+'</select>'
+          +'<button class="btn sm" onclick="applyCourseRename('+i+')" title="Переименовать этот курс во всём расписании и связанных местах">Переименовать везде</button>'
+          +'</div>';
+      });
+      html+='</div>';
     }
     if(inTableNotGrid.length){
       html+='<p style="font-weight:600;margin-top:10px">⚪ Есть в таблице курсов, но НЕТ в расписании ('+inTableNotGrid.length+'):</p><ul style="margin:4px 0 0 18px">';
