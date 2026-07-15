@@ -5011,7 +5011,8 @@ function renderMay(){
         <h3>Список оплативших майский</h3>
         ${_fbIsAdmin?`<div class="callout" style="border-color:var(--green);margin-bottom:12px">
           <b>🗓 Подтянуть из Альфы</b> — надёжнее ручного списка: Альфа сама знает, кто купил майский и на какой курс.
-          <div style="margin-top:8px"><button class="btn" onclick="mayFromAlfa()">🗓 Майские из Альфы</button></div>
+          <div style="margin-top:8px"><button class="btn" onclick="mayFromAlfa()">🗓 Майские из Альфы</button>
+          <button class="btn ghost" onclick="mayAlfaProbe()" title="Диагностика: где в Альфе лежат абонементы (по одному ребёнку)">🔬 Проба</button></div>
         </div>`:""}
         <p style="font-size:12px;color:var(--muted)">Или вставьте вручную три колонки через табуляцию: <b>ФИО ⇥ пометка ⇥ курс</b>. Заголовок и пустые строки не мешают.</p>
         <textarea id="mayDocText" class="cell wide" rows="10" style="font-size:12px;font-family:monospace" placeholder="Найденок Богдан&#9;майский 26&#9;3D Blender и Unity"></textarea>
