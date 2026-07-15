@@ -347,6 +347,7 @@ details.callout[open] summary{margin-bottom:6px}
      <button class="btn ghost sm" id="fbAdminBtn" onclick="openAdminPanel()" title="Заявки на доступ и вкладки пользователей" style="display:none">🔑 Доступы<span id="fbAdminBadge"></span></button>
      <button class="btn ghost sm" id="histBtn" onclick="openHistory()" title="История версий — снимки на случай потери данных" style="display:none">🕘 История</button>
      <button class="btn ghost sm" id="reportBtn" onclick="openReport()" title="Отчёт для владельца — воронка подтверждений и прогноз" style="display:none">📊 Отчёт</button>
+     <button class="btn ghost sm" id="logBtn" onclick="openLog()" title="Журнал действий — кто и что менял" style="display:none">📜 Журнал</button>
      <div class="menu-sep"></div>
      <button class="btn ghost sm" onclick="openScnMenu()" title="Отдельные модели: годы и сценарии «что если»">⋮ Версии модели</button>
      <button class="btn ghost sm" onclick="openSync()" title="Резервная Google-таблица">Хранилище</button>
@@ -706,6 +707,17 @@ details.callout[open] summary{margin-bottom:6px}
  </div>
 </div>
 
+<div class="modal-bg" id="logModal">
+ <div class="modal" style="max-width:920px">
+  <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
+   <h3 style="margin:0">📜 Журнал действий</h3>
+   <button class="btn ghost sm" onclick="closeLog()" style="margin-left:auto">Закрыть</button>
+  </div>
+  <p style="font-size:12px;color:var(--muted);margin-bottom:8px">Кто и что менял в модели — записи создаются автоматически при каждом сохранении. Показаны последние 400.</p>
+  <div id="logBody"></div>
+ </div>
+</div>
+
 <div class="modal-bg" id="histModal">
  <div class="modal" style="max-width:600px">
   <h3>🕘 История версий</h3>
@@ -947,7 +959,7 @@ function fbConnect(){
     if(val && (val.grid || val.rest)){
       _applyRemote(_normalizeRemote(val));      // в облаке уже есть данные — они главные
     } else {
-      _fbLast={grid:{},rest:""}; fbPush();       // пусто — заливаем текущие как стартовые
+      _fbLast={grid:{},rest:""}; _fbSeeding=true; fbPush(); _fbSeeding=false;  // пусто — заливаем текущие как стартовые (не логируем)
     }
     setSync("ok","✓ Сохранено · онлайн");
     _fbRef.on("value", onRemoteModel);
@@ -982,15 +994,154 @@ function fbPush(){
   _ensureLessonIds();
   const newG=_gridMap(), newRest=_restStr();
   const oldG=_fbLast.grid||{};
+  const oldRest=_fbLast.rest||"";
   const updates={};
   for(const id in newG){ if(JSON.stringify(newG[id])!==JSON.stringify(oldG[id])) updates["grid/"+id]=newG[id]; }
   for(const id in oldG){ if(!newG[id]) updates["grid/"+id]=null; }       // удалённые занятия
-  if(newRest!==(_fbLast.rest||"")) updates["rest"]=newRest;
+  if(newRest!==oldRest) updates["rest"]=newRest;
+  if(!Object.keys(updates).length){ _fbLast={ grid:newG, rest:newRest }; return; }
+  // читаемое описание правки для журнала (собрать ДО перезаписи _fbLast)
+  const logParts=_fbSeeding?null:_logDescribe(oldG,newG,oldRest,newRest);
   _fbLast={ grid:newG, rest:newRest };
-  if(!Object.keys(updates).length) return;
   setSync("warn","● Сохраняю…");
-  _fbRef.update(updates).then(()=>{ _dirty=false; setSync("ok","✓ Сохранено · онлайн"); })
+  _fbRef.update(updates).then(()=>{ _dirty=false; setSync("ok","✓ Сохранено · онлайн"); _pushLog(logParts); })
     .catch(e=>{ setSync("err","⚠ Firebase: "+((e&&e.message)||"ошибка")); });
+}
+/* ===== ЖУРНАЛ ДЕЙСТВИЙ (кто что менял) — отдельный узел logs/ в Firebase ===== */
+let _fbSeeding=false;   // true во время стартовой заливки пустого облака — такие правки не логируем
+const _LOG_SECTIONS={
+  courses:"курсы", planner:"планировщик", staff:"педсостав", wageTable:"справочник ставок ЗП",
+  fixed:"постоянные расходы", fixedGroup:"группировка расходов", fixedPct:"процентные расходы",
+  tax:"налоги", assume:"параметры расчёта", mayList:"список майских", groupsDone:"готовность групп",
+  viberTpl:"шаблон Viber", viberTplMay:"шаблон Viber (оплатившим)", viberStart:"дата старта Viber",
+  fotTaxable:"налоговая база ФОТ"
+};
+function _lesLabel(l){
+  if(!l) return "занятие";
+  const t=(l.start||"")+(l.end?("–"+l.end):"");
+  return (l.course||"занятие")+" · "+(DAY_NAMES[l.day]||"")+(t?(" "+t):"")+(l.group?(" · "+l.group):"")+(l.room?(" · каб. "+l.room):"");
+}
+function _kidsDiff(oa,na){
+  const O={}, N={};
+  (Array.isArray(oa)?oa:[]).forEach(k=>{ if(k&&k.n) O[_normName(k.n)]=k; });
+  (Array.isArray(na)?na:[]).forEach(k=>{ if(k&&k.n) N[_normName(k.n)]=k; });
+  const out=[];
+  for(const key in N){ if(!O[key]) out.push("вписан(а) "+N[key].n); }
+  for(const key in O){ if(!N[key]) out.push("убран(а) "+O[key].n); }
+  const REP={yes:"🟢 да",no:"🔴 нет",maybe:"🟡 думает"};
+  for(const key in N){ if(!O[key]) continue; const o=O[key], n=N[key];
+    if(!o.may && n.may) out.push("💰 "+n.n);
+    else if(o.may && !n.may) out.push("снята 💰 у "+n.n);
+    if(!o.no && n.no) out.push("❌ не придёт: "+n.n);
+    else if(o.no && !n.no) out.push("снят ❌ у "+n.n);
+    if(!o.vbSent && n.vbSent) out.push("✅ Viber отправлен: "+n.n);
+    if((o.vbReply||"")!==(n.vbReply||"") && n.vbReply) out.push("ответ ("+n.n+"): "+(REP[n.vbReply]||n.vbReply));
+    if((o.c||"")!==(n.c||"")) out.push("коммент. у "+n.n);
+  }
+  return out;
+}
+function _lesDetail(o,n){
+  const d=[];
+  if((o.course||"")!==(n.course||"")) d.push("курс → "+(n.course||"—"));
+  if(o.day!==n.day || (o.start||"")!==(n.start||"") || (o.end||"")!==(n.end||"")) d.push("время → "+(DAY_NAMES[n.day]||"")+" "+(n.start||"")+(n.end?("–"+n.end):""));
+  if((o.room||"")!==(n.room||"")) d.push("каб. → "+(n.room||"—"));
+  if((o.teacher||"")!==(n.teacher||"")) d.push("педагог → "+shortName(n.teacher));
+  if(!o.newIntake && n.newIntake) d.push("отмечен новый набор");
+  else if(o.newIntake && !n.newIntake) d.push("снят новый набор");
+  if(!o.pinned && n.pinned) d.push("закреплено");
+  else if(o.pinned && !n.pinned) d.push("откреплено");
+  if((o.note||"")!==(n.note||"")) d.push("изменён комментарий");
+  if((+o.students||0)!==(+n.students||0)) d.push("мест: "+(n.students||0));
+  _kidsDiff(o.kids,n.kids).forEach(x=>d.push(x));
+  return d;
+}
+function _restSections(oldRest,newRest){
+  let O={}, N={};
+  try{ O=JSON.parse(oldRest||"{}"); }catch(e){}
+  try{ N=JSON.parse(newRest||"{}"); }catch(e){}
+  const keys=new Set([...Object.keys(O),...Object.keys(N)]);
+  const names=[];
+  keys.forEach(k=>{
+    if(k==="meta") return;
+    if(JSON.stringify(O[k])!==JSON.stringify(N[k])) names.push(_LOG_SECTIONS[k]||k);
+  });
+  const om=(O.meta&&O.meta.name), nm=(N.meta&&N.meta.name);
+  if(om&&nm&&om!==nm) names.push("переименование версии: «"+om+"» → «"+nm+"»");
+  return names;
+}
+function _logDescribe(oldG,newG,oldRest,newRest){
+  const parts=[];
+  for(const id in newG){ if(!oldG[id]) parts.push("➕ занятие: "+_lesLabel(newG[id])); }
+  for(const id in oldG){ if(!newG[id]) parts.push("🗑 удалено занятие: "+_lesLabel(oldG[id])); }
+  for(const id in newG){ if(!oldG[id]) continue;
+    if(JSON.stringify(newG[id])!==JSON.stringify(oldG[id])){
+      const det=_lesDetail(oldG[id],newG[id]);
+      parts.push("✏️ "+_lesLabel(newG[id])+(det.length?(" — "+det.join("; ")):""));
+    }
+  }
+  if((oldRest||"")!==(newRest||"")){
+    const sec=_restSections(oldRest,newRest);
+    if(sec.length) parts.push("⚙️ "+sec.join(", "));
+  }
+  return parts;
+}
+function _fbUserEmail(){ try{ const au=_fbAuth(); return (au&&au.currentUser&&au.currentUser.email)||"—"; }catch(e){ return "—"; } }
+function _pushLog(parts){
+  if(!_fbDb || !FB_ON || _fbSeeding) return;
+  if(!parts || !parts.length) return;
+  const MAXP=10;
+  let text=parts.slice(0,MAXP).join(" · ");
+  if(parts.length>MAXP) text+=" · …и ещё "+(parts.length-MAXP);
+  const entry={ at: firebase.database.ServerValue.TIMESTAMP, email:_fbUserEmail(),
+    scenario: currentScenarioName(), text:text, n:parts.length };
+  try{ _fbDb.ref("logs").push(entry); }catch(e){}
+}
+/* --- просмотр журнала (только админ) --- */
+let _logData=[], _logQuery="";
+function openLog(){
+  const m=document.getElementById("logModal"); if(!m) return;
+  m.classList.add("show"); closeAllMore();
+  const body=document.getElementById("logBody");
+  if(!_fbDb){ if(body) body.innerHTML='<div style="color:var(--muted);font-size:13px;padding:10px 0">Журнал доступен только при подключении к облаку (вход в аккаунт).</div>'; return; }
+  if(body) body.innerHTML='<div style="color:var(--muted);font-size:13px;padding:10px 0">Загружаю журнал…</div>';
+  _fbDb.ref("logs").limitToLast(400).once("value").then(function(s){
+    const v=s.val()||{};
+    _logData=Object.keys(v).map(k=>v[k]).sort((a,b)=>(b.at||0)-(a.at||0));
+    renderLog();
+  }).catch(function(e){ if(body) body.innerHTML='<div style="color:var(--red);font-size:13px;padding:10px 0">Не удалось загрузить журнал: '+esc((e&&e.message)||"")+'<br><small>Если ошибка про доступ — нужно добавить в правила Firebase узел <b>logs</b> (чтение — админам, запись — одобренным).</small></div>'; });
+}
+function closeLog(){ const m=document.getElementById("logModal"); if(m) m.classList.remove("show"); }
+function _logDate(ts){
+  if(!ts) return "—";
+  const d=new Date(ts), p=n=>String(n).padStart(2,"0");
+  return p(d.getDate())+"."+p(d.getMonth()+1)+" "+p(d.getHours())+":"+p(d.getMinutes());
+}
+function renderLog(){
+  const body=document.getElementById("logBody"); if(!body) return;
+  const q=_ksNorm(_logQuery);
+  let list=_logData;
+  if(q.length>=2) list=list.filter(e=>_ksNorm((e.email||"")+" "+(e.text||"")+" "+(e.scenario||"")).includes(q));
+  const people=[...new Set(_logData.map(e=>e.email).filter(Boolean))].length;
+  let h=`<div class="hd-actions" style="margin-bottom:8px">
+    <input type="search" id="logQ" class="cell" style="width:280px" placeholder="🔍 Поиск: кто / что / курс / ребёнок" value="${esc(_logQuery)}" oninput="_logQuery=this.value;renderLog();const el=document.getElementById('logQ');if(el){const v=el.value;el.focus();el.value='';el.value=v;}">
+    <button class="btn ghost sm" onclick="openLog()" title="Перечитать из облака">↻ Обновить</button>
+    <span class="muted" style="font-size:12px">Записей: ${list.length}${people?(" · людей: "+people):""}</span>
+  </div>`;
+  if(!list.length){
+    h+='<div style="color:var(--muted);font-size:13px;padding:10px 2px">'+(_logData.length?'Ничего не найдено по запросу.':'Журнал пока пуст — записи появятся после первых правок в модели.')+'</div>';
+    body.innerHTML=h; return;
+  }
+  h+='<div class="tscroll"><table><thead><tr><th style="width:92px">Когда</th><th style="width:160px">Кто</th><th style="text-align:left">Что изменил(а)</th></tr></thead><tbody>';
+  list.forEach(e=>{
+    const who=(e.email||"—").split("@")[0];
+    h+=`<tr>
+      <td style="white-space:nowrap;color:var(--muted)">${esc(_logDate(e.at))}</td>
+      <td style="white-space:nowrap" title="${esc(e.email||"")}"><b>${esc(who)}</b>${(e.scenario&&e.scenario!=="Основной")?`<br><span style="font-size:10px;color:var(--muted)">${esc(e.scenario)}</span>`:""}</td>
+      <td style="text-align:left;font-size:12px">${esc(e.text||"")}</td>
+    </tr>`;
+  });
+  h+='</tbody></table></div>';
+  body.innerHTML=h;
 }
 /* ===== АВТОСНИМКИ (страховка от потери данных) — отдельный узел history/{сценарий} ===== */
 let _histTimer=null, _lastSnapHash="";
@@ -1217,6 +1368,8 @@ function _fbUpdateAdminUI(){
   if(hb) hb.style.display=_fbIsAdmin?"":"none";
   const rb=document.getElementById("reportBtn");
   if(rb) rb.style.display=_fbIsAdmin?"":"none";
+  const lg=document.getElementById("logBtn");
+  if(lg) lg.style.display=_fbIsAdmin?"":"none";
   if(_fbPendRef){ try{_fbPendRef.off();}catch(e){} _fbPendRef=null; }
   if(_fbIsAdmin && _fbDb){
     _fbPendRef=_fbDb.ref("pending");
