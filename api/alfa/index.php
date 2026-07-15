@@ -80,6 +80,41 @@ switch ($action) {
                   'branches' => count($branches), 'per_branch' => $perBranch]);
         break;
 
+    // --- история ребёнка: в каких группах был + краткая сводка (READ) ---
+    case 'history':
+        $cid = (int)($in['customerId'] ?? 0);
+        if (!$cid) json_out(['ok' => false, 'error' => 'нет customerId'], 400);
+        // членства в группах (cgi по customer_id) — вся история
+        $cgi = alfa_call('cgi', 'index', ['customer_id' => $cid, 'page' => 0, 'count' => 200]);
+        $items = $cgi['items'] ?? [];
+        // имена групп по id (мягко, по одной — их немного)
+        $gnames = [];
+        foreach ($items as $it) {
+            $gid = $it['group_id'] ?? null;
+            if ($gid === null || isset($gnames[$gid])) continue;
+            $gr = alfa_http('POST', 'https://' . alfa_host() . '/v2api/' . alfa_branch() . '/group/index',
+                ['id' => (int)$gid, 'page' => 0], alfa_token(), true);
+            $gnames[$gid] = $gr['items'][0]['name'] ?? ('Группа #' . $gid);
+        }
+        $history = array_map(fn($it) => [
+            'group'  => $gnames[$it['group_id'] ?? 0] ?? ('Группа #' . ($it['group_id'] ?? '?')),
+            'b_date' => $it['b_date'] ?? null,
+            'e_date' => $it['e_date'] ?? null,
+        ], $items);
+        // краткая сводка из карточки клиента
+        $cu = alfa_http('POST', 'https://' . alfa_host() . '/v2api/' . alfa_branch() . '/customer/index',
+            ['id' => $cid, 'page' => 0], alfa_token(), true);
+        $c0 = $cu['items'][0] ?? [];
+        $summary = [
+            'name'        => $c0['name'] ?? '',
+            'balance'     => $c0['balance'] ?? null,
+            'last_attend' => $c0['last_attend_date'] ?? null,
+            'paid_till'   => $c0['paid_till'] ?? null,
+            'next_lesson' => $c0['next_lesson_date'] ?? null,
+        ];
+        json_out(['ok' => true, 'customerId' => $cid, 'branch' => alfa_branch(), 'summary' => $summary, 'history' => $history]);
+        break;
+
     // --- справочники для маппинга модель→Alfa (READ) ---
     case 'refs':
         $out = [

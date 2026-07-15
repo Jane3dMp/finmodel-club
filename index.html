@@ -203,6 +203,8 @@ small.note{font-size:11px;color:var(--muted)}
 .vbtodo-body .vt-name{font-size:13px;font-weight:600;color:var(--coal);cursor:pointer}
 .vbtodo-body .vt-name:hover{text-decoration:underline;color:var(--terra)}
 .vbtodo-body .vt-ic{font-size:12px;letter-spacing:1px}
+.vbtodo-body .vt-hist{border:1px solid var(--line);background:#fff;border-radius:5px;padding:0 4px;font-size:12px;line-height:1.4;cursor:pointer;vertical-align:middle}
+.vbtodo-body .vt-hist:hover{background:#eef2f7;border-color:var(--blue)}
 .vbtodo-body .vt-meta{font-size:11px;color:var(--muted)}
 .vbtodo-body .vt-comment{font-size:11px;color:var(--terra-d);background:#fbf3ee;border-radius:5px;padding:2px 7px;align-self:flex-start;max-width:100%}
 .vbtodo-body .vt-noph-ic{font-size:11px;color:var(--muted);white-space:nowrap;padding:2px 4px}
@@ -636,6 +638,17 @@ tr.rowlocked input,tr.rowlocked select{background:#EAF3EC;border-color:#cfe3d4;c
   <div class="hd-actions les-foot" style="margin-top:14px">
    <button class="btn sm" id="alfaBtn" onclick="alfaFetch()">Загрузить из Альфы</button>
    <button class="btn ghost sm" onclick="closeAlfa()">Закрыть</button>
+  </div>
+ </div>
+</div>
+
+<div class="modal-bg" id="alfaHistModal">
+ <div class="modal" style="max-width:520px">
+  <h3 id="alfaHistTitle">📇 История в Альфе</h3>
+  <div id="alfaHistBody" style="font-size:13px"></div>
+  <div class="hd-actions les-foot" style="margin-top:12px">
+   <a id="alfaHistLink" class="btn ghost sm" href="#" target="_blank" rel="noopener" style="display:none">🔗 Открыть карточку в Альфе</a>
+   <button class="btn ghost sm" onclick="closeAlfaHist()">Закрыть</button>
   </div>
  </div>
 </div>
@@ -2917,7 +2930,7 @@ function renderKidsEditor(){
       <td class="k-name"><input type="text" class="k-in-name" value="${esc(k.n)}" placeholder="Фамилия Имя" oninput="refreshLesWage()"></td>
       ${KID_FLAGS.map(f=>`<td><input type="checkbox" class="k-in-${f.k}" ${k[f.k]?"checked":""} title="${f.lab}" onchange="kidFlagChanged()"></td>`).join("")}
       <td><input type="text" class="k-in-c" value="${esc(k.c||"")}" placeholder="—"></td>
-      <td><button type="button" class="btn ghost sm" style="padding:1px 6px${k.vbSent?';background:#e6f4ea;border-color:#66bb6a':''}" ${k.phone?"":"disabled"} title="${k.phone?(k.vbSent?('Отправлено'+(k.vbSentAt?' '+_vbDate(k.vbSentAt):'')+' · клик — отправить снова, правый клик — снять отметку'):('Viber → '+esc(k.phone))):'Нет телефона — сначала «📞 Контакты из Альфы»'}" onclick="kidViber(${i})" oncontextmenu="event.preventDefault();kidViberReset(${i});return false">${k.vbSent?'✅':'📨'}</button></td>
+      <td><button type="button" class="btn ghost sm" style="padding:1px 6px${k.vbSent?';background:#e6f4ea;border-color:#66bb6a':''}" ${k.phone?"":"disabled"} title="${k.phone?(k.vbSent?('Отправлено'+(k.vbSentAt?' '+_vbDate(k.vbSentAt):'')+' · клик — отправить снова, правый клик — снять отметку'):('Viber → '+esc(k.phone))):'Нет телефона — сначала «📞 Контакты из Альфы»'}" onclick="kidViber(${i})" oncontextmenu="event.preventDefault();kidViberReset(${i});return false">${k.vbSent?'✅':'📨'}</button>${k.alfaId?`<button type="button" class="btn ghost sm" style="padding:1px 5px;margin-left:3px" title="История ребёнка в Альфе — куда ходил, баланс" onclick="kidHist(${i})">📇</button>`:''}</td>
       <td><select class="k-in-reply cell" style="font-size:11px;padding:3px 2px;min-width:96px" onchange="kidFlagChanged()">${VB_REPLY.map(r=>`<option value="${r[0]}" ${k.vbReply===r[0]?'selected':''}>${r[1]}</option>`).join("")}</select></td>
       <td><span class="k-del" title="Удалить" onclick="kidDel(${i})">×</span></td>
     </tr>`).join("")
@@ -3995,12 +4008,54 @@ function kidViberReset(i){
   toast("Отметка «отправлено» снята");
 }
 
+/* ---- История ребёнка в Альфе (куда ходил + сводка) ---- */
+const ALFA_HOST_URL="https://proznanie4eee.s20.online";
+function closeAlfaHist(){ document.getElementById("alfaHistModal").classList.remove("show"); }
+function kidHist(i){ _kidsFromDOM(); const k=_editKids[i]; if(k) openAlfaHistory(k.alfaId,k.n); }
+function vbHist(li,ki){ const les=S.grid[li]; const k=les&&(les.kids||[])[ki]; if(k) openAlfaHistory(k.alfaId,k.n); }
+async function openAlfaHistory(alfaId,name){
+  if(!alfaId){ toast("Ребёнок не связан с Альфой — сделайте «📞 Контакты из Альфы»"); return; }
+  document.getElementById("alfaHistTitle").textContent="📇 "+(name||"История в Альфе");
+  const body=document.getElementById("alfaHistBody"), link=document.getElementById("alfaHistLink");
+  link.style.display="none";
+  body.innerHTML='<div style="color:var(--muted);padding:8px 0">Загружаю из Альфы…</div>';
+  document.getElementById("alfaHistModal").classList.add("show");
+  try{
+    const token=await _alfaIdToken();
+    const r=await fetch(ALFA_PROXY+"?action=history",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+token},body:JSON.stringify({customerId:alfaId})});
+    const j=await r.json().catch(()=>({ok:false,error:"Ответ не JSON ("+r.status+")"}));
+    if(!r.ok||!j.ok) throw new Error(j.error||("Ошибка "+r.status));
+    const s=j.summary||{}, h=(j.history||[]);
+    link.href=ALFA_HOST_URL+"/customer/"+(j.branch||1)+"/edit/index?id="+alfaId; link.style.display="";
+    const money=v=>(v===null||v===undefined||v==="")?"—":(fmt(Math.round(+v))+" р");
+    const dOnly=v=>v?String(v).slice(0,10).split("-").reverse().join("."):"";
+    let html=`<div class="callout" style="margin-bottom:8px">`
+      +(s.balance!=null?`Баланс: <b style="color:${(+s.balance)<0?'var(--red)':'var(--green)'}">${money(s.balance)}</b> · `:``)
+      +(s.last_attend?`последнее посещение: <b>${dOnly(s.last_attend)}</b> · `:``)
+      +(s.paid_till?`оплачено до: <b>${dOnly(s.paid_till)}</b>`:``)
+      +((s.balance==null&&!s.last_attend&&!s.paid_till)?`<span style="color:var(--muted)">Сводка недоступна</span>`:``)
+      +`</div>`;
+    if(h.length){
+      h.sort((a,b)=>String(b.b_date||"").localeCompare(String(a.b_date||"")));
+      html+=`<label style="font-weight:600">Ходил в группах (${h.length}):</label>
+        <div style="max-height:40vh;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:6px 10px;margin-top:4px">
+        ${h.map(x=>`<div style="padding:5px 0;border-bottom:1px solid #f0ebe4">
+          <div style="font-weight:600">${esc(x.group)}</div>
+          <div style="font-size:11px;color:var(--muted)">${dOnly(x.b_date)}${x.e_date?' – '+dOnly(x.e_date):''}</div></div>`).join("")}</div>`;
+    }else html+=`<div style="color:var(--muted);padding:6px 0">Групп в истории не найдено.</div>`;
+    body.innerHTML=html;
+  }catch(e){
+    body.innerHTML=`<div class="callout" style="border-color:var(--red)"><b>Не получилось:</b> ${esc(e.message||String(e))}</div>`;
+  }
+}
+
 /* ---- Блок под днями: кому в этот день ещё не отправлено сообщение ---- */
 let _vbTodoOpen=false;
 try{ _vbTodoOpen = localStorage.getItem("vbTodoOpen")==="1"; }catch(e){}
 function vbTodoToggle(){ _vbTodoOpen=!_vbTodoOpen; try{localStorage.setItem("vbTodoOpen",_vbTodoOpen?"1":"0");}catch(e){} renderVbTodo(); }
 function _vbName(it){
   return `<span class="vt-name" title="Открыть карточку занятия" onclick="editLes(${it.li},${it.ki})">${esc(it.name)}</span>`
+    +(it.alfaId?` <button type="button" class="vt-hist" title="История в Альфе — куда ходил" onclick="vbHist(${it.li},${it.ki})">📇</button>`:``)
     +(it.icons?` <span class="vt-ic">${it.icons}</span>`:``)
     +` <span class="vt-meta">— ${esc(it.course||"")}${it.time?', '+esc(it.time):''}</span>`;
 }
@@ -4035,7 +4090,7 @@ function renderVbTodo(){
       if(k.no) return;                              // «не придёт» — не в рассылке
       if(k.vbReply==="yes") cy++; else if(k.vbReply==="no") cn++; else if(k.vbReply==="maybe") cm++;
       const it={name:k.n, course:l.course, time:l.start, li:S.grid.indexOf(l), ki:l.kids.indexOf(k),
-                icons:kidIcons(k), c:(k.c||""), reply:(k.vbReply||"")};
+                icons:kidIcons(k), c:(k.c||""), reply:(k.vbReply||""), alfaId:k.alfaId||null};
       if(!k.vbSent){ if(_viberNumber(k.phone)) toSend.push(it); else noPhone.push(it); }
       else if(!k.vbReply){ awaiting.push(it); }     // отправлено, но родитель ещё не ответил
     });
