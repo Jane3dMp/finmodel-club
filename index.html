@@ -3036,10 +3036,16 @@ function togglePinModal(){
 }
 
 function closeLes(){
-  if(_newLesRef){                  // закрыли новое занятие без «Сохранить» — убрать его
-    const i=(S.grid||[]).indexOf(_newLesRef);
-    _newLesRef=null;
-    if(i>=0){ S.grid.splice(i,1); persistLocal(); renderGrid(); }
+  const ref=_newLesRef; _newLesRef=null;
+  if(ref){                         // закрыли новое занятие без «Сохранить» — убрать его везде
+    const i=(S.grid||[]).indexOf(ref); if(i>=0) S.grid.splice(i,1);
+    const id=ref.id;
+    if(id){
+      if(_fbLast && _fbLast.grid) delete _fbLast.grid[id];      // из локального снимка синхронизации
+      if(_fbPending && _fbPending.grid) delete _fbPending.grid[id]; // из отложенного апдейта (чтобы не вернулось)
+      if(FB_ON && _fbRef){ try{ _fbRef.child("grid/"+id).remove(); }catch(e){} } // и из самого Firebase
+    }
+    persistLocal(); renderGrid();
   }
   document.getElementById("lesModal").classList.remove("show");
   if(_fbPending){ const p=_fbPending; _fbPending=null; _applyRemote(p); }
