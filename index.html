@@ -301,6 +301,29 @@ tr.rowlocked input,tr.rowlocked select{background:#EAF3EC;border-color:#cfe3d4;c
 .lt-btn{cursor:pointer;font-size:10px;line-height:1;opacity:.55;padding:0 2px;border-radius:3px}
 .lt-btn:hover{opacity:1;background:rgba(0,0,0,.06)}
 .lt-del:hover{background:#f3d6d0;color:var(--red)}
+
+/* --- переключатель режимов «Работа»/«Финмодель» --- */
+.navmode{display:flex;gap:4px;align-items:center;padding:5px 12px 5px 0;margin-right:10px;border-right:1px solid var(--line)}
+.navmode .nm{padding:6px 14px;border:1px solid var(--terra);background:transparent;color:var(--terra);font-weight:700;font-size:13px;cursor:pointer;border-radius:8px;line-height:1.2}
+.navmode .nm:hover{background:var(--sand-l)}
+.navmode .nm.on{background:var(--terra);color:#fff}
+
+/* --- выпадающее меню «⋯ Ещё» --- */
+.more-wrap{position:relative;display:inline-block}
+.more-menu{display:none;position:absolute;top:calc(100% + 4px);left:0;background:#fff;border:1px solid var(--line);border-radius:9px;box-shadow:0 6px 24px rgba(28,20,16,.15);padding:6px;z-index:60;min-width:240px}
+.more-menu.show{display:flex;flex-direction:column;gap:1px}
+.more-menu.right{left:auto;right:0}
+.more-menu button.btn{background:transparent;border:none;color:var(--coal);text-align:left;border-radius:6px;padding:8px 10px;font-weight:500;font-size:13px;white-space:nowrap}
+.more-menu button.btn:hover{background:var(--sand-l);color:var(--coal)}
+.more-menu .menu-who{display:block;font-size:11px;color:var(--muted);padding:6px 10px;border-bottom:1px solid var(--line);margin-bottom:4px;max-width:240px;overflow:hidden;text-overflow:ellipsis}
+.more-menu .menu-sep{height:1px;background:var(--line);margin:4px 2px}
+
+/* --- сворачиваемые подсказки --- */
+details.callout summary{cursor:pointer;font-weight:600;color:var(--terra-d);user-select:none;list-style:none}
+details.callout summary::-webkit-details-marker{display:none}
+details.callout summary::before{content:'▸ ';font-size:11px}
+details.callout[open] summary::before{content:'▾ '}
+details.callout[open] summary{margin-bottom:6px}
 </style>
 </head>
 <body>
@@ -313,21 +336,32 @@ tr.rowlocked input,tr.rowlocked select{background:#EAF3EC;border-color:#cfe3d4;c
   <div class="syncbox">
    <span class="dot local" id="syncDot"></span>
    <span id="syncTxt">Локальный режим</span>
-   <button class="btn ghost sm" id="fbAdminBtn" onclick="openAdminPanel()" title="Заявки на доступ" style="display:none">🔑 Доступы<span id="fbAdminBadge"></span></button>
    <select id="scnSelect" class="cell" style="max-width:160px" onchange="switchScenario(this.value)" title="Сценарий / год"></select>
-   <button class="btn ghost sm" onclick="openScnMenu()" title="Управление сценариями">⋮</button>
-   <button class="btn ghost sm" onclick="openSync()">Хранилище</button>
    <button class="btn ghost sm" id="undoBtn" onclick="undo()" title="Отменить последнее изменение" disabled>↩ Отменить</button>
-   <button class="btn ghost sm" id="histBtn" onclick="openHistory()" title="История версий — снимки на случай потери данных" style="display:none">🕘 История</button>
-   <button class="btn ghost sm" id="reportBtn" onclick="openReport()" title="Отчёт для владельца — воронка подтверждений и прогноз" style="display:none">📊 Отчёт</button>
    <button class="btn sm" id="saveBtn" onclick="saveAll()">Сохранить</button>
-   <span id="fbWhoami" style="font-size:11px;color:var(--muted);margin-left:6px"></span>
-   <button class="btn ghost sm" id="fbLogoutBtn" onclick="fbLogout()" title="Выйти из аккаунта" style="display:none">Выйти</button>
+   <div class="more-wrap">
+    <button class="btn ghost sm more-toggle" onclick="toggleMore(this)" title="Меню">☰ Меню<span id="menuBadge"></span></button>
+    <div class="more-menu right">
+     <span id="fbWhoami" class="menu-who"></span>
+     <button class="btn ghost sm" id="fbAdminBtn" onclick="openAdminPanel()" title="Заявки на доступ и вкладки пользователей" style="display:none">🔑 Доступы<span id="fbAdminBadge"></span></button>
+     <button class="btn ghost sm" id="histBtn" onclick="openHistory()" title="История версий — снимки на случай потери данных" style="display:none">🕘 История</button>
+     <button class="btn ghost sm" id="reportBtn" onclick="openReport()" title="Отчёт для владельца — воронка подтверждений и прогноз" style="display:none">📊 Отчёт</button>
+     <div class="menu-sep"></div>
+     <button class="btn ghost sm" onclick="openScnMenu()" title="Управление версиями модели">⋮ Версии модели</button>
+     <button class="btn ghost sm" onclick="openSync()" title="Резервная Google-таблица">Хранилище</button>
+     <div class="menu-sep"></div>
+     <button class="btn ghost sm" id="fbLogoutBtn" onclick="fbLogout()" title="Выйти из аккаунта" style="display:none">Выйти</button>
+    </div>
+   </div>
   </div>
  </div>
 </header>
 
 <nav class="tabs"><div class="wrap">
+ <div class="navmode" id="navMode">
+  <button class="nm" data-m="work" onclick="setNavMode('work')">Работа</button>
+  <button class="nm" data-m="fin" onclick="setNavMode('fin')">Финмодель</button>
+ </div>
  <button class="tab active" data-t="dash">Дашборд</button>
  <button class="tab" data-t="courses">Курсы и маржа</button>
  <button class="tab" data-t="planner">Планировщик загрузки</button>
@@ -378,19 +412,25 @@ tr.rowlocked input,tr.rowlocked select{background:#EAF3EC;border-color:#cfe3d4;c
  <div class="kpigrid" id="coursesKpi"></div>
  <div class="hd-actions">
   <button class="btn sm" onclick="addCourse()">+ Курс</button>
-  <button class="btn ghost sm" onclick="sortCourses('name')">⇅ По алфавиту</button>
-  <button class="btn ghost sm" onclick="sortCourses('eco')">⇅ По экосистеме</button>
-  <button class="btn ghost sm" onclick="fillTarget()">Заполнить целевой наполняемостью</button>
-  <button class="btn ghost sm" onclick="checkCourseNames()" title="Сверить названия курсов в таблице и в расписании">🔍 Проверить названия</button>
-  <button class="btn ghost sm" onclick="unlockAllCourses()" title="Снять закрепление со всех строк курсов, чтобы их можно было редактировать">🔓 Разблокировать все</button>
   <button class="btn sm" onclick="openCoursesPrint()" title="Распечатать таблицу курсов с выбором столбцов">🖨 Печать</button>
-  <button class="btn gray sm" onclick="exportJSON()">Экспорт JSON</button>
-  <button class="btn gray sm" onclick="document.getElementById('impFile').click()">Импорт JSON</button>
+  <div class="more-wrap">
+   <button class="btn ghost sm more-toggle" onclick="toggleMore(this)">⋯ Ещё</button>
+   <div class="more-menu">
+    <button class="btn ghost sm" onclick="sortCourses('name')">⇅ По алфавиту</button>
+    <button class="btn ghost sm" onclick="sortCourses('eco')">⇅ По экосистеме</button>
+    <button class="btn ghost sm" onclick="fillTarget()">Заполнить целевой наполняемостью</button>
+    <button class="btn ghost sm" onclick="checkCourseNames()" title="Сверить названия курсов в таблице и в расписании">🔍 Проверить названия</button>
+    <button class="btn ghost sm" onclick="unlockAllCourses()" title="Снять закрепление со всех строк курсов, чтобы их можно было редактировать">🔓 Разблокировать все</button>
+    <div class="menu-sep"></div>
+    <button class="btn gray sm" onclick="exportJSON()">Экспорт JSON</button>
+    <button class="btn gray sm" onclick="document.getElementById('impFile').click()">Импорт JSON</button>
+   </div>
+  </div>
   <input type="file" id="impFile" hidden accept=".json" onchange="importJSON(event)">
  </div>
  <div id="nameCheckResult"></div>
   <div class="tscroll"><table id="courseTable"></table></div>
- <div class="callout"><b>Подсказка:</b> «целевой размер группы» — это план (из листа «Емкость»). «Факт детей» — сколько реально ходит. Разница между ними и есть ваш резерв роста выручки без новых затрат.<br><br><b>Про маржу:</b> «Маржа после ЗП» = оборот минус зарплата педагога. Аренда, налоги, эквайринг и команда сюда НЕ входят — это не чистая прибыль (она на Дашборде и в «Точке безубыточности»).<br><b>Про строку ИТОГО:</b> «Оборот», «Групп/нед» и «Факт детей» — это точная сумма столбцов выше. А «Маржа» в ИТОГО считается по <b>фактическому ФОТ из расписания</b>, поэтому может не совпадать с суммой столбца «Маржа после ЗП» (там зарплата берётся из карточек курсов).</div>
+ <details class="callout"><summary>ℹ️ Как читать эту таблицу</summary><b>Подсказка:</b> «целевой размер группы» — это план (из листа «Емкость»). «Факт детей» — сколько реально ходит. Разница между ними и есть ваш резерв роста выручки без новых затрат.<br><br><b>Про маржу:</b> «Маржа после ЗП» = оборот минус зарплата педагога. Аренда, налоги, эквайринг и команда сюда НЕ входят — это не чистая прибыль (она на Дашборде и в «Точке безубыточности»).<br><b>Про строку ИТОГО:</b> «Оборот», «Групп/нед» и «Факт детей» — это точная сумма столбцов выше. А «Маржа» в ИТОГО считается по <b>фактическому ФОТ из расписания</b>, поэтому может не совпадать с суммой столбца «Маржа после ЗП» (там зарплата берётся из карточек курсов).</details>
 </section>
 
 <!-- ===== ПЛАНИРОВЩИК ===== -->
@@ -410,7 +450,7 @@ tr.rowlocked input,tr.rowlocked select{background:#EAF3EC;border-color:#cfe3d4;c
  <div class="row2">
   <div class="card"><h3>Параметры набора</h3><div id="funnelBox"></div></div>
   <div class="card"><h3>Воронка: сколько детей нужно</h3><table id="funnelCalc"></table>
-   <div class="callout"><b>Как читать:</b> «детей нужно» — сумма по курсам (с учётом, что на дошкольные ходят 2×/нед). Делим на коэффициент загрузки (один ребёнок ходит на ~1,32 занятия) → получаем уникальных детей. Вычитаем тех, кто дойдёт из текущей базы → остаётся набрать новых.</div>
+   <details class="callout"><summary>ℹ️ Как читать воронку</summary>«Детей нужно» — сумма по курсам (с учётом, что на дошкольные ходят 2×/нед). Делим на коэффициент загрузки (один ребёнок ходит на ~1,32 занятия) → получаем уникальных детей. Вычитаем тех, кто дойдёт из текущей базы → остаётся набрать новых.</details>
   </div>
  </div>
 </section>
@@ -421,20 +461,18 @@ tr.rowlocked input,tr.rowlocked select{background:#EAF3EC;border-color:#cfe3d4;c
  <div class="sec-desc">Главный ввод. Расставляете занятия по дням, кабинетам и времени — из этого считаются группы для плана и фонд ЗП педагогов (по ставке для числа детей). Стартовая сетка загружена из вашей выгрузки Альфы (06–12.04).</div>
  <div class="kpigrid" id="gridSummary"></div>
  <div class="hd-actions">
-  <span class="hd-grp">
-   <button class="btn ghost sm" onclick="gridToPlan()" title="Пересчитать планировщик из текущего расписания">↻ Пересчитать план</button>
-  </span>
-  <span class="hd-sep"></span>
-  <span class="hd-grp">
-   <button class="btn ghost sm" onclick="renderConflictBanner();document.getElementById('conflictBanner').scrollIntoView({behavior:'smooth'})">⚠ Конфликты</button>
-   <button class="btn ghost sm" onclick="removeDuplicates()" title="Удалить занятия-дубли, наложенные друг на друга">🧹 Убрать дубли</button>
-  </span>
-  <span class="hd-sep"></span>
-  <span class="hd-grp">
-   <button class="btn sm" onclick="printSchedule()" title="Распечатать расписание для менеджеров">🖨 Печать</button>
-   <button class="btn sm" onclick="exportKidsByDay()" title="Выгрузить Excel: дети по дням со статусами">📥 Дети по дням (Excel)</button>
-   <button class="btn sm" id="alfaSyncBtn" style="display:none" onclick="openAlfaSync()" title="Подтянуть телефоны родителей из AlfaCRM и сопоставить с детьми в модели">📞 Контакты из Альфы</button>
-  </span>
+  <button class="btn sm" onclick="printSchedule()" title="Распечатать расписание для менеджеров">🖨 Печать</button>
+  <div class="more-wrap">
+   <button class="btn ghost sm more-toggle" onclick="toggleMore(this)">⋯ Ещё</button>
+   <div class="more-menu">
+    <button class="btn ghost sm" onclick="gridToPlan()" title="Пересчитать планировщик из текущего расписания">↻ Пересчитать план</button>
+    <button class="btn ghost sm" onclick="renderConflictBanner();document.getElementById('conflictBanner').scrollIntoView({behavior:'smooth'})">⚠ Конфликты</button>
+    <button class="btn ghost sm" onclick="removeDuplicates()" title="Удалить занятия-дубли, наложенные друг на друга">🧹 Убрать дубли</button>
+    <div class="menu-sep"></div>
+    <button class="btn ghost sm" onclick="exportKidsByDay()" title="Выгрузить Excel: дети по дням со статусами">📥 Дети по дням (Excel)</button>
+    <button class="btn ghost sm" id="alfaSyncBtn" style="display:none" onclick="openAlfaSync()" title="Подтянуть телефоны родителей из AlfaCRM и сопоставить с детьми в модели">📞 Контакты из Альфы</button>
+   </div>
+  </div>
  </div>
  <div class="kidsearch">
   <input id="kidSearchInput" type="search" class="kidsearch-in" placeholder="🔍 Найти ребёнка по ФИО — ищет во всех днях недели" oninput="renderKidSearch()" autocomplete="off">
@@ -483,7 +521,19 @@ tr.rowlocked input,tr.rowlocked select{background:#EAF3EC;border-color:#cfe3d4;c
   <div class="tscroll"><table id="fixRatesTable"></table></div>
  </div>
  <div class="kpigrid" id="staffKpi"></div>
- <div class="hd-actions"><button class="btn sm" onclick="addStaff()">+ Педагог</button><button class="btn ghost sm" onclick="setStaffSort('name')" title="Сортировать педагогов по алфавиту">⇅ По алфавиту</button><button class="btn ghost sm" onclick="setStaffSort('wage')" title="Сортировать по ЗП. Повторный клик — обратный порядок">⇅ По ЗП</button><button class="btn ghost sm" onclick="syncStaffFromGrid()" title="Добавить в список всех педагогов из расписания">↻ Собрать из расписания</button><button class="btn ghost sm" onclick="syncStaffFull()">Загрузить полный педсостав (21)</button></div>
+ <div class="hd-actions">
+  <button class="btn sm" onclick="addStaff()">+ Педагог</button>
+  <div class="more-wrap">
+   <button class="btn ghost sm more-toggle" onclick="toggleMore(this)">⋯ Ещё</button>
+   <div class="more-menu">
+    <button class="btn ghost sm" onclick="setStaffSort('name')" title="Сортировать педагогов по алфавиту">⇅ По алфавиту</button>
+    <button class="btn ghost sm" onclick="setStaffSort('wage')" title="Сортировать по ЗП. Повторный клик — обратный порядок">⇅ По ЗП</button>
+    <div class="menu-sep"></div>
+    <button class="btn ghost sm" onclick="syncStaffFromGrid()" title="Добавить в список всех педагогов из расписания">↻ Собрать из расписания</button>
+    <button class="btn ghost sm" onclick="syncStaffFull()">Загрузить полный педсостав (21)</button>
+   </div>
+  </div>
+ </div>
  <div class="card"><h3>Нагрузка и ЗП по педагогам</h3>
   <div class="tscroll"><table id="staffTable"></table></div>
   <div class="callout"><b>Связь с моделью:</b> этот фонд ЗП идёт в P&L и в расчёт взносов ФСЗН на вкладке «Налоги».</div>
@@ -561,18 +611,9 @@ tr.rowlocked input,tr.rowlocked select{background:#EAF3EC;border-color:#cfe3d4;c
 <!-- ===== ПАРАМЕТРЫ ===== -->
 <section class="panel" id="settings">
  <h2 class="sec">Параметры модели</h2>
- <div class="sec-desc">Глобальные настройки расчёта и подключение Google-таблицы как базы данных.</div>
+ <div class="sec-desc">Глобальные настройки расчёта. Резервная Google-таблица переехала в меню «☰» → «Хранилище».</div>
  <div class="row2">
   <div class="card"><h3>Расчётные допущения</h3><div id="assumptions"></div></div>
-  <div class="card"><h3>Подключение Google-таблицы (БД)</h3>
-   <div class="sec-desc" style="margin-bottom:10px">Вставьте URL вашего GAS Web App (doGet/doPost). Тогда модель будет открываться и продолжаться на любом устройстве. Пока URL пуст — данные хранятся локально в этом браузере.</div>
-   <input id="gasUrl" class="cell wide" style="width:100%;margin-bottom:8px" placeholder="https://script.google.com/macros/s/.../exec">
-   <div class="hd-actions">
-    <button class="btn sm" onclick="connectGas()">Подключить и загрузить</button>
-    <button class="btn ghost sm" onclick="pushGas()">Выгрузить в таблицу</button>
-   </div>
-   <div class="callout"><b>Инструкция по GAS</b> — кнопка «Хранилище» вверху: там готовый код Code.gs, который надо вставить в Apps Script вашей таблицы.</div>
-  </div>
  </div>
 </section>
 
@@ -739,16 +780,27 @@ tr.rowlocked input,tr.rowlocked select{background:#EAF3EC;border-color:#cfe3d4;c
 <div class="modal-bg" id="syncModal">
  <div class="modal">
   <h3>Хранилище данных</h3>
-  <p style="font-size:13px;margin-bottom:10px">Чтобы продолжать моделирование на разных устройствах, подключите Google-таблицу как базу. Шаги:</p>
-  <ol style="font-size:13px;margin:0 0 12px 18px;line-height:1.7">
-   <li>Создайте новую Google-таблицу.</li>
-   <li>Расширения → Apps Script, вставьте код ниже, сохраните.</li>
-   <li>Развернуть → Новое развёртывание → Веб-приложение → доступ «Все».</li>
-   <li>Скопируйте URL (.../exec) во вкладку «Параметры» → Подключить.</li>
-  </ol>
-  <textarea id="gasCode" readonly style="width:100%;height:140px;font-family:monospace;font-size:11px;border:1px solid var(--line);border-radius:7px;padding:8px"></textarea>
+  <p style="font-size:13px;margin-bottom:10px">Основное хранилище — <b>Firebase</b>: всё сохраняется и синхронизируется между компьютерами автоматически. Google-таблица ниже — <b>ручной резерв</b>: кнопка «Сохранить» дополнительно выгружает данные в неё.</p>
+  <label style="font-size:11px;color:var(--muted);font-weight:600;display:block;margin-bottom:4px">URL GAS Web App резервной таблицы</label>
+  <input id="gasUrl" class="cell wide" style="width:100%;margin-bottom:8px" placeholder="https://script.google.com/macros/s/.../exec">
+  <div class="hd-actions">
+   <button class="btn sm" onclick="connectGas()">Подключить и загрузить</button>
+   <button class="btn ghost sm" onclick="pushGas()">Выгрузить в таблицу</button>
+  </div>
+  <details class="callout" style="margin-top:12px">
+   <summary>Как подключить новую резервную таблицу</summary>
+   <ol style="font-size:13px;margin:8px 0 12px 18px;line-height:1.7">
+    <li>Создайте новую Google-таблицу.</li>
+    <li>Расширения → Apps Script, вставьте код ниже, сохраните.</li>
+    <li>Развернуть → Новое развёртывание → Веб-приложение → доступ «Все».</li>
+    <li>Скопируйте URL (.../exec) в поле выше → «Подключить и загрузить».</li>
+   </ol>
+   <textarea id="gasCode" readonly style="width:100%;height:140px;font-family:monospace;font-size:11px;border:1px solid var(--line);border-radius:7px;padding:8px"></textarea>
+   <div class="hd-actions" style="margin-top:8px">
+    <button class="btn sm" onclick="copyGas()">Копировать код</button>
+   </div>
+  </details>
   <div class="hd-actions" style="margin-top:12px">
-   <button class="btn sm" onclick="copyGas()">Копировать код</button>
    <button class="btn ghost sm" onclick="closeSync()">Закрыть</button>
   </div>
  </div>
@@ -1017,19 +1069,64 @@ function fbStart(){
 const TAB_DEFS=[["dash","Дашборд"],["courses","Курсы и маржа"],["planner","Планировщик загрузки"],["grid","Расписание (сетка)"],["groups","Группы"],["may","Майский"],["staff","Педсостав и ФОТ"],["fixed","Постоянные расходы"],["tax","Налоги РБ и ФОТ"],["break","Точка безубыточности"],["scenario","Сценарии"],["settings","Параметры"]];
 const MANAGER_DEFAULT_TABS=["grid","groups","may"];
 function _defaultTabsMap(){ const m={}; MANAGER_DEFAULT_TABS.forEach(function(k){ m[k]=true; }); return m; }
-function _applyTabAccess(tabsMap){
-  // tabsMap === null → админ (показать все вкладки)
+/* ---- режимы навигации: «Работа» (ежедневное) и «Финмодель» (финансы) ---- */
+const TAB_MODES={grid:"work",groups:"work",may:"work",dash:"fin",courses:"fin",planner:"fin",staff:"fin",fixed:"fin",tax:"fin","break":"fin",scenario:"fin",settings:"fin"};
+let _tabAccess=null;   // null = все вкладки (админ / до входа), иначе {tabKey:true}
+let navMode=(function(){ try{ return localStorage.getItem("navMode")||"work"; }catch(e){ return "work"; } })();
+function _tabAllowed(k){ return !_tabAccess || _tabAccess[k]===true; }
+function _updateTabVisibility(){
+  // если в текущем режиме не осталось доступных вкладок — перескочить в другой
+  const modes=["work","fin"];
+  const hasTabs={}; modes.forEach(function(m){ hasTabs[m]=TAB_DEFS.some(function(t){ return TAB_MODES[t[0]]===m && _tabAllowed(t[0]); }); });
+  if(!hasTabs[navMode]){ const other=modes.find(function(m){ return hasTabs[m]; }); if(other) navMode=other; }
   TAB_DEFS.forEach(function(t){
     const btn=document.querySelector('.tab[data-t="'+t[0]+'"]');
     if(!btn) return;
-    btn.style.display = (!tabsMap || tabsMap[t[0]]===true) ? "" : "none";
+    btn.style.display = (_tabAllowed(t[0]) && TAB_MODES[t[0]]===navMode) ? "" : "none";
   });
+  // переключатель режимов: активный + прятать, если доступен только один режим
+  const box=document.getElementById("navMode");
+  if(box){
+    const both=hasTabs.work&&hasTabs.fin;
+    box.style.display=both?"":"none";
+    box.querySelectorAll(".nm").forEach(function(b){ b.classList.toggle("on", b.dataset.m===navMode); });
+  }
   const active=document.querySelector('.tab.active');
-  if(active && active.style.display==="none"){
+  if(!active || active.style.display==="none"){
     const vis=[...document.querySelectorAll('.tab')].find(function(b){ return b.style.display!=="none"; });
     if(vis) vis.click();
   }
 }
+function setNavMode(m){
+  navMode=m;
+  try{ localStorage.setItem("navMode",m); }catch(e){}
+  _updateTabVisibility();
+  if(typeof updateNavHeightDelayed==="function") updateNavHeightDelayed();
+}
+function activateTab(k){
+  // программный переход на вкладку с учётом режима (например, из поиска ребёнка)
+  if(TAB_MODES[k] && TAB_MODES[k]!==navMode && _tabAllowed(k)) setNavMode(TAB_MODES[k]);
+  const btn=document.querySelector('.tab[data-t="'+k+'"]');
+  if(btn && btn.style.display!=="none") btn.click();
+}
+function _applyTabAccess(tabsMap){
+  // tabsMap === null → админ (показать все вкладки)
+  _tabAccess=tabsMap||null;
+  _updateTabVisibility();
+}
+/* ---- выпадающие меню «⋯ Ещё» / «☰ Меню» ---- */
+function closeAllMore(){ document.querySelectorAll(".more-menu.show").forEach(function(m){ m.classList.remove("show"); }); }
+function toggleMore(btn){
+  const menu=btn.parentElement.querySelector(".more-menu");
+  const wasOpen=menu&&menu.classList.contains("show");
+  closeAllMore();
+  if(menu&&!wasOpen) menu.classList.add("show");
+}
+document.addEventListener("click", function(e){
+  if(e.target.closest(".more-toggle")) return;  // сам тумблер обрабатывается в toggleMore
+  closeAllMore();
+});
+document.addEventListener("keydown", function(e){ if(e.key==="Escape") closeAllMore(); });
 function _fbWatchApproval(user){
   _fbApprRef=_fbDb.ref("approved/"+user.uid);
   _fbApprRef.on("value", function(s){
@@ -1125,6 +1222,7 @@ function _fbUpdateAdminUI(){
     _fbPendRef.on("value", function(s){
       const v=s.val()||{}; const n=Object.keys(v).length;
       const b=document.getElementById("fbAdminBadge"); if(b) b.textContent=n?(" ("+n+")"):"";
+      const mb=document.getElementById("menuBadge"); if(mb) mb.textContent=n?(" 🔴"+n):"";
       const m=document.getElementById("fbAdminModal"); if(m && m.style.display==="flex") _renderPending(v);
     }, function(){});
   }
@@ -3608,15 +3706,9 @@ function renderKidSearch(){
 function gotoKidLesson(idx){
   const les=(S.grid||[])[idx];
   if(!les) return;
-  // если открыта другая вкладка — переключимся на сетку
+  // если открыта другая вкладка (или другой режим) — переключимся на сетку
   const gridPanel=document.getElementById("grid");
-  if(gridPanel && !gridPanel.classList.contains("active")){
-    const tb=document.querySelector('.tab[data-t="grid"]');
-    document.querySelectorAll(".tab").forEach(x=>x.classList.remove("active"));
-    document.querySelectorAll(".panel").forEach(x=>x.classList.remove("active"));
-    if(tb) tb.classList.add("active");
-    gridPanel.classList.add("active");
-  }
+  if(gridPanel && !gridPanel.classList.contains("active")) activateTab("grid");
   if(les.day) curDay=les.day;
   renderGrid();
   setTimeout(()=>{
@@ -5028,6 +5120,8 @@ document.querySelectorAll(".tab").forEach(tb=>tb.onclick=()=>{
   document.getElementById(tb.dataset.t).classList.add("active");
   updateNavHeightDelayed();
 });
+/* стартовый режим навигации («Работа» по умолчанию, запоминается в браузере) */
+_updateTabVisibility();
 
 /* старт */
 if(S.gasUrl){
