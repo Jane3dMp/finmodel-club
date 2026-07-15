@@ -235,6 +235,94 @@ switch ($action) {
         json_out(['ok' => true, 'dryRun' => false, 'created' => $created]);
         break;
 
+    // --- майские абонементы из Alfa: кто купил майский и на какой курс (READ) ---
+    //   Метка майского (по словам клиента): комментарий содержит «майск» + даты сезона
+    //   01.09.2026–31.12.2026. Фильтр настраивается из клиента (keyword/from/to).
+    case 'maysubs':
+        @set_time_limit(180);
+        $from = (string)($in['from'] ?? '2026-09-01');           // начало сезона майского
+        $to   = (string)($in['to']   ?? '2026-12-31');           // конец сезона
+        $kw   = mb_strtolower(trim((string)($in['keyword'] ?? 'майск')));  // метка в комментарии
+        $allBranches = !empty($in['allBranches']);               // по умолчанию — только главный филиал
+        $branches = $allBranches ? alfa_all_branch_ids() : [alfa_branch()];
+
+        // справочник предметов: subject_id → название курса
+        $subjects = [];
+        foreach (alfa_ref('subject', ['id', 'name']) as $s) {
+            if (($s['id'] ?? null) !== null) $subjects[(int)$s['id']] = (string)$s['name'];
+        }
+
+        // обойти customer-tariff по филиалам, отобрать майские
+        $perPage = 50; $maxPages = 300; $maxScan = 12000;
+        $rows = []; $custIds = []; $scanned = 0; $capped = false;
+        $sampleKeys = null; $sampleRecords = [];
+        foreach ($branches as $bid) {
+            $page = 0;
+            do {
+                // оптимистично передаём фильтры дат — незнакомые Alfa игнорирует
+                $r = alfa_call_branch((int)$bid, 'customer-tariff', 'index',
+                    ['page' => $page, 'count' => $perPage, 'b_date' => $from, 'e_date' => $to]);
+                $items = $r['items'] ?? [];
+                foreach ($items as $ct) {
+                    $scanned++;
+                    if ($sampleKeys === null) $sampleKeys = array_keys($ct);
+                    if (count($sampleRecords) < 3) $sampleRecords[] = $ct;   // сырьё для сверки полей
+                    // комментарий — поле может называться по-разному
+                    $note = (string)($ct['note'] ?? ($ct['comment'] ?? ($ct['commentary'] ?? ($ct['name'] ?? ''))));
+                    $b = substr((string)($ct['b_date'] ?? ''), 0, 10);
+                    $e = substr((string)($ct['e_date'] ?? ''), 0, 10);
+                    $noteHit = ($kw === '') ? true : (mb_stripos($note, $kw) !== false);
+                    $dateHit = (!$b || $b <= $to) && (!$e || $e >= $from);   // пересечение с сезоном
+                    if (!$noteHit || !$dateHit) continue;
+                    $cid = (int)($ct['customer_id'] ?? 0);
+                    if (!$cid) continue;
+                    $subs = [];
+                    if (isset($ct['subject_ids']) && is_array($ct['subject_ids'])) $subs = $ct['subject_ids'];
+                    elseif (isset($ct['subject_id'])) $subs = [$ct['subject_id']];
+                    $courses = [];
+                    foreach ($subs as $sid) { $sid = (int)$sid; if (isset($subjects[$sid])) $courses[] = $subjects[$sid]; }
+                    $rows[] = [
+                        'customer_id' => $cid,
+                        'name'        => trim((string)($ct['customer'] ?? ($ct['customer_name'] ?? ''))),
+                        'course'      => implode(', ', $courses),
+                        'subject_ids' => array_map('intval', $subs),
+                        'note'        => $note,
+                        'b_date'      => $b, 'e_date' => $e,
+                    ];
+                    $custIds[$cid] = true;
+                }
+                $total = (int)($r['total'] ?? 0);
+                $page++;
+                if ($scanned >= $maxScan) { $capped = true; break; }
+            } while (count($items) === $perPage && ($page * $perPage) < $total && $page < $maxPages);
+            if ($capped) break;
+        }
+
+        // имена клиентов, которых не отдал сам customer-tariff — добираем из customer/index
+        $needNames = [];
+        foreach ($rows as $row) { if ($row['name'] === '' && $row['customer_id']) $needNames[$row['customer_id']] = true; }
+        $names = [];
+        if ($needNames) {
+            foreach ($branches as $bid) {
+                $page = 0;
+                do {
+                    $r = alfa_call_branch((int)$bid, 'customer', 'index', ['removed' => 0, 'page' => $page, 'count' => $perPage]);
+                    $items = $r['items'] ?? [];
+                    foreach ($items as $c) { $id = (int)($c['id'] ?? 0); if ($id && isset($needNames[$id]) && !isset($names[$id])) $names[$id] = trim((string)($c['name'] ?? '')); }
+                    $total = (int)($r['total'] ?? 0); $page++;
+                } while (count($items) === $perPage && ($page * $perPage) < $total && $page < $maxPages);
+            }
+            foreach ($rows as &$row) { if ($row['name'] === '' && isset($names[$row['customer_id']])) $row['name'] = $names[$row['customer_id']]; }
+            unset($row);
+        }
+
+        json_out(['ok' => true, 'count' => count($rows), 'subs' => $rows,
+                  'from' => $from, 'to' => $to, 'keyword' => $kw, 'allBranches' => $allBranches,
+                  'debug' => ['scanned' => $scanned, 'capped' => $capped, 'branches' => count($branches),
+                              'subjects' => count($subjects), 'sample_keys' => $sampleKeys,
+                              'sample_records' => $sampleRecords]]);
+        break;
+
     default:
         json_out(['ok' => false, 'error' => 'Неизвестное действие: ' . $action], 400);
 }

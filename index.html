@@ -4925,13 +4925,55 @@ function mayClearDone(){
   S.mayList=(S.mayList||[]).filter(r=>{ const f=mayFindAnywhere(r.fio); return !(f.found && f.anyMay); });
   persistLocal(); renderMay(); toast("Убрано разобранных: "+(before-(S.mayList||[]).length));
 }
+/* Подтянуть список майских прямо из AlfaCRM (надёжнее ручного переноса из Excel).
+   Прокси-действие maysubs отбирает абонементы с меткой «майск» на сезон 01.09–31.12.2026. */
+async function mayFromAlfa(){
+  if(!confirm("Подтянуть список майских из Альфы?\n\nОтберём абонементы с меткой «майский» на сезон 01.09.2026–31.12.2026 и заменим текущий список.\n\nОтметки 💰 в расписании при этом НЕ сбрасываются.")) return;
+  toast("Запрашиваю Альфу…");
+  try{
+    const token=await _alfaIdToken();
+    const r=await fetch(ALFA_PROXY+"?action=maysubs",{
+      method:"POST",
+      headers:{"Content-Type":"application/json","Authorization":"Bearer "+token},
+      body:JSON.stringify({allBranches:true, from:"2026-09-01", to:"2026-12-31", keyword:"майск"})
+    });
+    const j=await r.json().catch(()=>({ok:false,error:"Ответ не JSON (код "+r.status+")"}));
+    if(!r.ok||!j.ok) throw new Error(j.error||("Ошибка прокси "+r.status));
+    const subs=(j.subs||[]).filter(s=>s.name);
+    if(!subs.length){
+      const d=j.debug||{};
+      alert("Альфа не вернула майских по текущему фильтру.\n\nПросканировано абонементов: "+(d.scanned||0)
+        +"\nПоля записи Альфы: "+JSON.stringify(d.sample_keys||[])
+        +"\n\nСкопируйте это сообщение агенту — по реальным полям точно настроим фильтр (метку и даты).");
+      return;
+    }
+    // строим список: у ребёнка может быть несколько майских (разные курсы) — по строке на курс.
+    // название курса из Альфы приводим к названию модели через ALPHA_COURSE_MAP (как при импорте расписания).
+    const list=[];
+    subs.forEach(s=>{
+      const courses=(s.course?String(s.course).split(",").map(x=>x.trim()):[]).filter(Boolean);
+      if(!courses.length) courses.push("");
+      courses.forEach(c=>{ const mc=(typeof ALPHA_COURSE_MAP!=="undefined" && ALPHA_COURSE_MAP[c])||c;
+        list.push({fio:s.name, note:"майский (Альфа)", course:mc}); });
+    });
+    S.mayList=list; persistLocal(); if(typeof fbSchedulePush==="function") fbSchedulePush(); renderMay();
+    const capNote=(j.debug&&j.debug.capped)?" ⚠ достигнут предел сканирования — возможно, не все":"";
+    toast("Подтянуто из Альфы: "+list.length+" строк · детей: "+subs.length+capNote);
+  }catch(e){
+    alert("Не удалось подтянуть майские: "+((e&&e.message)||e)+"\n\nЕсли это про доступ/токен — проверьте вход в модель и «🔌 Проверить связь» в «📞 Контакты из Альфы».");
+  }
+}
 function renderMay(){
   const box=document.getElementById("mayReconBody"); if(!box) return;
   const list=S.mayList||[];
   if(!list.length){
     box.innerHTML=`<div class="card">
-        <h3>Загрузить список оплативших</h3>
-        <p style="font-size:12px;color:var(--muted)">Скопируйте из вашего документа три колонки через табуляцию: <b>ФИО ⇥ пометка ⇥ курс</b>. Заголовок и пустые строки не мешают.</p>
+        <h3>Список оплативших майский</h3>
+        ${_fbIsAdmin?`<div class="callout" style="border-color:var(--green);margin-bottom:12px">
+          <b>🗓 Подтянуть из Альфы</b> — надёжнее ручного списка: Альфа сама знает, кто купил майский и на какой курс.
+          <div style="margin-top:8px"><button class="btn" onclick="mayFromAlfa()">🗓 Майские из Альфы</button></div>
+        </div>`:""}
+        <p style="font-size:12px;color:var(--muted)">Или вставьте вручную три колонки через табуляцию: <b>ФИО ⇥ пометка ⇥ курс</b>. Заголовок и пустые строки не мешают.</p>
         <textarea id="mayDocText" class="cell wide" rows="10" style="font-size:12px;font-family:monospace" placeholder="Найденок Богдан&#9;майский 26&#9;3D Blender и Unity"></textarea>
         <div style="margin-top:10px"><button class="btn" onclick="mayLoadDoc()">Загрузить список</button></div>
       </div>`;
@@ -4972,6 +5014,7 @@ function renderMay(){
         <button class="btn sm" onclick="mayMarkAllFound()" title="Проставить 💰 всем, кто уже вписан в сетку">💰 Отметить всех в сетке (${cnt.found})</button>
         <button class="btn ghost sm" onclick="mayClearDone()" title="Убрать из списка строки, которые уже с 💰">🧹 Убрать готовые (${cnt.done})</button>
         <button class="btn sm" onclick="mayToggleAdd()" title="Дописать ещё детей, не трогая уже загруженных">＋ Добавить в список</button>
+        ${_fbIsAdmin?`<button class="btn sm" onclick="mayFromAlfa()" title="Подтянуть список майских прямо из AlfaCRM (надёжнее ручного)">🗓 Майские из Альфы</button>`:""}
         <button class="btn ghost sm" onclick="mayReplaceDoc()">↻ Заменить список</button>
       </span>
       <span class="hd-sep"></span>
