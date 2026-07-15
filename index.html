@@ -4468,10 +4468,12 @@ function mayOccurrences(key){
   (S.grid||[]).forEach(l=>kidsOf(l).forEach(k=>{ if(_normName(k.n)===key){
     const gl=l.group||((DAY_NAMES[l.day]||"")+" "+(l.start||""));
     const gk=(l.course||"")+"||"+gl;
-    if(!map[gk]) map[gk]={course:l.course||"", group:gl, kids:[]};
+    if(!map[gk]) map[gk]={course:l.course||"", group:gl, kids:[], slots:new Set()};
     map[gk].kids.push(k);
+    const t=((DAY_NAMES[l.day]||"")+" "+(l.start||"")+(l.end?("–"+l.end):"")).trim();
+    if(t) map[gk].slots.add(t);
   } }));
-  return Object.values(map).map(o=>Object.assign(o,{paid:o.kids.length>0&&o.kids.every(k=>k.may)}));
+  return Object.values(map).map(o=>Object.assign(o,{paid:o.kids.length>0&&o.kids.every(k=>k.may), sched:[...o.slots].join(", ")}));
 }
 /* отметить 💰 в одной конкретной группе ребёнка (по индексу занятия в mayOccurrences) */
 function mayMarkOcc(i,gi){
@@ -4486,7 +4488,7 @@ function mayGroupsOf(courseName){
   (S.grid||[]).forEach((l,idx)=>{
     if(l.course!==courseName) return;
     const gk = l.group || ("__"+l.day+"_"+l.start+"_"+l.room);
-    if(!groups[gk]){ groups[gk]={key:gk,label:l.group||"",teacher:l.teacher||"",newIntake:!!l.newIntake,day:l.day,start:l.start,room:l.room,idxs:[]}; order.push(gk); }
+    if(!groups[gk]){ groups[gk]={key:gk,label:l.group||"",teacher:l.teacher||"",newIntake:!!l.newIntake,day:l.day,start:l.start,end:l.end,room:l.room,idxs:[]}; order.push(gk); }
     groups[gk].idxs.push(idx);
   });
   return order.map(k=>{ const g=groups[k];
@@ -4494,7 +4496,7 @@ function mayGroupsOf(courseName){
     // если номера группы нет — подписываем педагогом (и пометкой «новый набор»), чтобы занятие было узнаваемо
     let nm=g.label;
     if(!nm) nm=(g.newIntake?"🆕 ":"")+(g.teacher?shortName(g.teacher):"без номера группы");
-    g.text=nm+" · "+(DAY_NAMES[g.day]||"")+" "+(g.start||"")+(g.room?(" · каб. "+g.room):"")+" · "+g.count+"👤";
+    g.text=nm+" · "+(DAY_NAMES[g.day]||"")+" "+(g.start||"")+(g.end?("–"+g.end):"")+(g.room?(" · каб. "+g.room):"")+" · "+g.count+"👤";
     return g; });
 }
 function maySetCourse(i,val){
@@ -4679,7 +4681,7 @@ function renderMay(){
       action+=`<div style="display:flex;flex-direction:column;gap:3px">`+occ.map((o,gi)=>{
         const isDst=dst && _normCourse(o.course)===_normCourse(dst);
         return `<div style="display:flex;align-items:center;gap:6px;font-size:12px;flex-wrap:wrap">
-          <span><b>${esc(o.group)}</b> <span style="color:var(--muted)">· ${esc(o.course)}</span>${isDst?' <span style="color:var(--terra)">(этот абонемент)</span>':''}</span>
+          <span><b>${esc(o.group)}</b> <span style="color:var(--muted)">· ${esc(o.course)}</span>${o.sched?` <span style="color:var(--terra-d)">· 🗓 ${esc(o.sched)}</span>`:''}${isDst?' <span style="color:var(--terra)">(этот абонемент)</span>':''}</span>
           ${o.paid?'<span style="color:var(--green);font-weight:600">✓ 💰</span>':`<button class="btn sm" style="padding:1px 8px" onclick="mayMarkOcc(${i},${gi})">Поставить 💰</button>`}</div>`;
       }).join("")+`</div>`;
     }
