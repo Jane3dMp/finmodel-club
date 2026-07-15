@@ -4500,6 +4500,12 @@ function mayGroupsOf(courseName){
 function maySetCourse(i,val){
   const r=(S.mayList||[])[i]; if(!r) return;
   r.courseManual=val||"";
+  r.placeDismiss=false;   // выбрали курс — подсказка снова актуальна
+  persistLocal(); if(typeof fbSchedulePush==="function") fbSchedulePush(); renderMay();
+}
+function maySetDismiss(i,val){
+  const r=(S.mayList||[])[i]; if(!r) return;
+  r.placeDismiss=!!val;
   persistLocal(); if(typeof fbSchedulePush==="function") fbSchedulePush(); renderMay();
 }
 function mayHist(i){
@@ -4621,13 +4627,14 @@ function renderMay(){
     const inDst=dst && occ.some(o=>_normCourse(o.course)===_normCourse(dst));
     const dstPaid=dst && occ.some(o=>_normCourse(o.course)===_normCourse(dst) && o.paid);
     const anyUnpaid=occ.some(o=>!o.paid);
+    const needPlace = dst && !inDst && !r.placeDismiss;             // предложить вписать в курс абонемента
     let state;
-    if(dst && !inDst) state="missing";                              // абонемент на курс, куда ещё НЕ вписан
-    else if(!dst && !occ.length) state="nocourse";                  // курс не распознан и нигде не в сетке
-    else if((dst?dstPaid:true) && !anyUnpaid) state="done";         // всё нужное с 💰
-    else state="found";                                             // есть что отметить 💰
+    if(needPlace) state="missing";                                  // абонемент на курс, куда ещё НЕ вписан
+    else if(!dst && !occ.length && !r.placeDismiss) state="nocourse"; // курс не распознан и нигде не в сетке
+    else if(occ.length) state=anyUnpaid?"found":"done";             // в сетке: есть что отметить / всё с 💰
+    else state="done";                                              // вписывать не нужно (скрыто) — разобрано
     if(state==="missing") cnt.missing++; else if(state==="done") cnt.done++; else if(state==="nocourse") cnt.nocourse++; else cnt.found++;
-    return {state, dst, occ, inDst};
+    return {state, dst, occ, inDst, needPlace};
   });
   const q=_ksNorm(_mayQuery);
   const fbtn=(k,lab)=>`<button class="btn ${_mayFilter===k?'':'ghost'} sm" onclick="mayFilter('${k}')">${lab}</button>`;
@@ -4676,12 +4683,15 @@ function renderMay(){
           ${o.paid?'<span style="color:var(--green);font-weight:600">✓ 💰</span>':`<button class="btn sm" style="padding:1px 8px" onclick="mayMarkOcc(${i},${gi})">Поставить 💰</button>`}</div>`;
       }).join("")+`</div>`;
     }
-    if(dst && !st.inDst){   // абонемент на курс, куда ещё не вписан — предложить группу этого курса
+    if(st.needPlace){   // абонемент на курс, куда ещё не вписан — предложить группу этого курса
       const groups=mayGroupsOf(dst); const opts=groups.map(g=>`<option value="${esc(g.key)}">${esc(g.text)}</option>`).join("");
-      action+=`<div style="${occ.length?'margin-top:5px;padding-top:5px;border-top:1px dashed var(--line);':''}font-size:12px">
+      action+=`<div style="${occ.length?'margin-top:5px;padding-top:5px;border-top:1px dashed var(--line);':''}font-size:12px;display:flex;align-items:center;gap:6px;flex-wrap:wrap">
         <span style="color:var(--muted)">Абонемент «${esc(dst)}» — вписать в группу: </span>
         <select class="cell may-grp" id="mayGrp${i}" style="min-width:200px">${opts||'<option value="">нет групп этого курса</option>'}</select>
-        <button class="btn sm" style="margin-left:4px" onclick="mayPlace(${i})">＋ Вписать с 💰</button></div>`;
+        <button class="btn sm" onclick="mayPlace(${i})">＋ Вписать с 💰</button>
+        <button class="btn ghost sm" style="padding:1px 7px" title="Скрыть эту подсказку — вписывать не нужно" onclick="maySetDismiss(${i},true)">✕ не нужно</button></div>`;
+    } else if(dst && !st.inDst && r.placeDismiss){   // подсказка скрыта — дать вернуть
+      action+=`<div style="${occ.length?'margin-top:4px;':''}font-size:11px;color:var(--muted)">Подсказка «вписать в «${esc(dst)}»» скрыта · <a href="#" onclick="maySetDismiss(${i},false);return false" style="color:var(--terra)">вернуть</a></div>`;
     } else if(!dst){   // курс не распознан — выбрать вручную
       action+=`<div style="${occ.length?'margin-top:5px;':''}font-size:12px"><span style="color:var(--muted)">Курс не найден в расписании — выберите: </span><select class="cell" style="min-width:200px" onchange="maySetCourse(${i},this.value)"><option value="">— курс из расписания —</option>${gcSorted.map(c=>`<option>${esc(c)}</option>`).join("")}</select></div>`;
     }
