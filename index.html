@@ -327,6 +327,11 @@ details.callout summary::-webkit-details-marker{display:none}
 details.callout summary::before{content:'▸ ';font-size:11px}
 details.callout[open] summary::before{content:'▾ '}
 details.callout[open] summary{margin-bottom:6px}
+/* --- свёрнутая «сменить группу» на Майском (по умолчанию — только стрелочка) --- */
+details.may-move-d>summary{cursor:pointer;color:var(--muted);font-size:11px;list-style:none;display:inline-block;padding:1px 0;user-select:none}
+details.may-move-d>summary::-webkit-details-marker{display:none}
+details.may-move-d>summary:hover{color:var(--terra)}
+details.may-move-d[open]>summary{color:var(--terra-d);margin-bottom:3px}
 </style>
 </head>
 <body>
@@ -4974,10 +4979,11 @@ function renderMay(){
         const curLabels=occ.filter(o=>o.course===c).map(o=>o.group);
         const opts=groups.map(g=>{ const here=!!(g.label && curLabels.includes(g.label));
           return `<option value="${esc(g.key)}"${here?' selected':''}>${esc(g.text)}${here?' — сейчас здесь':''}</option>`; }).join("");
-        action+=`<div style="margin-top:5px;font-size:12px;display:flex;align-items:center;gap:6px;flex-wrap:wrap">
-          <span style="color:var(--muted)">Сменить группу курса «${esc(c)}»:</span>
-          <select class="cell may-move" data-course="${esc(c)}" style="min-width:220px">${opts}</select>
-          <button class="btn ghost sm" onclick="mayMoveGroup(${i}, this.previousElementSibling)">↔ Перевести</button></div>`;
+        action+=`<details class="may-move-d" style="margin-top:2px">
+          <summary title="Перевести в другую группу этого курса">↔ сменить группу${occ.filter(o=>o.course===c).length&&[...new Set(occ.map(o=>o.course))].length>1?' курса «'+esc(c)+'»':''}</summary>
+          <div style="font-size:12px;display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+            <select class="cell may-move" data-course="${esc(c)}" style="min-width:220px">${opts}</select>
+            <button class="btn ghost sm" onclick="mayMoveGroup(${i}, this.previousElementSibling)">Перевести</button></div></details>`;
       });
     }
     if(st.needPlace){   // абонемент на курс, куда ещё не вписан — предложить группу этого курса
