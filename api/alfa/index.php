@@ -292,7 +292,8 @@ switch ($action) {
                     if ($kw !== '' && mb_strpos($note, $kw) === false) continue;   // метка «май»
                     $cid = (int)($p['customer_id'] ?? 0); if (!$cid) continue;
                     if (!isset($byCust[$cid]))
-                        $byCust[$cid] = ['note' => (string)($p['note'] ?? ''), 'date' => (string)($p['document_date'] ?? ''), 'income' => (string)($p['income'] ?? '')];
+                        $byCust[$cid] = ['count' => 0, 'note' => (string)($p['note'] ?? ''), 'date' => (string)($p['document_date'] ?? ''), 'income' => (string)($p['income'] ?? '')];
+                    $byCust[$cid]['count']++;   // сколько майских оплат у ребёнка (обычно = число курсов)
                 }
                 $total = (int)($r['total'] ?? 0); $page++;
                 if ($scanned >= $maxScan) { $capped = true; break; }
@@ -300,14 +301,15 @@ switch ($action) {
             if ($capped) break;
         }
 
-        // 4) собрать список: fio + курс (из custom_dogovora)
+        // 4) собрать список: по строке на каждый курс из договора + сколько майских оплачено
         $rows = [];
         foreach ($byCust as $cid => $pi) {
             $cm = $custMap[$cid] ?? null;
             $rows[] = ['customer_id' => $cid,
-                       'name'   => $cm ? $cm['name'] : '',
-                       'course' => $cm ? implode(', ', $cm['dogovora']) : '',
-                       'note'   => $pi['note'], 'date' => $pi['date'], 'income' => $pi['income']];
+                       'name'      => $cm ? $cm['name'] : '',
+                       'dogovora'  => $cm ? $cm['dogovora'] : [],   // все курсы договора (клиент разложит по строкам)
+                       'may_count' => (int)$pi['count'],            // сколько майских оплат (=обычно число курсов)
+                       'note'      => $pi['note'], 'date' => $pi['date'], 'income' => $pi['income']];
         }
 
         json_out(['ok' => true, 'count' => count($rows), 'subs' => $rows,

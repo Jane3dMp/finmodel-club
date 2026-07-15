@@ -4971,10 +4971,10 @@ async function mayFromAlfa(){
     // название курса из Альфы приводим к названию модели через ALPHA_COURSE_MAP (как при импорте расписания).
     const list=[];
     subs.forEach(s=>{
-      const courses=(s.course?String(s.course).split(",").map(x=>x.trim()):[]).filter(Boolean);
-      if(!courses.length) courses.push("");
-      courses.forEach(c=>{ const mc=(typeof ALPHA_COURSE_MAP!=="undefined" && ALPHA_COURSE_MAP[c])||c;
-        list.push({fio:s.name, note:"майский (Альфа)", course:mc}); });
+      const courses=(Array.isArray(s.dogovora)?s.dogovora:[]).map(x=>String(x).trim()).filter(Boolean);
+      if(!courses.length) courses.push("");   // договор в Альфе не указан — строка без курса
+      courses.forEach(c=>{ const mc=(c && typeof ALPHA_COURSE_MAP!=="undefined" && ALPHA_COURSE_MAP[c])||c;
+        list.push({fio:s.name, note:"майский (Альфа)", course:mc, alfaMay:s.may_count||0, alfaRaw:c}); });
     });
     S.mayList=list; persistLocal(); if(typeof fbSchedulePush==="function") fbSchedulePush(); renderMay();
     const capNote=(j.debug&&j.debug.capped)?" ⚠ достигнут предел сканирования — возможно, не все":"";
@@ -5074,8 +5074,10 @@ function renderMay(){
     if(_mayFilter!=="all" && st.state!==_mayFilter) return;
     if(q.length>=2 && !_ksNorm(r.fio).includes(q)) return;
     shownN++;
-    let courseCell=esc(r.course);
-    if(st.state==="nocourse") courseCell=`<span style="color:var(--red)">${esc(r.course)} — нет в расписании</span>`;
+    let courseCell=esc(r.course||"—");
+    if(st.state==="nocourse") courseCell = r.course
+        ? `<b>${esc(r.course)}</b> <span style="color:var(--red)">— нет в системе</span>`
+        : `<span style="color:var(--muted)">договор в Альфе не указан</span>`;
     else if(st.dst && _normCourse(st.dst)!==_normCourse(r.course)) courseCell=`${esc(r.course)} <span style="color:var(--muted)">→ ${esc(st.dst)}</span>`;
     const occ=st.occ||[], dst=st.dst;
     let action="";
@@ -5112,19 +5114,20 @@ function renderMay(){
         <button class="btn ghost sm" style="padding:1px 7px" title="Скрыть эту подсказку — вписывать не нужно" onclick="maySetDismiss(${i},true)">✕ не нужно</button></div>`;
     } else if(dst && !st.inDst && r.placeDismiss){   // подсказка скрыта — дать вернуть
       action+=`<div style="${occ.length?'margin-top:4px;':''}font-size:11px;color:var(--muted)">Подсказка «вписать в «${esc(dst)}»» скрыта · <a href="#" onclick="maySetDismiss(${i},false);return false" style="color:var(--terra)">вернуть</a></div>`;
-    } else if(!dst && !occ.length){   // не в сетке и курс не распознан — выбрать вручную (с подсказкой похожего)
+    } else if(!dst && !occ.length){   // курс из Альфы не совпал с нашей системой — не заставляем, но даём сопоставить
       const guess=_courseGuess(r.course,gcSorted);
-      action+=`<div style="font-size:12px">`
-        +(guess?`<div style="color:var(--muted);margin-bottom:2px">Курс «${esc(r.course)}» не найден точно. Похоже на «<b style="color:var(--terra)">${esc(guess)}</b>».</div>`
-               :`<span style="color:var(--muted)">Курс «${esc(r.course)}» не найден в расписании. </span>`)
-        +`Выберите: <select class="cell" style="min-width:220px" onchange="maySetCourse(${i},this.value)"><option value="">— курс из расписания —</option>${gcSorted.map(c=>`<option ${c===guess?'selected':''}>${esc(c)}</option>`).join("")}</select>`
+      const lead = r.course
+        ? `<span style="color:var(--muted)">Курс «${esc(r.course)}» — <b style="color:var(--red)">нет в системе</b>.${guess?` Похоже на «<b style="color:var(--terra)">${esc(guess)}</b>».`:''} При желании сопоставьте вручную: </span>`
+        : `<span style="color:var(--muted)">В Альфе не указан курс (договор пуст). Если нужно — выберите: </span>`;
+      action+=`<div style="font-size:12px">`+lead
+        +`<select class="cell" style="min-width:200px" onchange="maySetCourse(${i},this.value)"><option value="">— курс из расписания —</option>${gcSorted.map(c=>`<option ${c===guess?'selected':''}>${esc(c)}</option>`).join("")}</select>`
         +(guess?` <button class="btn sm" onclick="maySetCourse(${i},this.previousElementSibling.value)">Применить</button>`:'')
         +`</div>`;
     }
     if(!action) action=`<span style="color:var(--muted);font-size:12px">—</span>`;
     html+=`<tr>
       <td style="text-align:center;color:var(--muted)">${i+1}</td>
-      <td style="text-align:left">${esc(r.fio)}${(function(){ const kd=(st.occ||[]).flatMap(o=>o.kids).find(x=>x.dob); return kd?` <span style="font-size:11px;color:var(--blue);white-space:nowrap" title="Возраст из Альфы">· ${_ageStr(kd.dob)}</span>`:''; })()} <button type="button" class="btn ghost sm" style="padding:0 5px;font-size:12px" title="История ребёнка в Альфе — куда ходил в прошлом году" onclick="mayHist(${i})">👤</button></td>
+      <td style="text-align:left">${esc(r.fio)}${r.alfaMay?` <span style="font-size:10px;background:#fce9c8;color:#8a5a12;border-radius:8px;padding:0 6px;white-space:nowrap" title="Оплачено майских в Альфе (обычно = число курсов). Оставьте столько строк, сколько майских">🧾 ${r.alfaMay}</span>`:''}${(function(){ const kd=(st.occ||[]).flatMap(o=>o.kids).find(x=>x.dob); return kd?` <span style="font-size:11px;color:var(--blue);white-space:nowrap" title="Возраст из Альфы">· ${_ageStr(kd.dob)}</span>`:''; })()} <button type="button" class="btn ghost sm" style="padding:0 5px;font-size:12px" title="История ребёнка в Альфе — куда ходил в прошлом году" onclick="mayHist(${i})">👤</button></td>
       <td style="text-align:left">${courseCell}</td>
       <td style="text-align:left">${action}</td>
       <td style="text-align:center"><span class="k-del" title="Убрать строку" onclick="mayDelRow(${i})">×</span></td>
