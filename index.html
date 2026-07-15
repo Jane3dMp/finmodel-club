@@ -644,7 +644,7 @@ tr.rowlocked input,tr.rowlocked select{background:#EAF3EC;border-color:#cfe3d4;c
 
 <div class="modal-bg" id="alfaHistModal">
  <div class="modal" style="max-width:520px">
-  <h3 id="alfaHistTitle">📇 История в Альфе</h3>
+  <h3 id="alfaHistTitle">👤 История в Альфе</h3>
   <div id="alfaHistBody" style="font-size:13px"></div>
   <div class="hd-actions les-foot" style="margin-top:12px">
    <a id="alfaHistLink" class="btn ghost sm" href="#" target="_blank" rel="noopener" style="display:none">🔗 Открыть карточку в Альфе</a>
@@ -2931,7 +2931,7 @@ function renderKidsEditor(){
       <td class="k-name"><input type="text" class="k-in-name" value="${esc(k.n)}" placeholder="Фамилия Имя" oninput="refreshLesWage()"></td>
       ${KID_FLAGS.map(f=>`<td><input type="checkbox" class="k-in-${f.k}" ${k[f.k]?"checked":""} title="${f.lab}" onchange="kidFlagChanged()"></td>`).join("")}
       <td><input type="text" class="k-in-c" value="${esc(k.c||"")}" placeholder="—"></td>
-      <td><button type="button" class="btn ghost sm" style="padding:1px 6px${k.vbSent?';background:#e6f4ea;border-color:#66bb6a':''}" ${k.phone?"":"disabled"} title="${k.phone?(k.vbSent?('Отправлено'+(k.vbSentAt?' '+_vbDate(k.vbSentAt):'')+' · клик — отправить снова, правый клик — снять отметку'):('Viber → '+esc(k.phone))):'Нет телефона — сначала «📞 Контакты из Альфы»'}" onclick="kidViber(${i})" oncontextmenu="event.preventDefault();kidViberReset(${i});return false">${k.vbSent?'✅':'📨'}</button>${k.alfaId?`<button type="button" class="btn ghost sm" style="padding:1px 5px;margin-left:3px" title="История ребёнка в Альфе — куда ходил, баланс" onclick="kidHist(${i})">📇</button>`:''}</td>
+      <td><button type="button" class="btn ghost sm" style="padding:1px 6px${k.vbSent?';background:#e6f4ea;border-color:#66bb6a':''}" ${k.phone?"":"disabled"} title="${k.phone?(k.vbSent?('Отправлено'+(k.vbSentAt?' '+_vbDate(k.vbSentAt):'')+' · клик — отправить снова, правый клик — снять отметку'):('Viber → '+esc(k.phone))):'Нет телефона — сначала «📞 Контакты из Альфы»'}" onclick="kidViber(${i})" oncontextmenu="event.preventDefault();kidViberReset(${i});return false">${k.vbSent?'✅':'📨'}</button>${k.alfaId?`<button type="button" class="btn ghost sm" style="padding:1px 5px;margin-left:3px" title="История ребёнка в Альфе — куда ходил, баланс" onclick="kidHist(${i})">👤</button>`:''}</td>
       <td><select class="k-in-reply cell" style="font-size:11px;padding:3px 2px;min-width:96px" onchange="kidFlagChanged()">${VB_REPLY.map(r=>`<option value="${r[0]}" ${k.vbReply===r[0]?'selected':''}>${r[1]}</option>`).join("")}</select></td>
       <td><span class="k-del" title="Удалить" onclick="kidDel(${i})">×</span></td>
     </tr>`).join("")
@@ -4023,7 +4023,7 @@ function kidHist(i){ _kidsFromDOM(); const k=_editKids[i]; if(k) openAlfaHistory
 function vbHist(li,ki){ const les=S.grid[li]; const k=les&&(les.kids||[])[ki]; if(k) openAlfaHistory(k.alfaId,k.n); }
 async function openAlfaHistory(alfaId,name){
   if(!alfaId && !name){ toast("Нет данных для поиска в Альфе"); return; }
-  document.getElementById("alfaHistTitle").textContent="📇 "+(name||"История в Альфе");
+  document.getElementById("alfaHistTitle").textContent="👤 "+(name||"История в Альфе");
   const body=document.getElementById("alfaHistBody"), link=document.getElementById("alfaHistLink");
   link.style.display="none";
   body.innerHTML='<div style="color:var(--muted);padding:8px 0">Загружаю из Альфы…</div>';
@@ -4037,7 +4037,7 @@ async function openAlfaHistory(alfaId,name){
     if(j.notFound){ body.innerHTML='<div style="color:var(--muted);padding:8px 0">В Альфе не нашли ребёнка по имени «'+esc(name||"")+'». Возможно, другое написание — проверьте в Альфе.</div>'; return; }
     const s=j.summary||{}, h=(j.history||[]);
     const cid=j.customerId||alfaId;
-    if(j.matched && name && _normName(j.matched)!==_normName(name)) document.getElementById("alfaHistTitle").textContent="📇 "+j.matched+" (по «"+name+"»)";
+    if(j.matched && name && _normName(j.matched)!==_normName(name)) document.getElementById("alfaHistTitle").textContent="👤 "+j.matched+" (по «"+name+"»)";
     link.href=ALFA_HOST_URL+"/customer/"+(j.branch||1)+"/edit/index?id="+cid; link.style.display="";
     const money=v=>(v===null||v===undefined||v==="")?"—":(fmt(Math.round(+v))+" р");
     const dOnly=v=>v?String(v).slice(0,10).split("-").reverse().join("."):"";
@@ -4048,14 +4048,18 @@ async function openAlfaHistory(alfaId,name){
       +(s.paid_till?`оплачено до: <b>${dOnly(s.paid_till)}</b>`:``)
       +((s.balance==null&&!s.last_attend&&!s.paid_till&&!s.dob)?`<span style="color:var(--muted)">Сводка недоступна</span>`:``)
       +`</div>`;
+    const per=(dOnly(j.from)||"01.09.2025")+"–"+(dOnly(j.to)||"31.05.2026");
     if(h.length){
       h.sort((a,b)=>String(b.b_date||"").localeCompare(String(a.b_date||"")));
-      html+=`<label style="font-weight:600">Ходил в группах (${h.length}):</label>
+      html+=`<label style="font-weight:600">Ходил в прошлом году (${per}) — групп: ${h.length}:</label>
         <div style="max-height:40vh;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:6px 10px;margin-top:4px">
         ${h.map(x=>`<div style="padding:5px 0;border-bottom:1px solid #f0ebe4">
           <div style="font-weight:600">${esc(x.group)}</div>
           <div style="font-size:11px;color:var(--muted)">${dOnly(x.b_date)}${x.e_date?' – '+dOnly(x.e_date):''}</div></div>`).join("")}</div>`;
-    }else html+=`<div style="color:var(--muted);padding:6px 0">Групп в истории не найдено.</div>`;
+    }else{
+      html+=`<div style="color:var(--muted);padding:6px 0">За прошлый год (${per}) групп не найдено`
+        +(j.allCount?` (всего записей в Альфе: ${j.allCount} — вне этого периода)`:``)+`.</div>`;
+    }
     body.innerHTML=html;
   }catch(e){
     body.innerHTML=`<div class="callout" style="border-color:var(--red)"><b>Не получилось:</b> ${esc(e.message||String(e))}</div>`;
@@ -4068,7 +4072,7 @@ try{ _vbTodoOpen = localStorage.getItem("vbTodoOpen")==="1"; }catch(e){}
 function vbTodoToggle(){ _vbTodoOpen=!_vbTodoOpen; try{localStorage.setItem("vbTodoOpen",_vbTodoOpen?"1":"0");}catch(e){} renderVbTodo(); }
 function _vbName(it){
   return `<span class="vt-name" title="Открыть карточку занятия" onclick="editLes(${it.li},${it.ki})">${esc(it.name)}</span>`
-    +(it.alfaId?` <button type="button" class="vt-hist" title="История в Альфе — куда ходил" onclick="vbHist(${it.li},${it.ki})">📇</button>`:``)
+    +(it.alfaId?` <button type="button" class="vt-hist" title="История в Альфе — куда ходил" onclick="vbHist(${it.li},${it.ki})">👤</button>`:``)
     +(it.icons?` <span class="vt-ic">${it.icons}</span>`:``)
     +` <span class="vt-meta">— ${esc(it.course||"")}${it.time?', '+esc(it.time):''}</span>`;
 }
@@ -4339,9 +4343,16 @@ let _mayFilter="all", _mayQuery="", _mayAddOpen=false;
 function mayCourseMatch(pc){
   const gc=[...new Set((S.grid||[]).map(l=>l.course).filter(Boolean))];
   const n=_normCourse(pc);
-  let g=gc.find(x=>_normCourse(x)===n);
-  if(!g) g=gc.find(x=>{const gn=_normCourse(x); return gn.startsWith(n)||n.startsWith(gn);});
-  return g||"";
+  return gc.find(x=>_normCourse(x)===n)||"";   // только точное совпадение (без догадок)
+}
+/* курс строки с учётом ручного выбора (courseManual), иначе точное совпадение */
+function mayRowCourse(r){ return (r&&r.courseManual && (S.grid||[]).some(l=>l.course===r.courseManual)) ? r.courseManual : mayCourseMatch(r.course); }
+/* поиск ребёнка ВЕЗДЕ в сетке (в любой группе/курсе) — приоритет уже вписанной группы */
+function mayFindAnywhere(key){
+  const kids=[], gset=new Set();
+  (S.grid||[]).forEach(l=>kidsOf(l).forEach(k=>{ if(_normName(k.n)===key){
+    kids.push(k); gset.add((l.group||((DAY_NAMES[l.day]||"")+" "+(l.start||"")))+" · "+(l.course||"")); } }));
+  return {found:kids.length>0, kids, groupsText:[...gset].join(", "), anyMay:kids.some(k=>k.may), allMay:kids.length>0&&kids.every(k=>k.may)};
 }
 function mayCleanFio(fio){ return cleanKidName(String(fio).replace(/\(.*?\)/g," ").replace(/резерв\w*/gi," ").replace(/[#!]/g," ")); }
 function mayGroupsOf(courseName){
@@ -4418,15 +4429,16 @@ function mayAppendDoc(){
 function mayFilter(k){ _mayFilter=k; renderMay(); }
 function mayRerenderKeepFocus(){ renderMay(); const el=document.getElementById("mayQ"); if(el){ const v=el.value; el.focus(); el.value=""; el.value=v; } }
 function mayDelRow(i){ if(!S.mayList) return; S.mayList.splice(i,1); persistLocal(); renderMay(); }
-function mayMarkPaid(i){
+function mayMarkPaid(i){   // проставить 💰 во ВСЕ группы, где ребёнок уже вписан (его текущие)
   const r=(S.mayList||[])[i]; if(!r) return;
-  const dst=mayCourseMatch(r.course); const f=mayFindChild(_normName(r.fio),dst);
-  if(!f.found){ toast("Не найден в сетке"); renderMay(); return; }
-  f.kids.forEach(k=>k.may=true); persistLocal(); renderGrid(); renderMay(); toast("💰 отмечено: "+mayCleanFio(r.fio));
+  const key=_normName(r.fio); let n=0;
+  (S.grid||[]).forEach(l=>kidsOf(l).forEach(k=>{ if(_normName(k.n)===key && !k.may){ k.may=true; n++; } }));
+  if(!n){ toast("Не найден в сетке или уже с 💰"); renderMay(); return; }
+  persistLocal(); if(typeof fbSchedulePush==="function") fbSchedulePush(); renderGrid(); renderMay(); toast("💰 отмечено: "+mayCleanFio(r.fio));
 }
 function mayPlace(i){
   const r=(S.mayList||[])[i]; if(!r) return;
-  const dst=mayCourseMatch(r.course); if(!dst){ toast("Курс не сопоставлен"); return; }
+  const dst=mayRowCourse(r); if(!dst){ toast("Выберите курс"); return; }
   const sel=document.getElementById("mayGrp"+i); const gk=sel?sel.value:"";
   if(!gk){ toast("Выберите группу"); return; }
   const g=mayGroupsOf(dst).find(x=>x.key===gk); if(!g){ toast("Группа не найдена"); return; }
@@ -4437,18 +4449,15 @@ function mayPlace(i){
   });
   persistLocal(); renderGrid(); renderMay(); toast("Вписан(а) с 💰: "+nm);
 }
-function mayMarkAllFound(){
+function mayMarkAllFound(){   // всем, кто уже в сетке (в любой группе) — проставить 💰
   let n=0;
-  (S.mayList||[]).forEach(r=>{ const dst=mayCourseMatch(r.course); if(!dst) return;
-    const f=mayFindChild(_normName(r.fio),dst);
-    if(f.found && !f.allMay) f.kids.forEach(k=>{ if(!k.may){k.may=true;n++;} });
-  });
-  persistLocal(); renderGrid(); renderMay(); toast("Проставлено 💰: "+n);
+  (S.mayList||[]).forEach(r=>{ const key=_normName(r.fio);
+    (S.grid||[]).forEach(l=>kidsOf(l).forEach(k=>{ if(_normName(k.n)===key && !k.may){ k.may=true; n++; } })); });
+  persistLocal(); if(typeof fbSchedulePush==="function") fbSchedulePush(); renderGrid(); renderMay(); toast("Проставлено 💰: "+n);
 }
 function mayClearDone(){
   const before=(S.mayList||[]).length;
-  S.mayList=(S.mayList||[]).filter(r=>{ const dst=mayCourseMatch(r.course); if(!dst) return true;
-    const f=mayFindChild(_normName(r.fio),dst); return !(f.found && f.anyMay); });
+  S.mayList=(S.mayList||[]).filter(r=>{ const f=mayFindAnywhere(_normName(r.fio)); return !(f.found && f.anyMay); });
   persistLocal(); renderMay(); toast("Убрано разобранных: "+(before-(S.mayList||[]).length));
 }
 function renderMay(){
@@ -4470,13 +4479,16 @@ function renderMay(){
   const gcSorted=gcSet.slice().sort((a,b)=>a.localeCompare(b,"ru"));
   const cnt={all:list.length, missing:0, found:0, done:0, nocourse:0};
   const states=list.map(r=>{
-    // ручной выбор курса (если задан и курс есть в расписании) имеет приоритет
+    // 1) ПРИОРИТЕТ: ребёнок уже вписан в сетку где-либо — предлагаем его текущую группу
+    const any=mayFindAnywhere(_normName(r.fio));
+    if(any.found){
+      if(any.anyMay){ cnt.done++; return {state:"done", any}; }
+      cnt.found++; return {state:"found", any};      // в сетке, но без 💰
+    }
+    // 2) не в сетке — надо вписать; курс из списка (точный) или ручной выбор
     const dst=(r.courseManual && gcSet.includes(r.courseManual)) ? r.courseManual : matchC(r.course);
     if(!dst){ cnt.nocourse++; return {dst:"", state:"nocourse"}; }
-    const f=mayFindChild(_normName(r.fio),dst);
-    if(!f.found){ cnt.missing++; return {dst, state:"missing", f}; }
-    if(f.anyMay){ cnt.done++; return {dst, state:"done", f}; }
-    cnt.found++; return {dst, state:"found", f};
+    cnt.missing++; return {dst, state:"missing"};
   });
   const q=_ksNorm(_mayQuery);
   const fbtn=(k,lab)=>`<button class="btn ${_mayFilter===k?'':'ghost'} sm" onclick="mayFilter('${k}')">${lab}</button>`;
@@ -4515,13 +4527,13 @@ function renderMay(){
     else if(st.dst && _normCourse(st.dst)!==_normCourse(r.course)) courseCell=`${esc(r.course)} <span style="color:var(--muted)">→ ${esc(st.dst)}</span>`;
     let action="";
     if(st.state==="nocourse") action=`<span style="color:var(--muted);font-size:12px">Курс не совпал — выберите:</span> <select class="cell" style="min-width:220px;margin-left:6px" onchange="maySetCourse(${i},this.value)"><option value="">— курс из расписания —</option>${gcSorted.map(c=>`<option>${esc(c)}</option>`).join("")}</select>`;
-    else if(st.state==="done") action=`<span style="color:var(--green);font-weight:600">✓ в сетке · 💰 стоит</span> <span style="color:var(--muted);font-size:11px">${esc(st.f.groups)}</span>`;
-    else if(st.state==="found") action=`<span>в сетке: <b>${esc(st.f.groups)}</b>, но без 💰</span> <button class="btn sm" style="margin-left:6px" onclick="mayMarkPaid(${i})">Поставить 💰</button>`;
+    else if(st.state==="done") action=`<span style="color:var(--green);font-weight:600">✓ в сетке · 💰 стоит</span> <span style="color:var(--muted);font-size:11px">${esc(st.any.groupsText)}</span>`;
+    else if(st.state==="found") action=`<span>уже в сетке: <b>${esc(st.any.groupsText)}</b> — без 💰</span> <button class="btn sm" style="margin-left:6px" onclick="mayMarkPaid(${i})" title="Проставить 💰 в его текущую группу">Поставить 💰 сюда</button>`;
     else { const groups=mayGroupsOf(st.dst); const opts=groups.map(g=>`<option value="${esc(g.key)}">${esc(g.text)}</option>`).join("");
       action=`<select class="cell may-grp" id="mayGrp${i}" style="min-width:220px">${opts||'<option value="">нет групп в сетке</option>'}</select> <button class="btn sm" style="margin-left:6px" onclick="mayPlace(${i})">＋ Вписать с 💰</button>`; }
     html+=`<tr>
       <td style="text-align:center;color:var(--muted)">${i+1}</td>
-      <td style="text-align:left">${esc(r.fio)}${(function(){ const kd=st.f&&st.f.kids&&st.f.kids.find(x=>x.dob); return kd?` <span style="font-size:11px;color:var(--blue);white-space:nowrap" title="Возраст из Альфы">· ${_ageStr(kd.dob)}</span>`:''; })()} <button type="button" class="btn ghost sm" style="padding:0 5px;font-size:12px" title="История ребёнка в Альфе — куда ходил в прошлом году" onclick="mayHist(${i})">📇</button></td>
+      <td style="text-align:left">${esc(r.fio)}${(function(){ const kd=st.any&&st.any.kids&&st.any.kids.find(x=>x.dob); return kd?` <span style="font-size:11px;color:var(--blue);white-space:nowrap" title="Возраст из Альфы">· ${_ageStr(kd.dob)}</span>`:''; })()} <button type="button" class="btn ghost sm" style="padding:0 5px;font-size:12px" title="История ребёнка в Альфе — куда ходил в прошлом году" onclick="mayHist(${i})">👤</button></td>
       <td style="text-align:left">${courseCell}</td>
       <td style="text-align:left">${action}</td>
       <td style="text-align:center"><span class="k-del" title="Убрать строку" onclick="mayDelRow(${i})">×</span></td>

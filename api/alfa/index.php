@@ -95,9 +95,20 @@ switch ($action) {
         // членства в группах (cgi по customer_id) — вся история
         $cgi = alfa_call('cgi', 'index', ['customer_id' => $cid, 'page' => 0, 'count' => 200]);
         $items = $cgi['items'] ?? [];
-        // имена групп по id (мягко, по одной — их немного)
+        // фильтр по прошлому учебному году (по умолчанию 01.09.2025 – 31.05.2026)
+        $from = (string)($in['from'] ?? '2025-09-01');
+        $to   = (string)($in['to'] ?? '2026-05-31');
+        $overlap = function ($b, $e) use ($from, $to) {
+            $b = $b ? substr($b, 0, 10) : null;
+            $e = $e ? substr($e, 0, 10) : null;
+            if ($b && $b > $to) return false;      // началось после окна
+            if ($e && $e < $from) return false;    // закончилось до окна
+            return true;                            // пересекается (пустые границы = открыто)
+        };
+        $inWindow = array_values(array_filter($items, fn($it) => $overlap($it['b_date'] ?? null, $it['e_date'] ?? null)));
+        // имена групп по id (только для попавших в окно — мягко)
         $gnames = [];
-        foreach ($items as $it) {
+        foreach ($inWindow as $it) {
             $gid = $it['group_id'] ?? null;
             if ($gid === null || isset($gnames[$gid])) continue;
             $gr = alfa_http('POST', 'https://' . alfa_host() . '/v2api/' . alfa_branch() . '/group/index',
@@ -108,7 +119,7 @@ switch ($action) {
             'group'  => $gnames[$it['group_id'] ?? 0] ?? ('Группа #' . ($it['group_id'] ?? '?')),
             'b_date' => $it['b_date'] ?? null,
             'e_date' => $it['e_date'] ?? null,
-        ], $items);
+        ], $inWindow);
         // краткая сводка из карточки клиента
         $cu = alfa_http('POST', 'https://' . alfa_host() . '/v2api/' . alfa_branch() . '/customer/index',
             ['id' => $cid, 'page' => 0], alfa_token(), true);
@@ -121,7 +132,8 @@ switch ($action) {
             'paid_till'   => $c0['paid_till'] ?? null,
             'next_lesson' => $c0['next_lesson_date'] ?? null,
         ];
-        json_out(['ok' => true, 'customerId' => $cid, 'branch' => alfa_branch(), 'matched' => $matchedName, 'summary' => $summary, 'history' => $history]);
+        json_out(['ok' => true, 'customerId' => $cid, 'branch' => alfa_branch(), 'matched' => $matchedName,
+                  'summary' => $summary, 'history' => $history, 'allCount' => count($items), 'from' => $from, 'to' => $to]);
         break;
 
     // --- справочники для маппинга модель→Alfa (READ) ---
