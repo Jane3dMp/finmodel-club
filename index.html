@@ -317,6 +317,7 @@ tr.rowlocked input,tr.rowlocked select{background:#EAF3EC;border-color:#cfe3d4;c
    <button class="btn ghost sm" onclick="openSync()">Хранилище</button>
    <button class="btn ghost sm" id="undoBtn" onclick="undo()" title="Отменить последнее изменение" disabled>↩ Отменить</button>
    <button class="btn ghost sm" id="histBtn" onclick="openHistory()" title="История версий — снимки на случай потери данных" style="display:none">🕘 История</button>
+   <button class="btn ghost sm" id="reportBtn" onclick="openReport()" title="Отчёт для владельца — воронка подтверждений и прогноз" style="display:none">📊 Отчёт</button>
    <button class="btn sm" id="saveBtn" onclick="saveAll()">Сохранить</button>
    <span id="fbWhoami" style="font-size:11px;color:var(--muted);margin-left:6px"></span>
    <button class="btn ghost sm" id="fbLogoutBtn" onclick="fbLogout()" title="Выйти из аккаунта" style="display:none">Выйти</button>
@@ -636,6 +637,17 @@ tr.rowlocked input,tr.rowlocked select{background:#EAF3EC;border-color:#cfe3d4;c
    <button class="btn sm" id="alfaBtn" onclick="alfaFetch()">Загрузить из Альфы</button>
    <button class="btn ghost sm" onclick="closeAlfa()">Закрыть</button>
   </div>
+ </div>
+</div>
+
+<div class="modal-bg" id="reportModal">
+ <div class="modal" style="max-width:1000px">
+  <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+   <h3 style="margin:0">📊 Отчёт по набору</h3>
+   <button class="btn ghost sm" onclick="printReport()" style="margin-left:auto">🖨 Печать</button>
+   <button class="btn ghost sm" onclick="closeReport()">Закрыть</button>
+  </div>
+  <div id="reportBody"></div>
  </div>
 </div>
 
@@ -1089,6 +1101,8 @@ function _fbUpdateAdminUI(){
   if(asy) asy.style.display=_fbIsAdmin?"":"none";
   const hb=document.getElementById("histBtn");
   if(hb) hb.style.display=_fbIsAdmin?"":"none";
+  const rb=document.getElementById("reportBtn");
+  if(rb) rb.style.display=_fbIsAdmin?"":"none";
   if(_fbPendRef){ try{_fbPendRef.off();}catch(e){} _fbPendRef=null; }
   if(_fbIsAdmin && _fbDb){
     _fbPendRef=_fbDb.ref("pending");
@@ -4059,6 +4073,89 @@ async function vbTodoSend(li,ki){
   persistLocal(); if(typeof fbSchedulePush==="function") fbSchedulePush();
   renderVbTodo();
   toast(copied?"Текст в буфере — вставьте в Viber (Ctrl+V). Отмечено ✅":"Открываю Viber. Отмечено ✅");
+}
+/* ===== ОТЧЁТ ДЛЯ ВЛАДЕЛЬЦА: воронка подтверждений + прогноз оборота ===== */
+function _ownerReport(){
+  const wpm=(S.assume&&S.assume.weeksPerMonth)||4;
+  const groups={};
+  (S.grid||[]).forEach(l=>{
+    const course=l.course||"—";
+    const key=(l.group&&l.group.trim())?("g:"+l.group.trim()):("c:"+course+"|"+(l.day||"")+"|"+(l.start||""));
+    if(!groups[key]){
+      const lib=courseFromLib(course);
+      groups[key]={name:(l.group&&l.group.trim())||course, course, teacher:l.teacher||"", day:l.day||0, time:l.start||"",
+        cap:(lib&&+lib.groupSize)||0, price:(lib&&+lib.price)||0, visits:(lib&&+lib.visits)||1, kids:{}};
+    }
+    const g=groups[key];
+    kidsOf(l).forEach(k=>{
+      const nn=_normName(k.n); if(!nn) return;
+      const p=g.kids[nn]||{name:k.n,sent:false,reply:"",no:false};
+      p.sent=p.sent||!!k.vbSent; p.no=p.no||!!k.no;
+      const rank=r=>r==="yes"?3:r==="no"?2:r==="maybe"?1:0;
+      if(rank(k.vbReply)>rank(p.reply)) p.reply=k.vbReply;
+      g.kids[nn]=p;
+    });
+  });
+  const rows=Object.values(groups).map(g=>{
+    const ks=Object.values(g.kids).filter(k=>!k.no);
+    const total=ks.length, sent=ks.filter(k=>k.sent).length;
+    const yes=ks.filter(k=>k.reply==="yes").length, no=ks.filter(k=>k.reply==="no").length, maybe=ks.filter(k=>k.reply==="maybe").length;
+    const none=total-yes-no-maybe, fill=g.cap>0?Math.round(yes/g.cap*100):0, revWeek=yes*g.price*g.visits;
+    const risk=total>0 && (yes/total)<0.5;
+    return Object.assign({},g,{total,sent,yes,no,maybe,none,fill,revWeek,risk});
+  });
+  rows.sort((a,b)=>(a.day-b.day)||String(a.time).localeCompare(String(b.time))||a.name.localeCompare(b.name,"ru"));
+  const T={groups:rows.length,kids:0,sent:0,yes:0,no:0,maybe:0,none:0,revWeekYes:0,revWeekAll:0,wpm};
+  rows.forEach(r=>{T.kids+=r.total;T.sent+=r.sent;T.yes+=r.yes;T.no+=r.no;T.maybe+=r.maybe;T.none+=r.none;T.revWeekYes+=r.revWeek;T.revWeekAll+=r.total*r.price*r.visits;});
+  return {rows,T};
+}
+function _reportHTML(){
+  const {rows,T}=_ownerReport();
+  const rate=T.kids?Math.round(T.yes/T.kids*100):0;
+  const dn=["","Пн","Вт","Ср","Чт","Пт","Сб","Вс"];
+  const kp=(lab,val,sub,col)=>`<div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;min-width:118px">
+     <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.03em">${lab}</div>
+     <div style="font-size:22px;font-weight:700;color:${col||'var(--coal)'}">${val}</div>
+     ${sub?`<div style="font-size:11px;color:var(--muted)">${sub}</div>`:''}</div>`;
+  const tName=t=>(typeof shortName==="function"?shortName(t):t)||"";
+  let h=`<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+    ${kp("Групп",T.groups)}${kp("Детей в расписании",T.kids)}${kp("Отправлено",T.sent+" / "+T.kids)}
+    ${kp("Подтвердили 🟢",T.yes,rate+"% от записанных","var(--green)")}${kp("Отказ / Думают",T.no+" / "+T.maybe,"🔴 / 🟡")}${kp("Молчат",T.none)}
+  </div>
+  <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+    ${kp("Оборот/нед (подтв.)",fmt(T.revWeekYes)+" р","от подтвердивших","var(--green)")}
+    ${kp("Оборот/мес (подтв.)",fmt(Math.round(T.revWeekYes*T.wpm))+" р","×"+T.wpm+" недель","var(--green)")}
+    ${kp("Потенциал/нед",fmt(T.revWeekAll)+" р","если подтвердят все","var(--muted)")}
+  </div>
+  <div class="tscroll"><table style="width:100%;border-collapse:collapse;font-size:12px">
+    <thead><tr>${['Группа','Курс','Педагог','День·время','Вмест.','Записано','🟢','🔴','🟡','Молчат','Заполн.','Оборот/нед'].map((t,i)=>`<th style="background:var(--coal);color:#fff;padding:6px 8px;text-align:${i<4?'left':'center'};position:sticky;top:0">${t}</th>`).join("")}</tr></thead><tbody>`;
+  const td=(v,al)=>`<td style="padding:5px 8px;border-bottom:1px solid var(--line);text-align:${al||'left'}">${v}</td>`;
+  rows.forEach(r=>{
+    h+=`<tr style="${r.risk?'background:#fdecea':''}">`
+      +td((r.risk?'⚠ ':'')+'<b>'+esc(r.name)+'</b>')+td(esc(r.course))+td(esc(tName(r.teacher)))+td((dn[r.day]||'')+' '+esc(r.time||''))
+      +td(r.cap||'—','center')+td(r.total,'center')
+      +td('<b style="color:var(--green)">'+r.yes+'</b>','center')+td(r.no||'','center')+td(r.maybe||'','center')
+      +td('<span style="color:var(--muted)">'+(r.none||'')+'</span>','center')+td(r.cap>0?r.fill+'%':'—','center')+td(fmt(r.revWeek),'right')
+    +`</tr>`;
+  });
+  h+=`</tbody></table></div>`;
+  const risky=rows.filter(r=>r.risk);
+  if(risky.length) h+=`<div class="callout" style="margin-top:12px;border-color:var(--red)"><b>⚠ Группы риска (${risky.length})</b> — подтверждений меньше половины записанных:<br>${risky.map(r=>esc(r.name)+' <span style="color:var(--muted)">(🟢'+r.yes+' из '+r.total+')</span>').join(" · ")}</div>`;
+  h+=`<p style="font-size:11px;color:var(--muted);margin-top:8px">Оборот/нед = подтвердивших × цена × визитов/нед (из данных курса). «Молчат» = отправлено, но родитель пока не ответил. Группа = поле «Группа» занятия, иначе курс+время.</p>`;
+  return h;
+}
+function openReport(){ if(!_fbIsAdmin){ toast("Только для админа"); return; } document.getElementById("reportBody").innerHTML=_reportHTML(); document.getElementById("reportModal").classList.add("show"); }
+function closeReport(){ document.getElementById("reportModal").classList.remove("show"); }
+function printReport(){
+  const w=window.open("","_blank"); if(!w){ toast("Разрешите всплывающие окна"); return; }
+  const css=`body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;padding:20px}
+    h2{margin:0 0 2px}.sub{color:#8a8178;font-size:12px;margin-bottom:14px}
+    .tscroll{overflow:visible}.callout{border:1px solid #ddd;border-left:3px solid #b5532a;border-radius:8px;padding:8px 12px;font-size:12px}
+    :root{--line:#ddd;--muted:#8a8178;--coal:#1c1410;--green:#2e7d32;--red:#b5532a}`;
+  w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Отчёт по набору</title><style>${css}</style></head><body>
+    <h2>Отчёт по набору — Прознание + CODDY</h2><div class="sub">Сценарий: ${esc(currentScenarioName())} · ${esc(new Date().toLocaleString("ru-RU"))}</div>
+    ${_reportHTML()}</body></html>`);
+  w.document.close(); w.focus(); setTimeout(()=>{ try{ w.print(); }catch(e){} },350);
 }
 function editViberTpl(){
   document.getElementById("vtplText").value=S.viberTpl||VIBER_TPL_DEFAULT;
