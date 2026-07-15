@@ -84,7 +84,14 @@ switch ($action) {
     // --- история ребёнка: в каких группах был + краткая сводка (READ) ---
     case 'history':
         $cid = (int)($in['customerId'] ?? 0);
-        if (!$cid) json_out(['ok' => false, 'error' => 'нет customerId'], 400);
+        $matchedName = '';
+        if (!$cid && !empty($in['name'])) {           // поиск по ФИО, если id не передан
+            $s = alfa_http('POST', 'https://' . alfa_host() . '/v2api/' . alfa_branch() . '/customer/index',
+                ['name' => (string)$in['name'], 'removed' => 0, 'page' => 0, 'count' => 20], alfa_token(), true);
+            $cands = $s['items'] ?? [];
+            if (count($cands)) { $cid = (int)($cands[0]['id'] ?? 0); $matchedName = (string)($cands[0]['name'] ?? ''); }
+        }
+        if (!$cid) json_out(['ok' => true, 'notFound' => true, 'history' => [], 'summary' => []]);
         // членства в группах (cgi по customer_id) — вся история
         $cgi = alfa_call('cgi', 'index', ['customer_id' => $cid, 'page' => 0, 'count' => 200]);
         $items = $cgi['items'] ?? [];
@@ -114,7 +121,7 @@ switch ($action) {
             'paid_till'   => $c0['paid_till'] ?? null,
             'next_lesson' => $c0['next_lesson_date'] ?? null,
         ];
-        json_out(['ok' => true, 'customerId' => $cid, 'branch' => alfa_branch(), 'summary' => $summary, 'history' => $history]);
+        json_out(['ok' => true, 'customerId' => $cid, 'branch' => alfa_branch(), 'matched' => $matchedName, 'summary' => $summary, 'history' => $history]);
         break;
 
     // --- справочники для маппинга модель→Alfa (READ) ---
