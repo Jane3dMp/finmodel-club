@@ -110,7 +110,7 @@ switch ($action) {
         $inWin = fn($d) => !$d || ($d >= $from && $d <= $to);
 
         // 1) cgi
-        $cgi = alfa_http('POST', "$host/cgi/index", ['customer_id' => $cid, 'page' => 0, 'count' => 200], $token, true);
+        $cgi = alfa_http('POST', "$host/cgi/index", ['customer_id' => $cid, 'page' => 0, 'count' => 200], $token, true, 12);
         $cgiItems = isset($cgi['__err']) ? [] : ($cgi['items'] ?? []);
         foreach ($cgiItems as $it) {
             $b = $it['b_date'] ?? null; $e = $it['e_date'] ?? null;
@@ -120,8 +120,8 @@ switch ($action) {
         }
         // 2) уроки в окне (пробуем разные имена фильтров — лишние Alfa игнорирует)
         $les = alfa_http('POST', "$host/lesson/index",
-            ['customer_id' => $cid, 'date_from' => $from, 'date_to' => $to, 'b_date' => $from, 'e_date' => $to, 'page' => 0, 'count' => 500],
-            $token, true, 30);
+            ['customer_id' => $cid, 'date_from' => $from, 'date_to' => $to, 'b_date' => $from, 'e_date' => $to, 'page' => 0, 'count' => 150],
+            $token, true, 14);
         $lesItems = isset($les['__err']) ? [] : ($les['items'] ?? []);
         $gsched = [];   // group_id => набор слотов "деньНедели|начало|конец" (из фактических уроков)
         $hm = function ($v) { return preg_match('/(\d{1,2}:\d{2})/', (string)$v, $m) ? $m[1] : ''; };
@@ -147,16 +147,22 @@ switch ($action) {
             }
             return implode(', ', $out);
         };
-        // имена групп по id (ЗАПРОС ПО ID отдаёт и архивные) — мягко, с ограничением
-        $history = []; $cap = 0;
+        // имена групп: сперва ОДИН общий запрос активных (быстро), затем точечно по id только
+        // для тех, кого там нет (архивные) — так минимум запросов.
+        $names = [];
+        $grAll = alfa_http('POST', "$host/group/index", ['page' => 0, 'count' => 500], $token, true, 12);
+        foreach (($grAll['items'] ?? []) as $g) { if (isset($g['id'])) $names[$g['id']] = $g['name'] ?? ('Группа #' . $g['id']); }
+        $history = []; $miss = 0;
         foreach ($gid as $id => $dr) {
-            if ($cap++ > 40) break;
-            $gr = alfa_http('POST', "$host/group/index", ['id' => (int)$id, 'page' => 0], $token, true, 12);
-            $nm = $gr['items'][0]['name'] ?? ('Группа #' . $id);
+            if (isset($names[$id])) { $nm = $names[$id]; }
+            elseif ($miss++ < 6) {                      // архивную группу тянем по id (не более 6)
+                $gr = alfa_http('POST', "$host/group/index", ['id' => (int)$id, 'page' => 0], $token, true, 6);
+                $nm = $gr['items'][0]['name'] ?? ('Группа #' . $id);
+            } else { $nm = 'Группа #' . $id; }
             $history[] = ['group' => $nm, 'b_date' => $dr['b'], 'e_date' => $dr['e'], 'sched' => $schedOf($id)];
         }
         // краткая сводка из карточки клиента
-        $cu = alfa_http('POST', "$host/customer/index", ['id' => $cid, 'page' => 0], $token, true);
+        $cu = alfa_http('POST', "$host/customer/index", ['id' => $cid, 'page' => 0], $token, true, 12);
         $c0 = $cu['items'][0] ?? [];
         $summary = [
             'name'        => $c0['name'] ?? '',
