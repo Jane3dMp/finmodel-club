@@ -253,15 +253,19 @@ switch ($action) {
         }
 
         // обойти customer-tariff по филиалам, отобрать майские
-        $perPage = 50; $maxPages = 300; $maxScan = 12000;
-        $rows = []; $custIds = []; $scanned = 0; $capped = false;
+        $token = alfa_token(); $host = 'https://' . alfa_host();
+        $perPage = 50; $maxPages = 300; $maxScan = 15000;
+        $rows = []; $custIds = []; $scanned = 0; $capped = false; $totalReported = 0; $errNote = null;
         $sampleKeys = null; $sampleRecords = [];
         foreach ($branches as $bid) {
             $page = 0;
             do {
-                // оптимистично передаём фильтры дат — незнакомые Alfa игнорирует
-                $r = alfa_call_branch((int)$bid, 'customer-tariff', 'index',
-                    ['page' => $page, 'count' => $perPage, 'b_date' => $from, 'e_date' => $to]);
+                // БЕЗ фильтров дат — Alfa могла трактовать b_date/e_date строго и вернуть 0.
+                // soft=true: ошибку не роняем, а показываем в debug.
+                $r = alfa_http('POST', "$host/v2api/$bid/customer-tariff/index",
+                    ['page' => $page, 'count' => $perPage], $token, true, 20);
+                if (isset($r['__err'])) { $errNote = $r; break; }
+                if ($page === 0) $totalReported += (int)($r['total'] ?? 0);
                 $items = $r['items'] ?? [];
                 foreach ($items as $ct) {
                     $scanned++;
@@ -316,11 +320,33 @@ switch ($action) {
             unset($row);
         }
 
+        // если bulk ничего не просканировал — возможно, эндпоинт требует customer_id.
+        // Пробуем по нескольким клиентам, чтобы увидеть форму записи абонемента.
+        $probe = null;
+        if ($scanned === 0) {
+            $rc = alfa_http('POST', "$host/v2api/" . alfa_branch() . "/customer/index",
+                ['removed' => 0, 'page' => 0, 'count' => 5], $token, true, 15);
+            $pout = [];
+            foreach (array_slice(($rc['items'] ?? []), 0, 3) as $c) {
+                $pid = (int)($c['id'] ?? 0); if (!$pid) continue;
+                $pr = alfa_http('POST', "$host/v2api/" . alfa_branch() . "/customer-tariff/index",
+                    ['customer_id' => $pid, 'page' => 0, 'count' => 20], $token, true, 15);
+                $pitems = isset($pr['__err']) ? [] : ($pr['items'] ?? []);
+                $pout[] = ['customer_id' => $pid, 'name' => trim((string)($c['name'] ?? '')),
+                           'total' => $pr['total'] ?? null, 'items' => count($pitems),
+                           'err' => $pr['__err'] ?? null,
+                           'keys' => $pitems ? array_keys($pitems[0]) : [],
+                           'sample' => $pitems[0] ?? null];
+            }
+            $probe = ['note' => 'bulk дал 0 — проба по customer_id', 'results' => $pout];
+        }
+
         json_out(['ok' => true, 'count' => count($rows), 'subs' => $rows,
                   'from' => $from, 'to' => $to, 'keyword' => $kw, 'allBranches' => $allBranches,
-                  'debug' => ['scanned' => $scanned, 'capped' => $capped, 'branches' => count($branches),
-                              'subjects' => count($subjects), 'sample_keys' => $sampleKeys,
-                              'sample_records' => $sampleRecords]]);
+                  'debug' => ['scanned' => $scanned, 'total_reported' => $totalReported, 'capped' => $capped,
+                              'branches' => count($branches), 'subjects' => count($subjects),
+                              'err' => $errNote, 'probe' => $probe,
+                              'sample_keys' => $sampleKeys, 'sample_records' => $sampleRecords]]);
         break;
 
     default:
