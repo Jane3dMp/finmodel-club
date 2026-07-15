@@ -83,6 +83,7 @@ switch ($action) {
 
     // --- история ребёнка: в каких группах был + краткая сводка (READ) ---
     case 'history':
+        @set_time_limit(60);
         $cid = (int)($in['customerId'] ?? 0);
         $matchedName = '';
         if (!$cid && !empty($in['name'])) {           // поиск по ФИО, если id не передан
@@ -106,14 +107,12 @@ switch ($action) {
             return true;                            // пересекается (пустые границы = открыто)
         };
         $inWindow = array_values(array_filter($items, fn($it) => $overlap($it['b_date'] ?? null, $it['e_date'] ?? null)));
-        // имена групп по id (только для попавших в окно — мягко)
+        // имена групп: ОДИН запрос на все группы (id→name), маппим локально (быстрее, чем по одной)
         $gnames = [];
-        foreach ($inWindow as $it) {
-            $gid = $it['group_id'] ?? null;
-            if ($gid === null || isset($gnames[$gid])) continue;
-            $gr = alfa_http('POST', 'https://' . alfa_host() . '/v2api/' . alfa_branch() . '/group/index',
-                ['id' => (int)$gid, 'page' => 0], alfa_token(), true);
-            $gnames[$gid] = $gr['items'][0]['name'] ?? ('Группа #' . $gid);
+        $grAll = alfa_http('POST', 'https://' . alfa_host() . '/v2api/' . alfa_branch() . '/group/index',
+            ['page' => 0, 'count' => 500], alfa_token(), true);
+        foreach (($grAll['items'] ?? []) as $g) {
+            if (isset($g['id'])) $gnames[$g['id']] = $g['name'] ?? ('Группа #' . $g['id']);
         }
         $history = array_map(fn($it) => [
             'group'  => $gnames[$it['group_id'] ?? 0] ?? ('Группа #' . ($it['group_id'] ?? '?')),
