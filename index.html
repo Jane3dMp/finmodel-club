@@ -4405,6 +4405,25 @@ function mayFindAnywhere(key){
   return {found:kids.length>0, kids, groupsText:[...gset].join(", "), anyMay:kids.some(k=>k.may), allMay:kids.length>0&&kids.every(k=>k.may)};
 }
 function mayCleanFio(fio){ return cleanKidName(String(fio).replace(/\(.*?\)/g," ").replace(/резерв\w*/gi," ").replace(/[#!]/g," ")); }
+/* все группы ребёнка в сетке, сгруппированные по (курс · группа) */
+function mayOccurrences(key){
+  const map={};
+  (S.grid||[]).forEach(l=>kidsOf(l).forEach(k=>{ if(_normName(k.n)===key){
+    const gl=l.group||((DAY_NAMES[l.day]||"")+" "+(l.start||""));
+    const gk=(l.course||"")+"||"+gl;
+    if(!map[gk]) map[gk]={course:l.course||"", group:gl, kids:[]};
+    map[gk].kids.push(k);
+  } }));
+  return Object.values(map).map(o=>Object.assign(o,{paid:o.kids.length>0&&o.kids.every(k=>k.may)}));
+}
+/* отметить 💰 в одной конкретной группе ребёнка (по индексу занятия в mayOccurrences) */
+function mayMarkOcc(i,gi){
+  const r=(S.mayList||[])[i]; if(!r) return;
+  const occ=mayOccurrences(_normName(r.fio))[gi]; if(!occ) return;
+  let n=0; occ.kids.forEach(k=>{ if(!k.may){ k.may=true; n++; } });
+  persistLocal(); if(typeof fbSchedulePush==="function") fbSchedulePush(); renderGrid(); renderMay();
+  toast(n?("💰 отмечено: "+occ.group):"Уже стоит");
+}
 function mayGroupsOf(courseName){
   const groups={}, order=[];
   (S.grid||[]).forEach((l,idx)=>{
@@ -4529,16 +4548,19 @@ function renderMay(){
   const gcSorted=gcSet.slice().sort((a,b)=>a.localeCompare(b,"ru"));
   const cnt={all:list.length, missing:0, found:0, done:0, nocourse:0};
   const states=list.map(r=>{
-    // 1) ПРИОРИТЕТ: ребёнок уже вписан в сетку где-либо — предлагаем его текущую группу
-    const any=mayFindAnywhere(_normName(r.fio));
-    if(any.found){
-      if(any.anyMay){ cnt.done++; return {state:"done", any}; }
-      cnt.found++; return {state:"found", any};      // в сетке, но без 💰
-    }
-    // 2) не в сетке — надо вписать; курс из списка (точный) или ручной выбор
-    const dst=(r.courseManual && gcSet.includes(r.courseManual)) ? r.courseManual : matchC(r.course);
-    if(!dst){ cnt.nocourse++; return {dst:"", state:"nocourse"}; }
-    cnt.missing++; return {dst, state:"missing"};
+    const key=_normName(r.fio);
+    const occ=mayOccurrences(key);                                   // все группы ребёнка (столбиком)
+    const dst=(r.courseManual && gcSet.includes(r.courseManual)) ? r.courseManual : matchC(r.course); // курс этого абонемента
+    const inDst=dst && occ.some(o=>_normCourse(o.course)===_normCourse(dst));
+    const dstPaid=dst && occ.some(o=>_normCourse(o.course)===_normCourse(dst) && o.paid);
+    const anyUnpaid=occ.some(o=>!o.paid);
+    let state;
+    if(dst && !inDst) state="missing";                              // абонемент на курс, куда ещё НЕ вписан
+    else if(!dst && !occ.length) state="nocourse";                  // курс не распознан и нигде не в сетке
+    else if((dst?dstPaid:true) && !anyUnpaid) state="done";         // всё нужное с 💰
+    else state="found";                                             // есть что отметить 💰
+    if(state==="missing") cnt.missing++; else if(state==="done") cnt.done++; else if(state==="nocourse") cnt.nocourse++; else cnt.found++;
+    return {state, dst, occ, inDst};
   });
   const q=_ksNorm(_mayQuery);
   const fbtn=(k,lab)=>`<button class="btn ${_mayFilter===k?'':'ghost'} sm" onclick="mayFilter('${k}')">${lab}</button>`;
@@ -4575,15 +4597,29 @@ function renderMay(){
     let courseCell=esc(r.course);
     if(st.state==="nocourse") courseCell=`<span style="color:var(--red)">${esc(r.course)} — нет в расписании</span>`;
     else if(st.dst && _normCourse(st.dst)!==_normCourse(r.course)) courseCell=`${esc(r.course)} <span style="color:var(--muted)">→ ${esc(st.dst)}</span>`;
+    const occ=st.occ||[], dst=st.dst;
     let action="";
-    if(st.state==="nocourse") action=`<span style="color:var(--muted);font-size:12px">Курс не совпал — выберите:</span> <select class="cell" style="min-width:220px;margin-left:6px" onchange="maySetCourse(${i},this.value)"><option value="">— курс из расписания —</option>${gcSorted.map(c=>`<option>${esc(c)}</option>`).join("")}</select>`;
-    else if(st.state==="done") action=`<span style="color:var(--green);font-weight:600">✓ в сетке · 💰 стоит</span> <span style="color:var(--muted);font-size:11px">${esc(st.any.groupsText)}</span>`;
-    else if(st.state==="found") action=`<span>уже в сетке: <b>${esc(st.any.groupsText)}</b> — без 💰</span> <button class="btn sm" style="margin-left:6px" onclick="mayMarkPaid(${i})" title="Проставить 💰 в его текущую группу">Поставить 💰 сюда</button>`;
-    else { const groups=mayGroupsOf(st.dst); const opts=groups.map(g=>`<option value="${esc(g.key)}">${esc(g.text)}</option>`).join("");
-      action=`<select class="cell may-grp" id="mayGrp${i}" style="min-width:220px">${opts||'<option value="">нет групп в сетке</option>'}</select> <button class="btn sm" style="margin-left:6px" onclick="mayPlace(${i})">＋ Вписать с 💰</button>`; }
+    if(occ.length){   // все группы ребёнка — столбиком, у каждой своя кнопка 💰
+      action+=`<div style="display:flex;flex-direction:column;gap:3px">`+occ.map((o,gi)=>{
+        const isDst=dst && _normCourse(o.course)===_normCourse(dst);
+        return `<div style="display:flex;align-items:center;gap:6px;font-size:12px;flex-wrap:wrap">
+          <span><b>${esc(o.group)}</b> <span style="color:var(--muted)">· ${esc(o.course)}</span>${isDst?' <span style="color:var(--terra)">(этот абонемент)</span>':''}</span>
+          ${o.paid?'<span style="color:var(--green);font-weight:600">✓ 💰</span>':`<button class="btn sm" style="padding:1px 8px" onclick="mayMarkOcc(${i},${gi})">Поставить 💰</button>`}</div>`;
+      }).join("")+`</div>`;
+    }
+    if(dst && !st.inDst){   // абонемент на курс, куда ещё не вписан — предложить группу этого курса
+      const groups=mayGroupsOf(dst); const opts=groups.map(g=>`<option value="${esc(g.key)}">${esc(g.text)}</option>`).join("");
+      action+=`<div style="${occ.length?'margin-top:5px;padding-top:5px;border-top:1px dashed var(--line);':''}font-size:12px">
+        <span style="color:var(--muted)">Абонемент «${esc(dst)}» — вписать в группу: </span>
+        <select class="cell may-grp" id="mayGrp${i}" style="min-width:200px">${opts||'<option value="">нет групп этого курса</option>'}</select>
+        <button class="btn sm" style="margin-left:4px" onclick="mayPlace(${i})">＋ Вписать с 💰</button></div>`;
+    } else if(!dst){   // курс не распознан — выбрать вручную
+      action+=`<div style="${occ.length?'margin-top:5px;':''}font-size:12px"><span style="color:var(--muted)">Курс не найден в расписании — выберите: </span><select class="cell" style="min-width:200px" onchange="maySetCourse(${i},this.value)"><option value="">— курс из расписания —</option>${gcSorted.map(c=>`<option>${esc(c)}</option>`).join("")}</select></div>`;
+    }
+    if(!action) action=`<span style="color:var(--muted);font-size:12px">—</span>`;
     html+=`<tr>
       <td style="text-align:center;color:var(--muted)">${i+1}</td>
-      <td style="text-align:left">${esc(r.fio)}${(function(){ const kd=st.any&&st.any.kids&&st.any.kids.find(x=>x.dob); return kd?` <span style="font-size:11px;color:var(--blue);white-space:nowrap" title="Возраст из Альфы">· ${_ageStr(kd.dob)}</span>`:''; })()} <button type="button" class="btn ghost sm" style="padding:0 5px;font-size:12px" title="История ребёнка в Альфе — куда ходил в прошлом году" onclick="mayHist(${i})">👤</button></td>
+      <td style="text-align:left">${esc(r.fio)}${(function(){ const kd=(st.occ||[]).flatMap(o=>o.kids).find(x=>x.dob); return kd?` <span style="font-size:11px;color:var(--blue);white-space:nowrap" title="Возраст из Альфы">· ${_ageStr(kd.dob)}</span>`:''; })()} <button type="button" class="btn ghost sm" style="padding:0 5px;font-size:12px" title="История ребёнка в Альфе — куда ходил в прошлом году" onclick="mayHist(${i})">👤</button></td>
       <td style="text-align:left">${courseCell}</td>
       <td style="text-align:left">${action}</td>
       <td style="text-align:center"><span class="k-del" title="Убрать строку" onclick="mayDelRow(${i})">×</span></td>
