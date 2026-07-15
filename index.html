@@ -3633,14 +3633,17 @@ function gotoKidLesson(idx){
 
 /* ===== ИМПОРТ «КУПИЛ МАЙСКИЙ» ===== */
 let _mayRows=[], _mayCourses=[];
+/* латинские буквы-двойники → русские (частая беда копипаста из Excel/Word:
+   в «Арт-студия» буква латинская, а выглядит как русская → строки не совпадают) */
+const _CONFUSE={a:"а",c:"с",e:"е",o:"о",p:"р",x:"х",y:"у",k:"к",m:"м",t:"т",h:"н"};
+function _foldLat(s){ return String(s).toLowerCase().replace(/[acehkmoptxy]/g,ch=>_CONFUSE[ch]||ch); }
 function _normName(s){
-  return cleanKidName(String(s||"").replace(/\(.*?\)/g," ").replace(/\bрезерв\w*\b/gi," "))
-    .replace(/ё/gi,"е")
-    .toLowerCase()
+  return _foldLat(cleanKidName(String(s||"").replace(/\(.*?\)/g," ").replace(/\bрезерв\w*\b/gi," "))
+    .replace(/ё/gi,"е"))
     .split(" ").slice(0,2).join(" ");        // Фамилия Имя
 }
 function _normCourse(s){
-  return String(s||"").replace(/ё/gi,"е").replace(/[^а-яa-z0-9]/gi,"").toLowerCase();
+  return _foldLat(String(s||"").replace(/ё/gi,"е")).replace(/[^а-яa-z0-9]/gi,"");
 }
 function openMayImport(){
   _mayRows=[]; _mayCourses=[];
