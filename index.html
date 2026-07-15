@@ -4360,6 +4360,11 @@ function mayGroupsOf(courseName){
     g.text=nm+" · "+(DAY_NAMES[g.day]||"")+" "+(g.start||"")+(g.room?(" · каб. "+g.room):"")+" · "+g.count+"👤";
     return g; });
 }
+function maySetCourse(i,val){
+  const r=(S.mayList||[])[i]; if(!r) return;
+  r.courseManual=val||"";
+  persistLocal(); if(typeof fbSchedulePush==="function") fbSchedulePush(); renderMay();
+}
 function mayHist(i){
   const r=(S.mayList||[])[i]; if(!r) return;
   let alfaId=null; const key=_normName(r.fio);
@@ -4460,10 +4465,13 @@ function renderMay(){
   }
   // сопоставление курсов один раз за рендер
   const gcSet=[...new Set((S.grid||[]).map(l=>l.course).filter(Boolean))];
-  const matchC=(pc)=>{ const n=_normCourse(pc); let g=gcSet.find(x=>_normCourse(x)===n); if(!g) g=gcSet.find(x=>{const gn=_normCourse(x); return gn.startsWith(n)||n.startsWith(gn);}); return g||""; };
+  // ТОЛЬКО точное совпадение названия курса (без догадок по началу строки).
+  const matchC=(pc)=>{ const n=_normCourse(pc); return gcSet.find(x=>_normCourse(x)===n)||""; };
+  const gcSorted=gcSet.slice().sort((a,b)=>a.localeCompare(b,"ru"));
   const cnt={all:list.length, missing:0, found:0, done:0, nocourse:0};
   const states=list.map(r=>{
-    const dst=matchC(r.course);
+    // ручной выбор курса (если задан и курс есть в расписании) имеет приоритет
+    const dst=(r.courseManual && gcSet.includes(r.courseManual)) ? r.courseManual : matchC(r.course);
     if(!dst){ cnt.nocourse++; return {dst:"", state:"nocourse"}; }
     const f=mayFindChild(_normName(r.fio),dst);
     if(!f.found){ cnt.missing++; return {dst, state:"missing", f}; }
@@ -4506,7 +4514,7 @@ function renderMay(){
     if(st.state==="nocourse") courseCell=`<span style="color:var(--red)">${esc(r.course)} — нет в расписании</span>`;
     else if(st.dst && _normCourse(st.dst)!==_normCourse(r.course)) courseCell=`${esc(r.course)} <span style="color:var(--muted)">→ ${esc(st.dst)}</span>`;
     let action="";
-    if(st.state==="nocourse") action=`<span style="color:var(--muted);font-size:12px">Курс не сопоставлен — проверьте название курса</span>`;
+    if(st.state==="nocourse") action=`<span style="color:var(--muted);font-size:12px">Курс не совпал — выберите:</span> <select class="cell" style="min-width:220px;margin-left:6px" onchange="maySetCourse(${i},this.value)"><option value="">— курс из расписания —</option>${gcSorted.map(c=>`<option>${esc(c)}</option>`).join("")}</select>`;
     else if(st.state==="done") action=`<span style="color:var(--green);font-weight:600">✓ в сетке · 💰 стоит</span> <span style="color:var(--muted);font-size:11px">${esc(st.f.groups)}</span>`;
     else if(st.state==="found") action=`<span>в сетке: <b>${esc(st.f.groups)}</b>, но без 💰</span> <button class="btn sm" style="margin-left:6px" onclick="mayMarkPaid(${i})">Поставить 💰</button>`;
     else { const groups=mayGroupsOf(st.dst); const opts=groups.map(g=>`<option value="${esc(g.key)}">${esc(g.text)}</option>`).join("");
