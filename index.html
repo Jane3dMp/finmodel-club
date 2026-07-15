@@ -989,6 +989,13 @@ function _applyRemote(remote){
   _fbApplying=false;
 }
 function fbSchedulePush(){ clearTimeout(_fbPushTimer); _fbPushTimer=setTimeout(fbPush, 700); }
+/* стабильная сериализация: ключи объектов по алфавиту — чтобы разный ПОРЯДОК полей
+   (после пересборки/применения из облака) не считался «изменением» занятия */
+function _canon(v){
+  if(v===null || typeof v!=="object") return JSON.stringify(v);
+  if(Array.isArray(v)) return "["+v.map(_canon).join(",")+"]";
+  return "{"+Object.keys(v).sort().map(k=>JSON.stringify(k)+":"+_canon(v[k])).join(",")+"}";
+}
 function fbPush(){
   if(!FB_ON || !_fbRef) return;
   _ensureLessonIds();
@@ -996,7 +1003,7 @@ function fbPush(){
   const oldG=_fbLast.grid||{};
   const oldRest=_fbLast.rest||"";
   const updates={};
-  for(const id in newG){ if(JSON.stringify(newG[id])!==JSON.stringify(oldG[id])) updates["grid/"+id]=newG[id]; }
+  for(const id in newG){ if(_canon(newG[id])!==_canon(oldG[id])) updates["grid/"+id]=newG[id]; }
   for(const id in oldG){ if(!newG[id]) updates["grid/"+id]=null; }       // удалённые занятия
   if(newRest!==oldRest) updates["rest"]=newRest;
   if(!Object.keys(updates).length){ _fbLast={ grid:newG, rest:newRest }; return; }
@@ -1074,9 +1081,10 @@ function _logDescribe(oldG,newG,oldRest,newRest){
   for(const id in newG){ if(!oldG[id]) parts.push("➕ занятие: "+_lesLabel(newG[id])); }
   for(const id in oldG){ if(!newG[id]) parts.push("🗑 удалено занятие: "+_lesLabel(oldG[id])); }
   for(const id in newG){ if(!oldG[id]) continue;
-    if(JSON.stringify(newG[id])!==JSON.stringify(oldG[id])){
+    if(_canon(newG[id])!==_canon(oldG[id])){
       const det=_lesDetail(oldG[id],newG[id]);
-      parts.push("✏️ "+_lesLabel(newG[id])+(det.length?(" — "+det.join("; ")):""));
+      // логируем только осмысленные правки; «изменение» без конкретики — технический шум
+      if(det.length) parts.push("✏️ "+_lesLabel(newG[id])+" — "+det.join("; "));
     }
   }
   if((oldRest||"")!==(newRest||"")){
