@@ -4983,6 +4983,26 @@ async function mayFromAlfa(){
     alert("Не удалось подтянуть майские: "+((e&&e.message)||e)+"\n\nЕсли это про доступ/токен — проверьте вход в модель и «🔌 Проверить связь» в «📞 Контакты из Альфы».");
   }
 }
+/* Разведка: где в Альфе лежат абонементы. Дампит сырые ответы по одному ребёнку. */
+async function mayAlfaProbe(){
+  const name=prompt("Проба Альфы — чей абонемент посмотреть?\nВведите ФИО ребёнка, который ТОЧНО купил майский:","Синяков");
+  if(!name) return;
+  toast("Пробую Альфу…");
+  try{
+    const token=await _alfaIdToken();
+    const r=await fetch(ALFA_PROXY+"?action=probe",{method:"POST",
+      headers:{"Content-Type":"application/json","Authorization":"Bearer "+token},
+      body:JSON.stringify({name})});
+    const j=await r.json().catch(()=>({ok:false,error:"не JSON (код "+r.status+")"}));
+    if(!r.ok||!j.ok) throw new Error(j.error||("Ошибка "+r.status));
+    const dbg=JSON.stringify(j.probe||j,null,1);
+    const box=document.getElementById("mayReconBody");
+    box.innerHTML='<div class="card"><h3>🔬 Проба Альфы: '+esc(name)+'</h3>'
+      +'<p style="font-size:12px;color:var(--muted)">Скопируйте текст целиком (клик выделяет всё) и пришлите агенту — по этим полям настроим подтяжку майских.</p>'
+      +'<textarea class="cell wide" rows="24" style="font-family:monospace;font-size:11px" onclick="this.select()">'+esc(dbg)+'</textarea>'
+      +'<div style="margin-top:8px"><button class="btn ghost" onclick="renderMay()">← Назад к списку</button></div></div>';
+  }catch(e){ alert("Проба не удалась: "+((e&&e.message)||e)); }
+}
 function renderMay(){
   const box=document.getElementById("mayReconBody"); if(!box) return;
   const list=S.mayList||[];
@@ -5032,6 +5052,7 @@ function renderMay(){
         <button class="btn ghost sm" onclick="mayClearDone()" title="Убрать из списка строки, которые уже с 💰">🧹 Убрать готовые (${cnt.done})</button>
         <button class="btn sm" onclick="mayToggleAdd()" title="Дописать ещё детей, не трогая уже загруженных">＋ Добавить в список</button>
         ${_fbIsAdmin?`<button class="btn sm" onclick="mayFromAlfa()" title="Подтянуть список майских прямо из AlfaCRM (надёжнее ручного)">🗓 Майские из Альфы</button>`:""}
+        ${_fbIsAdmin?`<button class="btn ghost sm" onclick="mayAlfaProbe()" title="Диагностика: где в Альфе лежат абонементы (по одному ребёнку)">🔬 Проба</button>`:""}
         <button class="btn ghost sm" onclick="mayReplaceDoc()">↻ Заменить список</button>
       </span>
       <span class="hd-sep"></span>

@@ -349,6 +349,42 @@ switch ($action) {
                               'sample_keys' => $sampleKeys, 'sample_records' => $sampleRecords]]);
         break;
 
+    // --- РАЗВЕДКА: где в Alfa лежат абонементы/счета (READ, диагностика) ---
+    //   По ФИО (или customerId) дампит СЫРЫЕ ответы кандидатов-эндпоинтов + весь объект клиента.
+    case 'probe':
+        @set_time_limit(60);
+        $token = alfa_token(); $host = 'https://' . alfa_host(); $br = alfa_branch();
+        $cid = (int)($in['customerId'] ?? 0);
+        $matched = '';
+        if (!$cid && !empty($in['name'])) {
+            $s = alfa_http('POST', "$host/v2api/$br/customer/index",
+                ['name' => (string)$in['name'], 'removed' => 0, 'page' => 0, 'count' => 5], $token, true, 15);
+            $c0 = $s['items'][0] ?? null;
+            if ($c0) { $cid = (int)($c0['id'] ?? 0); $matched = (string)($c0['name'] ?? ''); }
+        }
+        $out = ['customerId' => $cid, 'matched' => $matched, 'branch' => $br, 'customer' => null, 'endpoints' => []];
+        if ($cid) {
+            $cust = alfa_http('POST', "$host/v2api/$br/customer/index", ['id' => $cid, 'page' => 0], $token, true, 12);
+            $out['customer'] = $cust['items'][0] ?? $cust;   // весь объект клиента — вдруг абонемент внутри
+        }
+        // кандидаты, где могут лежать абонементы/счета/платежи
+        $cand = ['customer-tariff', 'tariff', 'pay', 'cgi', 'invoice', 'subscription', 'balance', 'customer-pay'];
+        foreach ($cand as $ent) {
+            $r = alfa_http('POST', "$host/v2api/$br/$ent/index",
+                ['customer_id' => $cid, 'page' => 0, 'count' => 10], $token, true, 10);
+            $items = (is_array($r) && isset($r['items']) && is_array($r['items'])) ? $r['items'] : null;
+            $out['endpoints'][$ent] = [
+                'top_keys' => is_array($r) ? array_keys($r) : [],
+                'total'    => is_array($r) ? ($r['total'] ?? null) : null,
+                'count'    => $items !== null ? count($items) : 0,
+                'first'    => $items[0] ?? null,
+                'err'      => is_array($r) ? ($r['__err'] ?? null) : null,
+                'raw'      => ($items === null) ? $r : null,   // нет items → показать весь ответ (ошибку/иную форму)
+            ];
+        }
+        json_out(['ok' => true, 'probe' => $out]);
+        break;
+
     default:
         json_out(['ok' => false, 'error' => 'Неизвестное действие: ' . $action], 400);
 }
