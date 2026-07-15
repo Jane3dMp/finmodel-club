@@ -339,9 +339,7 @@ details.callout[open] summary{margin-bottom:6px}
   <div class="syncbox">
    <span class="dot local" id="syncDot"></span>
    <span id="syncTxt">Локальный режим</span>
-   <select id="scnSelect" class="cell" style="max-width:160px" onchange="switchScenario(this.value)" title="Сценарий / год"></select>
    <button class="btn ghost sm" id="undoBtn" onclick="undo()" title="Отменить последнее изменение" disabled>↩ Отменить</button>
-   <button class="btn sm" id="saveBtn" onclick="saveAll()">Сохранить</button>
    <div class="more-wrap">
     <button class="btn ghost sm more-toggle" onclick="toggleMore(this)" title="Меню">☰ Меню<span id="menuBadge"></span></button>
     <div class="more-menu right">
@@ -350,7 +348,7 @@ details.callout[open] summary{margin-bottom:6px}
      <button class="btn ghost sm" id="histBtn" onclick="openHistory()" title="История версий — снимки на случай потери данных" style="display:none">🕘 История</button>
      <button class="btn ghost sm" id="reportBtn" onclick="openReport()" title="Отчёт для владельца — воронка подтверждений и прогноз" style="display:none">📊 Отчёт</button>
      <div class="menu-sep"></div>
-     <button class="btn ghost sm" onclick="openScnMenu()" title="Управление версиями модели">⋮ Версии модели</button>
+     <button class="btn ghost sm" onclick="openScnMenu()" title="Отдельные модели: годы и сценарии «что если»">⋮ Версии модели</button>
      <button class="btn ghost sm" onclick="openSync()" title="Резервная Google-таблица">Хранилище</button>
      <div class="menu-sep"></div>
      <button class="btn ghost sm" id="fbLogoutBtn" onclick="fbLogout()" title="Выйти из аккаунта" style="display:none">Выйти</button>
@@ -943,7 +941,7 @@ function fbConnect(){
   _ensureLessonIds();
   _fbRef=_fbDb.ref("scenarios/"+_fbKey(currentScenarioName()));
   FB_ON=true;
-  setSync("warn","● Подключаюсь к Firebase…");
+  setSync("warn","● Подключаюсь…");
   _fbRef.once("value").then(snap=>{
     const val=snap.val();
     if(val && (val.grid || val.rest)){
@@ -951,7 +949,7 @@ function fbConnect(){
     } else {
       _fbLast={grid:{},rest:""}; fbPush();       // пусто — заливаем текущие как стартовые
     }
-    setSync("ok","✓ Firebase · живая синхронизация");
+    setSync("ok","✓ Сохранено · онлайн");
     _fbRef.on("value", onRemoteModel);
     _startHistTimer();
   }).catch(e=>{ FB_ON=false; setSync("err","Firebase: нет связи"); });
@@ -991,7 +989,7 @@ function fbPush(){
   _fbLast={ grid:newG, rest:newRest };
   if(!Object.keys(updates).length) return;
   setSync("warn","● Сохраняю…");
-  _fbRef.update(updates).then(()=>{ _dirty=false; setSync("ok","✓ Firebase · живая синхронизация"); })
+  _fbRef.update(updates).then(()=>{ _dirty=false; setSync("ok","✓ Сохранено · онлайн"); })
     .catch(e=>{ setSync("err","⚠ Firebase: "+((e&&e.message)||"ошибка")); });
 }
 /* ===== АВТОСНИМКИ (страховка от потери данных) — отдельный узел history/{сценарий} ===== */
@@ -5172,9 +5170,19 @@ if(S.gasUrl){
 } else { ensureCurrentInList(); setSync("local","Локальный режим"); renderAll(); markReady(); }
 /* инициализация истории отмены после старта */
 setTimeout(()=>{ if(_lastSnap===null) _lastSnap=_snap(); updateUndoBtn(); }, 0);
-/* защита от потери: предупредить перед уходом, если есть несохранённое */
-window.addEventListener("beforeunload", function(e){
-  if(_dirty){ e.preventDefault(); e.returnValue="Есть несохранённые изменения — они пропадут. Уйти?"; return e.returnValue; }
+/* Живая модель: всё автосохраняется в Firebase и localStorage. Перед уходом
+   не показываем предупреждений (как в Альфе) — только тихо дожимаем отложенную
+   запись, чтобы даже мгновенное обновление страницы ничего не потеряло. */
+window.addEventListener("beforeunload", function(){
+  try{ if(FB_ON && _dirty){ clearTimeout(_fbPushTimer); fbPush(); } }catch(e){}
+});
+/* Ctrl/⌘+S: не открывать диалог браузера — модель и так сохраняется сама */
+window.addEventListener("keydown", function(e){
+  if((e.ctrlKey||e.metaKey) && (e.key==="s"||e.key==="S")){
+    e.preventDefault();
+    try{ if(FB_ON && _dirty){ clearTimeout(_fbPushTimer); fbPush(); } }catch(x){}
+    toast("Всё сохраняется автоматически ✓");
+  }
 });
 
 </script>
