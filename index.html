@@ -3904,6 +3904,15 @@ function _normName(s){
 function _normCourse(s){
   return _foldLat(String(s||"").replace(/ё/gi,"е")).replace(/[^а-яa-z0-9]/gi,"");
 }
+/* «семейство» курса — базовое название без длительности: «7 навыков … (1 час)»
+   и «… (2 часа)» дают одно семейство. Нужно, чтобы при покупке курса подавались
+   ВСЕ его варианты (час/2 часа/…), а не только точное название из абонемента. */
+function _courseBase(s){
+  let t=String(s||"");
+  t=t.replace(/\([^)]*\)/g," ");                                       // «(1 час)», «(2 часа)», любые скобки
+  t=t.replace(/\b\d+([.,]\d+)?\s*(час(а|ов)?|ч|мин(ут(ы|а)?)?)\b/gi," "); // висячая длительность без скобок
+  return _normCourse(t);
+}
 function openMayImport(){
   _mayRows=[]; _mayCourses=[];
   document.getElementById("mayBody").innerHTML=`
@@ -4746,12 +4755,16 @@ function mayMarkOcc(i,gi){
   persistLocal(); if(typeof fbSchedulePush==="function") fbSchedulePush(); renderGrid(); renderMay();
   toast(n?("💰 отмечено: "+occ.group):"Уже стоит");
 }
+/* группы ВСЕГО семейства курса (все варианты «(1 час)»/«(2 часа)»/… — вместе),
+   а не только точное название. Ключ группы включает точный курс — чтобы разные
+   варианты с одинаковым номером группы не сливались. */
 function mayGroupsOf(courseName){
+  const fam=_courseBase(courseName);
   const groups={}, order=[];
   (S.grid||[]).forEach((l,idx)=>{
-    if(l.course!==courseName) return;
-    const gk = l.group || ("__"+l.day+"_"+l.start+"_"+l.room);
-    if(!groups[gk]){ groups[gk]={key:gk,label:l.group||"",teacher:l.teacher||"",newIntake:!!l.newIntake,day:l.day,start:l.start,end:l.end,room:l.room,idxs:[]}; order.push(gk); }
+    if(!l.course || _courseBase(l.course)!==fam) return;
+    const gk = l.course+"||"+(l.group || ("__"+l.day+"_"+l.start+"_"+l.room));
+    if(!groups[gk]){ groups[gk]={key:gk,course:l.course,label:l.group||"",teacher:l.teacher||"",newIntake:!!l.newIntake,day:l.day,start:l.start,end:l.end,room:l.room,idxs:[]}; order.push(gk); }
     groups[gk].idxs.push(idx);
   });
   return order.map(k=>{ const g=groups[k];
@@ -4759,8 +4772,10 @@ function mayGroupsOf(courseName){
     // если номера группы нет — подписываем педагогом, чтобы занятие было узнаваемо
     let nm=g.label;
     if(!nm) nm=(g.teacher?shortName(g.teacher):"без номера группы");
+    // маркер варианта курса (из скобок, напр. «(1 час)») — раз в списке теперь разные варианты
+    const vm=(g.course||"").match(/\(([^)]*)\)/); const variant=vm?(" ("+vm[1]+")"):"";
     // пометка «новый набор» — префиксом 🆕 (в <option> HTML-бейдж не рендерится, поэтому текстом)
-    g.text=(g.newIntake?"🆕 ":"")+nm+" · "+(DAY_NAMES[g.day]||"")+" "+(g.start||"")+(g.end?("–"+g.end):"")+(g.room?(" · каб. "+g.room):"")+" · "+g.count+"👤"+(g.newIntake?" · НОВЫЙ НАБОР":"");
+    g.text=(g.newIntake?"🆕 ":"")+nm+variant+" · "+(DAY_NAMES[g.day]||"")+" "+(g.start||"")+(g.end?("–"+g.end):"")+(g.room?(" · каб. "+g.room):"")+" · "+g.count+"👤"+(g.newIntake?" · НОВЫЙ НАБОР":"");
     return g; });
 }
 function maySetCourse(i,val){
@@ -4847,20 +4862,21 @@ function mayPlace(i){
   });
   persistLocal(); renderGrid(); renderMay(); toast("Вписан(а) с 💰: "+nm);
 }
-/* перевести ребёнка в другую группу того же курса (убрать из старых групп курса,
-   вписать в выбранную, сохранив карточку и отметку 💰) */
+/* перевести ребёнка в другую группу того же семейства курса (убрать из старых
+   групп семейства, вписать в выбранную, сохранив карточку и отметку 💰) */
 function mayMoveGroup(i, sel){
   const r=(S.mayList||[])[i]; if(!r||!sel) return;
   const targetKey=sel.value, courseName=sel.dataset.course;
   if(!targetKey){ toast("Выберите группу"); return; }
   const g=mayGroupsOf(courseName).find(x=>x.key===targetKey); if(!g){ toast("Группа не найдена"); return; }
+  const fam=_courseBase(courseName);
   const key=_normName(r.fio), nm=mayCleanFio(r.fio);
   const targetIdxs=new Set(g.idxs);
-  // текущая карточка ребёнка в этом курсе (со всеми полями) + была ли 💰
+  // текущая карточка ребёнка в этом семействе (со всеми полями) + была ли 💰
   let proto=null, wasPaid=false;
-  (S.grid||[]).forEach(l=>{ if(l.course!==courseName) return; kidsOf(l).forEach(k=>{ if(_normName(k.n)===key){ if(!proto) proto=JSON.parse(JSON.stringify(k)); if(k.may) wasPaid=true; } }); });
-  // убрать из всех занятий этого курса, кроме целевой группы
-  (S.grid||[]).forEach((l,idx)=>{ if(l.course!==courseName) return; if(targetIdxs.has(idx)) return;
+  (S.grid||[]).forEach(l=>{ if(_courseBase(l.course)!==fam) return; kidsOf(l).forEach(k=>{ if(_normName(k.n)===key){ if(!proto) proto=JSON.parse(JSON.stringify(k)); if(k.may) wasPaid=true; } }); });
+  // убрать из всех занятий этого семейства, кроме целевой группы
+  (S.grid||[]).forEach((l,idx)=>{ if(_courseBase(l.course)!==fam) return; if(targetIdxs.has(idx)) return;
     if(Array.isArray(l.kids)) l.kids=l.kids.filter(k=>_normName(k.n)!==key); });
   // вписать в целевую группу (перенести карточку со всеми полями, сохранить 💰)
   g.idxs.forEach(idx=>{ const l=S.grid[idx]; if(!Array.isArray(l.kids)) l.kids=[];
@@ -4972,15 +4988,19 @@ function renderMay(){
           <span><b>${esc(o.group)}</b>${o.newIntake?' <span class="ni-tag" title="Новый набор">NEW</span>':''} <span style="color:var(--muted)">· ${esc(o.course)}</span>${o.sched?` <span style="color:var(--terra-d)">· 🗓 ${esc(o.sched)}</span>`:''}${isDst?' <span style="color:var(--terra)">(этот абонемент)</span>':''}</span>
           ${o.paid?'<span style="color:var(--green);font-weight:600">✓ 💰</span>':`<button class="btn sm" style="padding:1px 8px" onclick="mayMarkOcc(${i},${gi})">Поставить 💰</button>`}</div>`;
       }).join("")+`</div>`;
-      // перевести в другую группу того же курса (когда нужна не та группа, что вписана)
-      [...new Set(occ.map(o=>o.course).filter(Boolean))].forEach(c=>{
+      // перевести в другую группу того же СЕМЕЙСТВА курса (все варианты — час/2 часа/…)
+      const childKey=_normName(r.fio);
+      const famRep={};   // семейство → представитель (курс, куда ребёнок вписан)
+      occ.forEach(o=>{ const fb=_courseBase(o.course); if(fb && !famRep[fb]) famRep[fb]=o.course; });
+      const famKeys=Object.keys(famRep), multiFam=famKeys.length>1;
+      famKeys.forEach(fb=>{
+        const c=famRep[fb];
         const groups=mayGroupsOf(c);
-        if(groups.length<=1) return;   // некуда переводить — у курса одна группа
-        const curLabels=occ.filter(o=>o.course===c).map(o=>o.group);
-        const opts=groups.map(g=>{ const here=!!(g.label && curLabels.includes(g.label));
+        if(groups.length<=1) return;   // некуда переводить — у семейства одна группа
+        const opts=groups.map(g=>{ const here=g.idxs.some(idx=>kidsOf(S.grid[idx]).some(k=>_normName(k.n)===childKey));
           return `<option value="${esc(g.key)}"${here?' selected':''}>${esc(g.text)}${here?' — сейчас здесь':''}</option>`; }).join("");
         action+=`<details class="may-move-d" style="margin-top:2px">
-          <summary title="Перевести в другую группу этого курса">↔ сменить группу${occ.filter(o=>o.course===c).length&&[...new Set(occ.map(o=>o.course))].length>1?' курса «'+esc(c)+'»':''}</summary>
+          <summary title="Перевести в другую группу этого курса (любой вариант)">↔ сменить группу${multiFam?' курса «'+esc(c)+'»':''}</summary>
           <div style="font-size:12px;display:flex;align-items:center;gap:6px;flex-wrap:wrap">
             <select class="cell may-move" data-course="${esc(c)}" style="min-width:220px">${opts}</select>
             <button class="btn ghost sm" onclick="mayMoveGroup(${i}, this.previousElementSibling)">Перевести</button></div></details>`;
