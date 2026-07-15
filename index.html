@@ -3901,6 +3901,23 @@ function _normName(s){
     .replace(/ё/gi,"е"))
     .split(" ").slice(0,2).join(" ");        // Фамилия Имя
 }
+/* Сопоставление ФИО по СЛОВАМ (Фамилия Имя Отчество). Два имени считаются одним
+   ребёнком, только если одно — пословный ПРЕФИКС другого:
+   «Полонников Даниил» ↔ «Полонников Даниил Ильич» — да (в списке нет отчества),
+   но «Полонников Даниил Ильич» ↔ «Полонников Даниил Петрович» — НЕТ (разные тёзки).
+   Раньше сравнивали только «Фамилия Имя» → однофамильцы-тёзки сливались, и детям
+   показывались/отмечались чужие абонементы. Требуем минимум 2 слова с обеих сторон. */
+function _nameWords(s){
+  return _foldLat(cleanKidName(String(s||"").replace(/\(.*?\)/g," ").replace(/\bрезерв\w*\b/gi," ")).replace(/ё/gi,"е"))
+    .split(" ").filter(Boolean);
+}
+function _sameKid(a,b){
+  const A=_nameWords(a), B=_nameWords(b), n=Math.min(A.length,B.length);
+  if(n<2) return false;                      // слишком мало слов — не рискуем сливать
+  for(let i=0;i<n;i++){ if(A[i]!==B[i]) return false; }
+  return true;
+}
+function _nameKey(s){ return _nameWords(s).join(" "); }   // полный ключ (для дедупа списка)
 function _normCourse(s){
   return _foldLat(String(s||"").replace(/ё/gi,"е")).replace(/[^а-яa-z0-9]/gi,"");
 }
@@ -3991,7 +4008,7 @@ function mayApply(){
     (S.grid||[]).forEach(l=>{
       if(l.course!==dst) return;
       kidsOf(l).forEach(k=>{
-        if(_normName(k.n)===r.key){ if(!k.may){ k.may=true; hits++; } found=true; }
+        if(_sameKid(k.n, r.fio)){ if(!k.may){ k.may=true; hits++; } found=true; }
       });
     });
     if(!found) notFound.push(r);
@@ -4726,17 +4743,17 @@ function mayCourseMatch(pc){
 /* курс строки с учётом ручного выбора (courseManual), иначе точное совпадение */
 function mayRowCourse(r){ return (r&&r.courseManual && (S.grid||[]).some(l=>l.course===r.courseManual)) ? r.courseManual : mayCourseMatch(r.course); }
 /* поиск ребёнка ВЕЗДЕ в сетке (в любой группе/курсе) — приоритет уже вписанной группы */
-function mayFindAnywhere(key){
+function mayFindAnywhere(fio){
   const kids=[], gset=new Set();
-  (S.grid||[]).forEach(l=>kidsOf(l).forEach(k=>{ if(_normName(k.n)===key){
+  (S.grid||[]).forEach(l=>kidsOf(l).forEach(k=>{ if(_sameKid(k.n, fio)){
     kids.push(k); gset.add((l.group||((DAY_NAMES[l.day]||"")+" "+(l.start||"")))+" · "+(l.course||"")); } }));
   return {found:kids.length>0, kids, groupsText:[...gset].join(", "), anyMay:kids.some(k=>k.may), allMay:kids.length>0&&kids.every(k=>k.may)};
 }
 function mayCleanFio(fio){ return cleanKidName(String(fio).replace(/\(.*?\)/g," ").replace(/резерв\w*/gi," ").replace(/[#!]/g," ")); }
 /* все группы ребёнка в сетке, сгруппированные по (курс · группа) */
-function mayOccurrences(key){
+function mayOccurrences(fio){
   const map={};
-  (S.grid||[]).forEach(l=>kidsOf(l).forEach(k=>{ if(_normName(k.n)===key){
+  (S.grid||[]).forEach(l=>kidsOf(l).forEach(k=>{ if(_sameKid(k.n, fio)){
     const gl=l.group||((DAY_NAMES[l.day]||"")+" "+(l.start||""));
     const gk=(l.course||"")+"||"+gl;
     if(!map[gk]) map[gk]={course:l.course||"", group:gl, kids:[], slots:new Set(), newIntake:false};
@@ -4750,7 +4767,7 @@ function mayOccurrences(key){
 /* отметить 💰 в одной конкретной группе ребёнка (по индексу занятия в mayOccurrences) */
 function mayMarkOcc(i,gi){
   const r=(S.mayList||[])[i]; if(!r) return;
-  const occ=mayOccurrences(_normName(r.fio))[gi]; if(!occ) return;
+  const occ=mayOccurrences(r.fio)[gi]; if(!occ) return;
   let n=0; occ.kids.forEach(k=>{ if(!k.may){ k.may=true; n++; } });
   persistLocal(); if(typeof fbSchedulePush==="function") fbSchedulePush(); renderGrid(); renderMay();
   toast(n?("💰 отмечено: "+occ.group):"Уже стоит");
@@ -4791,14 +4808,14 @@ function maySetDismiss(i,val){
 }
 function mayHist(i){
   const r=(S.mayList||[])[i]; if(!r) return;
-  let alfaId=null; const key=_normName(r.fio);
-  (S.grid||[]).some(l=>kidsOf(l).some(k=>{ if(_normName(k.n)===key && k.alfaId){ alfaId=k.alfaId; return true; } return false; }));
+  let alfaId=null;
+  (S.grid||[]).some(l=>kidsOf(l).some(k=>{ if(_sameKid(k.n, r.fio) && k.alfaId){ alfaId=k.alfaId; return true; } return false; }));
   openAlfaHistory(alfaId, r.fio);   // если не вписан (нет alfaId) — прокси найдёт по имени
 }
-function mayFindChild(key,courseName){
+function mayFindChild(fio,courseName){
   const kids=[], groups=new Set();
   (S.grid||[]).forEach(l=>{ if(l.course!==courseName) return;
-    kidsOf(l).forEach(k=>{ if(_normName(k.n)===key){ kids.push(k); groups.add(l.group||((DAY_NAMES[l.day]||"")+" "+(l.start||""))); } }); });
+    kidsOf(l).forEach(k=>{ if(_sameKid(k.n, fio)){ kids.push(k); groups.add(l.group||((DAY_NAMES[l.day]||"")+" "+(l.start||""))); } }); });
   return {found:kids.length>0, kids, groups:[...groups].join(", "), anyMay:kids.some(k=>k.may), allMay:kids.length>0&&kids.every(k=>k.may)};
 }
 function mayLoadDoc(){
@@ -4823,7 +4840,7 @@ function mayAppendDoc(){
   const ta=document.getElementById("mayAddText"); if(!ta) return;
   const raw=(ta.value||"").trim(); if(!raw){ toast("Пусто"); return; }
   if(!Array.isArray(S.mayList)) S.mayList=[];
-  const seen=new Set(S.mayList.map(r=>_normName(r.fio)+"|"+_normCourse(r.course)));
+  const seen=new Set(S.mayList.map(r=>_nameKey(r.fio)+"|"+_normCourse(r.course)));
   let added=0, dup=0;
   raw.split(/\r?\n/).forEach(ln=>{
     const p=ln.split("\t").map(x=>x.trim());
@@ -4831,7 +4848,7 @@ function mayAppendDoc(){
     const fio=p[0], note=p[1], course=p[2];
     if(!fio||!course) return;
     if(/^фио$/i.test(fio)) return;
-    const k=_normName(fio)+"|"+_normCourse(course);
+    const k=_nameKey(fio)+"|"+_normCourse(course);
     if(seen.has(k)){ dup++; return; }
     seen.add(k); S.mayList.push({fio,note,course}); added++;
   });
@@ -4844,8 +4861,8 @@ function mayRerenderKeepFocus(){ renderMay(); const el=document.getElementById("
 function mayDelRow(i){ if(!S.mayList) return; S.mayList.splice(i,1); persistLocal(); renderMay(); }
 function mayMarkPaid(i){   // проставить 💰 во ВСЕ группы, где ребёнок уже вписан (его текущие)
   const r=(S.mayList||[])[i]; if(!r) return;
-  const key=_normName(r.fio); let n=0;
-  (S.grid||[]).forEach(l=>kidsOf(l).forEach(k=>{ if(_normName(k.n)===key && !k.may){ k.may=true; n++; } }));
+  let n=0;
+  (S.grid||[]).forEach(l=>kidsOf(l).forEach(k=>{ if(_sameKid(k.n, r.fio) && !k.may){ k.may=true; n++; } }));
   if(!n){ toast("Не найден в сетке или уже с 💰"); renderMay(); return; }
   persistLocal(); if(typeof fbSchedulePush==="function") fbSchedulePush(); renderGrid(); renderMay(); toast("💰 отмечено: "+mayCleanFio(r.fio));
 }
@@ -4855,9 +4872,9 @@ function mayPlace(i){
   const sel=document.getElementById("mayGrp"+i); const gk=sel?sel.value:"";
   if(!gk){ toast("Выберите группу"); return; }
   const g=mayGroupsOf(dst).find(x=>x.key===gk); if(!g){ toast("Группа не найдена"); return; }
-  const key=_normName(r.fio), nm=mayCleanFio(r.fio);
+  const nm=mayCleanFio(r.fio);
   g.idxs.forEach(idx=>{ const l=S.grid[idx]; if(!Array.isArray(l.kids)) l.kids=[];
-    const k=l.kids.find(x=>_normName(x.n)===key);
+    const k=l.kids.find(x=>_sameKid(x.n, r.fio));
     if(k){ k.may=true; } else { l.kids.push(Object.assign(_blankKid(nm),{may:true})); }
   });
   persistLocal(); renderGrid(); renderMay(); toast("Вписан(а) с 💰: "+nm);
@@ -4870,17 +4887,17 @@ function mayMoveGroup(i, sel){
   if(!targetKey){ toast("Выберите группу"); return; }
   const g=mayGroupsOf(courseName).find(x=>x.key===targetKey); if(!g){ toast("Группа не найдена"); return; }
   const fam=_courseBase(courseName);
-  const key=_normName(r.fio), nm=mayCleanFio(r.fio);
+  const nm=mayCleanFio(r.fio);
   const targetIdxs=new Set(g.idxs);
   // текущая карточка ребёнка в этом семействе (со всеми полями) + была ли 💰
   let proto=null, wasPaid=false;
-  (S.grid||[]).forEach(l=>{ if(_courseBase(l.course)!==fam) return; kidsOf(l).forEach(k=>{ if(_normName(k.n)===key){ if(!proto) proto=JSON.parse(JSON.stringify(k)); if(k.may) wasPaid=true; } }); });
+  (S.grid||[]).forEach(l=>{ if(_courseBase(l.course)!==fam) return; kidsOf(l).forEach(k=>{ if(_sameKid(k.n, r.fio)){ if(!proto) proto=JSON.parse(JSON.stringify(k)); if(k.may) wasPaid=true; } }); });
   // убрать из всех занятий этого семейства, кроме целевой группы
   (S.grid||[]).forEach((l,idx)=>{ if(_courseBase(l.course)!==fam) return; if(targetIdxs.has(idx)) return;
-    if(Array.isArray(l.kids)) l.kids=l.kids.filter(k=>_normName(k.n)!==key); });
+    if(Array.isArray(l.kids)) l.kids=l.kids.filter(k=>!_sameKid(k.n, r.fio)); });
   // вписать в целевую группу (перенести карточку со всеми полями, сохранить 💰)
   g.idxs.forEach(idx=>{ const l=S.grid[idx]; if(!Array.isArray(l.kids)) l.kids=[];
-    let k=l.kids.find(x=>_normName(x.n)===key);
+    let k=l.kids.find(x=>_sameKid(x.n, r.fio));
     if(!k){ k=proto?Object.assign(JSON.parse(JSON.stringify(proto)),{n:(proto.n||nm)}):_blankKid(nm); l.kids.push(k); }
     if(wasPaid) k.may=true;
   });
@@ -4889,8 +4906,8 @@ function mayMoveGroup(i, sel){
 }
 function mayMarkAllFound(){   // всем, кто уже в сетке (в любой группе) — проставить 💰
   let n=0;
-  (S.mayList||[]).forEach(r=>{ const key=_normName(r.fio);
-    (S.grid||[]).forEach(l=>kidsOf(l).forEach(k=>{ if(_normName(k.n)===key && !k.may){ k.may=true; n++; } })); });
+  (S.mayList||[]).forEach(r=>{
+    (S.grid||[]).forEach(l=>kidsOf(l).forEach(k=>{ if(_sameKid(k.n, r.fio) && !k.may){ k.may=true; n++; } })); });
   persistLocal(); if(typeof fbSchedulePush==="function") fbSchedulePush(); renderGrid(); renderMay(); toast("Проставлено 💰: "+n);
 }
 function mayResetAll(){
@@ -4905,7 +4922,7 @@ function mayResetAll(){
 }
 function mayClearDone(){
   const before=(S.mayList||[]).length;
-  S.mayList=(S.mayList||[]).filter(r=>{ const f=mayFindAnywhere(_normName(r.fio)); return !(f.found && f.anyMay); });
+  S.mayList=(S.mayList||[]).filter(r=>{ const f=mayFindAnywhere(r.fio); return !(f.found && f.anyMay); });
   persistLocal(); renderMay(); toast("Убрано разобранных: "+(before-(S.mayList||[]).length));
 }
 function renderMay(){
@@ -4927,8 +4944,7 @@ function renderMay(){
   const gcSorted=gcSet.slice().sort((a,b)=>a.localeCompare(b,"ru"));
   const cnt={all:list.length, missing:0, found:0, done:0, nocourse:0};
   const states=list.map(r=>{
-    const key=_normName(r.fio);
-    const occ=mayOccurrences(key);                                   // все группы ребёнка (столбиком)
+    const occ=mayOccurrences(r.fio);                                 // все группы ребёнка (столбиком)
     const dst=(r.courseManual && gcSet.includes(r.courseManual)) ? r.courseManual : matchC(r.course); // курс этого абонемента
     const inDst=dst && occ.some(o=>_normCourse(o.course)===_normCourse(dst));
     const dstPaid=dst && occ.some(o=>_normCourse(o.course)===_normCourse(dst) && o.paid);
@@ -4989,7 +5005,6 @@ function renderMay(){
           ${o.paid?'<span style="color:var(--green);font-weight:600">✓ 💰</span>':`<button class="btn sm" style="padding:1px 8px" onclick="mayMarkOcc(${i},${gi})">Поставить 💰</button>`}</div>`;
       }).join("")+`</div>`;
       // перевести в другую группу того же СЕМЕЙСТВА курса (все варианты — час/2 часа/…)
-      const childKey=_normName(r.fio);
       const famRep={};   // семейство → представитель (курс, куда ребёнок вписан)
       occ.forEach(o=>{ const fb=_courseBase(o.course); if(fb && !famRep[fb]) famRep[fb]=o.course; });
       const famKeys=Object.keys(famRep), multiFam=famKeys.length>1;
@@ -4997,7 +5012,7 @@ function renderMay(){
         const c=famRep[fb];
         const groups=mayGroupsOf(c);
         if(groups.length<=1) return;   // некуда переводить — у семейства одна группа
-        const opts=groups.map(g=>{ const here=g.idxs.some(idx=>kidsOf(S.grid[idx]).some(k=>_normName(k.n)===childKey));
+        const opts=groups.map(g=>{ const here=g.idxs.some(idx=>kidsOf(S.grid[idx]).some(k=>_sameKid(k.n, r.fio)));
           return `<option value="${esc(g.key)}"${here?' selected':''}>${esc(g.text)}${here?' — сейчас здесь':''}</option>`; }).join("");
         action+=`<details class="may-move-d" style="margin-top:2px">
           <summary title="Перевести в другую группу этого курса (любой вариант)">↔ сменить группу${multiFam?' курса «'+esc(c)+'»':''}</summary>
