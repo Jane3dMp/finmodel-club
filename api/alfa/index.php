@@ -93,35 +93,52 @@ switch ($action) {
             if (count($cands)) { $cid = (int)($cands[0]['id'] ?? 0); $matchedName = (string)($cands[0]['name'] ?? ''); }
         }
         if (!$cid) json_out(['ok' => true, 'notFound' => true, 'history' => [], 'summary' => []]);
-        // членства в группах (cgi по customer_id) — вся история
-        $cgi = alfa_call('cgi', 'index', ['customer_id' => $cid, 'page' => 0, 'count' => 200]);
-        $items = $cgi['items'] ?? [];
-        // фильтр по прошлому учебному году (по умолчанию 01.09.2025 – 31.05.2026)
-        $from = (string)($in['from'] ?? '2025-09-01');
-        $to   = (string)($in['to'] ?? '2026-05-31');
-        $overlap = function ($b, $e) use ($from, $to) {
-            $b = $b ? substr($b, 0, 10) : null;
-            $e = $e ? substr($e, 0, 10) : null;
-            if ($b && $b > $to) return false;      // началось после окна
-            if ($e && $e < $from) return false;    // закончилось до окна
-            return true;                            // пересекается (пустые границы = открыто)
+        $from  = (string)($in['from'] ?? '2025-09-01');
+        $to    = (string)($in['to'] ?? '2026-05-31');
+        $host  = 'https://' . alfa_host() . '/v2api/' . alfa_branch();
+        $token = alfa_token();
+
+        // группы ребёнка (id) с диапазоном дат — из ДВУХ источников:
+        //   1) cgi (членства) — но отдаёт в основном действующие;
+        //   2) lesson (уроки/посещения) — ловит и АРХИВНЫЕ группы прошлого года.
+        $gid = [];   // group_id => ['b'=>минДата, 'e'=>максДата]
+        $note = function (&$gid, $id, $d) {
+            if (!$id) return; $d = $d ? substr($d, 0, 10) : null;
+            if (!isset($gid[$id])) $gid[$id] = ['b' => $d, 'e' => $d];
+            elseif ($d) { if (!$gid[$id]['b'] || $d < $gid[$id]['b']) $gid[$id]['b'] = $d; if (!$gid[$id]['e'] || $d > $gid[$id]['e']) $gid[$id]['e'] = $d; }
         };
-        $inWindow = array_values(array_filter($items, fn($it) => $overlap($it['b_date'] ?? null, $it['e_date'] ?? null)));
-        // имена групп: ОДИН запрос на все группы (id→name), маппим локально (быстрее, чем по одной)
-        $gnames = [];
-        $grAll = alfa_http('POST', 'https://' . alfa_host() . '/v2api/' . alfa_branch() . '/group/index',
-            ['page' => 0, 'count' => 500], alfa_token(), true);
-        foreach (($grAll['items'] ?? []) as $g) {
-            if (isset($g['id'])) $gnames[$g['id']] = $g['name'] ?? ('Группа #' . $g['id']);
+        $inWin = fn($d) => !$d || ($d >= $from && $d <= $to);
+
+        // 1) cgi
+        $cgi = alfa_http('POST', "$host/cgi/index", ['customer_id' => $cid, 'page' => 0, 'count' => 200], $token, true);
+        $cgiItems = isset($cgi['__err']) ? [] : ($cgi['items'] ?? []);
+        foreach ($cgiItems as $it) {
+            $b = $it['b_date'] ?? null; $e = $it['e_date'] ?? null;
+            $bb = $b ? substr($b, 0, 10) : null; $ee = $e ? substr($e, 0, 10) : null;
+            if (($bb && $bb > $to) || ($ee && $ee < $from)) continue;   // не пересекается с окном
+            $note($gid, $it['group_id'] ?? null, $ee ?: $bb);
         }
-        $history = array_map(fn($it) => [
-            'group'  => $gnames[$it['group_id'] ?? 0] ?? ('Группа #' . ($it['group_id'] ?? '?')),
-            'b_date' => $it['b_date'] ?? null,
-            'e_date' => $it['e_date'] ?? null,
-        ], $inWindow);
+        // 2) уроки в окне (пробуем разные имена фильтров — лишние Alfa игнорирует)
+        $les = alfa_http('POST', "$host/lesson/index",
+            ['customer_id' => $cid, 'date_from' => $from, 'date_to' => $to, 'b_date' => $from, 'e_date' => $to, 'page' => 0, 'count' => 500],
+            $token, true, 30);
+        $lesItems = isset($les['__err']) ? [] : ($les['items'] ?? []);
+        foreach ($lesItems as $ls) {
+            $d = $ls['date'] ?? ($ls['lesson_date'] ?? null);
+            if (!$inWin($d ? substr($d, 0, 10) : null)) continue;
+            foreach ((array)($ls['group_ids'] ?? []) as $g) $note($gid, $g, $d);
+            if (isset($ls['group_id'])) $note($gid, $ls['group_id'], $d);
+        }
+        // имена групп по id (ЗАПРОС ПО ID отдаёт и архивные) — мягко, с ограничением
+        $history = []; $cap = 0;
+        foreach ($gid as $id => $dr) {
+            if ($cap++ > 40) break;
+            $gr = alfa_http('POST', "$host/group/index", ['id' => (int)$id, 'page' => 0], $token, true, 12);
+            $nm = $gr['items'][0]['name'] ?? ('Группа #' . $id);
+            $history[] = ['group' => $nm, 'b_date' => $dr['b'], 'e_date' => $dr['e']];
+        }
         // краткая сводка из карточки клиента
-        $cu = alfa_http('POST', 'https://' . alfa_host() . '/v2api/' . alfa_branch() . '/customer/index',
-            ['id' => $cid, 'page' => 0], alfa_token(), true);
+        $cu = alfa_http('POST', "$host/customer/index", ['id' => $cid, 'page' => 0], $token, true);
         $c0 = $cu['items'][0] ?? [];
         $summary = [
             'name'        => $c0['name'] ?? '',
@@ -132,7 +149,8 @@ switch ($action) {
             'next_lesson' => $c0['next_lesson_date'] ?? null,
         ];
         json_out(['ok' => true, 'customerId' => $cid, 'branch' => alfa_branch(), 'matched' => $matchedName,
-                  'summary' => $summary, 'history' => $history, 'allCount' => count($items), 'from' => $from, 'to' => $to]);
+                  'summary' => $summary, 'history' => $history, 'from' => $from, 'to' => $to,
+                  'debug' => ['cgi' => count($cgiItems), 'lessons' => count($lesItems), 'groups' => count($gid)]]);
         break;
 
     // --- справочники для маппинга модель→Alfa (READ) ---

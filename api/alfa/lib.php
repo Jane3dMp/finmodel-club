@@ -171,7 +171,7 @@ function alfa_token(): string {
 
 // Низкоуровневый HTTP к Alfa. $token=null для логина.
 // $soft=true → при ошибке НЕ обрывать запрос, а вернуть ['__err'=>...] (для необязательных вызовов).
-function alfa_http(string $method, string $url, array $body, ?string $token, bool $soft = false): array {
+function alfa_http(string $method, string $url, array $body, ?string $token, bool $soft = false, int $timeout = 25): array {
     $headers = ['Content-Type: application/json'];
     if ($token !== null) $headers[] = 'X-ALFACRM-TOKEN: ' . $token;
     $ch = curl_init($url);
@@ -180,7 +180,7 @@ function alfa_http(string $method, string $url, array $body, ?string $token, boo
         CURLOPT_CUSTOMREQUEST  => $method,
         CURLOPT_HTTPHEADER     => $headers,
         CURLOPT_POSTFIELDS     => json_encode($body, JSON_UNESCAPED_UNICODE),
-        CURLOPT_TIMEOUT        => 25,
+        CURLOPT_TIMEOUT        => $timeout,
     ]);
     $raw  = curl_exec($ch);
     $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);

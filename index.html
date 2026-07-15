@@ -4113,8 +4113,10 @@ async function openAlfaHistory(alfaId,name){
           <div style="font-weight:600">${esc(x.group)}</div>
           <div style="font-size:11px;color:var(--muted)">${dOnly(x.b_date)}${x.e_date?' – '+dOnly(x.e_date):''}</div></div>`).join("")}</div>`;
     }else{
-      html+=`<div style="color:var(--muted);padding:6px 0">За прошлый год (${per}) групп не найдено`
-        +(j.allCount?` (всего записей в Альфе: ${j.allCount} — вне этого периода)`:``)+`.</div>`;
+      const dbg=j.debug||{};
+      html+=`<div style="color:var(--muted);padding:6px 0">За прошлый год (${per}) групп не найдено.`
+        +`<br><span style="font-size:11px">Проверено: членств ${dbg.cgi||0}, уроков ${dbg.lessons||0}. `
+        +`Если ребёнок точно ходил — возможно, данные закрыты правами API; откройте карточку в Альфе.</span></div>`;
     }
     body.innerHTML=html;
   }catch(e){
