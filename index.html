@@ -4831,21 +4831,33 @@ function mayFindChild(fio,courseName){
     kidsOf(l).forEach(k=>{ if(_sameKid(k.n, fio)){ kids.push(k); groups.add(l.group||((DAY_NAMES[l.day]||"")+" "+(l.start||""))); } }); });
   return {found:kids.length>0, kids, groups:[...groups].join(", "), anyMay:kids.some(k=>k.may), allMay:kids.length>0&&kids.every(k=>k.may)};
 }
+/* Разбор вставленного списка. Принимает «ФИО ⇥ курс» (2 колонки) ИЛИ
+   «ФИО ⇥ пометка ⇥ курс» (3). Разделитель — табуляция (как из Excel) или «;».
+   Пустые хвостовые ячейки и строку-заголовок пропускаем. */
+function _mayParseLines(raw){
+  const rows=[];
+  String(raw||"").split(/\r?\n/).forEach(ln=>{
+    if(!ln.trim()) return;
+    let p=ln.split("\t").map(x=>x.trim());
+    if(p.filter(Boolean).length<2){ const q=ln.split(";").map(x=>x.trim()); if(q.filter(Boolean).length>=2) p=q; }
+    while(p.length && p[p.length-1]==="") p.pop();   // убрать пустые хвосты
+    let fio, note, course;
+    if(p.length>=3){ fio=p[0]; note=p[1]; course=p[2]; }
+    else if(p.length===2){ fio=p[0]; note=""; course=p[1]; }
+    else return;
+    if(!fio||!course) return;
+    if(/^\s*фио\b/i.test(fio) || /^\s*курс\s*$/i.test(course)) return;   // заголовок
+    rows.push({fio, note, course});
+  });
+  return rows;
+}
 function mayLoadDoc(){
   const ta=document.getElementById("mayDocText"); if(!ta) return;
   const raw=(ta.value||"").trim();
   if(!raw){ toast("Пусто"); return; }
-  const rows=[];
-  raw.split(/\r?\n/).forEach(ln=>{
-    const p=ln.split("\t").map(x=>x.trim());
-    if(p.length<3) return;
-    const fio=p[0], note=p[1], course=p[2];
-    if(!fio||!course) return;
-    if(/^фио$/i.test(fio)) return;
-    rows.push({fio, note, course});
-  });
-  if(!rows.length){ toast("Не нашла строк — нужны колонки через табуляцию"); return; }
-  S.mayList=rows; persistLocal(); renderMay(); toast("Загружено: "+rows.length);
+  const rows=_mayParseLines(raw);
+  if(!rows.length){ toast("Не нашла строк — нужны колонки «ФИО ⇥ курс» (через табуляцию из Excel)"); return; }
+  S.mayList=rows; persistLocal(); if(typeof fbSchedulePush==="function") fbSchedulePush(); renderMay(); toast("Загружено: "+rows.length);
 }
 function mayReplaceDoc(){ if(!confirm("Заменить список? Отметки 💰 в расписании останутся, сбросится только этот список.")) return; S.mayList=[]; _mayAddOpen=false; persistLocal(); renderMay(); }
 function mayToggleAdd(){ _mayAddOpen=!_mayAddOpen; renderMay(); if(_mayAddOpen){ const t=document.getElementById("mayAddText"); if(t) t.focus(); } }
@@ -4855,15 +4867,10 @@ function mayAppendDoc(){
   if(!Array.isArray(S.mayList)) S.mayList=[];
   const seen=new Set(S.mayList.map(r=>_nameKey(r.fio)+"|"+_normCourse(r.course)));
   let added=0, dup=0;
-  raw.split(/\r?\n/).forEach(ln=>{
-    const p=ln.split("\t").map(x=>x.trim());
-    if(p.length<3) return;
-    const fio=p[0], note=p[1], course=p[2];
-    if(!fio||!course) return;
-    if(/^фио$/i.test(fio)) return;
-    const k=_nameKey(fio)+"|"+_normCourse(course);
+  _mayParseLines(raw).forEach(row=>{
+    const k=_nameKey(row.fio)+"|"+_normCourse(row.course);
     if(seen.has(k)){ dup++; return; }
-    seen.add(k); S.mayList.push({fio,note,course}); added++;
+    seen.add(k); S.mayList.push(row); added++;
   });
   if(!added){ toast(dup?("Все "+dup+" уже в списке"):"Не нашла новых строк"); return; }
   _mayAddOpen=false; persistLocal(); renderMay();
@@ -5009,13 +5016,8 @@ function renderMay(){
   if(!list.length){
     box.innerHTML=`<div class="card">
         <h3>Список оплативших майский</h3>
-        ${_fbIsAdmin?`<div class="callout" style="border-color:var(--green);margin-bottom:12px">
-          <b>🗓 Подтянуть из Альфы</b> — надёжнее ручного списка: Альфа сама знает, кто купил майский и на какой курс.
-          <div style="margin-top:8px"><button class="btn" onclick="mayFromAlfa()">🗓 Майские из Альфы</button>
-          <button class="btn ghost" onclick="mayAlfaProbe()" title="Диагностика: где в Альфе лежат абонементы (по одному ребёнку)">🔬 Проба</button></div>
-        </div>`:""}
-        <p style="font-size:12px;color:var(--muted)">Или вставьте вручную три колонки через табуляцию: <b>ФИО ⇥ пометка ⇥ курс</b>. Заголовок и пустые строки не мешают.</p>
-        <textarea id="mayDocText" class="cell wide" rows="10" style="font-size:12px;font-family:monospace" placeholder="Найденок Богдан&#9;майский 26&#9;3D Blender и Unity"></textarea>
+        <p style="font-size:12px;color:var(--muted)">Вставьте свой список из Excel: <b>ФИО ⇥ курс</b> (или <b>ФИО ⇥ пометка ⇥ курс</b>) — колонки через табуляцию. Каждая строка — ребёнок и один его майский курс. Заголовок и пустые строки не мешают.</p>
+        <textarea id="mayDocText" class="cell wide" rows="12" style="font-size:12px;font-family:monospace" placeholder="Синяков Иван Викторович&#9;7 навыков уверенных детей&#10;Спектор Иван&#9;Лепка из глины"></textarea>
         <div style="margin-top:10px"><button class="btn" onclick="mayLoadDoc()">Загрузить список</button></div>
       </div>`;
     return;
@@ -5052,8 +5054,6 @@ function renderMay(){
         <button class="btn sm" onclick="mayMarkAllFound()" title="Проставить 💰 всем, кто уже вписан в сетку">💰 Отметить всех в сетке (${cnt.found})</button>
         <button class="btn ghost sm" onclick="mayClearDone()" title="Убрать из списка строки, которые уже с 💰">🧹 Убрать готовые (${cnt.done})</button>
         <button class="btn sm" onclick="mayToggleAdd()" title="Дописать ещё детей, не трогая уже загруженных">＋ Добавить в список</button>
-        ${_fbIsAdmin?`<button class="btn sm" onclick="mayFromAlfa()" title="Подтянуть список майских прямо из AlfaCRM (надёжнее ручного)">🗓 Майские из Альфы</button>`:""}
-        ${_fbIsAdmin?`<button class="btn ghost sm" onclick="mayAlfaProbe()" title="Диагностика: где в Альфе лежат абонементы (по одному ребёнку)">🔬 Проба</button>`:""}
         <button class="btn ghost sm" onclick="mayReplaceDoc()">↻ Заменить список</button>
       </span>
       <span class="hd-sep"></span>
