@@ -170,7 +170,8 @@ function alfa_token(): string {
 }
 
 // Низкоуровневый HTTP к Alfa. $token=null для логина.
-function alfa_http(string $method, string $url, array $body, ?string $token): array {
+// $soft=true → при ошибке НЕ обрывать запрос, а вернуть ['__err'=>...] (для необязательных вызовов).
+function alfa_http(string $method, string $url, array $body, ?string $token, bool $soft = false): array {
     $headers = ['Content-Type: application/json'];
     if ($token !== null) $headers[] = 'X-ALFACRM-TOKEN: ' . $token;
     $ch = curl_init($url);
@@ -185,12 +186,24 @@ function alfa_http(string $method, string $url, array $body, ?string $token): ar
     $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
     $err  = curl_error($ch);
     curl_close($ch);
-    if ($raw === false) json_out(['ok' => false, 'error' => 'Сеть до AlfaCRM недоступна: ' . $err], 502);
+    if ($raw === false) {
+        if ($soft) return ['__err' => 'network', 'msg' => $err];
+        json_out(['ok' => false, 'error' => 'Сеть до AlfaCRM недоступна: ' . $err], 502);
+    }
     $data = json_decode((string)$raw, true);
     if (!is_array($data)) {
+        if ($soft) return ['__err' => 'nonjson', 'code' => $code];
         json_out(['ok' => false, 'error' => 'AlfaCRM вернул не-JSON (код ' . $code . ')', 'raw' => mb_substr((string)$raw, 0, 300)], 502);
     }
     return $data;
+}
+
+// Мягкая попытка получить справочник (index). null, если эндпоинта нет/ошибка.
+function alfa_try_index(string $entity, bool $global = false): ?array {
+    $path = $global ? "/v2api/$entity/index" : '/v2api/' . alfa_branch() . "/$entity/index";
+    $r = alfa_http('POST', 'https://' . alfa_host() . $path, ['page' => 0, 'count' => 500], alfa_token(), true);
+    if (isset($r['__err']) || !isset($r['items'])) return null;
+    return $r['items'];
 }
 
 // ID филиала. Если в конфиге 0/пусто — определяем сам (первый активный филиал).
@@ -221,6 +234,24 @@ function alfa_call(string $entity, string $cmd, array $body, bool $global = fals
 // Вызов в контексте конкретного филиала.
 function alfa_call_branch(int $branch, string $entity, string $cmd, array $body): array {
     return alfa_http('POST', 'https://' . alfa_host() . "/v2api/$branch/$entity/$cmd", $body, alfa_token());
+}
+
+// Создать сущность: POST /v2api/{branch}/{entity}/create с телом $data.
+function alfa_create(string $entity, array $data): array {
+    return alfa_call($entity, 'create', $data);
+}
+
+// Прочитать справочник целиком (index, до 500 записей) → массив items с нужными полями.
+function alfa_ref(string $entity, array $fields, bool $global = false): array {
+    $r = $global ? alfa_call($entity, 'index', ['page' => 0, 'count' => 500], true)
+                 : alfa_call($entity, 'index', ['page' => 0, 'count' => 500]);
+    $out = [];
+    foreach (($r['items'] ?? []) as $it) {
+        $row = [];
+        foreach ($fields as $f) $row[$f] = $it[$f] ?? null;
+        $out[] = $row;
+    }
+    return $out;
 }
 
 // Список id всех активных филиалов (клиенты в Alfa привязаны к филиалам).

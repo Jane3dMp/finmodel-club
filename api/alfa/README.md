@@ -22,6 +22,8 @@
 | `GET  ?action=ping` | Проверка: токен ок, конфиг на месте. Вернёт ваш email и хост Alfa. |
 | `GET  ?action=branches` | Список филиалов Alfa с их `id` — чтобы узнать `branch`. |
 | `POST ?action=customers` | Ученики/клиенты Alfa: `id`, ФИО, телефоны. Тело `{filter:{...}}` необязательно. |
+| `GET  ?action=refs` | Справочники для маппинга модель→Alfa: subjects, rooms, lesson-types (+ мягко teachers/statuses). Для этапа 3 (публикация групп). |
+| `POST ?action=publish` | Публикация ОДНОЙ группы (создать группу+расписание+состав). **По умолчанию `dryRun:true`** — только показывает payload, ничего не создаёт. Живое создание — тело `{"dryRun":false,...}`. См. `PUBLISH_GROUPS.md`. |
 
 Все запросы требуют заголовок `Authorization: Bearer <firebase_id_token>`.
 

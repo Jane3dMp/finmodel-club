@@ -80,6 +80,64 @@ switch ($action) {
                   'branches' => count($branches), 'per_branch' => $perBranch]);
         break;
 
+    // --- справочники для маппинга модель→Alfa (READ) ---
+    case 'refs':
+        $out = [
+            'subjects'     => alfa_ref('subject', ['id', 'name']),
+            'rooms'        => alfa_ref('room', ['id', 'name', 'is_enabled']),
+            'lesson_types' => alfa_ref('lesson-type', ['id', 'name']),
+        ];
+        // необязательные справочники — мягко (эндпоинт может отсутствовать в v2)
+        foreach (['teacher'=>'teachers','group-status'=>'group_statuses','group-level'=>'group_levels','level'=>'levels'] as $ent => $key) {
+            $items = alfa_try_index($ent);
+            if ($items !== null) $out[$key] = array_map(fn($i) => ['id' => $i['id'] ?? null, 'name' => $i['name'] ?? ''], $items);
+        }
+        json_out(['ok' => true, 'branch' => alfa_branch(), 'refs' => $out]);
+        break;
+
+    // --- публикация ОДНОЙ группы: dryRun=true по умолчанию (ничего не создаёт) ---
+    case 'publish':
+        $dry      = !isset($in['dryRun']) || $in['dryRun'] !== false;
+        $g        = is_array($in['group'] ?? null) ? $in['group'] : [];
+        $sched    = is_array($in['schedule'] ?? null) ? $in['schedule'] : [];
+        $students = is_array($in['studentAlfaIds'] ?? null) ? $in['studentAlfaIds'] : [];
+        $branch   = alfa_branch();
+        $bDate    = (string)($in['b_date'] ?? '2026-09-02');
+        $eDate    = (string)($in['e_date'] ?? '2027-05-31');
+
+        $groupPayload = array_merge(
+            ['name' => (string)($g['name'] ?? ''), 'branch_ids' => [$branch], 'b_date' => $bDate, 'e_date' => $eDate],
+            array_intersect_key($g, array_flip(['teacher_ids','level_id','status_id','limit','note','subject_ids']))
+        );
+
+        $plan = ['group' => $groupPayload, 'schedule' => [], 'links' => []];
+        foreach ($sched as $s) {
+            $plan['schedule'][] = [
+                'related_class' => 'Group', 'related_id' => '<group_id>',
+                'subject_id'    => $s['subject_id'] ?? null,
+                'room_id'       => $s['room_id'] ?? null,
+                'teacher_ids'   => $s['teacher_ids'] ?? ($g['teacher_ids'] ?? []),
+                'day'           => $s['day'] ?? null,
+                'time_from_v'   => $s['time_from'] ?? null,
+                'time_to_v'     => $s['time_to'] ?? null,
+                'lesson_type_id'=> $s['lesson_type_id'] ?? null,
+                'b_date' => $bDate, 'e_date' => $eDate, 'is_public' => true,
+            ];
+        }
+        foreach ($students as $cid) $plan['links'][] = ['customer_id' => $cid, 'group_id' => '<group_id>', 'b_date' => $bDate, 'e_date' => $eDate];
+
+        if ($dry) { json_out(['ok' => true, 'dryRun' => true, 'plan' => $plan]); }
+
+        // ЖИВОЕ создание (только при явном dryRun:false)
+        $gr  = alfa_create('group', $groupPayload);
+        $gid = $gr['id'] ?? ($gr['model']['id'] ?? null);
+        if (!$gid) json_out(['ok' => false, 'error' => 'AlfaCRM не вернула id группы', 'alfa' => $gr], 502);
+        $created = ['group_id' => $gid, 'lessons' => [], 'links' => []];
+        foreach ($plan['schedule'] as $rl) { $rl['related_id'] = $gid; $created['lessons'][] = alfa_create('regular-lesson', $rl); }
+        foreach ($students as $cid) { $created['links'][] = alfa_create('cgi', ['customer_id' => $cid, 'group_id' => $gid, 'b_date' => $bDate, 'e_date' => $eDate]); }
+        json_out(['ok' => true, 'dryRun' => false, 'created' => $created]);
+        break;
+
     default:
         json_out(['ok' => false, 'error' => 'Неизвестное действие: ' . $action], 400);
 }
