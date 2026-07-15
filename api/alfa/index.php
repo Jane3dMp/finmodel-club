@@ -66,6 +66,7 @@ switch ($action) {
                         'name'     => trim((string)($c['name'] ?? '')),
                         'phones'   => array_values(array_filter(array_map('strval', (array)$phones))),
                         'is_study' => (int)($c['is_study'] ?? 0),
+                        'dob'      => $c['dob'] ?? null,
                     ];
                 }
                 $total = (int)($r['total'] ?? 0);
@@ -107,6 +108,7 @@ switch ($action) {
         $c0 = $cu['items'][0] ?? [];
         $summary = [
             'name'        => $c0['name'] ?? '',
+            'dob'         => $c0['dob'] ?? null,
             'balance'     => $c0['balance'] ?? null,
             'last_attend' => $c0['last_attend_date'] ?? null,
             'paid_till'   => $c0['paid_till'] ?? null,

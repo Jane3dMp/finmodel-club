@@ -2894,6 +2894,7 @@ function _kidsFromDOM(){
     o.c=tr.querySelector(".k-in-c").value.trim();
     o.phone=prev.phone||"";                              // поля из Альфы в строке не показаны —
     o.alfaId=(prev.alfaId!==undefined?prev.alfaId:null); // переносим их из текущего состояния
+    o.dob=prev.dob||"";                                  // дата рождения из Альфы (для возраста)
     o.vbSent=!!prev.vbSent;                              // отметка «отправлено в Viber»
     o.vbSentAt=prev.vbSentAt||"";
     const rep=tr.querySelector(".k-in-reply");           // ответ родителя (select в строке)
@@ -3434,7 +3435,13 @@ const KID_FLAGS=[
   {k:"no",    ic:"❌", lab:"Не придёт"},
   {k:"call",  ic:"📵", lab:"Недозвон"}
 ];
-function _blankKid(n){ return {n:cleanKidName(n), may:false, sched:false, no:false, call:false, c:"", phone:"", alfaId:null, vbSent:false, vbSentAt:"", vbReply:"", vbReplyAt:"" }; }
+function _blankKid(n){ return {n:cleanKidName(n), may:false, sched:false, no:false, call:false, c:"", phone:"", alfaId:null, dob:"", vbSent:false, vbSentAt:"", vbReply:"", vbReplyAt:"" }; }
+/* возраст из даты рождения Альфы (dob = "YYYY-MM-DD...") */
+function _ageFromDob(dob){ if(!dob) return null; const d=new Date(String(dob).slice(0,10)); if(isNaN(d.getTime())) return null;
+  const now=new Date(); let a=now.getFullYear()-d.getFullYear(); const m=now.getMonth()-d.getMonth();
+  if(m<0||(m===0&&now.getDate()<d.getDate())) a--; return (a>=0&&a<100)?a:null; }
+function _yearsWord(n){ const a=n%10,b=n%100; if(a===1&&b!==11) return "год"; if(a>=2&&a<=4&&(b<10||b>=20)) return "года"; return "лет"; }
+function _ageStr(dob){ const a=_ageFromDob(dob); return a==null?"":(a+" "+_yearsWord(a)); }
 /* ответ родителя на приглашение: "" не ответил · yes подтвердил · no отказ · maybe думает */
 const VB_REPLY=[["","— нет ответа"],["yes","🟢 Подтвердил"],["no","🔴 Отказ"],["maybe","🟡 Думает"]];
 function _vbReplyIcon(v){ return v==="yes"?"🟢":v==="no"?"🔴":v==="maybe"?"🟡":""; }
@@ -3754,7 +3761,7 @@ function alfaBuildMatch(customers){
     const key=_normName(c.name); if(!key) return;
     const phone=(c.phones&&c.phones.find(p=>String(p).replace(/\D/g,"").length>=6))||"";
     if(!idx.has(key)) idx.set(key,[]);
-    idx.get(key).push({id:c.id,name:c.name,phone:phone});
+    idx.get(key).push({id:c.id,name:c.name,phone:phone,dob:c.dob||""});
   });
   // уникальные дети модели
   const kids=new Map();
@@ -3817,12 +3824,13 @@ function alfaApply(){
   });
   // карта нормимя → {phone,id}
   const set=new Map();
-  M.willSet.forEach(w=>{ if(w.pick&&w.pick.phone) set.set(w.kid.key,{phone:w.pick.phone,id:w.pick.id}); });
+  M.willSet.forEach(w=>{ if(w.pick&&w.pick.phone) set.set(w.kid.key,{phone:w.pick.phone,id:w.pick.id,dob:w.pick.dob||""}); });
 
   let updated=0;
   (S.grid||[]).forEach(l=>kidsOf(l).forEach(k=>{
     const v=set.get(_normName(k.n)); if(!v) return;
-    if(k.phone!==v.phone || k.alfaId!==v.id){ k.phone=v.phone; k.alfaId=v.id; updated++; }
+    if(k.phone!==v.phone || k.alfaId!==v.id || (v.dob&&k.dob!==v.dob)){ k.phone=v.phone; k.alfaId=v.id; if(v.dob) k.dob=v.dob; updated++; }
+    else if(v.dob && !k.dob){ k.dob=v.dob; }
   }));
   persistLocal(); if(typeof fbSchedulePush==="function") fbSchedulePush();
   if(typeof renderGrid==="function") renderGrid(); refreshKidSearch();
@@ -4030,10 +4038,11 @@ async function openAlfaHistory(alfaId,name){
     const money=v=>(v===null||v===undefined||v==="")?"—":(fmt(Math.round(+v))+" р");
     const dOnly=v=>v?String(v).slice(0,10).split("-").reverse().join("."):"";
     let html=`<div class="callout" style="margin-bottom:8px">`
+      +(s.dob?`Возраст: <b>${esc(_ageStr(s.dob))||"—"}</b> · `:``)
       +(s.balance!=null?`Баланс: <b style="color:${(+s.balance)<0?'var(--red)':'var(--green)'}">${money(s.balance)}</b> · `:``)
       +(s.last_attend?`последнее посещение: <b>${dOnly(s.last_attend)}</b> · `:``)
       +(s.paid_till?`оплачено до: <b>${dOnly(s.paid_till)}</b>`:``)
-      +((s.balance==null&&!s.last_attend&&!s.paid_till)?`<span style="color:var(--muted)">Сводка недоступна</span>`:``)
+      +((s.balance==null&&!s.last_attend&&!s.paid_till&&!s.dob)?`<span style="color:var(--muted)">Сводка недоступна</span>`:``)
       +`</div>`;
     if(h.length){
       h.sort((a,b)=>String(b.b_date||"").localeCompare(String(a.b_date||"")));
@@ -4494,7 +4503,7 @@ function renderMay(){
       action=`<select class="cell may-grp" id="mayGrp${i}" style="min-width:220px">${opts||'<option value="">нет групп в сетке</option>'}</select> <button class="btn sm" style="margin-left:6px" onclick="mayPlace(${i})">＋ Вписать с 💰</button>`; }
     html+=`<tr>
       <td style="text-align:center;color:var(--muted)">${i+1}</td>
-      <td style="text-align:left">${esc(r.fio)}</td>
+      <td style="text-align:left">${esc(r.fio)}${(function(){ const kd=st.f&&st.f.kids&&st.f.kids.find(x=>x.dob); return kd?` <span style="font-size:11px;color:var(--blue);white-space:nowrap" title="Возраст из Альфы">· ${_ageStr(kd.dob)}</span>`:''; })()}</td>
       <td style="text-align:left">${courseCell}</td>
       <td style="text-align:left">${action}</td>
       <td style="text-align:center"><span class="k-del" title="Убрать строку" onclick="mayDelRow(${i})">×</span></td>
