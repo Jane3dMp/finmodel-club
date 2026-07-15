@@ -4735,14 +4735,25 @@ function renderGroups(){
 
 /* ===== ВКЛАДКА «МАЙСКИЙ» — постоянная сверка оплат с расписанием ===== */
 let _mayFilter="all", _mayQuery="", _mayAddOpen=false;
+/* название курса из Альфы → в название модели (список майских — из Альфы, там свои имена).
+   «3D Unity»→«Blender + Unity», «Хочу всё знать»→«Хочу все знать! выходной», «Пескография»→«Песок» и т.д.
+   Плюс «&»→«и» для «3D Blender & Unity». */
+function _mapAlfaCourse(c){
+  if(typeof ALPHA_COURSE_MAP==="undefined" || !c) return c;
+  if(ALPHA_COURSE_MAP[c]) return ALPHA_COURSE_MAP[c];
+  const alt=String(c).replace(/\s*&\s*/g," и ");
+  return ALPHA_COURSE_MAP[alt]||c;
+}
 function mayCourseMatch(pc){
   const gc=[...new Set((S.grid||[]).map(l=>l.course).filter(Boolean))];
-  const n=_normCourse(pc);
-  const exact=gc.find(x=>_normCourse(x)===n); if(exact) return exact;   // точное совпадение
-  // мягко — по семейству (без «(1 час)»/«(2 часа)»): майский из Excel/Альфы часто без длительности,
-  // а в сетке курс с длительностью. Семейство не путает разные курсы (режет только скобки/длительность).
-  const fam=_courseBase(pc);
-  return fam ? (gc.find(x=>_courseBase(x)===fam)||"") : "";
+  const tryOne=(name)=>{ const n=_normCourse(name); const ex=gc.find(x=>_normCourse(x)===n); if(ex) return ex;
+    const f=_courseBase(name); return f?(gc.find(x=>_courseBase(x)===f)||""):""; };
+  // 1) как есть (точное, затем семейство без «(1 час)»/«(2 часа)»)
+  let hit=tryOne(pc); if(hit) return hit;
+  // 2) через таблицу соответствий Alfa→модель
+  const mapped=_mapAlfaCourse(pc);
+  if(mapped && mapped!==pc){ hit=tryOne(mapped); if(hit) return hit; }
+  return "";
 }
 /* курс строки с учётом ручного выбора (courseManual), иначе точное совпадение */
 function mayRowCourse(r){ return (r&&r.courseManual && (S.grid||[]).some(l=>l.course===r.courseManual)) ? r.courseManual : mayCourseMatch(r.course); }
