@@ -235,124 +235,86 @@ switch ($action) {
         json_out(['ok' => true, 'dryRun' => false, 'created' => $created]);
         break;
 
-    // --- майские абонементы из Alfa: кто купил майский и на какой курс (READ) ---
-    //   Метка майского (по словам клиента): комментарий содержит «майск» + даты сезона
-    //   01.09.2026–31.12.2026. Фильтр настраивается из клиента (keyword/from/to).
+    // --- майские из Alfa: ПЛАТЕЖИ (pay) с пометкой «май» → кто купил; курс — из custom_dogovora клиента ---
+    //   Абонемента как такового в Alfa нет: майский = платёж-доход с note ~ «май»/«майский».
     case 'maysubs':
         @set_time_limit(180);
-        $from = (string)($in['from'] ?? '2026-09-01');           // начало сезона майского
-        $to   = (string)($in['to']   ?? '2026-12-31');           // конец сезона
-        $kw   = mb_strtolower(trim((string)($in['keyword'] ?? 'майск')));  // метка в комментарии
-        $allBranches = !empty($in['allBranches']);               // по умолчанию — только главный филиал
+        $kw   = mb_strtolower(trim((string)($in['keyword'] ?? 'май')));   // метка в примечании платежа
+        $from = (string)($in['from'] ?? '2026-05-01');                    // окно оплаты майского
+        $to   = (string)($in['to']   ?? '2026-06-30');
+        $allBranches = !isset($in['allBranches']) || $in['allBranches'] !== false;   // по умолчанию все филиалы
         $branches = $allBranches ? alfa_all_branch_ids() : [alfa_branch()];
-
-        // справочник предметов: subject_id → название курса
-        $subjects = [];
-        foreach (alfa_ref('subject', ['id', 'name']) as $s) {
-            if (($s['id'] ?? null) !== null) $subjects[(int)$s['id']] = (string)$s['name'];
-        }
-
-        // обойти customer-tariff по филиалам, отобрать майские
         $token = alfa_token(); $host = 'https://' . alfa_host();
-        $perPage = 50; $maxPages = 300; $maxScan = 15000;
-        $rows = []; $custIds = []; $scanned = 0; $capped = false; $totalReported = 0; $errNote = null;
-        $sampleKeys = null; $sampleRecords = [];
+        $perPage = 50; $maxPages = 400; $maxScan = 20000;
+
+        // 1) карта клиентов: id → {имя, курс(ы) из custom_dogovora}
+        $custMap = [];
         foreach ($branches as $bid) {
             $page = 0;
             do {
-                // БЕЗ фильтров дат — Alfa могла трактовать b_date/e_date строго и вернуть 0.
-                // soft=true: ошибку не роняем, а показываем в debug.
-                $r = alfa_http('POST', "$host/v2api/$bid/customer-tariff/index",
-                    ['page' => $page, 'count' => $perPage], $token, true, 20);
+                $r = alfa_http('POST', "$host/v2api/$bid/customer/index",
+                    ['removed' => 0, 'page' => $page, 'count' => $perPage], $token, true, 20);
+                if (isset($r['__err'])) break;
+                $items = $r['items'] ?? [];
+                foreach ($items as $c) {
+                    $id = (int)($c['id'] ?? 0); if (!$id || isset($custMap[$id])) continue;
+                    $dog = $c['custom_dogovora'] ?? [];
+                    if (is_string($dog)) $dog = ($dog === '') ? [] : [$dog];
+                    $custMap[$id] = ['name' => trim((string)($c['name'] ?? '')), 'dogovora' => array_values((array)$dog)];
+                }
+                $total = (int)($r['total'] ?? 0); $page++;
+            } while (count($items) === $perPage && ($page * $perPage) < $total && $page < $maxPages);
+        }
+
+        // 2) honorит ли Alfa фильтр дат pay? (чтобы не сканировать все платежи за годы)
+        $useDates = false;
+        $t = alfa_http('POST', "$host/v2api/" . alfa_branch() . "/pay/index",
+            ['date_from' => $from, 'date_to' => $to, 'page' => 0, 'count' => 1], $token, true, 15);
+        if (!isset($t['__err']) && (int)($t['total'] ?? 0) > 0) $useDates = true;
+
+        // 3) платежи с меткой «май» по филиалам
+        $scanned = 0; $capped = false; $errNote = null; $totalReported = 0;
+        $sampleKeys = null; $sampleRecords = []; $byCust = [];
+        foreach ($branches as $bid) {
+            $page = 0;
+            do {
+                $body = ['page' => $page, 'count' => $perPage];
+                if ($useDates) { $body['date_from'] = $from; $body['date_to'] = $to; }
+                $r = alfa_http('POST', "$host/v2api/$bid/pay/index", $body, $token, true, 20);
                 if (isset($r['__err'])) { $errNote = $r; break; }
                 if ($page === 0) $totalReported += (int)($r['total'] ?? 0);
                 $items = $r['items'] ?? [];
-                foreach ($items as $ct) {
+                foreach ($items as $p) {
                     $scanned++;
-                    if ($sampleKeys === null) $sampleKeys = array_keys($ct);
-                    if (count($sampleRecords) < 3) $sampleRecords[] = $ct;   // сырьё для сверки полей
-                    // комментарий — поле может называться по-разному
-                    $note = (string)($ct['note'] ?? ($ct['comment'] ?? ($ct['commentary'] ?? ($ct['name'] ?? ''))));
-                    $b = substr((string)($ct['b_date'] ?? ''), 0, 10);
-                    $e = substr((string)($ct['e_date'] ?? ''), 0, 10);
-                    $noteHit = ($kw === '') ? true : (mb_stripos($note, $kw) !== false);
-                    $dateHit = (!$b || $b <= $to) && (!$e || $e >= $from);   // пересечение с сезоном
-                    if (!$noteHit || !$dateHit) continue;
-                    $cid = (int)($ct['customer_id'] ?? 0);
-                    if (!$cid) continue;
-                    $subs = [];
-                    if (isset($ct['subject_ids']) && is_array($ct['subject_ids'])) $subs = $ct['subject_ids'];
-                    elseif (isset($ct['subject_id'])) $subs = [$ct['subject_id']];
-                    $courses = [];
-                    foreach ($subs as $sid) { $sid = (int)$sid; if (isset($subjects[$sid])) $courses[] = $subjects[$sid]; }
-                    $rows[] = [
-                        'customer_id' => $cid,
-                        'name'        => trim((string)($ct['customer'] ?? ($ct['customer_name'] ?? ''))),
-                        'course'      => implode(', ', $courses),
-                        'subject_ids' => array_map('intval', $subs),
-                        'note'        => $note,
-                        'b_date'      => $b, 'e_date' => $e,
-                    ];
-                    $custIds[$cid] = true;
+                    if ($sampleKeys === null) $sampleKeys = array_keys($p);
+                    if (count($sampleRecords) < 3) $sampleRecords[] = $p;
+                    $note = mb_strtolower((string)($p['note'] ?? ''));
+                    if ($kw !== '' && mb_strpos($note, $kw) === false) continue;   // метка «май»
+                    $cid = (int)($p['customer_id'] ?? 0); if (!$cid) continue;
+                    if (!isset($byCust[$cid]))
+                        $byCust[$cid] = ['note' => (string)($p['note'] ?? ''), 'date' => (string)($p['document_date'] ?? ''), 'income' => (string)($p['income'] ?? '')];
                 }
-                $total = (int)($r['total'] ?? 0);
-                $page++;
+                $total = (int)($r['total'] ?? 0); $page++;
                 if ($scanned >= $maxScan) { $capped = true; break; }
             } while (count($items) === $perPage && ($page * $perPage) < $total && $page < $maxPages);
             if ($capped) break;
         }
 
-        // имена клиентов, которых не отдал сам customer-tariff — добираем из customer/index
-        $needNames = [];
-        foreach ($rows as $row) { if ($row['name'] === '' && $row['customer_id']) $needNames[$row['customer_id']] = true; }
-        $names = [];
-        if ($needNames) {
-            foreach ($branches as $bid) {
-                $page = 0;
-                do {
-                    $r = alfa_call_branch((int)$bid, 'customer', 'index', ['removed' => 0, 'page' => $page, 'count' => $perPage]);
-                    $items = $r['items'] ?? [];
-                    foreach ($items as $c) { $id = (int)($c['id'] ?? 0); if ($id && isset($needNames[$id]) && !isset($names[$id])) $names[$id] = trim((string)($c['name'] ?? '')); }
-                    $total = (int)($r['total'] ?? 0); $page++;
-                } while (count($items) === $perPage && ($page * $perPage) < $total && $page < $maxPages);
-            }
-            foreach ($rows as &$row) { if ($row['name'] === '' && isset($names[$row['customer_id']])) $row['name'] = $names[$row['customer_id']]; }
-            unset($row);
-        }
-
-        // если bulk ничего не просканировал — возможно, эндпоинт требует customer_id.
-        // Пробуем по нескольким клиентам, чтобы увидеть форму записи абонемента.
-        $probe = null;
-        if ($scanned === 0) {
-            $rc = alfa_http('POST', "$host/v2api/" . alfa_branch() . "/customer/index",
-                ['removed' => 0, 'page' => 0, 'count' => 3], $token, true, 15);
-            $cand = ['customer-tariff', 'pay', 'cgi', 'tariff', 'invoice', 'balance'];
-            $pout = [];
-            foreach (array_slice(($rc['items'] ?? []), 0, 2) as $c) {
-                $pid = (int)($c['id'] ?? 0); if (!$pid) continue;
-                $eps = [];
-                foreach ($cand as $ent) {
-                    $pr = alfa_http('POST', "$host/v2api/" . alfa_branch() . "/$ent/index",
-                        ['customer_id' => $pid, 'page' => 0, 'count' => 10], $token, true, 8);
-                    $items = (is_array($pr) && isset($pr['items']) && is_array($pr['items'])) ? $pr['items'] : null;
-                    $eps[$ent] = ['top_keys' => is_array($pr) ? array_keys($pr) : [],
-                                  'total' => is_array($pr) ? ($pr['total'] ?? null) : null,
-                                  'count' => $items !== null ? count($items) : 0,
-                                  'first' => $items[0] ?? null,
-                                  'err'   => is_array($pr) ? ($pr['__err'] ?? null) : null,
-                                  'raw'   => ($items === null) ? $pr : null];
-                }
-                $pout[] = ['customer_id' => $pid, 'name' => trim((string)($c['name'] ?? '')), 'endpoints' => $eps];
-            }
-            $probe = ['note' => 'bulk дал 0 — сырые ответы кандидатов по клиентам', 'results' => $pout];
+        // 4) собрать список: fio + курс (из custom_dogovora)
+        $rows = [];
+        foreach ($byCust as $cid => $pi) {
+            $cm = $custMap[$cid] ?? null;
+            $rows[] = ['customer_id' => $cid,
+                       'name'   => $cm ? $cm['name'] : '',
+                       'course' => $cm ? implode(', ', $cm['dogovora']) : '',
+                       'note'   => $pi['note'], 'date' => $pi['date'], 'income' => $pi['income']];
         }
 
         json_out(['ok' => true, 'count' => count($rows), 'subs' => $rows,
-                  'from' => $from, 'to' => $to, 'keyword' => $kw, 'allBranches' => $allBranches,
+                  'keyword' => $kw, 'useDates' => $useDates, 'allBranches' => $allBranches,
                   'debug' => ['scanned' => $scanned, 'total_reported' => $totalReported, 'capped' => $capped,
-                              'branches' => count($branches), 'subjects' => count($subjects),
-                              'err' => $errNote, 'probe' => $probe,
-                              'sample_keys' => $sampleKeys, 'sample_records' => $sampleRecords]]);
+                              'customers' => count($custMap), 'matched' => count($byCust),
+                              'err' => $errNote, 'sample_keys' => $sampleKeys, 'sample_records' => $sampleRecords]]);
         break;
 
     // --- РАЗВЕДКА: где в Alfa лежат абонементы/счета (READ, диагностика) ---

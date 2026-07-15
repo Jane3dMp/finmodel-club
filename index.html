@@ -4946,14 +4946,14 @@ function mayClearDone(){
 /* Подтянуть список майских прямо из AlfaCRM (надёжнее ручного переноса из Excel).
    Прокси-действие maysubs отбирает абонементы с меткой «майск» на сезон 01.09–31.12.2026. */
 async function mayFromAlfa(){
-  if(!confirm("Подтянуть список майских из Альфы?\n\nОтберём абонементы с меткой «майский» на сезон 01.09.2026–31.12.2026 и заменим текущий список.\n\nОтметки 💰 в расписании при этом НЕ сбрасываются.")) return;
-  toast("Запрашиваю Альфу…");
+  if(!confirm("Подтянуть список майских из Альфы?\n\nОтберём платежи с пометкой «май» (майский), курс — из карточки клиента, и заменим текущий список.\n\nОтметки 💰 в расписании при этом НЕ сбрасываются.")) return;
+  toast("Запрашиваю Альфу… (может занять до минуты)");
   try{
     const token=await _alfaIdToken();
     const r=await fetch(ALFA_PROXY+"?action=maysubs",{
       method:"POST",
       headers:{"Content-Type":"application/json","Authorization":"Bearer "+token},
-      body:JSON.stringify({allBranches:true, from:"2026-09-01", to:"2026-12-31", keyword:"майск"})
+      body:JSON.stringify({allBranches:true, keyword:"май"})
     });
     const j=await r.json().catch(()=>({ok:false,error:"Ответ не JSON (код "+r.status+")"}));
     if(!r.ok||!j.ok) throw new Error(j.error||("Ошибка прокси "+r.status));
