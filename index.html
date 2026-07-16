@@ -939,6 +939,12 @@ let FB_ON=false,_fbDb=null,_fbRef=null,_fbLast={},_fbApplying=false,_fbPending=n
 const FB_SKIP={gasUrl:1};
 function _lid(){ return "L"+Date.now().toString(36)+Math.random().toString(36).slice(2,7); }
 function _ensureLessonIds(){ (S.grid||[]).forEach(l=>{ if(l && !l.id) l.id=_lid(); }); }
+/* Идентификация занятий по СТАБИЛЬНОМУ id (индекс массива сбивается при синхронизации Firebase).
+   Индекс вычисляем в момент действия, а не рендера. */
+function _lesById(id){ if(id==null||id==="") return null; return (S.grid||[]).find(l=>l&&l.id===id)||null; }
+function _lesIdx(id){ if(id==null||id==="") return -1; return (S.grid||[]).findIndex(l=>l&&l.id===id); }
+function _modalLesIdx(){ const m=document.getElementById("lesModal"); if(!m) return -1;
+  const byId=_lesIdx(m.dataset.lesId); return byId>=0?byId:(parseInt(m.dataset.idx,10)); }
 function _fbKey(name){ return String(name||"Основной").replace(/[.#$\[\]\/]/g,"_"); }
 /* Синхронизация: grid — по занятиям (карта {id:занятие}, гранулярно = правки в разные
    занятия не затирают друг друга); всё остальное — одним JSON-блобом (иначе имена-ключи
@@ -2804,6 +2810,7 @@ function printSchedule(){
 }
 function renderGrid(){
   migrateAllKids();
+  _ensureLessonIds();   // у каждого занятия должен быть стабильный id ДО рендера (действия — по id)
   _migrateViberTpl();
   let dt="";
   for(let d=1;d<=7;d++){
@@ -2843,12 +2850,12 @@ function renderGrid(){
         // пометим перекрытые ячейки ниже
         for(let k=1;k<span;k++){ covered[(si+k)+"_"+room]=true; }
         h+=`<td class="cell-les" rowspan="${span}" ondragover="dragOver(event)" ondrop="dropLes(event,'${slot}','${esc(room)}')">
-          <div class="les${pinned?' pinned':''}${newintake?' newintake':''}" data-idx="${idx}" style="height:100%" draggable="${pinned?'false':'true'}" ${pinned?'':`ondragstart="dragStart(event,${idx})" ondragend="dragEnd(event)"`} onclick="editLes(${idx})">
+          <div class="les${pinned?' pinned':''}${newintake?' newintake':''}" data-idx="${idx}" data-id="${esc(les.id)}" style="height:100%" draggable="${pinned?'false':'true'}" ${pinned?'':`ondragstart="dragStart(event,'${esc(les.id)}')" ondragend="dragEnd(event)"`} onclick="editLes(_lesIdx('${esc(les.id)}'))">
             <div class="les-tools">
-              <span class="lt-btn" onclick="event.stopPropagation();togglePin(${idx})" title="${pinned?'Открепить':'Закрепить'}">${pinned?'📌':'📍'}</span>
-              <span class="lt-btn" onclick="event.stopPropagation();toggleNewIntake(${idx})" title="${newintake?'Снять «новый набор»':'Отметить «новый набор»'}">${newintake?'🟠':'🆕'}</span>
-              <span class="lt-btn" onclick="event.stopPropagation();dupLes(${idx})" title="Копировать занятие">⧉</span>
-              <span class="lt-btn lt-del" onclick="event.stopPropagation();delLesByIdx(${idx})" title="Удалить занятие">×</span>
+              <span class="lt-btn" onclick="event.stopPropagation();togglePin(_lesIdx('${esc(les.id)}'))" title="${pinned?'Открепить':'Закрепить'}">${pinned?'📌':'📍'}</span>
+              <span class="lt-btn" onclick="event.stopPropagation();toggleNewIntake(_lesIdx('${esc(les.id)}'))" title="${newintake?'Снять «новый набор»':'Отметить «новый набор»'}">${newintake?'🟠':'🆕'}</span>
+              <span class="lt-btn" onclick="event.stopPropagation();dupLes(_lesIdx('${esc(les.id)}'))" title="Копировать занятие">⧉</span>
+              <span class="lt-btn lt-del" onclick="event.stopPropagation();delLesByIdx(_lesIdx('${esc(les.id)}'))" title="Удалить занятие">×</span>
             </div>
             <b>${newintake?'<span class="ni-badge" title="Новый набор">🟠</span> ':''}${esc(les.course)}${les.note?` <span class="les-note" title="${esc(les.note)}">📝</span>`:""}</b>
             ${les.group?`<span class="les-grp">${esc(les.group)}</span>`:""}
@@ -2993,6 +3000,7 @@ function dupLes(idx){
   const l=S.grid[idx]; if(!l) return;
   const copy=JSON.parse(JSON.stringify(l));
   delete copy.pinned;
+  copy.id=_lid();   // ВАЖНО: у копии свой id, иначе в Firebase (карта по id) копия затрёт оригинал → «рандом»
   const dur=minDiff(l.start,l.end)||60;
   // 1) пробуем тот же кабинет, следующий свободный слот вниз
   let placed=false;
@@ -3074,14 +3082,14 @@ function toggleNewIntake(idx){
   toast(l.newIntake?"Отмечено: новый набор":"Метка «новый набор» снята");
 }
 
-let _dragIdx=null;
-function dragStart(e,idx){ if(S.grid[idx]&&S.grid[idx].pinned){e.preventDefault();return;} _dragIdx=idx; e.dataTransfer.effectAllowed="move"; setTimeout(()=>{ if(e.target.classList) e.target.style.opacity="0.4"; },0); }
+let _dragId=null;
+function dragStart(e,id){ const l=_lesById(id); if(l&&l.pinned){e.preventDefault();return;} _dragId=id; e.dataTransfer.effectAllowed="move"; setTimeout(()=>{ if(e.target.classList) e.target.style.opacity="0.4"; },0); }
 function dragEnd(e){ if(e.target.style) e.target.style.opacity="1"; }
 function dragOver(e){ e.preventDefault(); e.dataTransfer.dropEffect="move"; }
 function dropLes(e,slot,room){
   e.preventDefault();
-  if(_dragIdx==null) return;
-  const l=S.grid[_dragIdx];
+  if(_dragId==null) return;
+  const l=_lesById(_dragId);   // по стабильному id — не собьётся при синхронизации
   if(!l) return;
   // длительность сохраняем, сдвигаем начало и конец
   const dur=minDiff(l.start,l.end);
@@ -3089,7 +3097,7 @@ function dropLes(e,slot,room){
   l.end=addMin(slot,dur||90);
   l.room=room;
   l.day=curDay;
-  _dragIdx=null;
+  _dragId=null;
   persistLocal(); renderGrid(); renderStaff();
 }
 function minDiff(a,b){ const[ah,am]=a.split(":").map(Number),[bh,bm]=b.split(":").map(Number); return (bh*60+bm)-(ah*60+am); }
@@ -3130,15 +3138,16 @@ function renderGridSummary(){
 let _newLesRef=null;
 function addLes(slot,room){
   const courseNames=S.courses.map(c=>c.name);
-  const les={day:curDay,start:slot,end:addMin(slot,90),course:courseNames[0]||"",teacher:"",students:6,room:room};
+  const les={id:_lid(),day:curDay,start:slot,end:addMin(slot,90),course:courseNames[0]||"",teacher:"",students:6,room:room};
   S.grid.push(les);
   _newLesRef=les;
-  persistLocal(); renderGrid(); editLes(S.grid.length-1);
+  persistLocal(); renderGrid(); editLes(_lesIdx(les.id));
 }
 function addMin(t,min){ const[h,m]=t.split(":").map(Number); let tot=h*60+m+min;
   return String(Math.floor(tot/60)).padStart(2,"0")+":"+String(tot%60).padStart(2,"0"); }
 function editLes(idx,focusKi){
   const l=S.grid[idx];
+  if(!l){ toast("Занятие не найдено — обновите страницу"); return; }
   migrateLessonKids(l);
   _editKids=kidsOf(l).map(k=>Object.assign(_blankKid(),k));
   let courseOpts=S.courses.map(c=>`<option ${c.name===l.course?"selected":""}>${esc(c.name)}</option>`).join("");
@@ -3183,6 +3192,7 @@ function editLes(idx,focusKi){
   renderKidsEditor();
   document.getElementById("lesModal").classList.add("show");
   document.getElementById("lesModal").dataset.idx=idx;
+  document.getElementById("lesModal").dataset.lesId=l.id||"";   // все действия модалки — по стабильному id
   document.getElementById("mCourse").onchange=refreshLesWage;
   document.getElementById("mStud").oninput=refreshLesWage;
   if(document.getElementById("mTeacher")) document.getElementById("mTeacher").onchange=refreshLesWage;
@@ -3265,7 +3275,7 @@ function kidMoveToGroup(kidIndex, targetKey){
   if(!targetKey){ toast("Выберите группу"); return; }
   _kidsFromDOM();
   const kid=_editKids[kidIndex]; if(!kid || !kid.n){ toast("Пустая строка"); return; }
-  const curIdx=+document.getElementById("lesModal").dataset.idx;
+  const curIdx=_modalLesIdx();
   const cur=S.grid[curIdx]; if(!cur) return;
   const list=_gridGroupList();
   const target=list.find(g=>g.key===targetKey); if(!target){ toast("Группа не найдена"); return; }
@@ -3343,8 +3353,9 @@ function kidPasteList(){
 
 function saveLes(){
   _newLesRef=null;                 // занятие подтверждено — при закрытии не удалять
-  const idx=+document.getElementById("lesModal").dataset.idx;
+  const idx=_modalLesIdx();
   const l=S.grid[idx];
+  if(!l){ toast("Занятие не найдено — обновите страницу"); closeLes(); return; }
   _kidsFromDOM();
   l.course=document.getElementById("mCourse").value;
   l.teacher=document.getElementById("mTeacher").value;
@@ -3361,14 +3372,15 @@ function saveLes(){
 }
 function delLes(){
   _newLesRef=null;                 // удаляем явно — пометку снять, чтобы closeLes не дублировал
-  const idx=+document.getElementById("lesModal").dataset.idx;
+  const idx=_modalLesIdx();
+  if(idx<0||!S.grid[idx]){ closeLes(); return; }   // -1 → splice(-1,1) удалил бы последнее занятие
   S.grid.splice(idx,1); persistLocal(); closeLes(); renderGrid(); renderStaff(); renderGroups(); renderMay();
 }
 
 function togglePinModal(){
-  const idx=+document.getElementById("lesModal").dataset.idx;
+  const idx=_modalLesIdx();
+  const l=S.grid[idx]; if(!l) return;
   togglePin(idx);
-  const l=S.grid[idx];
   document.getElementById("pinBtn").textContent=l.pinned?"Открепить":"Закрепить";
 }
 
@@ -4430,7 +4442,7 @@ function _vbDate(iso){ try{ const d=new Date(iso); return d.toLocaleDateString("
 function _commitEditKids(les){ if(les) les.kids=_editKids.filter(x=>x.n); }
 async function kidViber(i){
   _kidsFromDOM();
-  const idx=+(document.getElementById("lesModal").dataset.idx);
+  const idx=_modalLesIdx();
   const les=S.grid[idx]; const k=_editKids[i];
   if(!les||!k) return;
   const num=_viberNumber(k.phone);
@@ -4445,7 +4457,7 @@ async function kidViber(i){
 }
 function kidViberReset(i){
   _kidsFromDOM();
-  const les=S.grid[+(document.getElementById("lesModal").dataset.idx)]; const k=_editKids[i];
+  const les=S.grid[_modalLesIdx()]; const k=_editKids[i];
   if(!k) return;
   k.vbSent=false; k.vbSentAt="";
   _commitEditKids(les); persistLocal(); if(typeof fbSchedulePush==="function") fbSchedulePush();
@@ -4476,7 +4488,7 @@ async function kidAlfaUpdate(i){
     const kk=_editKids[i]; if(!kk) return;
     if(s.dob) kk.dob=s.dob;
     if(j.customerId) kk.alfaId=j.customerId;
-    const idx=+document.getElementById("lesModal").dataset.idx;
+    const idx=_modalLesIdx();
     if(S.grid[idx]) S.grid[idx].kids=_editKids.filter(x=>x.n);
     persistLocal(); if(typeof fbSchedulePush==="function") fbSchedulePush();
     renderKidsEditor();
@@ -4507,7 +4519,7 @@ async function kidsPullAges(){
       if(c.id && !k.alfaId) k.alfaId=c.id;
       if(c.phones && c.phones[0] && !k.phone) k.phone=c.phones[0];
     });
-    const idx=+document.getElementById("lesModal").dataset.idx;
+    const idx=_modalLesIdx();
     if(S.grid[idx]) S.grid[idx].kids=_editKids.filter(x=>x.n);
     persistLocal(); if(typeof fbSchedulePush==="function") fbSchedulePush();
     renderKidsEditor();
@@ -4762,7 +4774,7 @@ function resetViberTpl(){ const def=_vtplMode==="may"?VIBER_TPL_MAY_DEFAULT:VIBE
 /* образец для предпросмотра: реальные данные открытого занятия + условное имя ребёнка */
 function _vtplSampleLes(){
   const im=document.getElementById("lesModal");
-  if(im && im.classList.contains("show")){ const idx=+im.dataset.idx; if(S.grid&&S.grid[idx]) return S.grid[idx]; }
+  if(im && im.classList.contains("show")){ const idx=_modalLesIdx(); if(S.grid&&S.grid[idx]) return S.grid[idx]; }
   return {group:"Minecraft №1",course:"Minecraft",day:1,start:"11:00",end:"12:30",teacher:"Анна"};
 }
 function renderVtplPreview(){
