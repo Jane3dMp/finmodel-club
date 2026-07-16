@@ -3167,6 +3167,7 @@ function editLes(idx,focusKi){
     <div class="hd-actions" style="margin-top:6px">
       <button type="button" class="btn ghost sm" onclick="kidAdd()">+ Ребёнок</button>
       <button type="button" class="btn ghost sm" onclick="kidPasteList()">📋 Вставить список</button>
+      <button type="button" class="btn ghost sm" id="kidsPullAgesBtn" onclick="kidsPullAges()" title="Подтянуть из Альфы возраст, телефон и связь сразу ВСЕМ детям этого занятия (один заход)" style="display:none">🎂 Возраст всем</button>
       <button type="button" class="btn ghost sm" onclick="editViberTpl()" title="Текст сообщения, который копируется в Viber">✍️ Шаблон Viber</button>
       <span style="font-size:11px;color:var(--muted);align-self:center">Комментарии в основную сетку не выводятся</span>
     </div>
@@ -3185,6 +3186,7 @@ function editLes(idx,focusKi){
   if(document.getElementById("mEnd")) document.getElementById("mEnd").oninput=refreshLesWage;
   refreshLesWage();
   const pb=document.getElementById("pinBtn"); if(pb) pb.textContent=S.grid[idx].pinned?"Открепить":"Закрепить";
+  const pab=document.getElementById("kidsPullAgesBtn"); if(pab) pab.style.display=_fbIsAdmin?"":"none";
   if(typeof focusKi==="number" && focusKi>=0){   // подсветить конкретного ребёнка (клик из списка)
     const rows=document.querySelectorAll("#kidsTable tbody tr");
     const tr=rows[focusKi];
@@ -4477,6 +4479,38 @@ async function kidAlfaUpdate(i){
     toast("Обновлено из Альфы: "+shortName(nm)+(s.dob?(" · "+_ageStr(s.dob)):" · возраст не указан"));
   }catch(e){ toast("Не удалось: "+((e&&e.message)||e)); }
 }
+/* Подтянуть из Альфы возраст (ДР) + телефон + связь сразу ВСЕМ детям занятия —
+   одна выгрузка клиентов, сопоставление по ФИО. Не трогает уже заполненные поля. */
+async function kidsPullAges(){
+  _kidsFromDOM();
+  if(!_editKids.length){ toast("Нет детей"); return; }
+  const btn=document.getElementById("kidsPullAgesBtn"); if(btn){ btn.disabled=true; btn.textContent="Тяну из Альфы…"; }
+  try{
+    const token=await _alfaIdToken();
+    const r=await fetch(ALFA_PROXY+"?action=customers",{method:"POST",
+      headers:{"Content-Type":"application/json","Authorization":"Bearer "+token},body:JSON.stringify({})});
+    const j=await r.json().catch(()=>({ok:false,error:"ответ не JSON (код "+r.status+")"}));
+    if(!r.ok||!j.ok) throw new Error(j.error||("Ошибка "+r.status));
+    const cust=(j.customers||[]).filter(c=>c&&c.name);
+    // сопоставление: строгое по словам, иначе мягко по «Фамилия Имя» (ловит усечённые/без отчества)
+    const byN2={}; cust.forEach(c=>{ const n=_normName(c.name); if(n && !byN2[n]) byN2[n]=c; });
+    const findC=(name)=>{ const s=cust.find(x=>_sameKid(x.name, name)); return s||byN2[_normName(name)]||null; };
+    let nAge=0, nMiss=0;
+    _editKids.forEach(k=>{ if(!k.n) return;
+      const c=findC(k.n);
+      if(!c){ if(!k.dob) nMiss++; return; }
+      if(c.dob && !k.dob){ k.dob=c.dob; nAge++; }
+      if(c.id && !k.alfaId) k.alfaId=c.id;
+      if(c.phones && c.phones[0] && !k.phone) k.phone=c.phones[0];
+    });
+    const idx=+document.getElementById("lesModal").dataset.idx;
+    if(S.grid[idx]) S.grid[idx].kids=_editKids.filter(x=>x.n);
+    persistLocal(); if(typeof fbSchedulePush==="function") fbSchedulePush();
+    renderKidsEditor();
+    toast("Возраст подтянут: +"+nAge+(nMiss?(" · не найдено в Альфе: "+nMiss):""));
+  }catch(e){ toast("Не удалось: "+((e&&e.message)||e)); }
+  const b2=document.getElementById("kidsPullAgesBtn"); if(b2){ b2.disabled=false; b2.textContent="🎂 Возраст всем"; }
+}
 function vbHist(li,ki){ const les=S.grid[li]; const k=les&&(les.kids||[])[ki]; if(k) openAlfaHistory(k.alfaId,k.n); }
 async function openAlfaHistory(alfaId,name){
   if(!alfaId && !name){ toast("Нет данных для поиска в Альфе"); return; }
@@ -5119,8 +5153,9 @@ async function mayPullAges(){
     const j=await r.json().catch(()=>({ok:false,error:"ответ не JSON (код "+r.status+")"}));
     if(!r.ok||!j.ok) throw new Error(j.error||("Ошибка "+r.status));
     const cust=(j.customers||[]).filter(c=>c&&c.dob&&c.name);
+    const byN2={}; cust.forEach(c=>{ const n=_normName(c.name); if(n && !byN2[n]) byN2[n]=c; });
     let n=0;
-    list.forEach(row=>{ if(row.dob) return; const c=cust.find(c=>_sameKid(c.name, row.fio)); if(c&&c.dob){ row.dob=c.dob; n++; } });
+    list.forEach(row=>{ if(row.dob) return; const c=cust.find(c=>_sameKid(c.name, row.fio))||byN2[_normName(row.fio)]; if(c&&c.dob){ row.dob=c.dob; n++; } });
     persistLocal(); if(typeof fbSchedulePush==="function") fbSchedulePush(); renderMay();
     toast("Возраст подтянут: +"+n+" (в списке "+list.length+")");
   }catch(e){ toast("Не удалось: "+((e&&e.message)||e)); }
