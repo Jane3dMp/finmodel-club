@@ -4734,7 +4734,7 @@ function renderGroups(){
 }
 
 /* ===== ВКЛАДКА «МАЙСКИЙ» — постоянная сверка оплат с расписанием ===== */
-let _mayFilter="all", _mayQuery="", _mayAddOpen=false;
+let _mayFilter="all", _mayQuery="", _mayAddOpen=false, _mayHideDone=false;
 /* название курса из Альфы → в название модели (список майских — из Альфы, там свои имена).
    «3D Unity»→«Blender + Unity», «Хочу всё знать»→«Хочу все знать! выходной», «Пескография»→«Песок» и т.д.
    Плюс «&»→«и» для «3D Blender & Unity». */
@@ -4955,12 +4955,9 @@ function mayResetAll(){
   renderGrid(); if(typeof renderGroups==="function") renderGroups(); renderMay();
   toast("Обнулено 💰: "+n+" · список майских очищен");
 }
-function mayClearDone(){
-  const before=(S.mayList||[]).length;
-  // «готово» = группа купленного майского курса вписана и с 💰 (годовые группы не считаем)
-  S.mayList=(S.mayList||[]).filter(r=>{ const occ=mayOccFor(r); const done=occ.length>0 && occ.every(o=>o.paid); return !done; });
-  persistLocal(); renderMay(); toast("Убрано разобранных: "+(before-(S.mayList||[]).length));
-}
+/* Скрыть/показать готовых — НЕ удаляем строки (чтобы всегда можно было вернуть,
+   посмотреть или изменить, куда ребёнок определён). Фильтр «Готово» их всё равно покажет. */
+function mayToggleDone(){ _mayHideDone=!_mayHideDone; renderMay(); }
 /* Подтянуть список майских прямо из AlfaCRM (надёжнее ручного переноса из Excel).
    Прокси-действие maysubs отбирает абонементы с меткой «майск» на сезон 01.09–31.12.2026. */
 async function mayFromAlfa(){
@@ -5063,7 +5060,7 @@ function renderMay(){
       <span class="hd-sep"></span>
       <span class="hd-grp">
         <button class="btn sm" onclick="mayMarkAllFound()" title="Проставить 💰 всем, кто уже вписан в сетку">💰 Отметить всех в сетке (${cnt.found})</button>
-        <button class="btn ghost sm" onclick="mayClearDone()" title="Убрать из списка строки, которые уже с 💰">🧹 Убрать готовые (${cnt.done})</button>
+        <button class="btn ${_mayHideDone?'':'ghost'} sm" onclick="mayToggleDone()" title="Скрыть/показать строки, которые уже с 💰. Не удаляет — вернуть можно этой же кнопкой (или фильтром «Готово»)">${_mayHideDone?'👁 Показать всех':'🙈 Скрыть готовые'} (${cnt.done})</button>
         <button class="btn sm" onclick="mayToggleAdd()" title="Дописать ещё детей, не трогая уже загруженных">＋ Добавить в список</button>
         <button class="btn ghost sm" onclick="mayReplaceDoc()">↻ Заменить список</button>
       </span>
@@ -5083,6 +5080,7 @@ function renderMay(){
   list.forEach((r,i)=>{
     const st=states[i];
     if(_mayFilter!=="all" && st.state!==_mayFilter) return;
+    if(_mayHideDone && st.state==="done" && _mayFilter!=="done") return;   // готовые спрятаны (не удалены)
     if(q.length>=2 && !_ksNorm(r.fio).includes(q)) return;
     shownN++;
     let courseCell=esc(r.course||"—");
