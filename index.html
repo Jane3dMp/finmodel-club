@@ -4376,6 +4376,8 @@ const VIBER_TPL_DEFAULT=[
 const VIBER_TPL_MAY_DEFAULT=[
 "{привет}",
 "",
+"На связи менеджер {бренд}, Ольга!",
+"",
 "Спасибо, что остаётесь с нами! 💙 Место в группе уже закреплено — {имя} снова будет заниматься в новом учебном году.",
 "",
 "Вот детали занятий:",
@@ -4494,12 +4496,23 @@ const VIBER_TPL_OLDS=[
    ИЛИ не содержит «умных» плейсхолдеров {бренд}/{вступление} (значит плоский, без бренда
    и вариативности — именно то, на что жаловались). Осознанно кастомный (со смысловыми
    {бренд}/{вступление}) не трогаем. */
+/* прежние версии дефолта для ОПЛАТИВШИХ — если сохранён один из них, подхватываем новый */
+const VIBER_TPL_MAY_OLDS=[
+["{привет}","","Спасибо, что остаётесь с нами! 💙 Место в группе уже закреплено — {имя} снова будет заниматься в новом учебном году.","","Вот детали занятий:","📘 Курс: {курс}","👥 Группа: «{группа}»","🗓 {день}, {время}","📅 Начало занятий: {старт}","","{нотка}","","Ждём вас на занятиях — до скорой встречи! 🚀"].join("\n")
+];
 function _migrateViberTpl(){
   const cur=(S.viberTpl||"").trim();
   const looksOld = cur==="" || VIBER_TPL_OLDS.indexOf(cur)>=0
                    || (cur.indexOf("{бренд}")<0 && cur.indexOf("{вступление}")<0);
   if(looksOld && S.viberTpl!==VIBER_TPL_DEFAULT){
     S.viberTpl=VIBER_TPL_DEFAULT;
+    persistLocal();
+    if(typeof fbSchedulePush==="function") fbSchedulePush();
+  }
+  // шаблон оплатившим: только пустой или прежний дефолт → новый (кастомный не трогаем)
+  const cm=(S.viberTplMay||"").trim();
+  if((cm==="" || VIBER_TPL_MAY_OLDS.indexOf(cm)>=0) && S.viberTplMay!==VIBER_TPL_MAY_DEFAULT){
+    S.viberTplMay=VIBER_TPL_MAY_DEFAULT;
     persistLocal();
     if(typeof fbSchedulePush==="function") fbSchedulePush();
   }
