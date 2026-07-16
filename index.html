@@ -341,6 +341,23 @@ details.kid-move[open]>summary{color:var(--terra-d)}
 details.kid-move>div{position:absolute;right:0;top:calc(100% + 2px);z-index:20;background:#fff;border:1px solid var(--line);
   border-radius:8px;padding:6px;box-shadow:0 8px 24px rgba(28,20,16,.2);display:flex;gap:4px;align-items:center;white-space:nowrap}
 details.kid-move>div .cell{min-width:230px}
+/* --- вкладка «Клиенты» --- */
+details.client{border:1px solid var(--line);border-radius:9px;margin-bottom:6px;background:#fff;overflow:hidden}
+details.client>summary{cursor:pointer;list-style:none;padding:9px 12px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:14px}
+details.client>summary::-webkit-details-marker{display:none}
+details.client>summary::before{content:'▸';color:var(--muted);font-size:12px;width:12px}
+details.client[open]>summary::before{content:'▾'}
+details.client[open]>summary{border-bottom:1px solid var(--line);background:var(--sand-l)}
+details.client>summary:hover{background:var(--sand-l)}
+details.client .cli-badges{margin-left:auto;font-size:12px;color:var(--muted)}
+.cli-list{padding:4px 8px 8px}
+.cli-enr{display:grid;grid-template-columns:130px minmax(160px,1fr) 150px minmax(120px,1fr);gap:8px;align-items:baseline;padding:6px;border-bottom:1px solid #f0ebe4;font-size:12px;cursor:pointer}
+.cli-enr:last-child{border-bottom:none}
+.cli-enr:hover{background:#fbf6f2}
+.cli-when{color:var(--terra-d);font-weight:600;white-space:nowrap}
+.cli-meta{color:var(--muted)}
+.cli-st{text-align:right}
+@media(max-width:760px){.cli-enr{grid-template-columns:1fr;gap:2px}.cli-st{text-align:left}}
 </style>
 </head>
 <body>
@@ -383,6 +400,7 @@ details.kid-move>div .cell{min-width:230px}
  <button class="tab" data-t="planner">Планировщик загрузки</button>
  <button class="tab" data-t="grid">Расписание (сетка)</button>
  <button class="tab" data-t="groups">Группы</button>
+ <button class="tab" data-t="clients">Клиенты</button>
  <button class="tab" data-t="may">Майский 💰</button>
  <button class="tab" data-t="staff">Педсостав и ФОТ</button>
  <button class="tab" data-t="fixed">Постоянные расходы</button>
@@ -513,6 +531,13 @@ details.kid-move>div .cell{min-width:230px}
  <h2 class="sec">Группы</h2>
  <div class="sec-desc">Все группы, собранные из расписания: курс, педагог, дни и время, сколько детей вписано (из «мест») и сколько с 💰. Клик по «→» открывает группу в сетке.</div>
  <div id="groupsBody"></div>
+</section>
+
+<!-- ===== КЛИЕНТЫ (все дети + их курсы/статусы) ===== -->
+<section class="panel" id="clients">
+ <h2 class="sec">Клиенты</h2>
+ <div class="sec-desc">Все дети из расписания. Нажмите на ребёнка — раскроется список: на какой курс/группу вписан, день и время, кабинет, педагог и статус (💰 майский, подтверждён и т.д.). Клик по строке открывает это занятие.</div>
+ <div id="clientsBody"></div>
 </section>
 
 <!-- ===== МАЙСКИЙ (сверка оплат) ===== -->
@@ -1252,14 +1277,15 @@ function fbStart(){
   });
 }
 /* ---- вкладки по ролям ---- */
-const TAB_DEFS=[["dash","Дашборд"],["courses","Курсы и маржа"],["planner","Планировщик загрузки"],["grid","Расписание (сетка)"],["groups","Группы"],["may","Майский"],["staff","Педсостав и ФОТ"],["fixed","Постоянные расходы"],["tax","Налоги РБ и ФОТ"],["break","Точка безубыточности"],["scenario","Сценарии"],["settings","Параметры"]];
-const MANAGER_DEFAULT_TABS=["grid","groups","may"];
+const TAB_DEFS=[["dash","Дашборд"],["courses","Курсы и маржа"],["planner","Планировщик загрузки"],["grid","Расписание (сетка)"],["groups","Группы"],["clients","Клиенты"],["may","Майский"],["staff","Педсостав и ФОТ"],["fixed","Постоянные расходы"],["tax","Налоги РБ и ФОТ"],["break","Точка безубыточности"],["scenario","Сценарии"],["settings","Параметры"]];
+const MANAGER_DEFAULT_TABS=["grid","groups","clients","may"];
+const ALWAYS_TABS={clients:1};   // видны всем ролям, даже если не отмечены в доступах
 function _defaultTabsMap(){ const m={}; MANAGER_DEFAULT_TABS.forEach(function(k){ m[k]=true; }); return m; }
 /* ---- режимы навигации: «Работа» (ежедневное) и «Финмодель» (финансы) ---- */
-const TAB_MODES={grid:"work",groups:"work",may:"work",dash:"fin",courses:"fin",planner:"fin",staff:"fin",fixed:"fin",tax:"fin","break":"fin",scenario:"fin",settings:"fin"};
+const TAB_MODES={grid:"work",groups:"work",clients:"work",may:"work",dash:"fin",courses:"fin",planner:"fin",staff:"fin",fixed:"fin",tax:"fin","break":"fin",scenario:"fin",settings:"fin"};
 let _tabAccess=null;   // null = все вкладки (админ / до входа), иначе {tabKey:true}
 let navMode=(function(){ try{ return localStorage.getItem("navMode")||"work"; }catch(e){ return "work"; } })();
-function _tabAllowed(k){ return !_tabAccess || _tabAccess[k]===true; }
+function _tabAllowed(k){ return ALWAYS_TABS[k]===1 || !_tabAccess || _tabAccess[k]===true; }
 function _updateTabVisibility(){
   // если в текущем режиме не осталось доступных вкладок — перескочить в другой
   const modes=["work","fin"];
@@ -4878,6 +4904,59 @@ function renderGroups(){
   box.innerHTML=html;
 }
 
+/* ===== ВКЛАДКА «КЛИЕНТЫ» — все дети + на какие курсы/группы вписаны и статус ===== */
+let _clientsQuery="";
+function _clientEnrollStatus(e){
+  const s=[];
+  if(e.may) s.push('<span style="color:var(--green)">💰 майский</span>');
+  if(e.vbReply==="yes") s.push('🟢 подтвердил');
+  else if(e.vbReply==="no") s.push('🔴 отказ');
+  else if(e.vbReply==="maybe") s.push('🟡 думает');
+  if(e.no) s.push('<span style="color:var(--red)">❌ не придёт</span>');
+  if(e.sched) s.push('🗓 подходит');
+  if(e.call) s.push('📵 недозвон');
+  return s.length?s.join(' · '):'<span style="color:var(--muted)">—</span>';
+}
+function renderClients(){
+  const box=document.getElementById("clientsBody"); if(!box) return;
+  // собрать всех детей по полному имени (Фамилия Имя Отчество — тёзок не сливаем)
+  const map={};
+  (S.grid||[]).forEach(l=>kidsOf(l).forEach(k=>{
+    const key=_nameKey(k.n); if(!key) return;
+    if(!map[key]) map[key]={name:k.n, dob:k.dob||"", enroll:[]};
+    if(!map[key].dob && k.dob) map[key].dob=k.dob;
+    if(map[key].name.split(" ").length < String(k.n).trim().split(" ").length) map[key].name=k.n; // берём наиболее полное написание
+    map[key].enroll.push({ id:l.id||"", course:l.course||"", group:l.group||"", day:l.day||0, start:l.start||"", end:l.end||"",
+      room:l.room||"", teacher:l.teacher||"", may:!!k.may, sched:!!k.sched, no:!!k.no, call:!!k.call, vbReply:k.vbReply||"", comment:k.c||"" });
+  }));
+  const clients=Object.values(map).sort((a,b)=>a.name.localeCompare(b.name,"ru"));
+  const q=_ksNorm(_clientsQuery);
+  const shown=q.length>=2 ? clients.filter(c=>_ksNorm(c.name).includes(q)) : clients;
+  let html=`<div class="callout" style="margin-bottom:10px">Детей в системе: <b>${clients.length}</b>${q.length>=2?` · найдено: <b>${shown.length}</b>`:''}</div>
+    <div class="kidsearch" style="margin-bottom:10px">
+      <input id="clientsQ" type="search" class="kidsearch-in" placeholder="🔍 Поиск ребёнка по ФИО" value="${esc(_clientsQuery)}" oninput="_clientsQuery=this.value;clientsRerenderKeepFocus()" autocomplete="off">
+    </div>`;
+  if(!shown.length){ box.innerHTML=html+`<div style="color:var(--muted);padding:10px 2px">${clients.length?'Никого не найдено.':'В расписании пока нет детей.'}</div>`; return; }
+  shown.forEach(c=>{
+    const courses=[...new Set(c.enroll.map(e=>e.course).filter(Boolean))];
+    const paid=c.enroll.filter(e=>e.may).length;
+    const rows=c.enroll.slice().sort((a,b)=>(a.day-b.day)||String(a.start).localeCompare(String(b.start))).map(e=>
+      `<div class="cli-enr" title="Открыть это занятие" onclick="editLes(_lesIdx('${esc(e.id)}'))">
+        <span class="cli-when">${DAY_NAMES[e.day]||'?'} ${esc(e.start)}${e.end?'–'+esc(e.end):''}</span>
+        <span class="cli-course"><b>${esc(e.course||'?')}</b>${e.group?' '+esc(e.group):''}</span>
+        <span class="cli-meta">${e.room?'каб. '+esc(e.room)+' · ':''}${esc(shortName(e.teacher))}</span>
+        <span class="cli-st">${_clientEnrollStatus(e)}</span>
+      </div>`).join("");
+    html+=`<details class="client">
+      <summary><b>${esc(c.name)}</b>${c.dob?` <span style="font-size:11px;color:var(--blue)">· ${esc(_ageStr(c.dob))}</span>`:''}
+        <span class="cli-badges">${courses.length} курс(ов)${paid?` · <span style="color:var(--green)">💰 ${paid}</span>`:''}</span></summary>
+      <div class="cli-list">${rows}</div>
+    </details>`;
+  });
+  box.innerHTML=html;
+}
+function clientsRerenderKeepFocus(){ renderClients(); const el=document.getElementById("clientsQ"); if(el){ const v=el.value; el.focus(); el.value=""; el.value=v; } }
+
 /* ===== ВКЛАДКА «МАЙСКИЙ» — постоянная сверка оплат с расписанием ===== */
 let _mayFilter="all", _mayQuery="", _mayAddOpen=false, _mayHideDone=false;
 /* название курса из Альфы → в название модели (список майских — из Альфы, там свои имена).
@@ -5531,7 +5610,7 @@ function deleteScenario(){
 
 
 function renderAll(){
-  renderCourses(); renderPlanner(); renderGrid(); renderGroups(); renderMay(); renderStaff(); renderFixed(); renderTax(); renderBreak(); renderSettings(); renderDash(); onSlider(); renderConflictBanner(); renderScenarioBar(); updateNavHeightDelayed();
+  renderCourses(); renderPlanner(); renderGrid(); renderGroups(); renderClients(); renderMay(); renderStaff(); renderFixed(); renderTax(); renderBreak(); renderSettings(); renderDash(); onSlider(); renderConflictBanner(); renderScenarioBar(); updateNavHeightDelayed();
 }
 function toast(m){ const t=document.getElementById("toast"); t.textContent=m; t.classList.add("show");
   clearTimeout(t._h); t._h=setTimeout(()=>t.classList.remove("show"),2200); }
