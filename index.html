@@ -332,6 +332,15 @@ details.may-move-d>summary{cursor:pointer;color:var(--muted);font-size:11px;list
 details.may-move-d>summary::-webkit-details-marker{display:none}
 details.may-move-d>summary:hover{color:var(--terra)}
 details.may-move-d[open]>summary{color:var(--terra-d);margin-bottom:3px}
+/* --- перевод ребёнка в другую группу из карточки занятия --- */
+details.kid-move{position:relative;display:inline-block}
+details.kid-move>summary{cursor:pointer;list-style:none;font-size:15px;color:var(--muted);padding:0 3px;user-select:none}
+details.kid-move>summary::-webkit-details-marker{display:none}
+details.kid-move>summary:hover{color:var(--terra)}
+details.kid-move[open]>summary{color:var(--terra-d)}
+details.kid-move>div{position:absolute;right:0;top:calc(100% + 2px);z-index:20;background:#fff;border:1px solid var(--line);
+  border-radius:8px;padding:6px;box-shadow:0 8px 24px rgba(28,20,16,.2);display:flex;gap:4px;align-items:center;white-space:nowrap}
+details.kid-move>div .cell{min-width:230px}
 </style>
 </head>
 <body>
@@ -3221,6 +3230,58 @@ function _kidsFromDOM(){
     return o;
   });
 }
+/* все группы сетки (курс·группа) — для «перевести ребёнка в другую группу» */
+function _gridGroupList(){
+  const groups={}, order=[];
+  (S.grid||[]).forEach((l,idx)=>{
+    if(!l.course && !l.group) return;
+    const gk=(l.course||"")+"||"+(l.group||("__"+l.day+"_"+l.start+"_"+l.room));
+    if(!groups[gk]){ groups[gk]={key:gk,course:l.course||"",label:l.group||"",teacher:l.teacher||"",day:l.day,start:l.start,end:l.end,room:l.room,newIntake:!!l.newIntake,idxs:[]}; order.push(gk); }
+    groups[gk].idxs.push(idx);
+  });
+  return order.map(k=>{ const g=groups[k];
+    const nm=g.label||(g.teacher?shortName(g.teacher):"без №");
+    const vm=(g.course||"").match(/\(([^)]*)\)/); const variant=vm?(" ("+vm[1]+")"):"";
+    g.text=(g.newIntake?"🆕 ":"")+nm+variant+" · "+(DAY_NAMES[g.day]||"")+" "+(g.start||"")+(g.room?(" · каб."+g.room):"");
+    return g; });
+}
+function _gridGroupOptsHtml(){
+  const gl=_gridGroupList();
+  const byC={}; gl.forEach(g=>{ (byC[g.course]=byC[g.course]||[]).push(g); });
+  let h='<option value="">— выбрать группу —</option>';
+  Object.keys(byC).sort((a,b)=>a.localeCompare(b,"ru")).forEach(c=>{
+    h+=`<optgroup label="${esc(c||"без курса")}">`+byC[c].map(g=>`<option value="${esc(g.key)}">${esc(g.text)}</option>`).join("")+`</optgroup>`;
+  });
+  return h;
+}
+/* перевести ребёнка из текущей группы (карточка занятия) в выбранную — со всей карточкой */
+function kidMoveToGroup(kidIndex, targetKey){
+  if(!targetKey){ toast("Выберите группу"); return; }
+  _kidsFromDOM();
+  const kid=_editKids[kidIndex]; if(!kid || !kid.n){ toast("Пустая строка"); return; }
+  const curIdx=+document.getElementById("lesModal").dataset.idx;
+  const cur=S.grid[curIdx]; if(!cur) return;
+  const list=_gridGroupList();
+  const target=list.find(g=>g.key===targetKey); if(!target){ toast("Группа не найдена"); return; }
+  const curKey=(cur.course||"")+"||"+(cur.group||("__"+cur.day+"_"+cur.start+"_"+cur.room));
+  if(target.key===curKey){ toast("Это та же группа"); return; }
+  const proto=JSON.parse(JSON.stringify(kid));
+  // убрать из прочих занятий текущей группы (текущее занятие — через _editKids)
+  const curG=list.find(g=>g.key===curKey);
+  (curG?curG.idxs:[curIdx]).forEach(idx=>{ if(idx===curIdx) return; const l=S.grid[idx]; if(Array.isArray(l.kids)) l.kids=l.kids.filter(k=>!_sameKid(k.n, kid.n)); });
+  _editKids.splice(kidIndex,1);
+  S.grid[curIdx].kids=_editKids.filter(k=>k.n);
+  // вписать во все занятия целевой группы
+  target.idxs.forEach(idx=>{ const l=S.grid[idx]; if(!Array.isArray(l.kids)) l.kids=[];
+    if(!l.kids.some(k=>_sameKid(k.n, kid.n))) l.kids.push(JSON.parse(JSON.stringify(proto)));
+  });
+  persistLocal(); if(typeof fbSchedulePush==="function") fbSchedulePush();
+  renderKidsEditor();
+  if(typeof renderGrid==="function") renderGrid();
+  if(typeof renderGroups==="function") renderGroups();
+  if(typeof renderMay==="function") renderMay();
+  toast("Переведён(а): "+(kid.n)+" → "+(target.label||target.course||"группа"));
+}
 function renderKidsEditor(){
   const box=document.getElementById("kidsBox");
   if(!box) return;
@@ -3230,6 +3291,7 @@ function renderKidsEditor(){
     return;
   }
   const th=KID_FLAGS.map(f=>`<th title="${f.lab}">${f.ic}<br>${f.lab.split(" ")[0]}</th>`).join("");
+  const moveOpts=_gridGroupOptsHtml();   // список групп для «перевести» (строится один раз)
   // сводка по группе (детей «не придёт» не считаем)
   const act=_editKids.filter(k=>!k.no);
   const cSent=act.filter(k=>k.vbSent).length;
@@ -3242,7 +3304,7 @@ function renderKidsEditor(){
       <span>🟡 Думают: <b>${cm}</b></span>
       <span style="color:var(--muted)">без ответа: <b>${cNo}</b></span></div>`;
   box.innerHTML=summary+`<table id="kidsTable"><thead><tr>
-      <th class="k-num"></th><th class="k-name">ФИО</th>${th}<th style="min-width:120px">Комментарий</th><th title="Написать в Viber родителю. ✅ = уже отправлено (правый клик — снять отметку)">📨</th><th title="Ответ родителя на приглашение">Ответ</th><th style="width:22px"></th>
+      <th class="k-num"></th><th class="k-name">ФИО</th>${th}<th style="min-width:120px">Комментарий</th><th title="Написать в Viber родителю. ✅ = уже отправлено (правый клик — снять отметку)">📨</th><th title="Ответ родителя на приглашение">Ответ</th><th title="Перевести в другую группу">↔</th><th style="width:22px"></th>
     </tr></thead><tbody>${
     _editKids.map((k,i)=>`<tr class="${k.no?'k-off':''}">
       <td class="k-num">${i+1}</td>
@@ -3251,6 +3313,7 @@ function renderKidsEditor(){
       <td><input type="text" class="k-in-c" value="${esc(k.c||"")}" placeholder="—"></td>
       <td><button type="button" class="btn ghost sm" style="padding:1px 6px${k.vbSent?';background:#e6f4ea;border-color:#66bb6a':''}" ${k.phone?"":"disabled"} title="${k.phone?(k.vbSent?('Отправлено'+(k.vbSentAt?' '+_vbDate(k.vbSentAt):'')+' · клик — отправить снова, правый клик — снять отметку'):('Viber → '+esc(k.phone))):'Нет телефона — сначала «📞 Контакты из Альфы»'}" onclick="kidViber(${i})" oncontextmenu="event.preventDefault();kidViberReset(${i});return false">${k.vbSent?'✅':'📨'}</button>${k.alfaId?`<button type="button" class="btn ghost sm" style="padding:1px 5px;margin-left:3px" title="История ребёнка в Альфе — куда ходил, баланс" onclick="kidHist(${i})">👤</button>`:''}</td>
       <td><select class="k-in-reply cell" style="font-size:11px;padding:3px 2px;min-width:96px" onchange="kidFlagChanged()">${VB_REPLY.map(r=>`<option value="${r[0]}" ${k.vbReply===r[0]?'selected':''}>${r[1]}</option>`).join("")}</select></td>
+      <td style="text-align:center"><details class="kid-move"><summary title="Перевести в другую группу">↔</summary><div><select class="cell kmv-sel">${moveOpts}</select><button type="button" class="btn sm" onclick="kidMoveToGroup(${i}, this.previousElementSibling.value)">Перевести</button></div></details></td>
       <td><span class="k-del" title="Удалить" onclick="kidDel(${i})">×</span></td>
     </tr>`).join("")
   }</tbody></table>`;
