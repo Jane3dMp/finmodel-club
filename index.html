@@ -2212,15 +2212,7 @@ function doPrintCourses(){
     tot=`<tr class="pr-tot">${cols.map(c=>`<td class="a-${c.al}">${V[c.k]||""}</td>`).join("")}</tr>`;
   }
 
-  const T2=totals();
-  const marginPct=T2.rev>0?Math.round((T2.rev-T2.wage-T2.mat)/T2.rev*1000)/10:0;
-  const meta=`<div class="pr-meta">
-    Оборот/мес: <b>${fmt(Math.round(T2.rev))} р</b> ·
-    ФОТ педагогов: <b>${fmt(Math.round(T2.wage))} р</b> ·
-    Маржа после ЗП: <b>${fmt(Math.round(T2.rev-T2.wage-T2.mat))} р (${marginPct}%)</b> ·
-    Модель ЗП: <b>${S._wageMode==="fix"?"фикс-ставка":"KPI"}</b>
-  </div>`;
-
+  // Печать курсов — список для менеджеров: финансовую сводку (оборот/ФОТ/маржа) не печатаем.
   const d=new Date();
   const dd=String(d.getDate()).padStart(2,"0")+"."+String(d.getMonth()+1).padStart(2,"0")+"."+d.getFullYear();
   const scn=(typeof currentScenarioName==="function")?currentScenarioName():"";
@@ -2244,7 +2236,6 @@ function doPrintCourses(){
   const html=`<!doctype html><html><head><meta charset="utf-8"><title>Курсы и маржа</title><style>${css}</style></head><body>
     <h1>Курсы и продуктовая матрица</h1>
     <div class="pr-sub">Прознание + CODDY · учебный год 2026/2027 · версия модели: ${esc(scn)} · напечатано ${dd}</div>
-    ${meta}
     <table><thead>${head}</thead><tbody>${rows}${tot}</tbody></table>
   </body></html>`;
 
