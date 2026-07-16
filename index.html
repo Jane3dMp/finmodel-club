@@ -342,6 +342,10 @@ details.kid-move>div{position:absolute;right:0;top:calc(100% + 2px);z-index:20;b
   border-radius:8px;padding:6px;box-shadow:0 8px 24px rgba(28,20,16,.2);display:flex;gap:4px;align-items:center;white-space:nowrap}
 details.kid-move>div .cell{min-width:230px}
 /* --- вкладка «Клиенты» --- */
+.cli-letters{display:flex;flex-wrap:wrap;gap:4px;margin-bottom:2px}
+.cli-lbtn{min-width:30px;padding:5px 8px;border:1px solid var(--line);background:#fff;border-radius:7px;cursor:pointer;font-weight:700;font-size:13px;color:var(--muted);line-height:1}
+.cli-lbtn:hover{background:var(--sand-l);color:var(--coal)}
+.cli-lbtn.on{background:var(--terra);color:#fff;border-color:var(--terra)}
 details.client{border:1px solid var(--line);border-radius:9px;margin-bottom:6px;background:#fff;overflow:hidden}
 details.client>summary{cursor:pointer;list-style:none;padding:9px 12px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:14px}
 details.client>summary::-webkit-details-marker{display:none}
@@ -4966,7 +4970,7 @@ function renderGroups(){
 }
 
 /* ===== ВКЛАДКА «КЛИЕНТЫ» — все дети + на какие курсы/группы вписаны и статус ===== */
-let _clientsQuery="";
+let _clientsQuery="", _clientsLetter="";
 function _clientEnrollStatus(e){
   const s=[];
   if(e.may) s.push('<span style="color:var(--green)">💰 майский</span>');
@@ -4991,10 +4995,17 @@ function renderClients(){
       room:l.room||"", teacher:l.teacher||"", may:!!k.may, sched:!!k.sched, no:!!k.no, call:!!k.call, vbReply:k.vbReply||"", comment:k.c||"" });
   }));
   const clients=Object.values(map).sort((a,b)=>a.name.localeCompare(b.name,"ru"));
+  const _firstLetter=nm=>((String(nm).trim().split(/\s+/)[0]||"")[0]||"").toUpperCase();
+  const letters=[...new Set(clients.map(c=>_firstLetter(c.name)).filter(Boolean))].sort((a,b)=>a.localeCompare(b,"ru"));
+  if(_clientsLetter && !letters.includes(_clientsLetter)) _clientsLetter="";   // буквы не осталось — сброс
   const q=_ksNorm(_clientsQuery);
-  const shown=q.length>=2 ? clients.filter(c=>_ksNorm(c.name).includes(q)) : clients;
-  let html=`<div class="callout" style="margin-bottom:10px">Детей в системе: <b>${clients.length}</b>${q.length>=2?` · найдено: <b>${shown.length}</b>`:''}</div>
-    <div class="kidsearch" style="margin-bottom:10px">
+  let shown=clients;
+  if(_clientsLetter) shown=shown.filter(c=>_firstLetter(c.name)===_clientsLetter);
+  if(q.length>=2) shown=shown.filter(c=>_ksNorm(c.name).includes(q));
+  const lbtn=(lab,val)=>`<button class="cli-lbtn${(_clientsLetter===val)?' on':''}" onclick="_clientsLetter=${val?`'${val}'`:"''"};renderClients()">${lab}</button>`;
+  let html=`<div class="callout" style="margin-bottom:10px">Детей в системе: <b>${clients.length}</b>${(q.length>=2||_clientsLetter)?` · показано: <b>${shown.length}</b>`:''}</div>
+    <div class="cli-letters">${lbtn('Все','')}${letters.map(L=>lbtn(L,L)).join("")}</div>
+    <div class="kidsearch" style="margin:8px 0 10px">
       <input id="clientsQ" type="search" class="kidsearch-in" placeholder="🔍 Поиск ребёнка по ФИО" value="${esc(_clientsQuery)}" oninput="_clientsQuery=this.value;clientsRerenderKeepFocus()" autocomplete="off">
     </div>`;
   if(!shown.length){ box.innerHTML=html+`<div style="color:var(--muted);padding:10px 2px">${clients.length?'Никого не найдено.':'В расписании пока нет детей.'}</div>`; return; }
@@ -5559,23 +5570,50 @@ function addConf(conf,i,msg){ if(!conf[i])conf[i]=[]; conf[i].push(msg); }
 function conflictCount(){
   const c=findConflicts(); return Object.keys(c).length;
 }
-function renderConflictBanner(){
-  const c=findConflicts();
-  const n=Object.keys(c).length;
-  const box=document.getElementById("conflictBanner");
-  if(!box) return;
-  if(n===0){ box.innerHTML=`<div class="callout" style="border-left-color:var(--green)"><b style="color:var(--green)">✓ Конфликтов нет</b> — ни один педагог и кабинет не пересекаются по времени.</div>`; return; }
-  // соберём список по дням
-  const dayNames=["","Понедельник","Вторник","Среда","Четверг","Пятница","Суббота","Воскресенье"];
-  let items=[];
-  Object.keys(c).forEach(i=>{ const l=S.grid[i];
-    items.push(`<li><b>${dayNames[l.day]} ${l.start}</b> · ${l.course}: ${[...new Set(c[i])].join("; ")}</li>`);
+/* Перехлёсты у детей: один ребёнок в один день в пересекающееся время — в двух занятиях. */
+function _childConflicts(){
+  const byKid={};
+  (S.grid||[]).forEach(l=>kidsOf(l).forEach(k=>{
+    const key=_nameKey(k.n); if(!key) return;
+    if(!byKid[key]) byKid[key]={name:k.n, ls:[]};
+    if(byKid[key].name.trim().split(/\s+/).length<String(k.n).trim().split(/\s+/).length) byKid[key].name=k.n;
+    byKid[key].ls.push({day:l.day, start:l.start, end:l.end||l.start, course:l.course||"", group:l.group||"", id:l.id});
+  }));
+  const out=[];
+  Object.values(byKid).forEach(kd=>{
+    const ls=kd.ls;
+    for(let i=0;i<ls.length;i++) for(let j=i+1;j<ls.length;j++){
+      const a=ls[i], b=ls[j];
+      if(a.day!==b.day) continue;
+      if(a.id && b.id && a.id===b.id) continue;
+      const as=toMin(a.start), ae=toMin(a.end), bs=toMin(b.start), be=toMin(b.end);
+      if(as<be && bs<ae) out.push({name:kd.name, day:a.day, a, b});   // пересечение по времени
+    }
   });
-  box.innerHTML=`<div class="callout" style="border-left-color:var(--red)">
-    <b style="color:var(--red)">⚠ Конфликтов: ${n}</b> — есть пересечения по педагогам или кабинетам.
-    <ul style="margin:8px 0 0 18px;font-size:12px;line-height:1.6">${items.slice(0,12).join("")}</ul>
-    ${items.length>12?`<div class="muted" style="font-size:11px;margin-top:4px">…и ещё ${items.length-12}</div>`:""}
-  </div>`;
+  return out;
+}
+function renderConflictBanner(){
+  const box=document.getElementById("conflictBanner"); if(!box) return;
+  const c=findConflicts();
+  const rt=Object.keys(c);          // пересечения педагогов/кабинетов (по индексу занятия)
+  const kc=_childConflicts();       // перехлёсты у детей по времени
+  const dayNames=["","Понедельник","Вторник","Среда","Четверг","Пятница","Суббота","Воскресенье"];
+  if(!rt.length && !kc.length){ box.innerHTML=`<div class="callout" style="border-left-color:var(--green)"><b style="color:var(--green)">✓ Конфликтов нет</b> — педагоги, кабинеты и дети по времени не пересекаются.</div>`; return; }
+  let html=`<div class="callout" style="border-left-color:var(--red)">`;
+  const gl=g=>esc(g.course)+(g.group?(" "+esc(g.group)):"");
+  if(kc.length){
+    html+=`<b style="color:var(--red)">⚠ Перехлёсты у детей: ${kc.length}</b> — ребёнок в одно время в двух занятиях:
+      <ul style="margin:6px 0 0 18px;font-size:12px;line-height:1.6">`
+      +kc.slice(0,20).map(x=>`<li><b>${esc(x.name)}</b> · ${dayNames[x.day]}: «${gl(x.a)}» ${esc(x.a.start)}–${esc(x.a.end)} ✕ «${gl(x.b)}» ${esc(x.b.start)}–${esc(x.b.end)}</li>`).join("")
+      +`</ul>${kc.length>20?`<div class="muted" style="font-size:11px;margin-top:4px">…и ещё ${kc.length-20}</div>`:""}`;
+  }
+  if(rt.length){
+    html+=`${kc.length?'<div style="height:8px"></div>':''}<b style="color:var(--red)">⚠ Пересечения педагогов/кабинетов: ${rt.length}</b>
+      <ul style="margin:6px 0 0 18px;font-size:12px;line-height:1.6">`
+      +rt.slice(0,12).map(i=>{ const l=S.grid[i]; return `<li><b>${dayNames[l.day]} ${l.start}</b> · ${esc(l.course)}: ${[...new Set(c[i])].map(esc).join("; ")}</li>`; }).join("")
+      +`</ul>${rt.length>12?`<div class="muted" style="font-size:11px;margin-top:4px">…и ещё ${rt.length-12}</div>`:""}`;
+  }
+  box.innerHTML=html+`</div>`;
 }
 
 
