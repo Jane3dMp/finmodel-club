@@ -4644,7 +4644,7 @@ async function openAlfaHistory(alfaId,name){
     const s=j.summary||{}, h=(j.history||[]);
     const cid=j.customerId||alfaId;
     if(j.matched && name && _normName(j.matched)!==_normName(name)) document.getElementById("alfaHistTitle").textContent="👤 "+j.matched+" (по «"+name+"»)";
-    link.href=ALFA_HOST_URL+"/customer/"+(j.branch||1)+"/edit/index?id="+cid; link.style.display="";
+    link.href=ALFA_HOST_URL+"/company/"+(j.branch||1)+"/customer/view?id="+cid; link.style.display="";
     const money=v=>(v===null||v===undefined||v==="")?"—":(fmt(Math.round(+v))+" р");
     const dOnly=v=>v?String(v).slice(0,10).split("-").reverse().join("."):"";
     let html=`<div class="callout" style="margin-bottom:8px">`
