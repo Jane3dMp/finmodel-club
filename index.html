@@ -3110,8 +3110,12 @@ function gridStats(){
   return {lessons,students,wageWeek,revWeek,groupsByCourse};
 }
 function renderGridSummary(){
+  const box=document.getElementById("gridSummary"); if(!box) return;
+  // Оборот/ФОТ и прочие сводные цифры — только для админов (Жанна и proznanie). Менеджеры не видят.
+  if(!_fbIsAdmin){ box.innerHTML=""; box.style.display="none"; return; }
+  box.style.display="";
   const st=gridStats();
-  document.getElementById("gridSummary").innerHTML=`
+  box.innerHTML=`
    ${kpi("Занятий/нед",fmt(st.lessons),"coal","всего в сетке")}
    ${kpi("Детей-мест/нед",fmt(st.students),"blue","сумма учеников")}
    ${kpi("Оборот/нед",fmt(st.revWeek)+" р","green","цена×ученики")}
