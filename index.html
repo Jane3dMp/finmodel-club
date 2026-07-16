@@ -3308,7 +3308,7 @@ function renderKidsEditor(){
     </tr></thead><tbody>${
     _editKids.map((k,i)=>`<tr class="${k.no?'k-off':''}">
       <td class="k-num">${i+1}</td>
-      <td class="k-name"><input type="text" class="k-in-name" value="${esc(k.n)}" placeholder="Фамилия Имя" oninput="refreshLesWage()"></td>
+      <td class="k-name"><div style="display:flex;align-items:center;gap:5px"><input type="text" class="k-in-name" style="flex:1;min-width:0;width:auto" value="${esc(k.n)}" placeholder="Фамилия Имя" oninput="refreshLesWage()">${k.dob?`<span style="font-size:11px;color:var(--blue);white-space:nowrap" title="Возраст из Альфы (ДР ${esc(String(k.dob).slice(0,10))})">${esc(_ageStr(k.dob))}</span>`:''}${_fbIsAdmin?`<button type="button" class="btn ghost sm" style="padding:0 5px;font-size:11px" title="Подтянуть возраст и связь этого ребёнка из Альфы (по ФИО)" onclick="kidAlfaUpdate(${i})">⟳</button>`:''}</div></td>
       ${KID_FLAGS.map(f=>`<td><input type="checkbox" class="k-in-${f.k}" ${k[f.k]?"checked":""} title="${f.lab}" onchange="kidFlagChanged()"></td>`).join("")}
       <td><input type="text" class="k-in-c" value="${esc(k.c||"")}" placeholder="—"></td>
       <td><button type="button" class="btn ghost sm" style="padding:1px 6px${k.vbSent?';background:#e6f4ea;border-color:#66bb6a':''}" ${k.phone?"":"disabled"} title="${k.phone?(k.vbSent?('Отправлено'+(k.vbSentAt?' '+_vbDate(k.vbSentAt):'')+' · клик — отправить снова, правый клик — снять отметку'):('Viber → '+esc(k.phone))):'Нет телефона — сначала «📞 Контакты из Альфы»'}" onclick="kidViber(${i})" oncontextmenu="event.preventDefault();kidViberReset(${i});return false">${k.vbSent?'✅':'📨'}</button>${k.alfaId?`<button type="button" class="btn ghost sm" style="padding:1px 5px;margin-left:3px" title="История ребёнка в Альфе — куда ходил, баланс" onclick="kidHist(${i})">👤</button>`:''}</td>
@@ -4451,6 +4451,32 @@ function kidViberReset(i){
 const ALFA_HOST_URL="https://proznanie4eee.s20.online";
 function closeAlfaHist(){ document.getElementById("alfaHistModal").classList.remove("show"); }
 function kidHist(i){ _kidsFromDOM(); const k=_editKids[i]; if(k) openAlfaHistory(k.alfaId,k.n); }
+/* точечно подтянуть из Альфы возраст (ДР) и связь (alfaId) ОДНОГО ребёнка — для новеньких,
+   чтобы не гонять полную синхронизацию контактов. Возраст хранится в карточке (k.dob). */
+async function kidAlfaUpdate(i){
+  _kidsFromDOM();
+  const k=_editKids[i]; if(!k||!k.n){ toast("Пустая строка"); return; }
+  const nm=k.n;
+  toast("Ищу в Альфе: "+shortName(nm)+"…");
+  try{
+    const token=await _alfaIdToken();
+    const r=await fetch(ALFA_PROXY+"?action=history",{method:"POST",
+      headers:{"Content-Type":"application/json","Authorization":"Bearer "+token},
+      body:JSON.stringify({name:nm})});
+    const j=await r.json().catch(()=>({ok:false,error:"ответ не JSON (код "+r.status+")"}));
+    if(!r.ok||!j.ok) throw new Error(j.error||("Ошибка "+r.status));
+    if(j.notFound || !j.customerId){ toast("В Альфе не найден: "+shortName(nm)); return; }
+    const s=j.summary||{};
+    const kk=_editKids[i]; if(!kk) return;
+    if(s.dob) kk.dob=s.dob;
+    if(j.customerId) kk.alfaId=j.customerId;
+    const idx=+document.getElementById("lesModal").dataset.idx;
+    if(S.grid[idx]) S.grid[idx].kids=_editKids.filter(x=>x.n);
+    persistLocal(); if(typeof fbSchedulePush==="function") fbSchedulePush();
+    renderKidsEditor();
+    toast("Обновлено из Альфы: "+shortName(nm)+(s.dob?(" · "+_ageStr(s.dob)):" · возраст не указан"));
+  }catch(e){ toast("Не удалось: "+((e&&e.message)||e)); }
+}
 function vbHist(li,ki){ const les=S.grid[li]; const k=les&&(les.kids||[])[ki]; if(k) openAlfaHistory(k.alfaId,k.n); }
 async function openAlfaHistory(alfaId,name){
   if(!alfaId && !name){ toast("Нет данных для поиска в Альфе"); return; }
