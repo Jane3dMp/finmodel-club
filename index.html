@@ -5116,10 +5116,13 @@ function renderMay(){
             <button class="btn ghost sm" onclick="mayMoveGroup(${i}, this.previousElementSibling)">Перевести</button></div></details>`;
       });
     }
-    if(st.needPlace){   // абонемент на курс, куда ещё не вписан — предложить группу этого курса
+    if(st.needPlace){   // абонемент на курс, куда ещё не вписан — предложить группу; можно и сменить курс
       const groups=mayGroupsOf(dst); const opts=groups.map(g=>`<option value="${esc(g.key)}">${esc(g.text)}</option>`).join("");
+      const courseOpts=gcSorted.map(c=>`<option ${_normCourse(c)===_normCourse(dst)?'selected':''}>${esc(c)}</option>`).join("");
       action+=`<div style="${occ.length?'margin-top:5px;padding-top:5px;border-top:1px dashed var(--line);':''}font-size:12px;display:flex;align-items:center;gap:6px;flex-wrap:wrap">
-        <span style="color:var(--muted)">Абонемент «${esc(dst)}» — вписать в группу: </span>
+        <span style="color:var(--muted)">Курс:</span>
+        <select class="cell" style="min-width:160px" title="Ребёнку нужен другой курс? Смените здесь — группы обновятся" onchange="maySetCourse(${i},this.value)">${courseOpts}</select>
+        <span style="color:var(--muted)">→ группа:</span>
         <select class="cell may-grp" id="mayGrp${i}" style="min-width:200px">${opts||'<option value="">нет групп этого курса</option>'}</select>
         <button class="btn sm" onclick="mayPlace(${i})">＋ Вписать с 💰</button>
         <button class="btn ghost sm" style="padding:1px 7px" title="Скрыть эту подсказку — вписывать не нужно" onclick="maySetDismiss(${i},true)">✕ не нужно</button></div>`;
