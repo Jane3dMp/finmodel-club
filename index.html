@@ -381,7 +381,6 @@ details.client .cli-badges{margin-left:auto;font-size:12px;color:var(--muted)}
      <span id="fbWhoami" class="menu-who"></span>
      <button class="btn ghost sm" id="fbAdminBtn" onclick="openAdminPanel()" title="Заявки на доступ и вкладки пользователей" style="display:none">🔑 Доступы<span id="fbAdminBadge"></span></button>
      <button class="btn ghost sm" id="histBtn" onclick="openHistory()" title="История версий — снимки на случай потери данных" style="display:none">🕘 История</button>
-     <button class="btn ghost sm" id="reportBtn" onclick="openReport()" title="Отчёт для владельца — воронка подтверждений и прогноз" style="display:none">📊 Отчёт</button>
      <button class="btn ghost sm" id="logBtn" onclick="openLog()" title="Журнал действий — кто и что менял" style="display:none">📜 Журнал</button>
      <div class="menu-sep"></div>
      <button class="btn ghost sm" onclick="openScnMenu()" title="Отдельные модели: годы и сценарии «что если»">⋮ Версии модели</button>
@@ -400,6 +399,7 @@ details.client .cli-badges{margin-left:auto;font-size:12px;color:var(--muted)}
   <button class="nm" data-m="fin" onclick="setNavMode('fin')">Финмодель</button>
  </div>
  <button class="tab active" data-t="dash">Дашборд</button>
+ <button class="tab" data-t="report">📊 Отчёт по набору</button>
  <button class="tab" data-t="courses">Курсы и маржа</button>
  <button class="tab" data-t="planner">Планировщик загрузки</button>
  <button class="tab" data-t="grid">Расписание (сетка)</button>
@@ -440,6 +440,16 @@ details.client .cli-badges{margin-left:auto;font-size:12px;color:var(--muted)}
    <div><b style="color:var(--red)">🔴 Под вопросом</b><table id="botCourses" style="margin-top:8px"></table></div>
   </div>
  </div>
+</section>
+
+<!-- ===== ОТЧЁТ ПО НАБОРУ ===== -->
+<section class="panel" id="report">
+ <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px">
+  <h2 class="sec" style="margin:0">📊 Отчёт по набору</h2>
+  <button class="btn ghost sm" onclick="printReport()" style="margin-left:auto">🖨 Печать</button>
+ </div>
+ <div class="sec-desc">Воронка подтверждений и прогноз оборота по группам — по данным Viber-рассылки и ответов родителей. Только для админа.</div>
+ <div id="reportBody"></div>
 </section>
 
 <!-- ===== КУРСЫ ===== -->
@@ -737,17 +747,6 @@ details.client .cli-badges{margin-left:auto;font-size:12px;color:var(--muted)}
    <a id="alfaHistLink" class="btn ghost sm" href="#" target="_blank" rel="noopener" style="display:none">🔗 Открыть карточку в Альфе</a>
    <button class="btn ghost sm" onclick="closeAlfaHist()">Закрыть</button>
   </div>
- </div>
-</div>
-
-<div class="modal-bg" id="reportModal">
- <div class="modal" style="max-width:1000px">
-  <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
-   <h3 style="margin:0">📊 Отчёт по набору</h3>
-   <button class="btn ghost sm" onclick="printReport()" style="margin-left:auto">🖨 Печать</button>
-   <button class="btn ghost sm" onclick="closeReport()">Закрыть</button>
-  </div>
-  <div id="reportBody"></div>
  </div>
 </div>
 
@@ -1282,15 +1281,16 @@ function fbStart(){
   });
 }
 /* ---- вкладки по ролям ---- */
-const TAB_DEFS=[["dash","Дашборд"],["courses","Курсы и маржа"],["planner","Планировщик загрузки"],["grid","Расписание (сетка)"],["groups","Группы"],["clients","Клиенты"],["may","Майский"],["staff","Педсостав и ФОТ"],["fixed","Постоянные расходы"],["tax","Налоги РБ и ФОТ"],["break","Точка безубыточности"],["scenario","Сценарии"],["settings","Параметры"]];
+const TAB_DEFS=[["dash","Дашборд"],["report","Отчёт по набору"],["courses","Курсы и маржа"],["planner","Планировщик загрузки"],["grid","Расписание (сетка)"],["groups","Группы"],["clients","Клиенты"],["may","Майский"],["staff","Педсостав и ФОТ"],["fixed","Постоянные расходы"],["tax","Налоги РБ и ФОТ"],["break","Точка безубыточности"],["scenario","Сценарии"],["settings","Параметры"]];
 const MANAGER_DEFAULT_TABS=["grid","groups","clients","may"];
 const ALWAYS_TABS={clients:1};   // видны всем ролям, даже если не отмечены в доступах
+const ADMIN_TABS={report:1};     // только для админа, не назначаются менеджерам
 function _defaultTabsMap(){ const m={}; MANAGER_DEFAULT_TABS.forEach(function(k){ m[k]=true; }); return m; }
 /* ---- режимы навигации: «Работа» (ежедневное) и «Финмодель» (финансы) ---- */
-const TAB_MODES={grid:"work",groups:"work",clients:"work",may:"work",dash:"fin",courses:"fin",planner:"fin",staff:"fin",fixed:"fin",tax:"fin","break":"fin",scenario:"fin",settings:"fin"};
+const TAB_MODES={grid:"work",groups:"work",clients:"work",may:"work",dash:"fin",report:"fin",courses:"fin",planner:"fin",staff:"fin",fixed:"fin",tax:"fin","break":"fin",scenario:"fin",settings:"fin"};
 let _tabAccess=null;   // null = все вкладки (админ / до входа), иначе {tabKey:true}
 let navMode=(function(){ try{ return localStorage.getItem("navMode")||"work"; }catch(e){ return "work"; } })();
-function _tabAllowed(k){ return ALWAYS_TABS[k]===1 || !_tabAccess || _tabAccess[k]===true; }
+function _tabAllowed(k){ if(ADMIN_TABS[k]) return _fbIsAdmin; return ALWAYS_TABS[k]===1 || !_tabAccess || _tabAccess[k]===true; }
 function _updateTabVisibility(){
   // если в текущем режиме не осталось доступных вкладок — перескочить в другой
   const modes=["work","fin"];
@@ -1431,8 +1431,6 @@ function _fbUpdateAdminUI(){
   if(asy) asy.style.display=_fbIsAdmin?"":"none";
   const hb=document.getElementById("histBtn");
   if(hb) hb.style.display=_fbIsAdmin?"":"none";
-  const rb=document.getElementById("reportBtn");
-  if(rb) rb.style.display=_fbIsAdmin?"":"none";
   const lg=document.getElementById("logBtn");
   if(lg) lg.style.display=_fbIsAdmin?"":"none";
   if(_fbPendRef){ try{_fbPendRef.off();}catch(e){} _fbPendRef=null; }
@@ -1474,7 +1472,7 @@ function _renderUsers(v){
   if(!ids.length){ box.innerHTML='<div style="color:#8a8178;font-size:13px;padding:6px 0">Пока нет пользователей с доступом.</div>'; return; }
   box.innerHTML=ids.map(function(uid){
     const u=_fbUsersData[uid]||{}; const em=(u&&u.email)||uid; const tabs=(u&&u.tabs)||{};
-    const checks=TAB_DEFS.map(function(t){
+    const checks=TAB_DEFS.filter(function(t){ return !ADMIN_TABS[t[0]]; }).map(function(t){
       return '<label style="display:inline-flex;align-items:center;gap:3px;font-size:11px;margin:2px 8px 2px 0;white-space:nowrap;cursor:pointer">'
         +'<input type="checkbox" '+(tabs[t[0]]===true?"checked":"")+' onchange="fbSetUserTab(\''+uid+'\',\''+t[0]+'\',this.checked)"> '+esc(t[1])+'</label>';
     }).join("");
@@ -4829,8 +4827,7 @@ function _reportHTML(){
   h+=`<p style="font-size:11px;color:var(--muted);margin-top:8px">Оборот/нед = подтвердивших × цена × визитов/нед (из данных курса). «Молчат» = отправлено, но родитель пока не ответил. Группа = поле «Группа» занятия, иначе курс+время.</p>`;
   return h;
 }
-function openReport(){ if(!_fbIsAdmin){ toast("Только для админа"); return; } document.getElementById("reportBody").innerHTML=_reportHTML(); document.getElementById("reportModal").classList.add("show"); }
-function closeReport(){ document.getElementById("reportModal").classList.remove("show"); }
+function renderReport(){ const b=document.getElementById("reportBody"); if(!b) return; b.innerHTML=_fbIsAdmin?_reportHTML():'<div class="sec-desc">Отчёт доступен только администратору.</div>'; }
 function printReport(){
   const w=window.open("","_blank"); if(!w){ toast("Разрешите всплывающие окна"); return; }
   const css=`body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;padding:20px}
@@ -5701,7 +5698,7 @@ function deleteScenario(){
 
 
 function renderAll(){
-  renderCourses(); renderPlanner(); renderGrid(); renderGroups(); renderClients(); renderMay(); renderStaff(); renderFixed(); renderTax(); renderBreak(); renderSettings(); renderDash(); onSlider(); renderConflictBanner(); renderScenarioBar(); updateNavHeightDelayed();
+  renderCourses(); renderPlanner(); renderGrid(); renderGroups(); renderClients(); renderMay(); renderStaff(); renderFixed(); renderTax(); renderBreak(); renderSettings(); renderDash(); if(typeof renderReport==="function") renderReport(); onSlider(); renderConflictBanner(); renderScenarioBar(); updateNavHeightDelayed();
 }
 function toast(m){ const t=document.getElementById("toast"); t.textContent=m; t.classList.add("show");
   clearTimeout(t._h); t._h=setTimeout(()=>t.classList.remove("show"),2200); }
@@ -5793,6 +5790,7 @@ document.querySelectorAll(".tab").forEach(tb=>tb.onclick=()=>{
   document.querySelectorAll(".panel").forEach(x=>x.classList.remove("active"));
   tb.classList.add("active");
   document.getElementById(tb.dataset.t).classList.add("active");
+  if(tb.dataset.t==="report" && typeof renderReport==="function") renderReport();
   updateNavHeightDelayed();
 });
 /* стартовый режим навигации («Работа» по умолчанию, запоминается в браузере) */
