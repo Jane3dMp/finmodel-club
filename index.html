@@ -3169,6 +3169,7 @@ function renderGridSummary(){
 /* ссылка на только что созданное занятие — если карточку закрыть «Отмена»,
    не сохранив, оно должно исчезнуть (а не остаться в расписании). */
 let _newLesRef=null;
+let _savedInModal=false;   // true если карточку закрыли ПОСЛЕ сохранения/удаления (наша правка новее отложенного remote)
 function addLes(slot,room){
   const courseNames=S.courses.map(c=>c.name);
   const les={id:_lid(),day:curDay,start:slot,end:addMin(slot,90),course:courseNames[0]||"",teacher:"",students:6,room:room};
@@ -3402,7 +3403,10 @@ function saveLes(){
   l.kids=_editKids.filter(k=>k.n);
   l.newIntake=!!document.getElementById("mNewIntake")?.checked;
   const synced=_syncGroupKids(l);   // одна группа (курс+№) = один состав во всех её занятиях
-  persistLocal(); closeLes(); renderGrid(); renderStaff(); renderGroups(); renderMay();
+  _savedInModal=true;               // наша правка новее — closeLes не должен откатить её отложенным remote
+  persistLocal();
+  if(FB_ON && typeof fbPush==="function"){ try{ clearTimeout(_fbPushTimer); fbPush(); }catch(e){} }  // сразу в Firebase — до окна гонки
+  closeLes(); renderGrid(); renderStaff(); renderGroups(); renderMay();
   if(synced>0) toast("Состав применён и к другим занятиям группы: "+synced);
 }
 /* Синхронизировать состав детей по всем занятиям одной группы (тот же курс + тот же номер группы).
@@ -3451,7 +3455,9 @@ function delLes(){
   _newLesRef=null;                 // удаляем явно — пометку снять, чтобы closeLes не дублировал
   const idx=_modalLesIdx();
   if(idx<0||!S.grid[idx]){ closeLes(); return; }   // -1 → splice(-1,1) удалил бы последнее занятие
-  S.grid.splice(idx,1); persistLocal(); closeLes(); renderGrid(); renderStaff(); renderGroups(); renderMay();
+  S.grid.splice(idx,1); _savedInModal=true; persistLocal();
+  if(FB_ON && typeof fbPush==="function"){ try{ clearTimeout(_fbPushTimer); fbPush(); }catch(e){} }  // сразу в Firebase
+  closeLes(); renderGrid(); renderStaff(); renderGroups(); renderMay();
 }
 
 function togglePinModal(){
@@ -3474,7 +3480,12 @@ function closeLes(){
     persistLocal(); renderGrid();
   }
   document.getElementById("lesModal").classList.remove("show");
-  if(_fbPending){ const p=_fbPending; _fbPending=null; _applyRemote(p); }
+  if(_fbPending){ const p=_fbPending; _fbPending=null;
+    // после СОХРАНЕНИЯ/УДАЛЕНИЯ не применяем устаревший снимок (иначе откатит нашу правку) —
+    // наша правка уйдёт в Firebase, а изменения с других компов подтянет живой слушатель.
+    if(!_savedInModal) _applyRemote(p);
+  }
+  _savedInModal=false;
 }
 
 /* перенос сетки → план (считаем группы по расставленным занятиям) */
