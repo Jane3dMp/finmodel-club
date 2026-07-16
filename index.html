@@ -5107,6 +5107,24 @@ async function mayAlfaProbe(){
       +'<div style="margin-top:8px"><button class="btn ghost" onclick="renderMay()">← Назад к списку</button></div></div>';
   }catch(e){ alert("Проба не удалась: "+((e&&e.message)||e)); }
 }
+/* Один раз подтянуть возраст (ДР) из Альфы для ВСЕХ строк списка майских — включая
+   не вписанных в сетку. Одна выгрузка клиентов + сопоставление по ФИО; dob хранится на строке (r.dob). */
+async function mayPullAges(){
+  const list=S.mayList||[]; if(!list.length){ toast("Список пуст"); return; }
+  toast("Тяну возраст из Альфы… (может занять до минуты)");
+  try{
+    const token=await _alfaIdToken();
+    const r=await fetch(ALFA_PROXY+"?action=customers",{method:"POST",
+      headers:{"Content-Type":"application/json","Authorization":"Bearer "+token},body:JSON.stringify({})});
+    const j=await r.json().catch(()=>({ok:false,error:"ответ не JSON (код "+r.status+")"}));
+    if(!r.ok||!j.ok) throw new Error(j.error||("Ошибка "+r.status));
+    const cust=(j.customers||[]).filter(c=>c&&c.dob&&c.name);
+    let n=0;
+    list.forEach(row=>{ if(row.dob) return; const c=cust.find(c=>_sameKid(c.name, row.fio)); if(c&&c.dob){ row.dob=c.dob; n++; } });
+    persistLocal(); if(typeof fbSchedulePush==="function") fbSchedulePush(); renderMay();
+    toast("Возраст подтянут: +"+n+" (в списке "+list.length+")");
+  }catch(e){ toast("Не удалось: "+((e&&e.message)||e)); }
+}
 function renderMay(){
   const box=document.getElementById("mayReconBody"); if(!box) return;
   const list=S.mayList||[];
@@ -5152,6 +5170,7 @@ function renderMay(){
         <button class="btn ${_mayHideDone?'':'ghost'} sm" onclick="mayToggleDone()" title="Скрыть/показать строки, которые уже с 💰. Не удаляет — вернуть можно этой же кнопкой (или фильтром «Готово»)">${_mayHideDone?'👁 Показать всех':'🙈 Скрыть готовые'} (${cnt.done})</button>
         <button class="btn sm" onclick="mayToggleAdd()" title="Дописать ещё детей, не трогая уже загруженных">＋ Добавить в список</button>
         <button class="btn ghost sm" onclick="mayReplaceDoc()">↻ Заменить список</button>
+        ${_fbIsAdmin?`<button class="btn ghost sm" onclick="mayPullAges()" title="Один раз подтянуть возраст (дату рождения) из Альфы для всех строк списка — чтобы возраст был виден даже у не вписанных. Хранится, каждый раз не нужно">🎂 Возраст из Альфы</button>`:''}
       </span>
       <span class="hd-sep"></span>
       <span class="hd-grp"><button class="btn gray sm" onclick="mayResetAll()" title="Снять 💰 со ВСЕХ детей во всём расписании и очистить список — чтобы разложить майские заново">♻️ Обнулить всё (💰 + список)</button></span>
@@ -5165,6 +5184,8 @@ function renderMay(){
     <div class="tscroll"><table id="mayTable"><thead><tr>
       <th style="width:34px">#</th><th style="text-align:left">ФИО</th><th style="text-align:left">Курс</th><th style="text-align:left">Статус / действие</th><th style="width:34px"></th>
     </tr></thead><tbody>`;
+  // все дети сетки с датой рождения — чтобы показать возраст по ЛЮБОЙ группе ребёнка (не только майского курса)
+  const _dobKids=[]; (S.grid||[]).forEach(l=>kidsOf(l).forEach(k=>{ if(k&&k.dob) _dobKids.push(k); }));
   let shownN=0;
   list.forEach((r,i)=>{
     const st=states[i];
@@ -5228,7 +5249,7 @@ function renderMay(){
     if(!action) action=`<span style="color:var(--muted);font-size:12px">—</span>`;
     html+=`<tr>
       <td style="text-align:center;color:var(--muted)">${i+1}</td>
-      <td style="text-align:left">${esc(r.fio)}${r.alfaMay?` <span style="font-size:10px;background:#fce9c8;color:#8a5a12;border-radius:8px;padding:0 6px;white-space:nowrap" title="Оплачено майских в Альфе (обычно = число курсов). Оставьте столько строк, сколько майских">🧾 ${r.alfaMay}</span>`:''}${(function(){ const kd=(st.occ||[]).flatMap(o=>o.kids).find(x=>x.dob); return kd?` <span style="font-size:11px;color:var(--blue);white-space:nowrap" title="Возраст из Альфы">· ${_ageStr(kd.dob)}</span>`:''; })()} <button type="button" class="btn ghost sm" style="padding:0 5px;font-size:12px" title="История ребёнка в Альфе — куда ходил в прошлом году" onclick="mayHist(${i})">👤</button></td>
+      <td style="text-align:left">${esc(r.fio)}${r.alfaMay?` <span style="font-size:10px;background:#fce9c8;color:#8a5a12;border-radius:8px;padding:0 6px;white-space:nowrap" title="Оплачено майских в Альфе (обычно = число курсов). Оставьте столько строк, сколько майских">🧾 ${r.alfaMay}</span>`:''}${(function(){ const kd=_dobKids.find(x=>_sameKid(x.n, r.fio)); const dob=r.dob||(kd&&kd.dob)||""; return dob?` <span style="font-size:11px;color:var(--blue);white-space:nowrap" title="Возраст из Альфы">· ${_ageStr(dob)}</span>`:''; })()} <button type="button" class="btn ghost sm" style="padding:0 5px;font-size:12px" title="История ребёнка в Альфе — куда ходил в прошлом году" onclick="mayHist(${i})">👤</button></td>
       <td style="text-align:left">${courseCell}</td>
       <td style="text-align:left">${action}</td>
       <td style="text-align:center"><span class="k-del" title="Убрать строку" onclick="mayDelRow(${i})">×</span></td>
