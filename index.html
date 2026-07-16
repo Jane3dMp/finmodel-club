@@ -938,7 +938,13 @@ const FB_CONFIG={
 let FB_ON=false,_fbDb=null,_fbRef=null,_fbLast={},_fbApplying=false,_fbPending=null,_fbPushTimer=null;
 const FB_SKIP={gasUrl:1};
 function _lid(){ return "L"+Date.now().toString(36)+Math.random().toString(36).slice(2,7); }
-function _ensureLessonIds(){ (S.grid||[]).forEach(l=>{ if(l && !l.id) l.id=_lid(); }); }
+function _ensureLessonIds(){
+  const seen=new Set();
+  (S.grid||[]).forEach(l=>{ if(!l) return;
+    if(!l.id || seen.has(l.id)) l.id=_lid();   // нет id ИЛИ дубль (старые копии с общим id) → новый уникальный
+    seen.add(l.id);
+  });
+}
 /* Идентификация занятий по СТАБИЛЬНОМУ id (индекс массива сбивается при синхронизации Firebase).
    Индекс вычисляем в момент действия, а не рендера. */
 function _lesById(id){ if(id==null||id==="") return null; return (S.grid||[]).find(l=>l&&l.id===id)||null; }
