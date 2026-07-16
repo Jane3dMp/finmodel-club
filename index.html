@@ -2226,17 +2226,18 @@ function doPrintCourses(){
   const scn=(typeof currentScenarioName==="function")?currentScenarioName():"";
 
   const css=`
-    @page{size:landscape;margin:10mm}
+    @page{size:portrait;margin:12mm}
     *{box-sizing:border-box;font-family:Arial,Helvetica,sans-serif}
     body{margin:0;color:#1c1410}
-    h1{font-size:17px;margin:0 0 3px;border-bottom:2px solid #b5532a;padding-bottom:4px}
-    .pr-sub{font-size:11px;color:#666;margin:0 0 8px}
-    .pr-meta{font-size:11px;color:#333;background:#f6f1ea;border:1px solid #e2d7c9;border-radius:6px;padding:6px 8px;margin-bottom:8px}
-    table{width:100%;border-collapse:collapse}
-    th,td{border:1px solid #ccc;font-size:10px;padding:3px 5px}
-    th{background:#2a211b;color:#fff;font-size:10px}
+    h1{font-size:16px;margin:0 0 3px;border-bottom:2px solid #b5532a;padding-bottom:4px}
+    .pr-sub{font-size:10px;color:#666;margin:0 0 8px}
+    .pr-meta{font-size:10px;color:#333;background:#f6f1ea;border:1px solid #e2d7c9;border-radius:6px;padding:6px 8px;margin-bottom:8px}
+    /* не растягиваем на весь лист — таблица по содержимому и по центру страницы */
+    table{border-collapse:collapse;margin:0 auto;max-width:100%}
+    th,td{border:1px solid #ccc;font-size:10px;padding:3px 10px;text-align:center}   /* все столбцы по центру */
+    th{background:#2a211b;color:#fff}
+    th.a-left,td.a-left{text-align:left}   /* кроме названия курса — оно влево */
     tr.pr-tot td{background:#f3ece4;font-weight:700}
-    .a-left{text-align:left}.a-right{text-align:right}.a-center{text-align:center}
     tbody tr:nth-child(even) td{background:#faf7f3}
     tbody tr.pr-tot td{background:#f3ece4}
   `;
