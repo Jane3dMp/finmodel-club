@@ -502,6 +502,7 @@ details.client .cli-badges{margin-left:auto;font-size:12px;color:var(--muted)}
     <button class="btn ghost sm" onclick="gridToPlan()" title="Пересчитать планировщик из текущего расписания">↻ Пересчитать план</button>
     <button class="btn ghost sm" onclick="renderConflictBanner();document.getElementById('conflictBanner').scrollIntoView({behavior:'smooth'})">⚠ Конфликты</button>
     <button class="btn ghost sm" onclick="removeDuplicates()" title="Удалить занятия-дубли, наложенные друг на друга">🧹 Убрать дубли</button>
+    <button class="btn ghost sm" onclick="syncAllGroups()" title="Свести составы: у групп, что идут несколько раз в неделю, состав детей станет одинаковым во всех занятиях">🔗 Свести составы групп</button>
     <div class="menu-sep"></div>
     <button class="btn ghost sm" onclick="exportKidsByDay()" title="Выгрузить Excel: дети по дням со статусами">📥 Дети по дням (Excel)</button>
     <button class="btn ghost sm" id="alfaSyncBtn" style="display:none" onclick="openAlfaSync()" title="Подтянуть телефоны родителей из AlfaCRM и сопоставить с детьми в модели">📞 Контакты из Альфы</button>
@@ -3400,7 +3401,51 @@ function saveLes(){
   l.note=(document.getElementById("mNote").value||"").trim();
   l.kids=_editKids.filter(k=>k.n);
   l.newIntake=!!document.getElementById("mNewIntake")?.checked;
+  const synced=_syncGroupKids(l);   // одна группа (курс+№) = один состав во всех её занятиях
   persistLocal(); closeLes(); renderGrid(); renderStaff(); renderGroups(); renderMay();
+  if(synced>0) toast("Состав применён и к другим занятиям группы: "+synced);
+}
+/* Синхронизировать состав детей по всем занятиям одной группы (тот же курс + тот же номер группы).
+   Возвращает, во сколько ДРУГИХ занятий скопирован состав. Без номера группы не синхронизируем. */
+function _syncGroupKids(l){
+  if(!l || !l.group || !String(l.group).trim()) return 0;
+  const key=(l.course||"")+"||"+String(l.group).trim();
+  let n=0;
+  (S.grid||[]).forEach(o=>{ if(o===l || !o) return;
+    if((o.course||"")+"||"+String(o.group||"").trim()===key){
+      o.kids=JSON.parse(JSON.stringify(l.kids||[]));   // копия (свои объекты, не общие ссылки)
+      n++;
+    }
+  });
+  return n;
+}
+/* Свести составы ВСЕХ групп: у каждой группы (курс+№), что идёт несколько раз в неделю,
+   состав = объединение детей всех её занятий, применяется ко всем занятиям группы. */
+function syncAllGroups(){
+  const byGroup={};
+  (S.grid||[]).forEach((l,idx)=>{ const g=String(l.group||"").trim(); if(!g) return;
+    const key=(l.course||"")+"||"+g; (byGroup[key]=byGroup[key]||[]).push(idx); });
+  const multi=Object.values(byGroup).filter(idxs=>idxs.length>=2);
+  if(!multi.length){ toast("Нет групп с несколькими занятиями в неделю"); return; }
+  if(!confirm("Свести составы групп?\n\nУ каждой группы, что идёт несколько раз в неделю, состав детей станет ОДИНАКОВЫМ во всех её занятиях (объединение). Перед изменением сохранится снимок (откат через «🕘 История»).")) return;
+  if(typeof makeSnapshot==="function") makeSnapshot(true);
+  let groupsFixed=0, lessonsChanged=0;
+  multi.forEach(idxs=>{
+    // объединение детей по ПОЛНОМУ имени (тёзок не сливаем), первое вхождение — со всеми полями
+    const merged={}, order=[];
+    idxs.forEach(i=>kidsOf(S.grid[i]).forEach(k=>{ const nk=_nameKey(k.n); if(!nk) return;
+      if(!merged[nk]){ merged[nk]=k; order.push(nk); } }));
+    const roster=order.map(nk=>merged[nk]);
+    const rosterSig=JSON.stringify(order.slice().sort());
+    let changed=false;
+    idxs.forEach(i=>{ const cur=JSON.stringify(kidsOf(S.grid[i]).map(k=>_nameKey(k.n)).sort());
+      if(cur!==rosterSig){ S.grid[i].kids=JSON.parse(JSON.stringify(roster)); changed=true; lessonsChanged++; } });
+    if(changed) groupsFixed++;
+  });
+  if(!lessonsChanged){ toast("Все группы уже согласованы"); return; }
+  persistLocal(); if(typeof fbSchedulePush==="function") fbSchedulePush();
+  renderGrid(); if(typeof renderGroups==="function") renderGroups(); renderMay(); if(typeof renderClients==="function") renderClients();
+  toast("Сведено групп: "+groupsFixed+" · занятий изменено: "+lessonsChanged);
 }
 function delLes(){
   _newLesRef=null;                 // удаляем явно — пометку снять, чтобы closeLes не дублировал
