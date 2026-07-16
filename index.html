@@ -2042,6 +2042,7 @@ function renderCourses(){
     ${_sortTh("name",{cls:"col-name"})}
     ${_sortTh("eco",{cls:"col-eco",title:"Экосистема: П — Прознание, C — CODDY, Д — Детали"})}
     ${_sortTh("price")}
+    ${_sortTh("single",{title:"Стоимость разового занятия (справочно; в расчётах оборота/маржи не участвует)"})}
     ${_sortTh("wage")}
     ${_sortTh("groups")}
     ${_sortTh("ingrid",{title:"Сколько групп этого курса уже стоит в расписании (занятия÷визиты). Обновляется из сетки"})}
@@ -2069,6 +2070,7 @@ function renderCourses(){
       <td class="col-eco c-eco a-center"><select class="cell eco-sel" ${da} title="${esc(c.eco)}" onchange="upd(${i},'eco',this.value)">
         ${[["Прознание","П"],["CODDY","C"],["Детали","Д"]].map(([v,lab])=>`<option value="${v}" ${c.eco===v?"selected":""}>${lab}</option>`).join("")}</select></td>
       <td class="c-price a-right"><input class="cell" type="number" value="${c.price}" ${da} onchange="upd(${i},'price',this.value)"></td>
+      <td class="c-single a-right"><input class="cell" type="number" value="${c.single}" ${da} onchange="upd(${i},'single',this.value)"></td>
       <td class="num c-wage a-right" title="${S._wageMode==='fix'?'фикс-ставка педагога курса (прочерк = один педагог не назначен или ставка не задана)':'из справочника ставок по '+(r.fillN||c.fill||4)+' детям'}"><b>${(()=>{ if(S._wageMode==='fix'){ const fw=courseFixWageDisplay(c.name); return fw!=null?fmt(fw):'—'; } return fmt(r.wage); })()}</b></td>
       <td class="c-groups a-right"><input class="cell" type="number" value="${c.groups}" ${da} onchange="upd(${i},'groups',this.value)"></td>
       <td class="num c-ingrid a-right" title="групп в расписании (из сетки)">${(()=>{ const g=courseGroupsInGrid(c.name,c.visits); const plan=+c.groups||0; const cls=g===plan?'pos':(g<plan?'neg':''); return `<b class="${cls}">${g}</b>`; })()}</td>
@@ -2094,6 +2096,7 @@ function renderCourses(){
     `<td class="c-name a-left">ИТОГО (${S.courses.length} курсов)</td>`+
     `<td class="c-eco"></td>`+
     `<td class="c-price"></td>`+
+    `<td class="c-single"></td>`+
     `<td class="c-wage"></td>`+
     `<td class="num c-groups a-right" title="Всего групп в неделю по всем курсам">${_totGroups}</td>`+
     `<td class="num c-ingrid a-right" title="Всего групп в расписании (из сетки)">${S.courses.reduce((a,c)=>a+courseGroupsInGrid(c.name,c.visits),0)}</td>`+
@@ -2118,6 +2121,7 @@ const COURSE_PRINT_COLS=[
   {k:"name",   lab:"Курс",              al:"left", get:(c,r)=>esc(c.name), val:(c,r)=>c.name||""},
   {k:"eco",    lab:"Эко",               al:"center", get:(c,r)=>({"Прознание":"П","CODDY":"C","Детали":"Д"}[c.eco]||""), val:(c,r)=>_ECO_ORDER[c.eco]??9},
   {k:"price",  lab:"Цена",              al:"right", get:(c,r)=>fmt(+c.price||0), val:(c,r)=>+c.price||0},
+  {k:"single", lab:"Разовое",           al:"right", get:(c,r)=>fmt(+c.single||0), val:(c,r)=>+c.single||0},
   {k:"wage",   lab:"ЗП/зан",            al:"right", get:(c,r)=>{ if(S._wageMode==="fix"){ const fw=courseFixWageDisplay(c.name); return fw!=null?fmt(fw):"—"; } return fmt(r.wage); }, val:(c,r)=>{ if(S._wageMode==="fix"){ const fw=courseFixWageDisplay(c.name); return fw!=null?+fw:-1; } return +r.wage||0; }},
   {k:"groups", lab:"Групп/нед",         al:"right", get:(c,r)=>String(+c.groups||0), val:(c,r)=>+c.groups||0},
   {k:"ingrid", lab:"В расписании",      al:"right", get:(c,r)=>String(courseGroupsInGrid(c.name,c.visits)), val:(c,r)=>courseGroupsInGrid(c.name,c.visits)},
@@ -2311,7 +2315,7 @@ function applyLastYearFill(){
   toast(msg);
 }
 
-function addCourse(){ S.courses.push({name:"Новый курс",eco:"Прознание",price:25,single:30,wage:40,dur:1,groupSize:8,groups:0,fill:0,material:0}); persistLocal(); renderCourses(); }
+function addCourse(){ S.courses.push({name:"Новый курс",eco:"Прознание",price:25,single:35,wage:40,dur:1,groupSize:8,groups:0,fill:0,material:0}); persistLocal(); renderCourses(); }
 function unlockAllCourses(){
   let n=0;
   (S.courses||[]).forEach(c=>{ if(c._locked){ delete c._locked; n++; } });
@@ -5697,7 +5701,16 @@ function deleteScenario(){
 }
 
 
+/* одноразовая инициализация «стоимости разового»: цена + 10 р (Жанна потом правит вручную).
+   Флаг S._singleInit хранится в модели → срабатывает один раз, ручные правки не сбрасывает. */
+function _migrateSingle(){
+  if(S._singleInit) return;
+  (S.courses||[]).forEach(function(c){ c.single=(+c.price||0)+10; });
+  S._singleInit=true;
+  persistLocal();
+}
 function renderAll(){
+  _migrateSingle();
   renderCourses(); renderPlanner(); renderGrid(); renderGroups(); renderClients(); renderMay(); renderStaff(); renderFixed(); renderTax(); renderBreak(); renderSettings(); renderDash(); if(typeof renderReport==="function") renderReport(); onSlider(); renderConflictBanner(); renderScenarioBar(); updateNavHeightDelayed();
 }
 function toast(m){ const t=document.getElementById("toast"); t.textContent=m; t.classList.add("show");
