@@ -4847,7 +4847,7 @@ async function openKidCard(alfaId,name,kid){
   if(!alfaId && !name){ body.innerHTML=_kidCardTop(kid)+'<div class="callout">Нет связи с Альфой — заполните ЭВ 26/27, остальное подтянется после «⟳» у ребёнка.</div>'; return; }
   try{
     const token=await _alfaIdToken();
-    const payload = alfaId ? {customerId:alfaId, full:1} : {name:name, full:1};
+    const payload = alfaId ? {customerId:alfaId} : {name:name};
     let r=null, lastErr=null;
     for(let a=0;a<2;a++){
       try{ r=await fetch(ALFA_PROXY+"?action=history",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+token},body:JSON.stringify(payload)}); lastErr=null; break; }
@@ -4878,7 +4878,7 @@ function _kidCardGroups(title, arr, empty){
       <div style="font-size:11px;color:var(--muted)">${dOnly(x.b_date)}${x.e_date?' – '+dOnly(x.e_date):''}</div></div>`).join("")}</div>`;
 }
 function _kidCardAlfa(j){
-  const s=j.summary||{}, custom=j.custom||{}, active=j.active||[], hist=j.history||[], tariffs=j.tariffs||[];
+  const s=j.summary||{}, custom=j.custom||{}, active=j.active||[], hist=j.history||[];
   const money=v=>(v===null||v===undefined||v==="")?"—":(fmt(Math.round(+v))+" р");
   const dOnly=v=>v?String(v).slice(0,10).split("-").reverse().join("."):"";
   const phone=(s.phones||[])[0]||"";
@@ -4891,19 +4891,13 @@ function _kidCardAlfa(j){
   const evPrev=[["evz","ЭВ 25/26"],["ev","ЭВ 24/25"],["etapvzaimodeystviya","ЭВ 23/24"]].filter(x=>custom[x[0]]);
   if(evPrev.length){
     h+=`<label style="font-weight:600">Этап взаимодействия (из Альфы):</label>
-      <div style="margin:4px 0 10px;display:flex;gap:6px;flex-wrap:wrap">${evPrev.map(x=>`<span class="ctag">${x[1]}: <b>${esc(custom[x[0]])}</b></span>`).join("")}</div>`;
+      <div style="margin:4px 0 10px;border:1px solid var(--line);border-radius:8px;padding:2px 10px">${evPrev.map((x,i)=>`<div style="padding:6px 0;font-size:12px;line-height:1.45;overflow-wrap:anywhere${i<evPrev.length-1?';border-bottom:1px solid #f0ebe4':''}"><b>${x[1]}:</b> ${esc(custom[x[0]])}</div>`).join("")}</div>`;
   }
   h+=_kidCardGroups("🟢 Активные абонементы (группы)", active, "Активных групп нет");
   const actIds=new Set(active.map(a=>a.group_id));
   const arch=hist.filter(x=>!actIds.has(x.group_id));
   const per=(dOnly(j.from)||"01.09.2025")+"–"+(dOnly(j.to)||"31.05.2026");
   h+=_kidCardGroups("🗄 Архивные абонементы ("+per+")", arch, "Архивных групп нет");
-  if(tariffs.length){
-    h+=`<label style="font-weight:600">Тарифы / оплаты — ${tariffs.length}:</label>
-      <div style="max-height:26vh;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:6px 10px;margin:4px 0 6px">${tariffs.map(t=>`<div style="padding:4px 0;border-bottom:1px solid #f0ebe4;font-size:12px">${t.type==='pay'?'💳':'🎫'} ${esc(t.name||'')}${t.amount!=null?' · '+money(t.amount):''}${t.lessons!=null?' · '+esc(String(t.lessons))+' зан.':''}${t.b_date?' · '+dOnly(t.b_date):''}${t.e_date?'–'+dOnly(t.e_date):''}</div>`).join("")}</div>`;
-  }else{
-    h+=`<div style="font-size:11px;color:var(--muted);margin-top:4px">Отдельных тарифов/абонементов в Альфе не найдено — у клуба учёт по группам.</div>`;
-  }
   return h;
 }
 /* точечно подтянуть из Альфы возраст (ДР) и связь (alfaId) ОДНОГО ребёнка — для новеньких,
