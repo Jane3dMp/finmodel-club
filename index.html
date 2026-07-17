@@ -290,6 +290,15 @@ small.note{font-size:11px;color:var(--muted)}
 #courseTable th.c-lyrev,#courseTable td.c-lyrev{width:88px;min-width:88px}
 #courseTable td.c-price input,#courseTable td.c-single input,#courseTable td.c-sub input,#courseTable td.c-groups input,#courseTable td.c-fill input{width:100%}
 
+/* реальный оборот (майская акция) */
+#realTable th.a-left,#realTable td.a-left{text-align:left}
+#realTable th.a-right,#realTable td.a-right{text-align:right}
+#realTable th.a-center,#realTable td.a-center{text-align:center}
+#realTable th{white-space:normal;line-height:1.15;vertical-align:middle}
+#realTable td:first-child{min-width:210px}
+#realTable td.a-right input.cell{width:72px}
+#realTable td.a-right .cell{text-align:right}
+
 /* прайс для менеджеров — только просмотр */
 #priceTable th.a-left,#priceTable td.a-left{text-align:left}
 #priceTable th.a-right,#priceTable td.a-right{text-align:right}
@@ -414,6 +423,7 @@ details.client .cli-badges{margin-left:auto;font-size:12px;color:var(--muted)}
  <button class="tab active" data-t="dash">Дашборд</button>
  <button class="tab" data-t="report">📊 Отчёт по набору</button>
  <button class="tab" data-t="courses">Курсы и маржа</button>
+ <button class="tab" data-t="real">📉 Реальный оборот</button>
  <button class="tab" data-t="planner">Планировщик загрузки</button>
  <button class="tab" data-t="grid">Расписание (сетка)</button>
  <button class="tab" data-t="groups">Группы</button>
@@ -493,6 +503,15 @@ details.client .cli-badges{margin-left:auto;font-size:12px;color:var(--muted)}
  <div id="nameCheckResult"></div>
   <div class="tscroll"><table id="courseTable"></table></div>
  <details class="callout"><summary>ℹ️ Как читать эту таблицу</summary><b>Подсказка:</b> «целевой размер группы» — это план (из листа «Емкость»). «Факт детей» — сколько реально ходит. Разница между ними и есть ваш резерв роста выручки без новых затрат.<br><br><b>Про маржу:</b> «Маржа после ЗП» = оборот минус зарплата педагога. Аренда, налоги, эквайринг и команда сюда НЕ входят — это не чистая прибыль (она на Дашборде и в «Точке безубыточности»).<br><b>Про строку ИТОГО:</b> «Оборот», «Групп/нед» и «Факт детей» — это точная сумма столбцов выше. А «Маржа» в ИТОГО считается по <b>фактическому ФОТ из расписания</b>, поэтому может не совпадать с суммой столбца «Маржа после ЗП» (там зарплата берётся из карточек курсов).</details>
+</section>
+
+<!-- ===== РЕАЛЬНЫЙ ОБОРОТ (майская акция) ===== -->
+<section class="panel" id="real">
+ <h2 class="sec">📉 Реальный оборот — с учётом майской акции</h2>
+ <div class="sec-desc">Сколько реально соберём, если «майские» дети (💰 в расписании) ходят по <b>прошлогодней (майской) цене</b>, а остальные места добираются новыми детьми по <b>текущей цене</b> — до «Факт детей × Групп». Впишите «Майскую цену» там, где есть майские (пустая = как текущая, разницы нет). Оборот показан <b>за месяц</b> периода акции; правее — сколько было бы, если бы все платили текущую цену, и разница.</div>
+ <div class="kpigrid" id="realKpi"></div>
+ <div class="tscroll"><table id="realTable"></table></div>
+ <div class="callout" style="margin-top:12px;font-size:12px">Майские считаются автоматически по отметке 💰 в расписании (уникальные дети на курс). Текущая цена, «Факт детей», «Групп» и «Визиты» — с вкладки «Курсы и маржа». «Майская цена» хранится отдельно и на модель/маржу не влияет.</div>
 </section>
 
 <!-- ===== ПРАЙС ДЛЯ МЕНЕДЖЕРОВ (только просмотр) ===== -->
@@ -1310,13 +1329,13 @@ function fbStart(){
   });
 }
 /* ---- вкладки по ролям ---- */
-const TAB_DEFS=[["dash","Дашборд"],["report","Отчёт по набору"],["courses","Курсы и маржа"],["planner","Планировщик загрузки"],["grid","Расписание (сетка)"],["groups","Группы"],["clients","Клиенты"],["price","Прайс"],["may","Майский"],["staff","Педсостав и ФОТ"],["fixed","Постоянные расходы"],["tax","Налоги РБ и ФОТ"],["break","Точка безубыточности"],["scenario","Сценарии"],["settings","Параметры"]];
+const TAB_DEFS=[["dash","Дашборд"],["report","Отчёт по набору"],["courses","Курсы и маржа"],["real","Реальный оборот"],["planner","Планировщик загрузки"],["grid","Расписание (сетка)"],["groups","Группы"],["clients","Клиенты"],["price","Прайс"],["may","Майский"],["staff","Педсостав и ФОТ"],["fixed","Постоянные расходы"],["tax","Налоги РБ и ФОТ"],["break","Точка безубыточности"],["scenario","Сценарии"],["settings","Параметры"]];
 const MANAGER_DEFAULT_TABS=["grid","groups","clients","may"];
 const ALWAYS_TABS={clients:1,price:1};   // видны всем ролям, даже если не отмечены в доступах
 const ADMIN_TABS={report:1};     // только для админа, не назначаются менеджерам
 function _defaultTabsMap(){ const m={}; MANAGER_DEFAULT_TABS.forEach(function(k){ m[k]=true; }); return m; }
 /* ---- режимы навигации: «Работа» (ежедневное) и «Финмодель» (финансы) ---- */
-const TAB_MODES={grid:"work",groups:"work",clients:"work",price:"work",may:"work",dash:"fin",report:"fin",courses:"fin",planner:"fin",staff:"fin",fixed:"fin",tax:"fin","break":"fin",scenario:"fin",settings:"fin"};
+const TAB_MODES={grid:"work",groups:"work",clients:"work",price:"work",may:"work",dash:"fin",report:"fin",courses:"fin",real:"fin",planner:"fin",staff:"fin",fixed:"fin",tax:"fin","break":"fin",scenario:"fin",settings:"fin"};
 let _tabAccess=null;   // null = все вкладки (админ / до входа), иначе {tabKey:true}
 let navMode=(function(){ try{ return localStorage.getItem("navMode")||"work"; }catch(e){ return "work"; } })();
 function _tabAllowed(k){ if(ADMIN_TABS[k]) return _fbIsAdmin; return ALWAYS_TABS[k]===1 || !_tabAccess || _tabAccess[k]===true; }
@@ -2258,6 +2277,80 @@ function printPrice(){
     <table><thead>${head}</thead><tbody>${body}</tbody></table></body></html>`);
   w.document.close();
   setTimeout(()=>{ try{ w.focus(); w.print(); }catch(e){} }, 300);
+}
+
+/* ===== РЕАЛЬНЫЙ ОБОРОТ (с учётом майской акции) ===== */
+// сколько уникальных «майских» детей (💰 k.may) стоит в расписании по данному курсу
+function _mayCountForCourse(name){
+  const seen=new Set();
+  (S.grid||[]).forEach(l=>{ if(l.course!==name) return;
+    kidsOf(l).forEach(k=>{ if(k&&k.may){ const nn=_normName(k.n); if(nn) seen.add(nn); } });
+  });
+  return seen.size;
+}
+function _realRows(){
+  const wpm=(S.assume&&S.assume.weeksPerMonth)||4;
+  return (S.courses||[]).map((c,i)=>{
+    const price=+c.price||0;
+    const hasMayPrice=(c.mayPrice!=null&&c.mayPrice!==""&&+c.mayPrice>0);
+    const mayPrice=hasMayPrice?+c.mayPrice:price;                 // если майская цена не задана — берём текущую (разницы нет)
+    const visits=+c.visits||1, groups=+c.groups||0, fill=+c.fill||0;
+    const target=fill*groups;                                    // нужное число детей = «Факт детей» × групп
+    const mayN=_mayCountForCourse(c.name);                        // майские — из расписания
+    const totalKids=Math.max(target,mayN);                       // если майских больше цели — берём майских
+    const newN=Math.max(0,totalKids-mayN);                       // новые (вписанные + добор) по текущей цене
+    const f=visits*wpm;                                          // занятий на ребёнка в месяц
+    const revReal=(mayN*mayPrice+newN*price)*f;                  // реальный оборот/мес
+    const revModel=totalKids*price*f;                            // если бы все платили текущую цену
+    return {i,c,price,mayPrice,hasMayPrice,visits,groups,fill,target,mayN,newN,totalKids,revReal,revModel,diff:revReal-revModel};
+  });
+}
+function renderReal(){
+  const t=document.getElementById("realTable"); if(!t) return;
+  const rows=_realRows();
+  const T={mayN:0,totalKids:0,newN:0,revReal:0,revModel:0};
+  rows.forEach(r=>{T.mayN+=r.mayN;T.totalKids+=r.totalKids;T.newN+=r.newN;T.revReal+=r.revReal;T.revModel+=r.revModel;});
+  T.diff=T.revReal-T.revModel;
+  const coursesWithMay=rows.filter(r=>r.mayN>0).length;
+  const box=document.getElementById("realKpi");
+  if(box){
+    const diffPct=T.revModel>0?Math.round(T.diff/T.revModel*1000)/10:0;
+    box.innerHTML =
+      kpi("Оборот реальный/мес", fmt(T.revReal)+" р","green","с майской акцией")+
+      kpi("Оборот модель/мес", fmt(T.revModel)+" р","coal","если все по текущей цене")+
+      kpi("Разница/мес", (T.diff>0?"+":"")+fmt(T.diff)+" р", T.diff<0?"red":"green", (diffPct>0?"+":"")+diffPct+"%")+
+      kpi("Майских детей", String(T.mayN),"blue", coursesWithMay+" курс. с майскими")+
+      kpi("Реальный ×4 мес", fmt(T.revReal*4)+" р","green","период акции");
+  }
+  const heads=[["Курс","left"],["Майских","center"],["Майская<br>цена","right"],["Тек.<br>цена","right"],["Факт/гр","right"],["Групп","right"],["Всего<br>детей","right"],["Новых","right"],["Оборот<br>реальн./мес","right"],["Модель<br>/мес","right"],["Разница","right"]];
+  let h=`<thead><tr>`+heads.map(function(x){return `<th class="a-${x[1]}">${x[0]}</th>`;}).join("")+`</tr></thead><tbody>`;
+  rows.forEach(function(r){
+    const warn=(r.mayN>0 && !r.hasMayPrice)?' style="background:#fff3e0"':'';   // майские есть, а цена не задана — подсветить
+    h+=`<tr>`
+      +`<td class="a-left">${esc(r.c.name)}</td>`
+      +`<td class="a-center">${r.mayN||'—'}</td>`
+      +`<td class="a-right"><input class="cell" type="number"${warn} value="${(r.c.mayPrice==null||r.c.mayPrice==='')?'':r.c.mayPrice}" onchange="updOpt(${r.i},'mayPrice',this.value)"></td>`
+      +`<td class="a-right">${fmt(r.price)}</td>`
+      +`<td class="a-right">${r.fill||'—'}</td>`
+      +`<td class="a-right">${r.groups||'—'}</td>`
+      +`<td class="a-right">${r.totalKids||'—'}</td>`
+      +`<td class="a-right">${r.newN}</td>`
+      +`<td class="a-right"><b>${fmt(r.revReal)}</b></td>`
+      +`<td class="a-right muted">${fmt(r.revModel)}</td>`
+      +`<td class="a-right" style="color:${r.diff<0?'var(--red)':(r.diff>0?'var(--green)':'inherit')}">${r.diff?((r.diff>0?'+':'')+fmt(r.diff)):'0'}</td>`
+    +`</tr>`;
+  });
+  h+=`<tr class="totrow">`
+    +`<td class="a-left"><b>ИТОГО</b></td>`
+    +`<td class="a-center"><b>${T.mayN}</b></td>`
+    +`<td></td><td></td><td></td><td></td>`
+    +`<td class="a-right"><b>${T.totalKids}</b></td>`
+    +`<td class="a-right"><b>${T.newN}</b></td>`
+    +`<td class="a-right"><b>${fmt(T.revReal)}</b></td>`
+    +`<td class="a-right muted">${fmt(T.revModel)}</td>`
+    +`<td class="a-right"><b style="color:${T.diff<0?'var(--red)':'var(--green)'}">${(T.diff>0?'+':'')+fmt(T.diff)}</b></td>`
+  +`</tr></tbody>`;
+  t.innerHTML=h;
 }
 
 const COURSE_PRINT_PRESETS={
@@ -5814,7 +5907,7 @@ function _migrateSingle(){
 }
 function renderAll(){
   _migrateSingle();
-  renderCourses(); renderPlanner(); renderGrid(); renderGroups(); renderClients(); if(typeof renderPrice==="function") renderPrice(); renderMay(); renderStaff(); renderFixed(); renderTax(); renderBreak(); renderSettings(); renderDash(); if(typeof renderReport==="function") renderReport(); onSlider(); renderConflictBanner(); renderScenarioBar(); updateNavHeightDelayed();
+  renderCourses(); renderPlanner(); renderGrid(); renderGroups(); renderClients(); if(typeof renderPrice==="function") renderPrice(); if(typeof renderReal==="function") renderReal(); renderMay(); renderStaff(); renderFixed(); renderTax(); renderBreak(); renderSettings(); renderDash(); if(typeof renderReport==="function") renderReport(); onSlider(); renderConflictBanner(); renderScenarioBar(); updateNavHeightDelayed();
 }
 function toast(m){ const t=document.getElementById("toast"); t.textContent=m; t.classList.add("show");
   clearTimeout(t._h); t._h=setTimeout(()=>t.classList.remove("show"),2200); }
