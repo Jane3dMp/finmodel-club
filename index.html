@@ -1379,6 +1379,16 @@ function _applyTabAccess(tabsMap){
   _tabAccess=tabsMap||null;
   _updateTabVisibility();
 }
+/* стартовая вкладка: админу при загрузке сразу открываем «Отчёт по набору».
+   Строго ОДИН раз за загрузку страницы — иначе выбрасывало бы обратно при уходе на другую вкладку.
+   Менеджерам не трогаем (Отчёт им не виден) — у них всё как было. */
+let _startTabDone=false;
+const START_TAB_ADMIN="report";
+function _applyStartTab(){
+  if(_startTabDone || !_fbIsAdmin) return;
+  _startTabDone=true;
+  activateTab(START_TAB_ADMIN);   // сам переключит режим на «Финмодель»
+}
 /* ---- выпадающие меню «⋯ Ещё» / «☰ Меню» ---- */
 function closeAllMore(){ document.querySelectorAll(".more-menu.show").forEach(function(m){ m.classList.remove("show"); }); }
 function toggleMore(btn){
@@ -1405,6 +1415,7 @@ function _fbGrant(isAdmin, tabs){
   _fbHideLogin();
   _fbUpdateAdminUI();
   _applyTabAccess(isAdmin ? null : (tabs||_defaultTabsMap()));
+  _applyStartTab();                       // админу — сразу «Отчёт по набору» (один раз за загрузку)
   const lo=document.getElementById("fbLogoutBtn"); if(lo) lo.style.display="";
   const who=document.getElementById("fbWhoami"); const au=_fbAuth();
   if(who) who.textContent=(au&&au.currentUser&&au.currentUser.email)||"";
