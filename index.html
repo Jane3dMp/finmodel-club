@@ -3551,11 +3551,13 @@ function renderKidsEditor(){
   }
   const th=KID_FLAGS.map(f=>`<th title="${f.lab}">${f.ic}<br>${f.lab.split(" ")[0]}</th>`).join("");
   const moveOpts=_gridGroupOptsHtml();   // список групп для «перевести» (строится один раз)
-  // сводка по группе (детей «не придёт» не считаем)
-  const act=_editKids.filter(k=>!k.no);
+  // сводка по группе: «❌ не придёт» считаем ОТКАЗОМ (ребёнок остаётся в общем числе записанных),
+  // отказ = галочка ❌ ИЛИ ответ «Отказ». Остальные счётчики — только по неотказавшимся.
+  const act=_editKids;
   const cSent=act.filter(k=>k.vbSent).length;
-  const cy=act.filter(k=>k.vbReply==="yes").length, cn=act.filter(k=>k.vbReply==="no").length, cm=act.filter(k=>k.vbReply==="maybe").length;
-  const cNo=act.filter(k=>k.vbSent&&!k.vbReply).length;
+  const cn=act.filter(k=>k.no||k.vbReply==="no").length;
+  const cy=act.filter(k=>!k.no&&k.vbReply==="yes").length, cm=act.filter(k=>!k.no&&k.vbReply==="maybe").length;
+  const cNo=act.filter(k=>!k.no&&k.vbSent&&!k.vbReply).length;
   const summary=`<div style="font-size:12px;color:var(--coal);margin:2px 0 6px;display:flex;gap:12px;flex-wrap:wrap">
       <span>📨 Отправлено: <b>${cSent}</b>/${act.length}</span>
       <span>🟢 Подтвердили: <b>${cy}</b></span>
@@ -5009,16 +5011,20 @@ function _ownerReport(){
     });
   });
   const rows=Object.values(groups).map(g=>{
-    const ks=Object.values(g.kids).filter(k=>!k.no);
+    // «❌ не придёт» считаем ОТКАЗОМ: ребёнок остаётся в «Записано» и попадает в «Отказ»,
+    // но в оборот (только по подтвердившим) не идёт.
+    const ks=Object.values(g.kids);
     const total=ks.length, sent=ks.filter(k=>k.sent).length;
-    const yes=ks.filter(k=>k.reply==="yes").length, no=ks.filter(k=>k.reply==="no").length, maybe=ks.filter(k=>k.reply==="maybe").length;
+    const no=ks.filter(k=>k.no||k.reply==="no").length;
+    const yes=ks.filter(k=>!k.no&&k.reply==="yes").length, maybe=ks.filter(k=>!k.no&&k.reply==="maybe").length;
     const none=total-yes-no-maybe, fill=g.cap>0?Math.round(yes/g.cap*100):0, revWeek=yes*g.price*g.visits;
     const risk=total>0 && (yes/total)<0.5;
     return Object.assign({},g,{total,sent,yes,no,maybe,none,fill,revWeek,risk});
   });
   rows.sort((a,b)=>(a.day-b.day)||String(a.time).localeCompare(String(b.time))||a.name.localeCompare(b.name,"ru"));
   const T={groups:rows.length,kids:0,sent:0,yes:0,no:0,maybe:0,none:0,revWeekYes:0,revWeekAll:0,wpm};
-  rows.forEach(r=>{T.kids+=r.total;T.sent+=r.sent;T.yes+=r.yes;T.no+=r.no;T.maybe+=r.maybe;T.none+=r.none;T.revWeekYes+=r.revWeek;T.revWeekAll+=r.total*r.price*r.visits;});
+  // «Потенциал» — по всем, кто ЕЩЁ не отказался (отказавшиеся точно не придут, их в потенциал не берём)
+  rows.forEach(r=>{T.kids+=r.total;T.sent+=r.sent;T.yes+=r.yes;T.no+=r.no;T.maybe+=r.maybe;T.none+=r.none;T.revWeekYes+=r.revWeek;T.revWeekAll+=Math.max(0,r.total-r.no)*r.price*r.visits;});
   return {rows,T};
 }
 function _reportHTML(){
