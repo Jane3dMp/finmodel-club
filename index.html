@@ -4998,6 +4998,7 @@ function _ownerReport(){
     if(!groups[key]){
       const lib=courseFromLib(course);
       groups[key]={name:(l.group&&l.group.trim())||course, course, teacher:l.teacher||"", day:l.day||0, time:l.start||"",
+        id:l.id||"",   // id ПЕРВОГО занятия группы — чтобы открыть карточку (индекс считаем в момент клика)
         cap:(lib&&+lib.groupSize)||0, price:(lib&&+lib.price)||0, visits:(lib&&+lib.visits)||1, kids:{}};
     }
     const g=groups[key];
@@ -5027,7 +5028,7 @@ function _ownerReport(){
   rows.forEach(r=>{T.kids+=r.total;T.sent+=r.sent;T.yes+=r.yes;T.no+=r.no;T.maybe+=r.maybe;T.none+=r.none;T.revWeekYes+=r.revWeek;T.revWeekAll+=Math.max(0,r.total-r.no)*r.price*r.visits;});
   return {rows,T};
 }
-function _reportHTML(){
+function _reportHTML(forPrint){
   const {rows,T}=_ownerReport();
   const rate=T.kids?Math.round(T.yes/T.kids*100):0;
   const dn=["","Пн","Вт","Ср","Чт","Пт","Сб","Вс"];
@@ -5049,8 +5050,13 @@ function _reportHTML(){
     <thead><tr>${['Группа','Курс','Педагог','День·время','Вмест.','Записано','🟢','🔴','🟡','Молчат','Заполн.','Оборот/нед'].map((t,i)=>`<th style="background:var(--coal);color:#fff;padding:6px 8px;text-align:${i<4?'left':'center'};position:sticky;top:0">${t}</th>`).join("")}</tr></thead><tbody>`;
   const td=(v,al)=>`<td style="padding:5px 8px;border-bottom:1px solid var(--line);text-align:${al||'left'}">${v}</td>`;
   rows.forEach(r=>{
+    // название группы — клик открывает карточку занятия (по стабильному id, индекс считаем в момент клика).
+    // В печати ссылок не делаем.
+    const nm=(!forPrint && r.id)
+      ? `<span class="grp-name" title="Открыть карточку занятия" onclick="editLes(_lesIdx('${esc(r.id)}'))"><b>${esc(r.name)}</b></span>`
+      : `<b>${esc(r.name)}</b>`;
     h+=`<tr style="${r.risk?'background:#fdecea':''}">`
-      +td((r.risk?'⚠ ':'')+'<b>'+esc(r.name)+'</b>')+td(esc(r.course))+td(esc(tName(r.teacher)))+td((dn[r.day]||'')+' '+esc(r.time||''))
+      +td((r.risk?'⚠ ':'')+nm)+td(esc(r.course))+td(esc(tName(r.teacher)))+td((dn[r.day]||'')+' '+esc(r.time||''))
       +td(r.cap||'—','center')+td(r.total,'center')
       +td('<b style="color:var(--green)">'+r.yes+'</b>','center')+td(r.no||'','center')+td(r.maybe||'','center')
       +td('<span style="color:var(--muted)">'+(r.none||'')+'</span>','center')+td(r.cap>0?r.fill+'%':'—','center')+td(fmt(r.revWeek),'right')
@@ -5071,7 +5077,7 @@ function printReport(){
     :root{--line:#ddd;--muted:#8a8178;--coal:#1c1410;--green:#2e7d32;--red:#b5532a}`;
   w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Отчёт по набору</title><style>${css}</style></head><body>
     <h2>Отчёт по набору — Прознание + CODDY</h2><div class="sub">Сценарий: ${esc(currentScenarioName())} · ${esc(new Date().toLocaleString("ru-RU"))}</div>
-    ${_reportHTML()}</body></html>`);
+    ${_reportHTML(true)}</body></html>`);
   w.document.close(); w.focus(); setTimeout(()=>{ try{ w.print(); }catch(e){} },350);
 }
 let _vtplMode="reg", _vtplEdit={reg:"",may:"",start:""};
