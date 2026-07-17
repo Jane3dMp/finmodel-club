@@ -109,17 +109,34 @@ switch ($action) {
         };
         $inWin = fn($d) => !$d || ($d >= $from && $d <= $to);
 
-        // 1) cgi
-        $today = date('Y-m-d');
-        $activeCgi = [];   // group_id => ['b'=>..,'e'=>..] — ДЕЙСТВУЮЩИЕ членства (для «активных абонементов»)
-        $cgi = alfa_http('POST', "$host/cgi/index", ['customer_id' => $cid, 'page' => 0, 'count' => 200], $token, true, 12);
-        $cgiItems = isset($cgi['__err']) ? [] : ($cgi['items'] ?? []);
+        // 1) cgi (членства): дефолтный запрос отдаёт в основном ТЕКУЩИЕ. Членства на новый учебный
+        //    год (с 01.09) — будущие, в дефолт не попадают → добираем вторым запросом с диапазоном дат
+        //    до 2027-06-30. Мержим по (id+group_id). Так «активные абонементы» ловят и сентябрьские.
+        $today  = date('Y-m-d');
+        $futTo  = '2027-06-30';
+        $cgiItems = []; $seenCgi = [];
+        foreach ([
+            ['customer_id' => $cid, 'page' => 0, 'count' => 200],
+            ['customer_id' => $cid, 'date_from' => $today, 'date_to' => $futTo, 'b_date' => $today, 'e_date' => $futTo, 'page' => 0, 'count' => 200],
+        ] as $q) {
+            $rr = alfa_http('POST', "$host/cgi/index", $q, $token, true, 10);
+            if (isset($rr['__err'])) continue;
+            foreach (($rr['items'] ?? []) as $it) {
+                $key = ($it['id'] ?? '') . ':' . ($it['group_id'] ?? '');
+                if (isset($seenCgi[$key])) continue;
+                $seenCgi[$key] = 1; $cgiItems[] = $it;
+            }
+        }
+        $activeCgi = [];   // group_id => ['b'=>..,'e'=>..] — ДЕЙСТВУЮЩИЕ и БУДУЩИЕ членства
+        $cgiDbg = [];      // диагностика: что реально вернула Альфа
         foreach ($cgiItems as $it) {
             $b = $it['b_date'] ?? null; $e = $it['e_date'] ?? null;
             $bb = $b ? substr($b, 0, 10) : null; $ee = $e ? substr($e, 0, 10) : null;
             $gidc = $it['group_id'] ?? null;
-            if ($gidc && (!$ee || $ee >= $today)) $activeCgi[$gidc] = ['b' => $bb, 'e' => $ee];   // нет конца или ещё не закончилось
-            if (($bb && $bb > $to) || ($ee && $ee < $from)) continue;   // не пересекается с окном
+            if (count($cgiDbg) < 15) $cgiDbg[] = ['g' => $gidc, 'b' => $bb, 'e' => $ee];
+            // активное = ещё не закончилось (нет конца ИЛИ конец в будущем) ИЛИ ещё не началось (старт в будущем)
+            if ($gidc && ((!$ee || $ee >= $today) || ($bb && $bb >= $today))) $activeCgi[$gidc] = ['b' => $bb, 'e' => $ee];
+            if (($bb && $bb > $to) || ($ee && $ee < $from)) continue;   // не пересекается с окном прошлого года
             $note($gid, $gidc, $ee ?: $bb);
         }
         // 2) уроки в окне (пробуем разные имена фильтров — лишние Alfa игнорирует)
@@ -223,7 +240,7 @@ switch ($action) {
         json_out(['ok' => true, 'customerId' => $cid, 'branch' => alfa_branch(), 'matched' => $matchedName,
                   'summary' => $summary, 'history' => $history, 'active' => $active, 'custom' => $custom,
                   'tariffs' => $tariffs, 'from' => $from, 'to' => $to,
-                  'debug' => ['cgi' => count($cgiItems), 'lessons' => count($lesItems), 'groups' => count($gid), 'active' => count($active)]]);
+                  'debug' => ['cgi' => count($cgiItems), 'lessons' => count($lesItems), 'groups' => count($gid), 'active' => count($active), 'today' => $today, 'cgiItems' => $cgiDbg]]);
         break;
 
     // --- справочники для маппинга модель→Alfa (READ) ---

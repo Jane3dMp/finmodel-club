@@ -4906,7 +4906,9 @@ function _kidCardAlfa(j){
     h+=`<label style="font-weight:600">Этап взаимодействия (из Альфы):</label>
       <div style="margin:4px 0 10px;border:1px solid var(--line);border-radius:8px;padding:2px 10px">${evPrev.map((x,i)=>`<div style="padding:6px 0;font-size:12px;line-height:1.45;overflow-wrap:anywhere${i<evPrev.length-1?';border-bottom:1px solid #f0ebe4':''}"><b>${x[1]}:</b> ${esc(custom[x[0]])}</div>`).join("")}</div>`;
   }
-  h+=_kidCardGroups("🟢 Активные абонементы (группы)", active, "Активных групп нет");
+  try{ if(j.debug) console.log("🪪 карточка ребёнка · debug Альфы:", j.debug); }catch(e){}
+  const emptyActive = "Активных групп нет"+(j.debug?` · членств в Альфе: ${j.debug.cgi||0}`:"");
+  h+=_kidCardGroups("🟢 Активные абонементы (группы)", active, emptyActive);
   const actIds=new Set(active.map(a=>a.group_id));
   const arch=hist.filter(x=>!actIds.has(x.group_id));
   const per=(dOnly(j.from)||"01.09.2025")+"–"+(dOnly(j.to)||"31.05.2026");
