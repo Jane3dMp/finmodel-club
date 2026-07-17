@@ -290,6 +290,16 @@ small.note{font-size:11px;color:var(--muted)}
 #courseTable th.c-lyrev,#courseTable td.c-lyrev{width:88px;min-width:88px}
 #courseTable td.c-price input,#courseTable td.c-single input,#courseTable td.c-sub input,#courseTable td.c-groups input,#courseTable td.c-fill input{width:100%}
 
+/* прайс для менеджеров — только просмотр */
+#priceTable th.a-left,#priceTable td.a-left{text-align:left}
+#priceTable th.a-right,#priceTable td.a-right{text-align:right}
+#priceTable th.a-center,#priceTable td.a-center{text-align:center}
+#priceTable th.sortable{cursor:pointer;user-select:none;white-space:nowrap}
+#priceTable th.sortable:hover{background:var(--terra);color:#fff}
+#priceTable th.sorted{color:#FED634}
+#priceTable .pr-name{min-width:240px}
+#priceTable td.pr-price,#priceTable td.pr-single,#priceTable td.pr-sub{font-weight:600}
+
 .pin{cursor:pointer;font-size:13px;user-select:none;opacity:.6}
 .pin:hover{opacity:1}
 tr.rowlocked{background:#EAF3EC!important}
@@ -408,6 +418,7 @@ details.client .cli-badges{margin-left:auto;font-size:12px;color:var(--muted)}
  <button class="tab" data-t="grid">Расписание (сетка)</button>
  <button class="tab" data-t="groups">Группы</button>
  <button class="tab" data-t="clients">Клиенты</button>
+ <button class="tab" data-t="price">💲 Прайс</button>
  <button class="tab" data-t="may">Майский 💰</button>
  <button class="tab" data-t="staff">Педсостав и ФОТ</button>
  <button class="tab" data-t="fixed">Постоянные расходы</button>
@@ -482,6 +493,21 @@ details.client .cli-badges{margin-left:auto;font-size:12px;color:var(--muted)}
  <div id="nameCheckResult"></div>
   <div class="tscroll"><table id="courseTable"></table></div>
  <details class="callout"><summary>ℹ️ Как читать эту таблицу</summary><b>Подсказка:</b> «целевой размер группы» — это план (из листа «Емкость»). «Факт детей» — сколько реально ходит. Разница между ними и есть ваш резерв роста выручки без новых затрат.<br><br><b>Про маржу:</b> «Маржа после ЗП» = оборот минус зарплата педагога. Аренда, налоги, эквайринг и команда сюда НЕ входят — это не чистая прибыль (она на Дашборде и в «Точке безубыточности»).<br><b>Про строку ИТОГО:</b> «Оборот», «Групп/нед» и «Факт детей» — это точная сумма столбцов выше. А «Маржа» в ИТОГО считается по <b>фактическому ФОТ из расписания</b>, поэтому может не совпадать с суммой столбца «Маржа после ЗП» (там зарплата берётся из карточек курсов).</details>
+</section>
+
+<!-- ===== ПРАЙС ДЛЯ МЕНЕДЖЕРОВ (только просмотр) ===== -->
+<section class="panel" id="price">
+ <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px">
+  <h2 class="sec" style="margin:0">💲 Прайс курсов</h2>
+  <button class="btn ghost sm" onclick="printPrice()" style="margin-left:auto">🖨 Печать</button>
+ </div>
+ <div class="sec-desc">Актуальные цены для менеджеров — только просмотр. Цены редактируются на вкладке «Курсы и маржа» (в режиме «Финмодель»).</div>
+ <div class="hd-actions" style="gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px">
+  <input id="priceQ" class="cell" style="width:210px;text-align:left" placeholder="Поиск по названию курса…" oninput="_priceQ=this.value;renderPrice()">
+  <span id="priceEcoBtns"></span>
+  <span id="priceCount" style="font-size:12px;color:var(--muted);margin-left:auto"></span>
+ </div>
+ <div class="tscroll"><table id="priceTable"></table></div>
 </section>
 
 <!-- ===== ПЛАНИРОВЩИК ===== -->
@@ -1284,13 +1310,13 @@ function fbStart(){
   });
 }
 /* ---- вкладки по ролям ---- */
-const TAB_DEFS=[["dash","Дашборд"],["report","Отчёт по набору"],["courses","Курсы и маржа"],["planner","Планировщик загрузки"],["grid","Расписание (сетка)"],["groups","Группы"],["clients","Клиенты"],["may","Майский"],["staff","Педсостав и ФОТ"],["fixed","Постоянные расходы"],["tax","Налоги РБ и ФОТ"],["break","Точка безубыточности"],["scenario","Сценарии"],["settings","Параметры"]];
+const TAB_DEFS=[["dash","Дашборд"],["report","Отчёт по набору"],["courses","Курсы и маржа"],["planner","Планировщик загрузки"],["grid","Расписание (сетка)"],["groups","Группы"],["clients","Клиенты"],["price","Прайс"],["may","Майский"],["staff","Педсостав и ФОТ"],["fixed","Постоянные расходы"],["tax","Налоги РБ и ФОТ"],["break","Точка безубыточности"],["scenario","Сценарии"],["settings","Параметры"]];
 const MANAGER_DEFAULT_TABS=["grid","groups","clients","may"];
-const ALWAYS_TABS={clients:1};   // видны всем ролям, даже если не отмечены в доступах
+const ALWAYS_TABS={clients:1,price:1};   // видны всем ролям, даже если не отмечены в доступах
 const ADMIN_TABS={report:1};     // только для админа, не назначаются менеджерам
 function _defaultTabsMap(){ const m={}; MANAGER_DEFAULT_TABS.forEach(function(k){ m[k]=true; }); return m; }
 /* ---- режимы навигации: «Работа» (ежедневное) и «Финмодель» (финансы) ---- */
-const TAB_MODES={grid:"work",groups:"work",clients:"work",may:"work",dash:"fin",report:"fin",courses:"fin",planner:"fin",staff:"fin",fixed:"fin",tax:"fin","break":"fin",scenario:"fin",settings:"fin"};
+const TAB_MODES={grid:"work",groups:"work",clients:"work",price:"work",may:"work",dash:"fin",report:"fin",courses:"fin",planner:"fin",staff:"fin",fixed:"fin",tax:"fin","break":"fin",scenario:"fin",settings:"fin"};
 let _tabAccess=null;   // null = все вкладки (админ / до входа), иначе {tabKey:true}
 let navMode=(function(){ try{ return localStorage.getItem("navMode")||"work"; }catch(e){ return "work"; } })();
 function _tabAllowed(k){ if(ADMIN_TABS[k]) return _fbIsAdmin; return ALWAYS_TABS[k]===1 || !_tabAccess || _tabAccess[k]===true; }
@@ -2170,6 +2196,69 @@ function _sortTh(key,extra){
   const lab=(extra&&extra.lab)?extra.lab:col.lab;   // extra.lab — только для показа в шапке (можно <br>); печать берёт col.lab
   return `<th class="${cls}" title="${esc(ttl)}" onclick="sortCoursesBy('${key}')">${lab}${arrow}</th>`;
 }
+/* ===== ПРАЙС ДЛЯ МЕНЕДЖЕРОВ (вкладка «Работа») — только просмотр ===== */
+const PRICE_COLS=[
+  {k:"name",   lab:"Курс",      al:"left",   get:c=>esc(c.name), val:c=>(c.name||"").toLowerCase()},
+  {k:"eco",    lab:"Эко",       al:"center", get:c=>({"Прознание":"П","CODDY":"C","Детали":"Д"}[c.eco]||""), val:c=>_ECO_ORDER[c.eco]??9},
+  {k:"price",  lab:"Цена",      al:"right",  get:c=>fmt(+c.price||0), val:c=>+c.price||0},
+  {k:"single", lab:"Разовое",   al:"right",  get:c=>fmt(+c.single||0), val:c=>+c.single||0},
+  {k:"sub",    lab:"Абонемент", al:"right",  get:c=>(c.sub==null||c.sub==="")?"—":fmt(+c.sub||0), val:c=>+c.sub||0},
+  {k:"visits", lab:"Визиты",    al:"center", get:c=>(+c.visits||1)+"×/нед", val:c=>+c.visits||1}
+];
+let _priceEco="", _priceQ="", _priceSort={k:"name",dir:1};
+function _priceRows(){
+  let rows=(S.courses||[]).slice();
+  if(_priceEco) rows=rows.filter(c=>c.eco===_priceEco);
+  if(_priceQ){ const q=_priceQ.trim().toLowerCase(); if(q) rows=rows.filter(c=>(c.name||"").toLowerCase().includes(q)); }
+  const col=PRICE_COLS.find(c=>c.k===_priceSort.k)||PRICE_COLS[0], d=_priceSort.dir;
+  rows.sort((a,b)=>{
+    const va=col.val(a), vb=col.val(b);
+    let r=(typeof va==="string")?va.localeCompare(vb,"ru"):(va-vb);
+    if(r===0) r=(a.name||"").localeCompare(b.name||"","ru");
+    return r*d;
+  });
+  return rows;
+}
+function priceSortBy(k){ _priceSort=(_priceSort.k===k)?{k:k,dir:-_priceSort.dir}:{k:k,dir:1}; renderPrice(); }
+function renderPrice(){
+  const t=document.getElementById("priceTable"); if(!t) return;
+  const eb=document.getElementById("priceEcoBtns");
+  if(eb){
+    eb.innerHTML=[["","Все"],["Прознание","Прознание"],["CODDY","CODDY"],["Детали","Детали"]]
+      .map(([v,lab])=>`<button class="btn ${_priceEco===v?'sm':'ghost sm'}" onclick="_priceEco=${v?`'${v}'`:"''"};renderPrice()">${lab}</button>`).join(" ");
+  }
+  const rows=_priceRows();
+  let h=`<thead><tr>`+PRICE_COLS.map(c=>{
+    const on=_priceSort.k===c.k, arr=on?(_priceSort.dir>0?" ▲":" ▼"):"";
+    return `<th class="pr-${c.k} a-${c.al} sortable${on?' sorted':''}" title="Клик — сортировка" onclick="priceSortBy('${c.k}')">${c.lab}${arr}</th>`;
+  }).join("")+`</tr></thead><tbody>`;
+  if(!rows.length) h+=`<tr><td colspan="${PRICE_COLS.length}" style="text-align:center;color:var(--muted);padding:16px">Ничего не найдено</td></tr>`;
+  rows.forEach(c=>{ h+=`<tr>`+PRICE_COLS.map(col=>`<td class="pr-${col.k} a-${col.al}">${col.get(c)}</td>`).join("")+`</tr>`; });
+  h+=`</tbody>`;
+  t.innerHTML=h;
+  const cnt=document.getElementById("priceCount"); if(cnt) cnt.textContent=rows.length+" курс"+(rows.length%10===1&&rows.length%100!==11?"":(rows.length%10>=2&&rows.length%10<=4&&(rows.length%100<10||rows.length%100>=20)?"а":"ов"));
+}
+function printPrice(){
+  const w=window.open("","_blank"); if(!w){ toast("Разрешите всплывающие окна"); return; }
+  const rows=_priceRows();
+  const css=`body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;padding:18px;color:#1c1410}
+    h2{margin:0 0 2px}.sub{color:#8a8178;font-size:12px;margin-bottom:14px}
+    table{border-collapse:collapse;margin:0 auto}
+    th{background:#1c1410;color:#fff;padding:7px 14px;font-size:12px}
+    td{padding:6px 14px;border-bottom:1px solid #e6ded3;font-size:12px}
+    .a-left{text-align:left}.a-right{text-align:right}.a-center{text-align:center}
+    tr:nth-child(even) td{background:#faf6f0}
+    @media print{@page{size:portrait;margin:12mm}}`;
+  const head=`<tr>${PRICE_COLS.map(c=>`<th class="a-${c.al}">${c.lab}</th>`).join("")}</tr>`;
+  const body=rows.map(c=>`<tr>${PRICE_COLS.map(col=>`<td class="a-${col.al}">${col.get(c)}</td>`).join("")}</tr>`).join("");
+  const flt=_priceEco?(" · "+esc(_priceEco)):"";
+  w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Прайс курсов — Прознание + CODDY</title><style>${css}</style></head>
+    <body><h2>Прайс курсов — Прознание + CODDY</h2><div class="sub">${esc(new Date().toLocaleDateString("ru-RU"))}${flt} · ${rows.length} курсов</div>
+    <table><thead>${head}</thead><tbody>${body}</tbody></table></body></html>`);
+  w.document.close();
+  setTimeout(()=>{ try{ w.focus(); w.print(); }catch(e){} }, 300);
+}
+
 const COURSE_PRINT_PRESETS={
   teachers:["name","eco","groups","visits","fill","ingrid"],
   finance:["name","price","groups","fill","rev","margin","mpct"],
@@ -5724,7 +5813,7 @@ function _migrateSingle(){
 }
 function renderAll(){
   _migrateSingle();
-  renderCourses(); renderPlanner(); renderGrid(); renderGroups(); renderClients(); renderMay(); renderStaff(); renderFixed(); renderTax(); renderBreak(); renderSettings(); renderDash(); if(typeof renderReport==="function") renderReport(); onSlider(); renderConflictBanner(); renderScenarioBar(); updateNavHeightDelayed();
+  renderCourses(); renderPlanner(); renderGrid(); renderGroups(); renderClients(); if(typeof renderPrice==="function") renderPrice(); renderMay(); renderStaff(); renderFixed(); renderTax(); renderBreak(); renderSettings(); renderDash(); if(typeof renderReport==="function") renderReport(); onSlider(); renderConflictBanner(); renderScenarioBar(); updateNavHeightDelayed();
 }
 function toast(m){ const t=document.getElementById("toast"); t.textContent=m; t.classList.add("show");
   clearTimeout(t._h); t._h=setTimeout(()=>t.classList.remove("show"),2200); }
