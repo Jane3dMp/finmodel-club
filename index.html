@@ -2249,8 +2249,9 @@ function printPrice(){
     .a-left{text-align:left}.a-right{text-align:right}.a-center{text-align:center}
     tr:nth-child(even) td{background:#faf6f0}
     @media print{@page{size:portrait;margin:12mm}}`;
-  const head=`<tr>${PRICE_COLS.map(c=>`<th class="a-${c.al}">${c.lab}</th>`).join("")}</tr>`;
-  const body=rows.map(c=>`<tr>${PRICE_COLS.map(col=>`<td class="a-${col.al}">${col.get(c)}</td>`).join("")}</tr>`).join("");
+  const pcols=PRICE_COLS.filter(c=>c.k!=="eco");   // в печати экосистему не показываем
+  const head=`<tr>${pcols.map(c=>`<th class="a-${c.al}">${c.lab}</th>`).join("")}</tr>`;
+  const body=rows.map(c=>`<tr>${pcols.map(col=>`<td class="a-${col.al}">${col.get(c)}</td>`).join("")}</tr>`).join("");
   const flt=_priceEco?(" · "+esc(_priceEco)):"";
   w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Прайс курсов — Прознание + CODDY</title><style>${css}</style></head>
     <body><h2>Прайс курсов — Прознание + CODDY</h2><div class="sub">${esc(new Date().toLocaleDateString("ru-RU"))}${flt} · ${rows.length} курсов</div>
