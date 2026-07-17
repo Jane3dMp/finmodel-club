@@ -2288,28 +2288,43 @@ function _mayCountForCourse(name){
   });
   return seen.size;
 }
+// нераспределённые майские: строки списка с распознанным курсом, ещё НЕ вписанные в группу
+// (в «Майском» это счётчик «не вписаны»). Считаем по курсу — они займут места позже.
+function _mayUnplacedByCourse(){
+  const m={};
+  (S.mayList||[]).forEach(r=>{
+    if(!r || r.placeDismiss) return;                             // подсказку «вписать» скрыли — не считаем
+    const dst=mayRowCourse(r); if(!dst) return;                  // курс майского не распознан — привязать не к чему
+    if(mayOccFor(r).length>0) return;                            // уже стоит в группе этого курса — учтён через расписание
+    m[dst]=(m[dst]||0)+1;
+  });
+  return m;
+}
 function _realRows(){
   const wpm=(S.assume&&S.assume.weeksPerMonth)||4;
+  const unplaced=_mayUnplacedByCourse();
   return (S.courses||[]).map((c,i)=>{
     const price=+c.price||0;
     const hasMayPrice=(c.mayPrice!=null&&c.mayPrice!==""&&+c.mayPrice>0);
     const mayPrice=hasMayPrice?+c.mayPrice:price;                 // если майская цена не задана — берём текущую (разницы нет)
     const visits=+c.visits||1, groups=+c.groups||0, fill=+c.fill||0;
     const target=fill*groups;                                    // нужное число детей = «Факт детей» × групп
-    const mayN=_mayCountForCourse(c.name);                        // майские — из расписания
+    const mayGrid=_mayCountForCourse(c.name);                     // майские уже в расписании (💰)
+    const mayUnplaced=unplaced[c.name]||0;                        // майские из списка, ещё не вписанные
+    const mayN=mayGrid+mayUnplaced;                              // всего майских по курсу
     const totalKids=Math.max(target,mayN);                       // если майских больше цели — берём майских
     const newN=Math.max(0,totalKids-mayN);                       // новые (вписанные + добор) по текущей цене
     const f=visits*wpm;                                          // занятий на ребёнка в месяц
     const revReal=(mayN*mayPrice+newN*price)*f;                  // реальный оборот/мес
     const revModel=totalKids*price*f;                            // если бы все платили текущую цену
-    return {i,c,price,mayPrice,hasMayPrice,visits,groups,fill,target,mayN,newN,totalKids,revReal,revModel,diff:revReal-revModel};
+    return {i,c,price,mayPrice,hasMayPrice,visits,groups,fill,target,mayGrid,mayUnplaced,mayN,newN,totalKids,revReal,revModel,diff:revReal-revModel};
   });
 }
 function renderReal(){
   const t=document.getElementById("realTable"); if(!t) return;
   const rows=_realRows();
-  const T={mayN:0,totalKids:0,newN:0,revReal:0,revModel:0};
-  rows.forEach(r=>{T.mayN+=r.mayN;T.totalKids+=r.totalKids;T.newN+=r.newN;T.revReal+=r.revReal;T.revModel+=r.revModel;});
+  const T={mayN:0,mayGrid:0,mayUnplaced:0,totalKids:0,newN:0,revReal:0,revModel:0};
+  rows.forEach(r=>{T.mayN+=r.mayN;T.mayGrid+=r.mayGrid;T.mayUnplaced+=r.mayUnplaced;T.totalKids+=r.totalKids;T.newN+=r.newN;T.revReal+=r.revReal;T.revModel+=r.revModel;});
   T.diff=T.revReal-T.revModel;
   const coursesWithMay=rows.filter(r=>r.mayN>0).length;
   const box=document.getElementById("realKpi");
@@ -2319,7 +2334,7 @@ function renderReal(){
       kpi("Оборот реальный/мес", fmt(T.revReal)+" р","green","с майской акцией")+
       kpi("Оборот модель/мес", fmt(T.revModel)+" р","coal","если все по текущей цене")+
       kpi("Разница/мес", (T.diff>0?"+":"")+fmt(T.diff)+" р", T.diff<0?"red":"green", (diffPct>0?"+":"")+diffPct+"%")+
-      kpi("Майских детей", String(T.mayN),"blue", coursesWithMay+" курс. с майскими")+
+      kpi("Майских детей", String(T.mayN),"blue", T.mayGrid+" в сетке · "+T.mayUnplaced+" не вписаны")+
       kpi("Реальный ×4 мес", fmt(T.revReal*4)+" р","green","период акции");
   }
   const heads=[["Курс","left"],["Майских","center"],["Майская<br>цена","right"],["Тек.<br>цена","right"],["Факт/гр","right"],["Групп","right"],["Всего<br>детей","right"],["Новых","right"],["Оборот<br>реальн./мес","right"],["Модель<br>/мес","right"],["Разница","right"]];
@@ -2328,7 +2343,7 @@ function renderReal(){
     const warn=(r.mayN>0 && !r.hasMayPrice)?' style="background:#fff3e0"':'';   // майские есть, а цена не задана — подсветить
     h+=`<tr>`
       +`<td class="a-left">${esc(r.c.name)}</td>`
-      +`<td class="a-center">${r.mayN||'—'}</td>`
+      +`<td class="a-center"${r.mayUnplaced?` title="${r.mayGrid} в сетке + ${r.mayUnplaced} ещё не вписаны"`:''}>${r.mayN||'—'}${r.mayUnplaced?`<span style="color:var(--muted);font-size:11px"> (+${r.mayUnplaced})</span>`:''}</td>`
       +`<td class="a-right"><input class="cell" type="number"${warn} value="${(r.c.mayPrice==null||r.c.mayPrice==='')?'':r.c.mayPrice}" onchange="updOpt(${r.i},'mayPrice',this.value)"></td>`
       +`<td class="a-right">${fmt(r.price)}</td>`
       +`<td class="a-right">${r.fill||'—'}</td>`
