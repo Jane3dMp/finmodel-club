@@ -263,7 +263,8 @@ small.note{font-size:11px;color:var(--muted)}
 #courseTable td input[type="number"]{width:62px}
 #courseTable .iconbtn{padding:2px 6px;font-size:11px;line-height:1.2;min-width:0}
 #courseTable .ly-col{background:rgba(120,90,60,.05);border-left:1px dashed var(--line)}
-#courseTable th.sortable{cursor:pointer;user-select:none;white-space:nowrap}
+#courseTable th{white-space:normal;line-height:1.15;vertical-align:middle}
+#courseTable th.sortable{cursor:pointer;user-select:none}
 #courseTable th.sortable:hover{background:var(--terra);color:#fff}
 #courseTable th.sorted{color:#FED634}
 /* выравнивание: шапка = значения */
@@ -274,18 +275,20 @@ small.note{font-size:11px;color:var(--muted)}
 #courseTable td.a-right .cell{text-align:right}
 /* ширины числовых столбцов — чтобы шапка и число не разъезжались */
 #courseTable th.c-price,#courseTable td.c-price,
+#courseTable th.c-single,#courseTable td.c-single,
+#courseTable th.c-sub,#courseTable td.c-sub,
 #courseTable th.c-wage,#courseTable td.c-wage,
 #courseTable th.c-groups,#courseTable td.c-groups,
-#courseTable th.c-ingrid,#courseTable td.c-ingrid,
 #courseTable th.c-fill,#courseTable td.c-fill,
-#courseTable th.c-min,#courseTable td.c-min{width:78px}
-#courseTable th.c-visits,#courseTable td.c-visits{width:64px}
+#courseTable th.c-min,#courseTable td.c-min{width:72px;min-width:72px}
+#courseTable th.c-ingrid,#courseTable td.c-ingrid{width:66px;min-width:66px}
+#courseTable th.c-visits,#courseTable td.c-visits{width:62px;min-width:62px}
 #courseTable th.c-rev,#courseTable td.c-rev,
 #courseTable th.c-margin,#courseTable td.c-margin,
 #courseTable th.c-mpct,#courseTable td.c-mpct,
 #courseTable th.c-lyfill,#courseTable td.c-lyfill,
-#courseTable th.c-lyrev,#courseTable td.c-lyrev{width:96px}
-#courseTable td.c-price input,#courseTable td.c-groups input,#courseTable td.c-fill input{width:100%}
+#courseTable th.c-lyrev,#courseTable td.c-lyrev{width:88px;min-width:88px}
+#courseTable td.c-price input,#courseTable td.c-single input,#courseTable td.c-sub input,#courseTable td.c-groups input,#courseTable td.c-fill input{width:100%}
 
 .pin{cursor:pointer;font-size:13px;user-select:none;opacity:.6}
 .pin:hover{opacity:1}
@@ -2046,14 +2049,14 @@ function renderCourses(){
     ${_sortTh("sub",{title:"Абонемент (заполняется вручную; справочно, в расчётах не участвует)"})}
     ${_sortTh("wage")}
     ${_sortTh("groups")}
-    ${_sortTh("ingrid",{title:"Сколько групп этого курса уже стоит в расписании (занятия÷визиты). Обновляется из сетки"})}
+    ${_sortTh("ingrid",{lab:"В сетке",title:"Сколько групп этого курса уже стоит в расписании (занятия÷визиты). Обновляется из сетки"})}
     ${_sortTh("visits",{title:"Сколько раз в неделю ходит группа"})}
-    ${_sortTh("fill",{title:"Моделируемое вами число детей в группе"})}
-    ${_sortTh("rev")}
-    ${_sortTh("margin",{title:"Оборот минус зарплата педагога. НЕ учтены аренда, налоги, команда — это не прибыль"})}
-    ${_sortTh("mpct",{title:"Маржа после ЗП ÷ оборот"})}
-    ${_sortTh("lyfill",{cls:"ly-col",title:"Средняя наполняемость прошлого года (неизменно, из Альфы)"})}
-    ${_sortTh("lyrev",{cls:"ly-col",title:"Реальный оборот по курсу в среднем за месяц 2025/2026 (неизменно)"})}
+    ${_sortTh("fill",{lab:"Факт<br>детей",title:"Моделируемое вами число детей в группе"})}
+    ${_sortTh("rev",{lab:"Оборот<br>мес"})}
+    ${_sortTh("margin",{lab:"Маржа после<br>ЗП, р",title:"Оборот минус зарплата педагога. НЕ учтены аренда, налоги, команда — это не прибыль"})}
+    ${_sortTh("mpct",{lab:"Маржа после<br>ЗП, %",title:"Маржа после ЗП ÷ оборот"})}
+    ${_sortTh("lyfill",{cls:"ly-col",lab:"Факт детей<br>25/26",title:"Средняя наполняемость прошлого года (неизменно, из Альфы)"})}
+    ${_sortTh("lyrev",{cls:"ly-col",lab:"Факт/мес<br>25/26",title:"Реальный оборот по курсу в среднем за месяц 2025/2026 (неизменно)"})}
     ${_sortTh("min")}
     <th></th></tr></thead><tbody>`;
   S.courses.forEach((c,i)=>{
@@ -2164,7 +2167,8 @@ function _sortTh(key,extra){
   const arrow=on?(_courseSort.dir>0?" ▲":" ▼"):"";
   const cls=(extra&&extra.cls?extra.cls+" ":"")+"c-"+key+" a-"+col.al+" sortable"+(on?" sorted":"");
   const ttl=(extra&&extra.title)?extra.title+" · клик — сортировка":"Клик — сортировка";
-  return `<th class="${cls}" title="${esc(ttl)}" onclick="sortCoursesBy('${key}')">${col.lab}${arrow}</th>`;
+  const lab=(extra&&extra.lab)?extra.lab:col.lab;   // extra.lab — только для показа в шапке (можно <br>); печать берёт col.lab
+  return `<th class="${cls}" title="${esc(ttl)}" onclick="sortCoursesBy('${key}')">${lab}${arrow}</th>`;
 }
 const COURSE_PRINT_PRESETS={
   teachers:["name","eco","groups","visits","fill","ingrid"],
