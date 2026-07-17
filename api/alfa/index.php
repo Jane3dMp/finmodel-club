@@ -110,13 +110,17 @@ switch ($action) {
         $inWin = fn($d) => !$d || ($d >= $from && $d <= $to);
 
         // 1) cgi
+        $today = date('Y-m-d');
+        $activeCgi = [];   // group_id => ['b'=>..,'e'=>..] — ДЕЙСТВУЮЩИЕ членства (для «активных абонементов»)
         $cgi = alfa_http('POST', "$host/cgi/index", ['customer_id' => $cid, 'page' => 0, 'count' => 200], $token, true, 12);
         $cgiItems = isset($cgi['__err']) ? [] : ($cgi['items'] ?? []);
         foreach ($cgiItems as $it) {
             $b = $it['b_date'] ?? null; $e = $it['e_date'] ?? null;
             $bb = $b ? substr($b, 0, 10) : null; $ee = $e ? substr($e, 0, 10) : null;
+            $gidc = $it['group_id'] ?? null;
+            if ($gidc && (!$ee || $ee >= $today)) $activeCgi[$gidc] = ['b' => $bb, 'e' => $ee];   // нет конца или ещё не закончилось
             if (($bb && $bb > $to) || ($ee && $ee < $from)) continue;   // не пересекается с окном
-            $note($gid, $it['group_id'] ?? null, $ee ?: $bb);
+            $note($gid, $gidc, $ee ?: $bb);
         }
         // 2) уроки в окне (пробуем разные имена фильтров — лишние Alfa игнорирует)
         $les = alfa_http('POST', "$host/lesson/index",
@@ -159,11 +163,29 @@ switch ($action) {
                 $gr = alfa_http('POST', "$host/group/index", ['id' => (int)$id, 'page' => 0], $token, true, 6);
                 $nm = $gr['items'][0]['name'] ?? ('Группа #' . $id);
             } else { $nm = 'Группа #' . $id; }
-            $history[] = ['group' => $nm, 'b_date' => $dr['b'], 'e_date' => $dr['e'], 'sched' => $schedOf($id)];
+            $history[] = ['group_id' => (int)$id, 'group' => $nm, 'b_date' => $dr['b'], 'e_date' => $dr['e'], 'sched' => $schedOf($id)];
+        }
+        // активные абонементы (действующие членства из cgi) — с именем и расписанием группы
+        $active = [];
+        foreach ($activeCgi as $agid => $adr) {
+            $nm = $names[$agid] ?? null;
+            if ($nm === null && $miss < 6) {   // добираем имя архивной/непопавшей в общий список группы
+                $gr = alfa_http('POST', "$host/group/index", ['id' => (int)$agid, 'page' => 0], $token, true, 6); $miss++;
+                $nm = $gr['items'][0]['name'] ?? ('Группа #' . $agid);
+            }
+            $active[] = ['group_id' => (int)$agid, 'group' => $nm ?: ('Группа #' . $agid),
+                         'b_date' => $adr['b'], 'e_date' => $adr['e'], 'sched' => $schedOf($agid)];
         }
         // краткая сводка из карточки клиента
         $cu = alfa_http('POST', "$host/customer/index", ['id' => $cid, 'page' => 0], $token, true, 12);
         $c0 = $cu['items'][0] ?? [];
+        // «Этап взаимодействия» (ЭВ) по годам — кастомные поля Alfa (в объекте клиента лежат как custom_<ключ>)
+        $evKeys = ['evzz' => 'ЭВ 26/27', 'evz' => 'ЭВ 25/26', 'ev' => 'ЭВ 24/25', 'etapvzaimodeystviya' => 'ЭВ 23/24'];
+        $custom = [];
+        foreach ($evKeys as $k => $lab) {
+            $v = $c0['custom_' . $k] ?? ($c0[$k] ?? null);
+            $custom[$k] = is_scalar($v) ? trim((string)$v) : '';
+        }
         // телефоны родителя — чтобы кнопка «⟳» у ребёнка могла подтянуть контакт точечно
         $ph0 = $c0['phone'] ?? [];
         if (is_string($ph0)) $ph0 = $ph0 === '' ? [] : [$ph0];
@@ -176,9 +198,32 @@ switch ($action) {
             'paid_till'   => $c0['paid_till'] ?? null,
             'next_lesson' => $c0['next_lesson_date'] ?? null,
         ];
+        // тарифы/оплаты («настоящие абонементы») — только по запросу full=1 (не тормозим лёгкую 👤).
+        // У этого клуба абонементов-сущностей может не быть (customer-tariff часто пуст) — отдаём best-effort.
+        $tariffs = [];
+        if (!empty($in['full'])) {
+            $ct = alfa_http('POST', "$host/customer-tariff/index", ['customer_id' => $cid, 'page' => 0, 'count' => 50], $token, true, 8);
+            foreach (($ct['items'] ?? []) as $t) {
+                if (!is_array($t)) continue;
+                $tariffs[] = ['type' => 'tariff',
+                    'name'   => $t['tariff_name'] ?? ($t['name'] ?? ('Тариф #' . ($t['id'] ?? ''))),
+                    'b_date' => isset($t['b_date']) ? substr((string)$t['b_date'], 0, 10) : null,
+                    'e_date' => isset($t['e_date']) ? substr((string)$t['e_date'], 0, 10) : null,
+                    'lessons' => $t['lesson_count'] ?? ($t['balance'] ?? null)];
+            }
+            $pay = alfa_http('POST', "$host/pay/index", ['customer_id' => $cid, 'page' => 0, 'count' => 50], $token, true, 8);
+            foreach (($pay['items'] ?? []) as $p) {
+                if (!is_array($p)) continue;
+                $tariffs[] = ['type' => 'pay',
+                    'name'   => $p['note'] ?? ($p['document_number'] ?? 'Оплата'),
+                    'b_date' => isset($p['date']) ? substr((string)$p['date'], 0, 10) : (isset($p['payment_date']) ? substr((string)$p['payment_date'], 0, 10) : null),
+                    'amount' => $p['income'] ?? ($p['amount'] ?? null)];
+            }
+        }
         json_out(['ok' => true, 'customerId' => $cid, 'branch' => alfa_branch(), 'matched' => $matchedName,
-                  'summary' => $summary, 'history' => $history, 'from' => $from, 'to' => $to,
-                  'debug' => ['cgi' => count($cgiItems), 'lessons' => count($lesItems), 'groups' => count($gid)]]);
+                  'summary' => $summary, 'history' => $history, 'active' => $active, 'custom' => $custom,
+                  'tariffs' => $tariffs, 'from' => $from, 'to' => $to,
+                  'debug' => ['cgi' => count($cgiItems), 'lessons' => count($lesItems), 'groups' => count($gid), 'active' => count($active)]]);
         break;
 
     // --- справочники для маппинга модель→Alfa (READ) ---
