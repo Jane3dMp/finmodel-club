@@ -4819,11 +4819,14 @@ async function kidAlfaUpdate(i){
     const kk=_editKids[i]; if(!kk) return;
     if(s.dob) kk.dob=s.dob;
     if(j.customerId) kk.alfaId=j.customerId;
+    // телефон родителя — вручную его нигде не вводят, приходит только из Альфы → обновляем
+    const ph=(s.phones||[]).find(p=>String(p).replace(/\D/g,"").length>=6)||"";
+    if(ph) kk.phone=ph;
     const idx=_modalLesIdx();
     if(S.grid[idx]) S.grid[idx].kids=_editKids.filter(x=>x.n);
     persistLocal(); if(typeof fbSchedulePush==="function") fbSchedulePush();
     renderKidsEditor();
-    toast("Обновлено из Альфы: "+shortName(nm)+(s.dob?(" · "+_ageStr(s.dob)):" · возраст не указан"));
+    toast("Обновлено из Альфы: "+shortName(nm)+(s.dob?(" · "+_ageStr(s.dob)):" · возраст не указан")+(ph?" · 📞 телефон":" · телефона нет"));
   }catch(e){ toast("Не удалось: "+((e&&e.message)||e)); }
 }
 /* Подтянуть из Альфы возраст (ДР) + телефон + связь сразу ВСЕМ детям занятия —

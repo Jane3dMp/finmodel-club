@@ -164,9 +164,13 @@ switch ($action) {
         // краткая сводка из карточки клиента
         $cu = alfa_http('POST', "$host/customer/index", ['id' => $cid, 'page' => 0], $token, true, 12);
         $c0 = $cu['items'][0] ?? [];
+        // телефоны родителя — чтобы кнопка «⟳» у ребёнка могла подтянуть контакт точечно
+        $ph0 = $c0['phone'] ?? [];
+        if (is_string($ph0)) $ph0 = $ph0 === '' ? [] : [$ph0];
         $summary = [
             'name'        => $c0['name'] ?? '',
             'dob'         => $c0['dob'] ?? null,
+            'phones'      => array_values(array_filter(array_map('strval', (array)$ph0))),
             'balance'     => $c0['balance'] ?? null,
             'last_attend' => $c0['last_attend_date'] ?? null,
             'paid_till'   => $c0['paid_till'] ?? null,
