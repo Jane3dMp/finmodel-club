@@ -5314,32 +5314,44 @@ function _kidCardAlfa(j){
       <div style="margin:4px 0 10px;border:1px solid var(--line);border-radius:8px;padding:2px 10px">${evPrev.map((x,i)=>`<div style="padding:6px 0;font-size:12px;line-height:1.45;overflow-wrap:anywhere${i<evPrev.length-1?';border-bottom:1px solid #f0ebe4':''}"><b>${x[1]}:</b> ${esc(custom[x[0]])}</div>`).join("")}</div>`;
   }
   try{ if(j.debug){ console.log("🪪 карточка ребёнка · debug Альфы:", j.debug); console.log("🪪 debug (скопировать):", JSON.stringify(j.debug)); } }catch(e){}
-  // «Счета и абонементы» (как в карточке клиента Альфы) — из customer-tariff
+  // «Счета и абонементы» (как в карточке клиента Альфы) — абонементы customer-tariff,
+  // а у этого клуба фактически платежи pay (сумма + пометка «майский» + дата).
   const subs=j.subs||[], subsArch=j.subsArch||[];
-  const emptySubs = "Активных абонементов нет"+(j.debug&&j.debug.tariffCount!=null?` · всего в Альфе: ${j.debug.tariffCount}`:"");
+  const emptySubs = j.paySrc ? "Оплат в Альфе не найдено" : ("Абонементов нет"+(j.debug&&j.debug.payCount?` · платежей: ${j.debug.payCount}`:""));
   h+=_kidCardSubs("💳 Счета и абонементы", subs, emptySubs);
   if(subsArch.length) h+=_kidCardSubs("🗄 Архивные абонементы ("+subsArch.length+")", subsArch, "");
   return h;
 }
-/* один блок «Счета и абонементы» (активные/архивные) — из customer-tariff Альфы */
+/* один блок «Счета и абонементы»: kind='pay' — платёж (сумма+пометка+дата), иначе абонемент-сущность */
 function _kidCardSubs(title, arr, empty){
   const dOnly=v=>v?String(v).slice(0,10).split("-").reverse().join("."):"";
   if(!arr.length) return `<label style="font-weight:600">${title}:</label><div style="font-size:12px;color:var(--muted);margin:4px 0 10px">${empty}</div>`;
   const money=v=>(v===null||v===undefined||v==="")?"":(fmt(Math.round(+v))+" р");
-  const rest=x=>{
-    const p=[];
-    const b=money(x.balance); if(b) p.push(`<b style="color:${(+x.balance)<0?'var(--red)':'var(--green)'}">${b}</b>`);
+  const row=x=>{
+    if(x.kind==='pay'){
+      const amt=money(x.balance);
+      return `<div style="padding:6px 0;border-bottom:1px solid #f0ebe4">
+        <div style="display:flex;justify-content:space-between;gap:8px;align-items:baseline">
+          <div style="font-weight:600">${esc(x.name||'Оплата')}${x.confirmed===false?' <span style="color:var(--red);font-weight:400;font-size:11px">не подтв.</span>':''}</div>
+          ${amt?`<b style="color:var(--green);white-space:nowrap">${amt}</b>`:''}
+        </div>
+        <div style="font-size:11px;color:var(--muted)">${x.b_date?dOnly(x.b_date):''}${x.subject?' · '+esc(x.subject):''}</div>
+      </div>`;
+    }
+    const p=[]; const b=money(x.balance);
+    if(b) p.push(`<b style="color:${(+x.balance)<0?'var(--red)':'var(--green)'}">${b}</b>`);
     if(x.lessons!=null&&x.lessons!=="") p.push(`${x.lessons} ур.`);
-    return p.length?("Остаток: "+p.join(" · ")):"";
-  };
-  return `<label style="font-weight:600">${title}:</label>
-    <div style="max-height:34vh;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:6px 10px;margin:4px 0 10px">
-    ${arr.map(x=>`<div style="padding:6px 0;border-bottom:1px solid #f0ebe4">
+    const rest=p.length?("Остаток: "+p.join(" · ")):"";
+    return `<div style="padding:6px 0;border-bottom:1px solid #f0ebe4">
       <div style="font-weight:600">${esc(x.name||'Абонемент')}</div>
       ${x.subject?`<div style="font-size:12px;color:var(--coal)">${esc(x.subject)}</div>`:''}
       <div style="font-size:11px;color:var(--muted)">${dOnly(x.b_date)}${x.e_date?' – '+dOnly(x.e_date):''}${x.note?' · '+esc(x.note):''}</div>
-      ${rest(x)?`<div style="font-size:12px;color:var(--terra-d)">${rest(x)}</div>`:''}
-    </div>`).join("")}</div>`;
+      ${rest?`<div style="font-size:12px;color:var(--terra-d)">${rest}</div>`:''}
+    </div>`;
+  };
+  return `<label style="font-weight:600">${title}:</label>
+    <div style="max-height:34vh;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:6px 10px;margin:4px 0 10px">
+    ${arr.map(row).join("")}</div>`;
 }
 /* точечно подтянуть из Альфы возраст (ДР) и связь (alfaId) ОДНОГО ребёнка — для новеньких,
    чтобы не гонять полную синхронизацию контактов. Возраст хранится в карточке (k.dob). */

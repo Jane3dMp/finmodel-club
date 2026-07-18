@@ -215,81 +215,92 @@ switch ($action) {
             'paid_till'   => $c0['paid_till'] ?? null,
             'next_lesson' => $c0['next_lesson_date'] ?? null,
         ];
-        // «Счета и абонементы» (в Alfa — счета/абонементы клиента) = customer-tariff.
-        // Тянем только по full=1 (карточка 🪪), чтобы лёгкая 👤-история оставалась быстрой.
-        // Отдаём: название абонемента, курс (через справочник предметов), период, остаток
-        // (деньги + уроки), заметку («майский …»), флаг активный/архивный. Сырой первый item —
-        // в debug.tariffRaw, чтобы сверить реальные имена полей с боевой Альфой и донастроить.
-        $subs = []; $subsArch = []; $tariffRaw = null; $tariffCount = 0; $ctDbg = []; $brList = [];
+        // «Счета и абонементы» (карточка 🪪, только full=1). У ЭТОГО клуба абонементы-сущности
+        // (customer-tariff) пустые — реальные «счета» лежат в ПЛАТЕЖАХ (pay): сумма (income),
+        // пометка (note, напр. «майский»), дата (document_date). Абонементы/справочники в Alfa
+        // привязаны к филиалу клиента, поэтому спрашиваем по всем его branch_ids.
+        $subs = []; $subsArch = []; $tariffRaw = null; $tariffCount = 0; $payCount = 0; $ctDbg = []; $brList = []; $paySrc = false;
         if (!empty($in['full'])) {
-            // Филиалы клиента: абонементы/справочники в Alfa привязаны к филиалу, а дефолтный
-            // филиал не всегда тот, где лежит клиент → берём из карточки клиента ($c0).
             $custBr = [];
             $bids = $c0['branch_ids'] ?? ($c0['branch'] ?? null);
             if (is_array($bids)) { foreach ($bids as $bb) { $bb = (int)$bb; if ($bb) $custBr[$bb] = 1; } }
             elseif ($bids) { $custBr[(int)$bids] = 1; }
             if (!$custBr) $custBr[alfa_branch()] = 1;
             $brList = array_keys($custBr);
+            $numN = fn($v) => ($v === null || $v === '' || !is_numeric($v)) ? null : (0 + $v);
+            $isoOf = function ($d) { $d = (string)$d; if (preg_match('#^(\d{2})\.(\d{2})\.(\d{4})#', $d, $m)) return "$m[3]-$m[2]-$m[1]"; return substr($d, 0, 10); };
 
-            // справочник предметов (id => name) — из первого филиала клиента
+            // справочник предметов (id => name) — на случай, если абонементы-сущности всё же есть
             $subjMap = [];
             $sj = alfa_http('POST', 'https://' . alfa_host() . '/v2api/' . $brList[0] . '/subject/index', ['page' => 0, 'count' => 500], $token, true, 8);
             foreach (($sj['items'] ?? []) as $sji) { if (isset($sji['id'])) $subjMap[(int)$sji['id']] = (string)($sji['name'] ?? ''); }
 
-            // «Счета и абонементы» (customer-tariff) — по КАЖДОМУ филиалу клиента, мержим
-            $items = [];
+            // 1) customer-tariff — обычный + is_active=0 (вдруг клуб заведёт абонементы-сущности)
+            $items = []; $seenCt = [];
             foreach ($brList as $br) {
                 $hb = 'https://' . alfa_host() . '/v2api/' . $br;
-                $ct = alfa_http('POST', "$hb/customer-tariff/index", ['customer_id' => $cid, 'page' => 0, 'count' => 100], $token, true, 10);
-                $its = is_array($ct['items'] ?? null) ? $ct['items'] : [];
-                foreach ($its as $t) $items[] = $t;
-                $ctDbg[] = ['branch' => $br, 'err' => $ct['__err'] ?? null, 'total' => $ct['total'] ?? null, 'count' => count($its),
-                            'keys0' => (count($its) && is_array($its[0] ?? null)) ? array_keys($its[0]) : null];
-            }
-            $tariffCount = count($items);
-            if ($tariffCount && is_array($items[0] ?? null)) $tariffRaw = $items[0];   // сырой первый — для сверки полей
-
-            // если абонементов нет — зонд по альтернативным сущностям (диагностика, где лежат «Счета и абонементы»)
-            if ($tariffCount === 0) {
-                foreach (['pay', 'invoice', 'subscription', 'customer-pay'] as $ep) {
-                    $hb = 'https://' . alfa_host() . '/v2api/' . $brList[0];
-                    $rr = alfa_http('POST', "$hb/$ep/index", ['customer_id' => $cid, 'page' => 0, 'count' => 30], $token, true, 6);
-                    $its = is_array($rr['items'] ?? null) ? $rr['items'] : [];
-                    $ctDbg[] = ['probe' => $ep, 'err' => $rr['__err'] ?? null, 'total' => $rr['total'] ?? null, 'count' => count($its),
-                                'keys0' => (count($its) && is_array($its[0] ?? null)) ? array_keys($its[0]) : null,
-                                'raw0' => $its[0] ?? null];
+                foreach ([['customer_id' => $cid, 'page' => 0, 'count' => 100], ['customer_id' => $cid, 'is_active' => 0, 'page' => 0, 'count' => 100]] as $q) {
+                    $ct = alfa_http('POST', "$hb/customer-tariff/index", $q, $token, true, 8);
+                    $its = is_array($ct['items'] ?? null) ? $ct['items'] : [];
+                    foreach ($its as $t) { $k = ($t['id'] ?? '') . '@' . $br; if (isset($seenCt[$k])) continue; $seenCt[$k] = 1; $items[] = $t; }
+                    $ctDbg[] = ['branch' => $br, 'act' => $q['is_active'] ?? 1, 'err' => $ct['__err'] ?? null, 'count' => count($its)];
                 }
             }
-
-            $numN = fn($v) => ($v === null || $v === '' || !is_numeric($v)) ? null : (0 + $v);
-            foreach ($items as $t) {
-                if (!is_array($t)) continue;
-                // курс: по subject_ids (или subject_id)
-                $sids = $t['subject_ids'] ?? ($t['subject_id'] ?? null);
-                if (!is_array($sids)) $sids = ($sids === null || $sids === '') ? [] : [$sids];
-                $subjNames = [];
-                foreach ($sids as $sid) { $nm = $subjMap[(int)$sid] ?? ''; if ($nm !== '') $subjNames[] = $nm; }
-                $b = isset($t['b_date']) ? substr((string)$t['b_date'], 0, 10) : null;
-                $e = isset($t['e_date']) ? substr((string)$t['e_date'], 0, 10) : null;
-                // остаток по счёту: деньги (balance) и уроки (кандидаты имён — сверим по tariffRaw)
-                $balance = $numN($t['balance'] ?? null);
-                $lessons = $numN($t['lesson_count'] ?? ($t['balance_lesson'] ?? ($t['lesson_left'] ?? ($t['paid_count'] ?? null))));
-                $isActive = isset($t['is_active']) ? ((int)$t['is_active'] === 1) : ($e === null || $e >= $today);
-                $row = [
-                    'name'    => $t['tariff_name'] ?? ($t['name'] ?? ('Абонемент #' . ($t['id'] ?? ''))),
-                    'subject' => implode(', ', $subjNames),
-                    'b_date'  => $b, 'e_date' => $e,
-                    'balance' => $balance, 'lessons' => $lessons,
-                    'note'    => is_scalar($t['note'] ?? null) ? trim((string)$t['note']) : '',
-                ];
-                if ($isActive) $subs[] = $row; else $subsArch[] = $row;
+            // 2) pay — реальные платежи клиента (основной источник «Счетов» у этого клуба)
+            $pays = [];
+            foreach ($brList as $br) {
+                $hb = 'https://' . alfa_host() . '/v2api/' . $br;
+                $pr = alfa_http('POST', "$hb/pay/index", ['customer_id' => $cid, 'page' => 0, 'count' => 100], $token, true, 8);
+                foreach (($pr['items'] ?? []) as $p) { if (is_array($p)) $pays[] = $p; }
             }
-            usort($subsArch, fn($a, $b) => strcmp((string)($b['e_date'] ?? ''), (string)($a['e_date'] ?? '')));   // архивные — новые сверху
+            $payCount = count($pays);
+
+            if (count($items)) {
+                // редкий путь: реальные абонементы-сущности есть
+                $tariffCount = count($items);
+                if (is_array($items[0] ?? null)) $tariffRaw = $items[0];
+                foreach ($items as $t) {
+                    if (!is_array($t)) continue;
+                    $sids = $t['subject_ids'] ?? ($t['subject_id'] ?? null);
+                    if (!is_array($sids)) $sids = ($sids === null || $sids === '') ? [] : [$sids];
+                    $subjNames = []; foreach ($sids as $sid) { $nm = $subjMap[(int)$sid] ?? ''; if ($nm !== '') $subjNames[] = $nm; }
+                    $b = isset($t['b_date']) ? substr((string)$t['b_date'], 0, 10) : null;
+                    $e = isset($t['e_date']) ? substr((string)$t['e_date'], 0, 10) : null;
+                    $isActive = isset($t['is_active']) ? ((int)$t['is_active'] === 1) : ($e === null || $e >= $today);
+                    $row = ['kind' => 'tariff', 'name' => $t['tariff_name'] ?? ($t['name'] ?? ('Абонемент #' . ($t['id'] ?? ''))),
+                            'subject' => implode(', ', $subjNames), 'b_date' => $b, 'e_date' => $e,
+                            'balance' => $numN($t['balance'] ?? null),
+                            'lessons' => $numN($t['lesson_count'] ?? ($t['balance_lesson'] ?? ($t['lesson_left'] ?? ($t['paid_count'] ?? null)))),
+                            'note' => is_scalar($t['note'] ?? null) ? trim((string)$t['note']) : ''];
+                    if ($isActive) $subs[] = $row; else $subsArch[] = $row;
+                }
+                usort($subsArch, fn($a, $b) => strcmp((string)($b['e_date'] ?? ''), (string)($a['e_date'] ?? '')));
+            } else {
+                // основной путь у этого клуба: «Счета и абонементы» = платежи pay (новые сверху)
+                $paySrc = true;
+                if ($payCount && is_array($pays[0] ?? null)) $tariffRaw = $pays[0];
+                usort($pays, fn($a, $b) => strcmp($isoOf($b['document_date'] ?? ($b['created_at'] ?? '')), $isoOf($a['document_date'] ?? ($a['created_at'] ?? ''))));
+                foreach ($pays as $p) {
+                    if (!is_array($p)) continue;
+                    $note = is_scalar($p['note'] ?? null) ? trim((string)$p['note']) : '';
+                    $gid2 = (int)($p['group_id'] ?? 0);
+                    $course = ($gid2 && isset($names[$gid2])) ? (string)$names[$gid2] : '';
+                    $subs[] = ['kind' => 'pay',
+                               'name'      => $note !== '' ? $note : ($p['pay_type_name'] ?? 'Оплата'),
+                               'subject'   => $course,
+                               'b_date'    => $isoOf($p['document_date'] ?? ($p['created_at'] ?? '')),
+                               'e_date'    => null,
+                               'balance'   => $numN($p['income'] ?? ($p['amount'] ?? null)),
+                               'lessons'   => null,
+                               'confirmed' => ((int)($p['is_confirmed'] ?? 1) === 1),
+                               'note'      => ''];
+                }
+            }
         }
         json_out(['ok' => true, 'customerId' => $cid, 'branch' => alfa_branch(), 'matched' => $matchedName,
                   'summary' => $summary, 'history' => $history, 'active' => $active, 'custom' => $custom,
-                  'subs' => $subs, 'subsArch' => $subsArch, 'from' => $from, 'to' => $to,
-                  'debug' => ['cgi' => count($cgiItems), 'lessons' => count($lesItems), 'groups' => count($gid), 'active' => count($active), 'today' => $today, 'cgiItems' => $cgiDbg, 'tariffCount' => $tariffCount, 'tariffRaw' => $tariffRaw, 'custBranches' => $brList, 'ct' => $ctDbg]]);
+                  'subs' => $subs, 'subsArch' => $subsArch, 'paySrc' => $paySrc, 'from' => $from, 'to' => $to,
+                  'debug' => ['cgi' => count($cgiItems), 'lessons' => count($lesItems), 'groups' => count($gid), 'active' => count($active), 'today' => $today, 'cgiItems' => $cgiDbg, 'tariffCount' => $tariffCount, 'payCount' => $payCount, 'tariffRaw' => $tariffRaw, 'custBranches' => $brList, 'ct' => $ctDbg]]);
         break;
 
     // --- СОЗДАТЬ НОВОГО КЛИЕНТА (ребёнка) в Alfa (WRITE) ---
