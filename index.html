@@ -334,6 +334,15 @@ details.cwarn .cwarn-body{padding:0 14px 12px}
 #courseTable th.c-lyrev,#courseTable td.c-lyrev{width:88px;min-width:88px}
 #courseTable td.c-price input,#courseTable td.c-single input,#courseTable td.c-sub input,#courseTable td.c-groups input,#courseTable td.c-fill input{width:100%}
 
+/* спидометры набора */
+#goals .gaugegrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(168px,1fr));gap:14px;margin-bottom:22px}
+#goals .gauge{background:#fff;border:1px solid var(--line);border-radius:14px;padding:14px 12px 15px;text-align:center;box-shadow:0 1px 3px rgba(28,20,16,.04)}
+#goals .gauge-svg{width:100%;max-width:184px;height:auto;display:block;margin:0 auto}
+#goals .gauge-val{font-size:30px;font-weight:800;letter-spacing:-.02em;line-height:1;margin-top:-4px;font-variant-numeric:tabular-nums}
+#goals .gauge-val .gauge-max{font-size:14px;font-weight:600;color:var(--muted);margin-left:3px}
+#goals .gauge-lab{font-size:11.5px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);font-weight:700;margin-top:6px}
+#goals .gauge-sub{font-size:11px;color:var(--muted);margin-top:2px}
+
 /* мотивационный дашборд набора */
 #goals .goaltop{display:flex;align-items:center;gap:16px;background:var(--graphite);color:#fff;border-radius:14px;padding:16px 22px;margin-bottom:16px}
 #goals .goaltop-lab{font-size:11px;text-transform:uppercase;letter-spacing:.06em;opacity:.7}
@@ -5535,6 +5544,45 @@ function _confirmedCount(){
   const unplaced=(typeof _mayUnplacedByCourse==='function')?Object.values(_mayUnplacedByCourse()).reduce((a,b)=>a+b,0):0;
   return Object.values(map).filter(o=>!o.no && (o.may||o.yes)).length + unplaced;
 }
+/* воронка для спидометров: уникальные дети; подтвердили/отказ/думают — среди НЕ купивших майский; молчат — от всех */
+function _goalsFunnel(){
+  const map={};
+  (S.grid||[]).forEach(l=>kidsOf(l).forEach(k=>{ const key=_nameKey(k.n); if(!key) return;
+    const o=map[key]||(map[key]={may:false,sent:false,reply:'',no:false});
+    if(k.may) o.may=true; if(k.vbSent) o.sent=true; if(k.no) o.no=true;
+    const rank=r=>r==='yes'?3:r==='no'?2:r==='maybe'?1:0;
+    if(rank(k.vbReply)>rank(o.reply)) o.reply=k.vbReply;
+  }));
+  const arr=Object.values(map);
+  const nonMay=arr.filter(k=>!k.may);
+  return {
+    total:arr.length,
+    sent:arr.filter(k=>k.sent).length,
+    nonMay:nonMay.length,
+    nmYes:nonMay.filter(k=>k.reply==='yes').length,
+    nmNo:nonMay.filter(k=>k.reply==='no'||k.no).length,
+    nmMaybe:nonMay.filter(k=>k.reply==='maybe').length,
+    silent:arr.filter(k=>!k.reply && !k.no).length   // молчат = нет ответа (из всех)
+  };
+}
+/* полукруглый спидометр: значение val из max, стрелка + дуга */
+function _gauge(val,max,color,label,sub){
+  max=Math.max(1,+max||1); val=+val||0;
+  const frac=Math.max(0,Math.min(1,val/max));
+  const R=80, arcLen=Math.PI*R;
+  const deg=180-frac*180, rad=deg*Math.PI/180;
+  const nx=(100+70*Math.cos(rad)).toFixed(1), ny=(100-70*Math.sin(rad)).toFixed(1);
+  return `<div class="gauge">
+    <svg viewBox="0 0 200 108" class="gauge-svg" aria-hidden="true">
+      <path d="M20 100 A80 80 0 0 1 180 100" fill="none" stroke="var(--sand-l)" stroke-width="14" stroke-linecap="round"/>
+      <path d="M20 100 A80 80 0 0 1 180 100" fill="none" stroke="${color}" stroke-width="14" stroke-linecap="round" stroke-dasharray="${(frac*arcLen).toFixed(1)} ${arcLen.toFixed(1)}"/>
+      <line x1="100" y1="100" x2="${nx}" y2="${ny}" stroke="var(--coal)" stroke-width="3.2" stroke-linecap="round"/>
+      <circle cx="100" cy="100" r="6" fill="var(--coal)"/>
+    </svg>
+    <div class="gauge-val" style="color:${color}">${val}<span class="gauge-max">/ ${max}</span></div>
+    <div class="gauge-lab">${label}</div>${sub?`<div class="gauge-sub">${sub}</div>`:''}
+  </div>`;
+}
 let _goalsEco="";   // фильтр «Движения по группам» по бренду
 function setGoalsEco(v){ _goalsEco=v||""; renderGoals(); }
 function renderGoals(){
@@ -5550,13 +5598,15 @@ function renderGoals(){
       <div class="goaltop-bar"><i style="width:${pct}%"></i></div>
       <div class="goaltop-pct">${pct}%</div>
     </div>`;
-  // воронка — плитки как в «Отчёте по набору»
-  h+=`<div class="kpigrid" style="margin-bottom:20px">`
-    +kpi("Детей в расписании",fmt(T.kids),"coal","всего записано")
-    +kpi("Отправлено",T.sent+" / "+T.kids,"coal","приглашений в Viber")
-    +kpi("Подтвердили",String(T.yes),"green",rate+"% от записанных")
-    +kpi("Отказ / думают",T.no+" / "+T.maybe,"red","🔴 / 🟡")
-    +kpi("Молчат",String(T.none),"coal","ждут ответа")
+  // воронка — спидометры
+  const F=_goalsFunnel();
+  h+=`<div class="gaugegrid">`
+    +_gauge(F.total, goal, "var(--green)", "Детей в расписании", "цель "+goal)
+    +_gauge(F.sent, F.total, "var(--blue)", "Отправлено", "из "+F.total+" в расписании")
+    +_gauge(F.nmYes, F.nonMay, "var(--green)", "Подтвердили", "из "+F.nonMay+" без майского")
+    +_gauge(F.nmNo, F.nonMay, "var(--red)", "Отказ", "из "+F.nonMay+" без майского")
+    +_gauge(F.nmMaybe, F.nonMay, "#C9922E", "Думают", "из "+F.nonMay+" без майского")
+    +_gauge(F.silent, F.total, "#9A948A", "Молчат", "из "+F.total+" всего")
     +`</div>`;
   // движение по группам — с фильтром по бренду; клик по названию открывает карточку занятия
   const dn=["","Пн","Вт","Ср","Чт","Пт","Сб","Вс"];
