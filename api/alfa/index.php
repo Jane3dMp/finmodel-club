@@ -235,16 +235,14 @@ switch ($action) {
             $sj = alfa_http('POST', 'https://' . alfa_host() . '/v2api/' . $brList[0] . '/subject/index', ['page' => 0, 'count' => 500], $token, true, 8);
             foreach (($sj['items'] ?? []) as $sji) { if (isset($sji['id'])) $subjMap[(int)$sji['id']] = (string)($sji['name'] ?? ''); }
 
-            // 1) customer-tariff — обычный + is_active=0 (вдруг клуб заведёт абонементы-сущности)
-            $items = []; $seenCt = [];
+            // 1) customer-tariff — на случай, если клуб когда-нибудь заведёт абонементы-сущности (сейчас пусто)
+            $items = [];
             foreach ($brList as $br) {
                 $hb = 'https://' . alfa_host() . '/v2api/' . $br;
-                foreach ([['customer_id' => $cid, 'page' => 0, 'count' => 100], ['customer_id' => $cid, 'is_active' => 0, 'page' => 0, 'count' => 100]] as $q) {
-                    $ct = alfa_http('POST', "$hb/customer-tariff/index", $q, $token, true, 8);
-                    $its = is_array($ct['items'] ?? null) ? $ct['items'] : [];
-                    foreach ($its as $t) { $k = ($t['id'] ?? '') . '@' . $br; if (isset($seenCt[$k])) continue; $seenCt[$k] = 1; $items[] = $t; }
-                    $ctDbg[] = ['branch' => $br, 'act' => $q['is_active'] ?? 1, 'err' => $ct['__err'] ?? null, 'count' => count($its)];
-                }
+                $ct = alfa_http('POST', "$hb/customer-tariff/index", ['customer_id' => $cid, 'page' => 0, 'count' => 100], $token, true, 8);
+                $its = is_array($ct['items'] ?? null) ? $ct['items'] : [];
+                foreach ($its as $t) $items[] = $t;
+                $ctDbg[] = ['branch' => $br, 'err' => $ct['__err'] ?? null, 'count' => count($its)];
             }
             // 2) pay — реальные платежи клиента (основной источник «Счетов» у этого клуба)
             $pays = [];
@@ -255,28 +253,19 @@ switch ($action) {
             }
             $payCount = count($pays);
 
-            // --- ищем «что за абонементы открыты с 1 сентября» ---
-            // (а) кастомные поля клиента — там у этого клуба лежат курсы договора («custom_dogovora» и т.п.)
-            $custAll = [];
-            foreach ((array)$c0 as $ck => $cv) {
-                if (strpos((string)$ck, 'custom_') === 0) $custAll[$ck] = is_scalar($cv) ? (string)$cv : json_encode($cv, JSON_UNESCAPED_UNICODE);
+            // «Абонементы с 1 сентября» = курсы договора из кастомного поля клиента custom_dogovora
+            // (у клуба сущность абонемента не ведётся — customer-tariff пуст даже по ctt_id платежа).
+            // custom_dogovora = JSON-массив названий курсов, напр. ["7 навыков…","Roblox + Blender"].
+            $dogovora = [];
+            $rawDog = $c0['custom_dogovora'] ?? '';
+            if (is_array($rawDog)) $dogovora = $rawDog;
+            elseif (is_string($rawDog) && trim($rawDog) !== '') {
+                $dec = json_decode($rawDog, true);
+                $dogovora = is_array($dec) ? $dec : preg_split('/[;\n]+/', $rawDog);
             }
-            $dogovora = null;
-            foreach ($custAll as $ck => $cv) { if (strpos($ck, 'dogovor') !== false && trim((string)$cv) !== '') { $dogovora = $cv; break; } }
-            // (б) проба customer-tariff по ctt_id из платежей (ctt_id = абонемент, к которому привязан платёж)
-            $cttIds = [];
-            foreach ($pays as $p) { $c2 = (int)($p['ctt_id'] ?? 0); if ($c2) $cttIds[$c2] = 1; }
-            $cttIds = array_keys($cttIds);
-            $cttProbe = [];
-            foreach (array_slice($cttIds, 0, 4) as $ci) {
-                foreach ($brList as $br) {
-                    $hb = 'https://' . alfa_host() . '/v2api/' . $br;
-                    $rr = alfa_http('POST', "$hb/customer-tariff/index", ['id' => (int)$ci, 'page' => 0, 'count' => 5], $token, true, 6);
-                    $its = is_array($rr['items'] ?? null) ? $rr['items'] : [];
-                    $cttProbe[] = ['ctt' => $ci, 'branch' => $br, 'err' => $rr['__err'] ?? null, 'count' => count($its), 'raw0' => $its[0] ?? null];
-                    if (count($its)) break;
-                }
-            }
+            $dogovora = array_values(array_filter(array_map(fn($x) => trim((string)$x), (array)$dogovora)));
+            $school = trim((string)($c0['custom_school'] ?? ''));
+            $klass  = trim((string)($c0['custom_klass'] ?? ''));
 
             if (count($items)) {
                 // редкий путь: реальные абонементы-сущности есть
@@ -322,8 +311,9 @@ switch ($action) {
         }
         json_out(['ok' => true, 'customerId' => $cid, 'branch' => alfa_branch(), 'matched' => $matchedName,
                   'summary' => $summary, 'history' => $history, 'active' => $active, 'custom' => $custom,
-                  'subs' => $subs, 'subsArch' => $subsArch, 'paySrc' => $paySrc, 'dogovora' => $dogovora ?? null, 'from' => $from, 'to' => $to,
-                  'debug' => ['cgi' => count($cgiItems), 'lessons' => count($lesItems), 'groups' => count($gid), 'active' => count($active), 'today' => $today, 'cgiItems' => $cgiDbg, 'tariffCount' => $tariffCount, 'payCount' => $payCount, 'tariffRaw' => $tariffRaw, 'custBranches' => $brList, 'ct' => $ctDbg, 'custAll' => $custAll ?? null, 'cttIds' => $cttIds ?? null, 'cttProbe' => $cttProbe ?? null]]);
+                  'subs' => $subs, 'subsArch' => $subsArch, 'paySrc' => $paySrc,
+                  'dogovora' => $dogovora ?? [], 'school' => $school ?? '', 'klass' => $klass ?? '', 'from' => $from, 'to' => $to,
+                  'debug' => ['cgi' => count($cgiItems), 'lessons' => count($lesItems), 'groups' => count($gid), 'active' => count($active), 'today' => $today, 'tariffCount' => $tariffCount, 'payCount' => $payCount, 'custBranches' => $brList, 'ct' => $ctDbg]]);
         break;
 
     // --- СОЗДАТЬ НОВОГО КЛИЕНТА (ребёнка) в Alfa (WRITE) ---
