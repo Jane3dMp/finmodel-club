@@ -1101,6 +1101,8 @@ const DEFAULT_STATE = {
   children: {},   // наши поля ребёнка по alfaId: {alfaId:{name,parentName,phone,dob,evzz}} — один на ребёнка, а не на группу
   goalReturn: 500,   // цель: вернуть прошлогодних
   goalNew: 350,      // цель: набрать новых
+  oldRoster: {},     // alfaId → число посещений за прошлый год (из Альфы); ≥3 = «старый»
+  oldRosterAt: "",   // дата последней выгрузки
   gasUrl: "https://script.google.com/macros/s/AKfycbxJajbntVctGjXImc1hVhWimvOkXHcNCkuVFpszEbA8ad-B40Lj2Q8gdMMTBar4YLnsew/exec"
 };
 const LS_KEY = "proznanie_finmodel_v1";
@@ -5436,12 +5438,44 @@ function printReport(){
 }
 
 /* ===== МОТИВАЦИОННЫЙ ДАШБОРД НАБОРА (для менеджеров): цели 500 возврат + 350 новых ===== */
+/* «старый» = ходил в прошлом году (01.09.2025–31.05.2026) ≥3 проведённых занятий (из Альфы).
+   «новый» = все остальные (вписан руками впервые, без прошлогодней истории). */
+const OLD_VISIT_TH=3, LY_FROM="2025-09-01", LY_TO="2026-05-31";
+function _scheduleAlfaIds(){
+  const set=new Set();
+  (S.grid||[]).forEach(l=>kidsOf(l).forEach(k=>{ if(k.alfaId!=null&&k.alfaId!=="") set.add(String(k.alfaId)); }));
+  return [...set];
+}
+/* один раз выгрузить посещаемость прошлого года из Альфы (батчами) → S.oldRoster */
+async function pullOldRoster(){
+  const ids=_scheduleAlfaIds();
+  if(!ids.length){ toast("Нет детей со связью с Альфой (сначала «Контакты из Альфы»)"); return; }
+  const btn=document.getElementById("oldRosterBtn"); if(btn){ btn.disabled=true; }
+  const roster={}; const BATCH=15; let sampleLogged=false;
+  try{
+    const token=await _alfaIdToken();
+    for(let i=0;i<ids.length;i+=BATCH){
+      const chunk=ids.slice(i,i+BATCH);
+      if(btn) btn.textContent="Из Альфы… "+Math.min(i+BATCH,ids.length)+"/"+ids.length;
+      const r=await fetch(ALFA_PROXY+"?action=visitcounts",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+token},body:JSON.stringify({ids:chunk,from:LY_FROM,to:LY_TO})});
+      const j=await r.json().catch(()=>({ok:false,error:"ответ не JSON ("+r.status+")"}));
+      if(!r.ok||!j.ok) throw new Error(j.error||("ошибка "+r.status));
+      Object.assign(roster, j.counts||{});
+      if(!sampleLogged){ try{ console.log("🔄 visitcounts debug:", j.debug); }catch(e){} sampleLogged=true; }
+    }
+    S.oldRoster=roster; S.oldRosterAt=new Date().toISOString().slice(0,10);
+    persistLocal(); if(typeof fbSchedulePush==="function") fbSchedulePush(); renderGoals();
+    const oldN=Object.values(roster).filter(c=>c>=OLD_VISIT_TH).length;
+    toast("Готово. Старых (≥"+OLD_VISIT_TH+" посещ.): "+oldN+" из "+ids.length);
+  }catch(e){ toast("Не удалось: "+((e&&e.message)||e)); }
+  if(btn){ btn.disabled=false; btn.textContent=""; renderGoals(); }
+}
 function _goalsData(){
   const map={};
-  (S.grid||[]).forEach(l=>{ const nw=!!l.newIntake;
+  (S.grid||[]).forEach(l=>{
     kidsOf(l).forEach(k=>{ const key=_nameKey(k.n); if(!key) return;
-      const o=map[key]||(map[key]={isNew:false,isRet:false,may:false,reply:'',no:false});
-      if(nw) o.isNew=true; else o.isRet=true;
+      const o=map[key]||(map[key]={may:false,reply:'',no:false,alfaId:null});
+      if(o.alfaId==null && k.alfaId!=null && k.alfaId!=="") o.alfaId=k.alfaId;
       if(k.may) o.may=true; if(k.no) o.no=true;
       const rank=r=>r==='yes'?3:r==='no'?2:r==='maybe'?1:0;
       if(rank(k.vbReply)>rank(o.reply)) o.reply=k.vbReply;
@@ -5449,15 +5483,17 @@ function _goalsData(){
   });
   const arr=Object.values(map);
   const unplaced=(typeof _mayUnplacedByCourse==='function')?Object.values(_mayUnplacedByCourse()).reduce((a,b)=>a+b,0):0;
-  const ret=arr.filter(k=>k.isRet);              // прошлогодние (в невыделенных «новым набором» группах)
-  const nw=arr.filter(k=>k.isNew && !k.isRet);   // чисто новые (только в группах «новый набор»)
-  const retMay=ret.filter(k=>k.may && !k.no).length + unplaced;         // майские (оплатили продолжение)
-  const retYes=ret.filter(k=>!k.may && !k.no && k.reply==='yes').length; // подтвердили продолжение
-  const retWork=ret.filter(k=>!k.no && !k.may && k.reply!=='yes').length;// в работе (написали/молчат/думают)
-  const retNo=ret.filter(k=>k.no || k.reply==='no').length;             // отказ / не придёт
-  const newYes=nw.filter(k=>!k.no && k.reply==='yes').length;
-  const newTotal=nw.filter(k=>!k.no).length;
-  return {retMay,retYes,retSecured:retMay+retYes,retWork,retNo,retPool:ret.length,newTotal,newYes,newPool:nw.length,unplaced};
+  const roster=S.oldRoster||{}; const hasRoster=Object.keys(roster).length>0;
+  // старый = есть в реестре с ≥3 посещений; фолбэк (до выгрузки) — просто наличие связи с Альфой
+  const isOld=o=> hasRoster ? (o.alfaId!=null && (+roster[String(o.alfaId)]||0)>=OLD_VISIT_TH) : (o.alfaId!=null);
+  const oldAll=arr.filter(isOld), newAll=arr.filter(k=>!isOld(k));
+  const old=oldAll.filter(k=>!k.no), nw=newAll.filter(k=>!k.no);
+  const retMay=old.filter(k=>k.may).length + unplaced;                  // майские (оплатили продолжение)
+  const retYes=old.filter(k=>!k.may && k.reply==='yes').length;         // подтвердили продолжение
+  const retWork=old.filter(k=>!k.may && k.reply!=='yes').length;        // в работе
+  const retNo=oldAll.filter(k=>k.no || k.reply==='no').length;          // отказ / не придёт
+  const newTotal=nw.length, newYes=nw.filter(k=>k.reply==='yes').length;
+  return {retMay,retYes,retSecured:retMay+retYes,retWork,retNo,retPool:oldAll.length,newTotal,newYes,newPool:newAll.length,unplaced,hasRoster,rosterAt:S.oldRosterAt||""};
 }
 function _donut(pct,color){
   const size=156,r=size/2-13,c=2*Math.PI*r,off=c*(1-Math.max(0,Math.min(1,pct)));
@@ -5480,8 +5516,19 @@ function renderGoals(){
   const totalDone=retDone+newDone, totalGoal=gRet+gNew, totalPct=totalGoal>0?Math.round(totalDone/totalGoal*100):0;
   const RET="#3B7A57", NEW="var(--blue)";
   const goalInp=(which,val)=>_fbIsAdmin?`<input type="number" value="${val}" onchange="saveGoal('${which}',this.value)" style="width:64px">`:`<b>${val}</b>`;
+  // строка про источник классификации старых/новых
+  let h="";
+  if(_fbIsAdmin){
+    h+=`<div class="hd-actions" style="margin-bottom:12px;align-items:center;gap:10px">
+      <button id="oldRosterBtn" class="btn ghost sm" onclick="pullOldRoster()" title="Один раз пройтись по Альфе и посчитать посещения за прошлый год — кто ходил ≥${OLD_VISIT_TH} раз, тот «старый»"><span data-ic="history"></span>Определить старых из Альфы</button>
+      <span style="font-size:12px;color:var(--muted)">${g.hasRoster?('обновлено: '+(g.rosterAt||'—')+' · критерий: ≥'+OLD_VISIT_TH+' посещ. за 01.09.2025–31.05.2026'):'ещё не выгружено — счёт приблизительный'}</span>
+    </div>`;
+  }
+  if(!g.hasRoster){
+    h+=`<div class="callout" style="border-left-color:var(--blue);margin-bottom:12px;font-size:12.5px"><b>Классификация приблизительная.</b> Пока «старый» = у кого есть связь с Альфой. Для точного счёта по <b>≥${OLD_VISIT_TH} посещениям за прошлый год</b> нажмите «Определить старых из Альфы»${_fbIsAdmin?'':' (у администратора)'}.</div>`;
+  }
   // верхняя мотивационная строка
-  let h=`<div class="goaltop">
+  h+=`<div class="goaltop">
       <div class="goaltop-l"><div class="goaltop-lab">Собрано всего</div><div class="goaltop-num">${totalDone} <span>/ ${totalGoal}</span></div></div>
       <div class="goaltop-bar"><i style="width:${totalPct}%"></i></div>
       <div class="goaltop-pct">${totalPct}%</div>

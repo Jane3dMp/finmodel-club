@@ -272,6 +272,42 @@ switch ($action) {
         json_out(['ok' => true, 'created' => true, 'id' => $newId, 'branch' => $branch, 'payload' => $payload]);
         break;
 
+    // --- ПОСЕЩЕНИЯ ЗА ПРОШЛЫЙ ГОД по клиентам (для «старый/новый») ---
+    //     На вход список id (батч). Для каждого считаем ПРОВЕДЁННЫЕ уроки в окне, где ребёнок присутствовал.
+    case 'visitcounts':
+        @set_time_limit(120);
+        $ids  = is_array($in['ids'] ?? null) ? array_values(array_unique(array_filter(array_map('intval', $in['ids'])))) : [];
+        $from = (string)($in['from'] ?? '2025-09-01');
+        $to   = (string)($in['to']   ?? '2026-05-31');
+        $host = 'https://' . alfa_host() . '/v2api/' . alfa_branch();
+        $token = alfa_token();
+        $counts = []; $sampleKeys = null; $sampleStatus = null;
+        foreach ($ids as $cid) {
+            // status=3 = проведён (если фильтр не поддержан — перепроверим в коде)
+            $r = alfa_http('POST', "$host/lesson/index",
+                ['customer_id' => $cid, 'date_from' => $from, 'date_to' => $to, 'b_date' => $from, 'e_date' => $to, 'status' => 3, 'page' => 0, 'count' => 300],
+                $token, true, 7);
+            $items = isset($r['__err']) ? [] : ($r['items'] ?? []);
+            $n = 0;
+            foreach ($items as $ls) {
+                if (!is_array($ls)) continue;
+                if ($sampleKeys === null) { $sampleKeys = array_keys($ls); $sampleStatus = $ls['status'] ?? '—'; }
+                $d = $ls['date'] ?? ($ls['lesson_date'] ?? null);
+                $dd = $d ? substr((string)$d, 0, 10) : null;
+                if ($dd && ($dd < $from || $dd > $to)) continue;                 // в окне
+                if (isset($ls['status']) && (int)$ls['status'] !== 3) continue;  // только проведённые
+                $absent = (isset($ls['is_attend'])  && !$ls['is_attend'])        // явно отсутствовал — не считаем
+                       || (isset($ls['is_present']) && !$ls['is_present'])
+                       || (isset($ls['is_missed'])  && $ls['is_missed']);
+                if ($absent) continue;
+                $n++;
+            }
+            $counts[(string)$cid] = $n;
+        }
+        json_out(['ok' => true, 'from' => $from, 'to' => $to, 'counts' => $counts,
+                  'debug' => ['sampleKeys' => $sampleKeys, 'sampleStatus' => $sampleStatus, 'ids' => count($ids)]]);
+        break;
+
     // --- справочники для маппинга модель→Alfa (READ) ---
     case 'refs':
         $out = [
