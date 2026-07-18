@@ -5602,6 +5602,9 @@ function _gauge(val,max,color,label,sub){
 }
 let _goalsEco="";   // фильтр «Движения по группам» по бренду
 function setGoalsEco(v){ _goalsEco=v||""; renderGoals(); }
+let _goalsSort={col:"",dir:1};   // сортировка таблицы «Движение по группам»
+function goalsSort(col){ if(_goalsSort.col===col) _goalsSort.dir*=-1; else _goalsSort={col,dir:1}; renderGoals(); }
+function _goalTh(col,lab,align){ const a=_goalsSort.col===col?(_goalsSort.dir>0?" ▲":" ▼"):""; return `<th style="background:var(--graphite);color:#fff;padding:6px 8px;text-align:${align};position:sticky;top:0;cursor:pointer;user-select:none;white-space:nowrap" onclick="goalsSort('${col}')" title="Сортировать">${lab}${a}</th>`; }
 function renderGoals(){
   const box=document.getElementById("goalsBody"); if(!box) return;
   const {rows}=_ownerReport();
@@ -5635,13 +5638,26 @@ function renderGoals(){
   const dn=["","Пн","Вт","Ср","Чт","Пт","Сб","Вс"];
   const tName=t=>(typeof shortName==="function"?shortName(t):t)||"";
   const eb=(v,lab)=>`<button class="${_goalsEco===v?'on':''}" onclick="setGoalsEco('${v}')">${lab}</button>`;
-  const frows=_goalsEco?rows.filter(r=>_courseEcoOf(r.course)===_goalsEco):rows;
+  let frows=_goalsEco?rows.filter(r=>_courseEcoOf(r.course)===_goalsEco):rows;
+  if(_goalsSort.col){
+    const num={total:1,yes:1,no:1,maybe:1,none:1,daytime:1,fill:1};
+    const val={ name:r=>r.name, course:r=>r.course, teacher:r=>tName(r.teacher),
+      daytime:r=>(r.day||0)*10000+(()=>{const p=String(r.time||"").split(":");return (+p[0]||0)*60+(+p[1]||0);})(),
+      total:r=>r.total, yes:r=>r.yes, no:r=>r.no||0, maybe:r=>r.maybe||0, none:r=>r.none||0,
+      fill:r=>r.cap>0?r.fill:-1 };
+    const gv=val[_goalsSort.col]||val.name;
+    frows=frows.slice().sort((a,b)=>{
+      let r=num[_goalsSort.col]?(gv(a)-gv(b)):String(gv(a)).localeCompare(String(gv(b)),"ru",{numeric:true});
+      if(r===0) r=(a.day-b.day)||String(a.time).localeCompare(String(b.time))||a.name.localeCompare(b.name,"ru");
+      return r*_goalsSort.dir;
+    });
+  }
   h+=`<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:6px 0 10px">
       <h3 style="font-size:15px;margin:0;display:flex;align-items:center;gap:8px"><span data-ic="report"></span>Движение по группам</h3>
       <div class="ecofilt" style="margin-left:auto" title="Показать группы только выбранного направления">${eb('','Все')}${eb('Прознание','Прознание')}${eb('CODDY','CODDY')}${eb('Детали','Детали')}</div>
     </div>
     <div class="tscroll"><table style="width:100%;border-collapse:collapse;font-size:12px">
-    <thead><tr>${['Группа','Курс','Педагог','День·время','Записано','🟢','🔴','🟡','Молчат','Заполн.'].map((t,i)=>`<th style="background:var(--graphite);color:#fff;padding:6px 8px;text-align:${i<4?'left':'center'};position:sticky;top:0">${t}</th>`).join("")}</tr></thead><tbody>`;
+    <thead><tr>${_goalTh('name','Группа','left')}${_goalTh('course','Курс','left')}${_goalTh('teacher','Педагог','left')}${_goalTh('daytime','День·время','left')}${_goalTh('total','Записано','center')}${_goalTh('yes','🟢','center')}${_goalTh('no','🔴','center')}${_goalTh('maybe','🟡','center')}${_goalTh('none','Молчат','center')}${_goalTh('fill','Заполн.','center')}</tr></thead><tbody>`;
   const td=(v,al)=>`<td style="padding:5px 8px;border-bottom:1px solid var(--line);text-align:${al||'left'}">${v}</td>`;
   if(!frows.length) h+=`<tr><td colspan="10" style="text-align:center;color:var(--muted);padding:14px">Нет групп выбранного направления</td></tr>`;
   frows.forEach(r=>{
