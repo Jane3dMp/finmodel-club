@@ -36,6 +36,14 @@ header .wrap{padding:0 16px}
 .btn.ghost:hover{background:var(--sand-l);border-color:#CFCBC2}
 .btn.sm{padding:6px 11px;font-size:13px}
 .btn.gray{background:#6b6256}.btn.gray:hover{background:#544c42}
+/* линейные иконки (наследуют цвет текста) */
+.ic{width:1.05em;height:1.05em;flex:none;stroke:currentColor;stroke-width:1.7;fill:none;stroke-linecap:round;stroke-linejoin:round;vertical-align:-.16em}
+[data-ic]{display:inline-flex;align-items:center;vertical-align:-.16em}
+[data-ic]:not(:empty){margin-right:6px}
+[data-ic] .ic{vertical-align:0}
+.btn [data-ic]:not(:empty){margin-right:5px}
+/* иконка-только кнопки (без текста) — иконка чуть крупнее, без отступа */
+.btn>.ic:only-child{width:1.15em;height:1.15em;vertical-align:-.2em}
 
 nav.tabs{display:flex;background:var(--sand);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:30}
 nav.tabs .wrap{display:flex;gap:1px 2px;flex-wrap:wrap;width:100%;max-width:96vw;padding:0 20px}
@@ -434,12 +442,12 @@ details.client .cli-badges{margin-left:auto;font-size:12px;color:var(--muted)}
    <span id="syncTxt">Локальный режим</span>
    <button class="btn ghost sm" id="undoBtn" onclick="undo()" title="Отменить последнее изменение" disabled>↩ Отменить</button>
    <div class="more-wrap">
-    <button class="btn ghost sm more-toggle" onclick="toggleMore(this)" title="Меню">☰ Меню<span id="menuBadge"></span></button>
+    <button class="btn ghost sm more-toggle" onclick="toggleMore(this)" title="Меню"><i data-ic="menu"></i>Меню<span id="menuBadge"></span></button>
     <div class="more-menu right">
      <span id="fbWhoami" class="menu-who"></span>
-     <button class="btn ghost sm" id="fbAdminBtn" onclick="openAdminPanel()" title="Заявки на доступ и вкладки пользователей" style="display:none">🔑 Доступы<span id="fbAdminBadge"></span></button>
-     <button class="btn ghost sm" id="histBtn" onclick="openHistory()" title="История версий — снимки на случай потери данных" style="display:none">🕘 История</button>
-     <button class="btn ghost sm" id="logBtn" onclick="openLog()" title="Журнал действий — кто и что менял" style="display:none">📜 Журнал</button>
+     <button class="btn ghost sm" id="fbAdminBtn" onclick="openAdminPanel()" title="Заявки на доступ и вкладки пользователей" style="display:none"><i data-ic="access"></i>Доступы<span id="fbAdminBadge"></span></button>
+     <button class="btn ghost sm" id="histBtn" onclick="openHistory()" title="История версий — снимки на случай потери данных" style="display:none"><i data-ic="history"></i>История</button>
+     <button class="btn ghost sm" id="logBtn" onclick="openLog()" title="Журнал действий — кто и что менял" style="display:none"><i data-ic="journal"></i>Журнал</button>
      <div class="menu-sep"></div>
      <button class="btn ghost sm" onclick="openScnMenu()" title="Отдельные модели: годы и сценарии «что если»">⋮ Версии модели</button>
      <button class="btn ghost sm" onclick="openSync()" title="Резервная Google-таблица">Хранилище</button>
@@ -457,15 +465,15 @@ details.client .cli-badges{margin-left:auto;font-size:12px;color:var(--muted)}
   <button class="nm" data-m="fin" onclick="setNavMode('fin')">Финмодель</button>
  </div>
  <button class="tab active" data-t="dash">Дашборд</button>
- <button class="tab" data-t="report">📊 Отчёт по набору</button>
+ <button class="tab" data-t="report"><i data-ic="report"></i>Отчёт по набору</button>
  <button class="tab" data-t="courses">Курсы и маржа</button>
- <button class="tab" data-t="real">📉 Реальный оборот</button>
+ <button class="tab" data-t="real"><i data-ic="real"></i>Реальный оборот</button>
  <button class="tab" data-t="planner">Планировщик загрузки</button>
  <button class="tab" data-t="grid">Расписание (сетка)</button>
  <button class="tab" data-t="groups">Группы</button>
  <button class="tab" data-t="clients">Клиенты</button>
- <button class="tab" data-t="price">💲 Прайс</button>
- <button class="tab" data-t="may">Майский 💰</button>
+ <button class="tab" data-t="price"><i data-ic="price"></i>Прайс</button>
+ <button class="tab" data-t="may"><i data-ic="may"></i>Майский</button>
  <button class="tab" data-t="staff">Педсостав и ФОТ</button>
  <button class="tab" data-t="fixed">Постоянные расходы</button>
  <button class="tab" data-t="tax">Налоги РБ и ФОТ</button>
@@ -506,7 +514,7 @@ details.client .cli-badges{margin-left:auto;font-size:12px;color:var(--muted)}
 <section class="panel" id="report">
  <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px">
   <h2 class="sec" style="margin:0">📊 Отчёт по набору</h2>
-  <button class="btn ghost sm" onclick="printReport()" style="margin-left:auto">🖨 Печать</button>
+  <button class="btn ghost sm" onclick="printReport()" style="margin-left:auto"><i data-ic="print"></i>Печать</button>
  </div>
  <div class="sec-desc">Воронка подтверждений и прогноз оборота по группам — по данным Viber-рассылки и ответов родителей. Только для админа.</div>
  <div id="reportBody"></div>
@@ -520,14 +528,14 @@ details.client .cli-badges{margin-left:auto;font-size:12px;color:var(--muted)}
  <div class="kpigrid" id="coursesKpi"></div>
  <div class="hd-actions">
   <button class="btn sm" onclick="addCourse()">+ Курс</button>
-  <button class="btn sm" onclick="openCoursesPrint()" title="Распечатать таблицу курсов с выбором столбцов">🖨 Печать</button>
+  <button class="btn sm" onclick="openCoursesPrint()" title="Распечатать таблицу курсов с выбором столбцов"><i data-ic="print"></i>Печать</button>
   <div class="more-wrap">
    <button class="btn ghost sm more-toggle" onclick="toggleMore(this)">⋯ Ещё</button>
    <div class="more-menu">
     <button class="btn ghost sm" onclick="sortCourses('name')">⇅ По алфавиту</button>
     <button class="btn ghost sm" onclick="sortCourses('eco')">⇅ По экосистеме</button>
     <button class="btn ghost sm" onclick="fillTarget()">Заполнить целевой наполняемостью</button>
-    <button class="btn ghost sm" onclick="checkCourseNames()" title="Сверить названия курсов в таблице и в расписании">🔍 Проверить названия</button>
+    <button class="btn ghost sm" onclick="checkCourseNames()" title="Сверить названия курсов в таблице и в расписании"><i data-ic="search"></i>Проверить названия</button>
     <button class="btn ghost sm" onclick="unlockAllCourses()" title="Снять закрепление со всех строк курсов, чтобы их можно было редактировать">🔓 Разблокировать все</button>
     <div class="menu-sep"></div>
     <button class="btn gray sm" onclick="exportJSON()">Экспорт JSON</button>
@@ -554,7 +562,7 @@ details.client .cli-badges{margin-left:auto;font-size:12px;color:var(--muted)}
 <section class="panel" id="price">
  <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px">
   <h2 class="sec" style="margin:0">💲 Прайс курсов</h2>
-  <button class="btn ghost sm" onclick="printPrice()" style="margin-left:auto">🖨 Печать</button>
+  <button class="btn ghost sm" onclick="printPrice()" style="margin-left:auto"><i data-ic="print"></i>Печать</button>
  </div>
  <div class="sec-desc">Актуальные цены для менеджеров — только просмотр. Цены редактируются на вкладке «Курсы и маржа» (в режиме «Финмодель»).</div>
  <div class="hd-actions" style="gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px">
@@ -593,7 +601,7 @@ details.client .cli-badges{margin-left:auto;font-size:12px;color:var(--muted)}
  <div class="sec-desc">Главный ввод. Расставляете занятия по дням, кабинетам и времени — из этого считаются группы для плана и фонд ЗП педагогов (по ставке для числа детей). Стартовая сетка загружена из вашей выгрузки Альфы (06–12.04).</div>
  <div class="kpigrid" id="gridSummary"></div>
  <div class="hd-actions">
-  <button class="btn sm" onclick="printSchedule()" title="Распечатать расписание для менеджеров">🖨 Печать</button>
+  <button class="btn sm" onclick="printSchedule()" title="Распечатать расписание для менеджеров"><i data-ic="print"></i>Печать</button>
   <div class="more-wrap">
    <button class="btn ghost sm more-toggle" onclick="toggleMore(this)">⋯ Ещё</button>
    <div class="more-menu">
@@ -602,8 +610,8 @@ details.client .cli-badges{margin-left:auto;font-size:12px;color:var(--muted)}
     <button class="btn ghost sm" onclick="removeDuplicates()" title="Удалить занятия-дубли, наложенные друг на друга">🧹 Убрать дубли</button>
     <button class="btn ghost sm" onclick="syncAllGroups()" title="Свести составы: у групп, что идут несколько раз в неделю, состав детей станет одинаковым во всех занятиях">🔗 Свести составы групп</button>
     <div class="menu-sep"></div>
-    <button class="btn ghost sm" onclick="exportKidsByDay()" title="Выгрузить Excel: дети по дням со статусами">📥 Дети по дням (Excel)</button>
-    <button class="btn ghost sm" id="alfaSyncBtn" style="display:none" onclick="openAlfaSync()" title="Подтянуть телефоны родителей из AlfaCRM и сопоставить с детьми в модели">📞 Контакты из Альфы</button>
+    <button class="btn ghost sm" onclick="exportKidsByDay()" title="Выгрузить Excel: дети по дням со статусами"><i data-ic="download"></i>Дети по дням (Excel)</button>
+    <button class="btn ghost sm" id="alfaSyncBtn" style="display:none" onclick="openAlfaSync()" title="Подтянуть телефоны родителей из AlfaCRM и сопоставить с детьми в модели"><i data-ic="phone"></i>Контакты из Альфы</button>
    </div>
   </div>
  </div>
@@ -952,7 +960,7 @@ details.client .cli-badges{margin-left:auto;font-size:12px;color:var(--muted)}
    <input type="checkbox" id="prnTotals" style="width:auto;margin:0" checked> Печатать строку ИТОГО
   </label>
   <div class="hd-actions" style="margin-top:14px">
-   <button class="btn sm" onclick="doPrintCourses()">🖨 Печать</button>
+   <button class="btn sm" onclick="doPrintCourses()"><i data-ic="print"></i>Печать</button>
    <button class="btn gray sm" onclick="closeCoursesPrint()">Отмена</button>
   </div>
  </div>
@@ -2254,6 +2262,29 @@ function renderCourses(){
   t.innerHTML=h;
 }
 function esc(s){return String(s).replace(/"/g,"&quot;");}
+/* ===== ПАК ЛИНЕЙНЫХ ИКОНОК (Lucide-стиль, наследуют цвет текста) ===== */
+const ICONS={
+  report:'<path d="M4 20V11"/><path d="M10 20V5"/><path d="M16 20v-6"/><path d="M3 20h18"/>',
+  real:'<polyline points="3 7 10 14 14 10 21 17"/><polyline points="16 17 21 17 21 12"/>',
+  price:'<path d="M20.5 13.3l-7.2 7.2a1.5 1.5 0 0 1-2.1 0l-7.9-7.9V4h8.6l8.6 8.6a1.5 1.5 0 0 1 0 .7z"/><circle cx="7.5" cy="7.5" r="1.3"/>',
+  may:'<path d="M12 21v-7"/><path d="M12 14c-3.2 0-5.5-2.2-5.5-5.4 3.2 0 5.5 2.2 5.5 5.4z"/><path d="M12 14c3.2 0 5.5-2.2 5.5-5.4-3.2 0-5.5 2.2-5.5 5.4z"/>',
+  menu:'<path d="M4 7h16"/><path d="M4 12h16"/><path d="M4 17h16"/>',
+  access:'<circle cx="8" cy="14" r="4"/><path d="M10.8 11.2L20 2"/><path d="M16 6l3 3"/><path d="M18.5 3.5l2 2"/>',
+  history:'<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>',
+  journal:'<circle cx="5" cy="7" r="1" fill="currentColor" stroke="none"/><circle cx="5" cy="12" r="1" fill="currentColor" stroke="none"/><circle cx="5" cy="17" r="1" fill="currentColor" stroke="none"/><path d="M9 7h11"/><path d="M9 12h11"/><path d="M9 17h11"/>',
+  print:'<path d="M6 9V4h12v5"/><rect x="4" y="9" width="16" height="7" rx="1.5"/><rect x="7" y="15" width="10" height="5"/>',
+  send:'<path d="M21 4L3 11l7 3 3 7z"/><path d="M21 4l-11 10"/>',
+  user:'<circle cx="12" cy="8" r="3.6"/><path d="M5 20a7 7 0 0 1 14 0"/>',
+  idcard:'<rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="8.5" cy="11" r="2"/><path d="M5.5 16.2a3.2 3.2 0 0 1 6 0"/><path d="M14.5 10h4"/><path d="M14.5 13h4"/>',
+  check:'<path d="M5 13l4 4L19 7"/>',
+  search:'<circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.2-4.2"/>',
+  download:'<path d="M12 3v11"/><path d="M8 10l4 4 4-4"/><path d="M4 20h16"/>',
+  phone:'<path d="M6 3l3 5-2 2a12 12 0 0 0 5 5l2-2 5 3-1.5 3A16 16 0 0 1 3 4.5z"/>',
+  pen:'<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13.5 6.5l4 4"/>',
+  plug:'<path d="M9 7V3"/><path d="M15 7V3"/><path d="M7 7h10v3a5 5 0 0 1-10 0z"/><path d="M12 15v6"/>'
+};
+function ic(name){ const p=ICONS[name]; return p?('<svg class="ic" viewBox="0 0 24 24" aria-hidden="true">'+p+'</svg>'):''; }
+function _paintIcons(root){ (root||document).querySelectorAll('[data-ic]:not([data-ic-done])').forEach(function(el){ const n=el.getAttribute('data-ic'); if(ICONS[n]){ el.innerHTML=ic(n); el.setAttribute('data-ic-done','1'); } }); }
 
 /* ===== ПЕЧАТЬ ТАБЛИЦЫ КУРСОВ (выбор столбцов) ===== */
 const _ECO_ORDER={"Прознание":0,"CODDY":1,"Детали":2};
@@ -3526,7 +3557,7 @@ function editLes(idx,focusKi){
       <button type="button" class="btn ghost sm" onclick="kidAdd()">+ Ребёнок</button>
       <button type="button" class="btn ghost sm" onclick="kidPasteList()">📋 Вставить список</button>
       <button type="button" class="btn ghost sm" id="kidsPullAgesBtn" onclick="kidsPullAges()" title="Подтянуть из Альфы возраст, телефон и связь сразу ВСЕМ детям этого занятия (один заход)" style="display:none">🎂 Возраст всем</button>
-      <button type="button" class="btn ghost sm" onclick="editViberTpl()" title="Текст сообщения, который копируется в Viber">✍️ Шаблон Viber</button>
+      <button type="button" class="btn ghost sm" onclick="editViberTpl()" title="Текст сообщения, который копируется в Viber"><i data-ic="pen"></i>Шаблон Viber</button>
       <span style="font-size:11px;color:var(--muted);align-self:center">Комментарии в основную сетку не выводятся</span>
     </div>
 
@@ -3675,7 +3706,7 @@ function renderKidsEditor(){
       <td class="k-name"><div style="display:flex;align-items:center;gap:5px"><input type="text" class="k-in-name" style="flex:1;min-width:0;width:auto" value="${esc(k.n)}" placeholder="Фамилия Имя" oninput="refreshLesWage()">${k.dob?`<span style="font-size:11px;color:var(--blue);white-space:nowrap" title="Возраст из Альфы (ДР ${esc(String(k.dob).slice(0,10))})">${esc(_ageStr(k.dob))}</span>`:''}${_fbIsAdmin?`<button type="button" class="btn ghost sm" style="padding:0 5px;font-size:11px" title="Подтянуть возраст и связь этого ребёнка из Альфы (по ФИО)" onclick="kidAlfaUpdate(${i})">⟳</button>`:''}</div></td>
       ${KID_FLAGS.map(f=>`<td><input type="checkbox" class="k-in-${f.k}" ${k[f.k]?"checked":""} title="${f.lab}" onchange="kidFlagChanged()"></td>`).join("")}
       <td><input type="text" class="k-in-c" value="${esc(k.c||"")}" placeholder="—"></td>
-      <td><div style="display:inline-flex;gap:3px;align-items:center;white-space:nowrap"><button type="button" class="btn ghost sm" style="padding:1px 6px${k.vbSent?';background:#e6f4ea;border-color:#66bb6a':''}" ${k.phone?"":"disabled"} title="${k.phone?(k.vbSent?('Отправлено'+(k.vbSentAt?' '+_vbDate(k.vbSentAt):'')+' · клик — отправить снова, правый клик — снять отметку'):('Viber → '+esc(k.phone))):'Нет телефона — сначала «📞 Контакты из Альфы»'}" onclick="kidViber(${i})" oncontextmenu="event.preventDefault();kidViberReset(${i});return false">${k.vbSent?'✅':'📨'}</button>${k.alfaId?`<button type="button" class="btn ghost sm" style="padding:1px 5px" title="История ребёнка в Альфе — куда ходил, баланс" onclick="kidHist(${i})">👤</button>`:''}${_fbIsAdmin?(function(){const ez=kidEvzz(k);return `<button type="button" class="btn ghost sm" style="padding:1px 5px${ez?';background:#eef3ee;border-color:#66bb6a':''}" title="Карточка ребёнка — ЭВ, телефон, активные/архивные абонементы из Альфы${ez?(' · ЭВ 26/27: '+esc(ez)):''}" onclick="kidCard(${i})">🪪</button>`;})():''}</div></td>
+      <td><div style="display:inline-flex;gap:3px;align-items:center;white-space:nowrap"><button type="button" class="btn ghost sm" style="padding:1px 6px${k.vbSent?';background:#e6f4ea;border-color:#66bb6a':''}" ${k.phone?"":"disabled"} title="${k.phone?(k.vbSent?('Отправлено'+(k.vbSentAt?' '+_vbDate(k.vbSentAt):'')+' · клик — отправить снова, правый клик — снять отметку'):('Viber → '+esc(k.phone))):'Нет телефона — сначала «Контакты из Альфы»'}" onclick="kidViber(${i})" oncontextmenu="event.preventDefault();kidViberReset(${i});return false">${k.vbSent?ic('check'):ic('send')}</button>${k.alfaId?`<button type="button" class="btn ghost sm" style="padding:1px 5px" title="История ребёнка в Альфе — куда ходил, баланс" onclick="kidHist(${i})">${ic('user')}</button>`:''}${_fbIsAdmin?(function(){const ez=kidEvzz(k);return `<button type="button" class="btn ghost sm" style="padding:1px 5px${ez?';background:#eef3ee;border-color:#66bb6a':''}" title="Карточка ребёнка — ЭВ, телефон, активные/архивные абонементы из Альфы${ez?(' · ЭВ 26/27: '+esc(ez)):''}" onclick="kidCard(${i})">${ic('idcard')}</button>`;})():''}</div></td>
       <td><select class="k-in-reply cell" style="font-size:11px;padding:3px 2px;min-width:96px" onchange="kidFlagChanged()">${VB_REPLY.map(r=>`<option value="${r[0]}" ${k.vbReply===r[0]?'selected':''}>${r[1]}</option>`).join("")}</select></td>
       <td style="text-align:center"><details class="kid-move"><summary title="Перевести в другую группу">↔</summary><div><select class="cell kmv-sel">${moveOpts}</select><button type="button" class="btn sm" onclick="kidMoveToGroup(${i}, this.previousElementSibling.value)">Перевести</button></div></details></td>
       <td><span class="k-del" title="Удалить" onclick="kidDel(${i})">×</span></td>
@@ -4554,7 +4585,7 @@ function openAlfaSync(){
       только читаем.
     </p>
     <div class="hd-actions" style="margin:0 0 8px">
-      <button type="button" class="btn ghost sm" onclick="alfaCheck()">🔌 Проверить связь с Альфой</button>
+      <button type="button" class="btn ghost sm" onclick="alfaCheck()"><i data-ic="plug"></i>Проверить связь с Альфой</button>
     </div>
     <div id="alfaCheckOut" style="font-size:12px"></div>`;
   const b=document.getElementById("alfaBtn");
@@ -4741,7 +4772,7 @@ const VIBER_TPL_MAY_DEFAULT=[
 "",
 "Ждём вас на занятиях — до скорой встречи! 🚀"
 ].join("\n");
-/* {старт} — дата начала занятий (можно поменять кнопкой «✍️ Шаблон Viber») */
+/* {старт} — дата начала занятий (можно поменять кнопкой «Шаблон Viber») */
 const VIBER_START_DEFAULT="2 сентября 2026";
 
 function _viberNumber(p){
@@ -4894,7 +4925,7 @@ async function kidViber(i){
   const les=S.grid[idx]; const k=_editKids[i];
   if(!les||!k) return;
   const num=_viberNumber(k.phone);
-  if(!num){ toast("У ребёнка нет телефона — сначала «📞 Контакты из Альфы»"); return; }
+  if(!num){ toast("У ребёнка нет телефона — сначала «Контакты из Альфы»"); return; }
   const msg=_buildViberMsg(k,les);
   const copied=await _copyText(msg);
   _openViber(num);
@@ -5248,7 +5279,7 @@ function renderVbTodo(){
     else{
       h+=toSend.map(it=>_vbItem(it,true)).join("");
       if(noPhone.length){
-        h+=`<div class="vt-note">Без телефона (${noPhone.length}) — сначала «📞 Контакты из Альфы»:</div>`;
+        h+=`<div class="vt-note">Без телефона (${noPhone.length}) — сначала «Контакты из Альфы»:</div>`;
         h+=noPhone.map(it=>_vbItem(it,false)).join("");
       }
     }
@@ -5806,7 +5837,7 @@ async function mayFromAlfa(){
     const capNote=(j.debug&&j.debug.capped)?" ⚠ достигнут предел сканирования — возможно, не все":"";
     toast("Подтянуто из Альфы: "+list.length+" строк · детей: "+subs.length+capNote);
   }catch(e){
-    alert("Не удалось подтянуть майские: "+((e&&e.message)||e)+"\n\nЕсли это про доступ/токен — проверьте вход в модель и «🔌 Проверить связь» в «📞 Контакты из Альфы».");
+    alert("Не удалось подтянуть майские: "+((e&&e.message)||e)+"\n\nЕсли это про доступ/токен — проверьте вход в модель и «🔌 Проверить связь» в «Контакты из Альфы».");
   }
 }
 /* Разведка: где в Альфе лежат абонементы. Дампит сырые ответы по одному ребёнку. */
@@ -6335,6 +6366,7 @@ document.querySelectorAll(".tab").forEach(tb=>tb.onclick=()=>{
 });
 /* стартовый режим навигации («Работа» по умолчанию, запоминается в браузере) */
 _updateTabVisibility();
+_paintIcons();   // проставить линейные иконки в статичных вкладках/кнопках (data-ic)
 
 /* старт */
 if(S.gasUrl){
