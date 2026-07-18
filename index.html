@@ -8,7 +8,8 @@
 :root{
   /* спокойная нейтральная палитра: белый/серый/чёрный + приглушённая охра (акцент) + голубой CODDY.
      Для дневной работы по 8 часов — мягкий контраст, без тёплой «детской» терракоты. */
-  --terra:#B0800F; --terra-d:#916A0A; --coal:#20201D; --sand:#EAE9E5;
+  --terra:#6B7078; --terra-d:#565B62; --coal:#20201D; --sand:#EAE9E5;
+  --graphite:#2C2F35;   /* тёмно-графитовый — тёмные подложки/фоны (шапка, заголовки, кнопки, таблетки); текст остаётся --coal */
   --sand-l:#F4F3F0; --cream:#FBFAF8; --green:#3B7A57; --red:#B0493D;
   --blue:#1F5BC0; --line:#E4E2DD; --muted:#847F76;   /* --blue = фирменный CODDY-синий (кобальт #0052CC), чуть приглушён для 8-часового комфорта */
   --acc-soft:#FBF2CE; --acc-ink:#6B5411;   /* спокойный пастельно-жёлтый акцент (активная вкладка) вместо «горчичного» */
@@ -18,17 +19,17 @@ body{font-family:'Segoe UI',system-ui,-apple-system,sans-serif;background:var(--
   color:var(--coal);line-height:1.5;font-size:15px}
 .wrap{max-width:96vw;margin:0 auto;padding:0 20px 80px}
 
-header{background:var(--coal);color:var(--sand);padding:12px 0;margin-bottom:0}
+header{background:var(--graphite);color:var(--sand);padding:12px 0;margin-bottom:0}
 header .wrap{padding:0 16px}
 .htop{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px}
 .brand{font-size:20px;font-weight:700;letter-spacing:.3px}
-.brand span{color:var(--terra)}
+.brand span{color:var(--sand)}
 .sub{font-size:12px;color:#B7B3AB;margin-top:2px}
 .syncbox{display:flex;align-items:center;gap:8px;font-size:12px}
 .dot{width:9px;height:9px;border-radius:50%;background:#888}
 .dot.ok{background:var(--green)} .dot.err{background:var(--red)} .dot.local{background:var(--terra)} .dot.warn{background:#e6a417;animation:dotpulse 1s infinite}
 @keyframes dotpulse{50%{opacity:.35}}
-.btn{background:var(--coal);color:#fff;border:none;padding:8px 14px;border-radius:7px;
+.btn{background:var(--graphite);color:#fff;border:none;padding:8px 14px;border-radius:7px;
   font-size:13px;font-weight:600;cursor:pointer;transition:.15s}
 .btn:hover{background:#39352D}
 .btn.ghost{background:transparent;border:1px solid var(--line);color:var(--coal)}
@@ -56,7 +57,7 @@ h2.sec{font-size:19px;margin-bottom:4px;color:var(--coal)}
 .card h3::before{content:'';width:4px;height:16px;background:#D8D3C8;border-radius:2px}
 
 table{width:100%;border-collapse:collapse;font-size:14px}
-th{background:var(--coal);color:var(--sand);padding:9px 10px;text-align:left;font-weight:600;font-size:13px}
+th{background:var(--graphite);color:var(--sand);padding:9px 10px;text-align:left;font-weight:600;font-size:13px}
 td{padding:6px 9px;border-bottom:1px solid var(--line)}
 tr:nth-child(even) td{background:var(--sand-l)}
 tbody tr:hover td{background:#EEEDEA}
@@ -78,7 +79,7 @@ select.cell{border:1px solid var(--line);border-radius:5px;padding:4px;font-size
 .pos{color:var(--green);font-weight:600}.neg{color:var(--red);font-weight:600}
 
 .kpigrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px;margin-bottom:18px}
-.kpi{background:#fff;border:1px solid var(--line);border-left:4px solid var(--coal);
+.kpi{background:#fff;border:1px solid var(--line);border-left:4px solid var(--graphite);
   border-radius:9px;padding:13px 15px;position:relative}
 .kpi .k-eye{position:absolute;top:8px;right:9px;cursor:pointer;font-size:13px;opacity:.35;
   user-select:none;line-height:1;transition:opacity .15s}
@@ -101,7 +102,7 @@ select.cell{border:1px solid var(--line);border-radius:5px;padding:4px;font-size
 .callout{background:var(--sand-l);border-left:4px solid var(--terra);padding:11px 14px;border-radius:7px;
   font-size:13px;margin:12px 0}
 .callout b{color:var(--terra-d)}
-.totrow td{background:var(--coal)!important;color:var(--sand);font-weight:700;font-size:13px}
+.totrow td{background:var(--graphite)!important;color:var(--sand);font-weight:700;font-size:13px}
 .barwrap{background:var(--sand);border-radius:6px;height:22px;overflow:hidden;position:relative;min-width:90px}
 .bar{height:100%;background:var(--terra);border-radius:6px 0 0 6px}
 .barlbl{position:absolute;left:8px;top:0;line-height:22px;font-size:11px;font-weight:600;color:var(--coal)}
@@ -111,11 +112,11 @@ select.cell{border:1px solid var(--line);border-radius:5px;padding:4px;font-size
 .hd-grp{display:inline-flex;gap:6px;flex-wrap:wrap;align-items:center}
 .scn{display:flex;gap:8px;margin-bottom:14px}
 .scn button{flex:1;padding:9px;border:1px solid var(--line);background:#fff;border-radius:8px;cursor:pointer;font-weight:600;font-size:13px}
-.scn button.on{background:var(--terra);color:#fff;border-color:var(--terra)}
+.scn button.on{background:var(--graphite);color:#fff;border-color:var(--terra)}
 .slider-row{display:grid;grid-template-columns:160px 1fr 60px;gap:10px;align-items:center;margin:9px 0}
 .slider-row label{font-size:13px}
 input[type=range]{width:100%;accent-color:var(--terra)}
-.toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--coal);color:#fff;
+.toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--graphite);color:#fff;
   padding:11px 20px;border-radius:8px;font-size:13px;opacity:0;transition:.3s;z-index:99;pointer-events:none}
 .toast.show{opacity:1}
 small.note{font-size:11px;color:var(--muted)}
@@ -132,7 +133,7 @@ small.note{font-size:11px;color:var(--muted)}
 .ecofilt{display:inline-flex;gap:3px;background:#fff;border:1px solid var(--line);border-radius:11px;padding:4px}
 .ecofilt button{border:0;background:transparent;color:var(--muted);font:inherit;font-size:13px;font-weight:600;padding:6px 14px;border-radius:8px;cursor:pointer}
 .ecofilt button:hover{background:var(--sand-l)}
-.ecofilt button.on{background:var(--coal);color:#fff}
+.ecofilt button.on{background:var(--graphite);color:#fff}
 .gridlegend{display:flex;gap:14px;font-size:12px;color:var(--muted);margin-left:auto;flex-wrap:wrap;align-items:center}
 .gridlegend span{display:inline-flex;align-items:center;gap:5px}
 .gridlegend i{width:9px;height:9px;border-radius:3px;display:inline-block}
@@ -152,8 +153,8 @@ details.cwarn.ok>summary::after{content:''}
 details.cwarn>summary::after{content:'▸';margin-left:auto;color:var(--muted);font-size:11px;transition:transform .15s}
 details.cwarn[open]>summary::after{transform:rotate(90deg)}
 details.cwarn .cwarn-body{padding:0 14px 12px}
-.dayb.on{background:var(--coal);color:#fff;border-color:var(--coal)}
-.dayb .badge{background:var(--coal);color:#fff;border-radius:9px;padding:0 6px;font-size:10px;margin-left:4px}
+.dayb.on{background:var(--graphite);color:#fff;border-color:var(--graphite)}
+.dayb .badge{background:var(--graphite);color:#fff;border-radius:9px;padding:0 6px;font-size:10px;margin-left:4px}
 .dayb.on .badge{background:rgba(255,255,255,.3)}
 #gridTable{table-layout:fixed}
 #gridTable th{font-size:11px;text-align:center}
@@ -229,7 +230,7 @@ details.cwarn .cwarn-body{padding:0 14px 12px}
 .vbtodo{margin:8px 0 2px}
 .vbtodo-head{display:flex;align-items:center;gap:8px;width:100%;box-sizing:border-box;padding:9px 12px;border:1px solid var(--line);border-left:3px solid var(--terra);border-radius:8px;background:#fff;cursor:pointer;font-size:13px;font-weight:600;color:var(--coal);text-align:left}
 .vbtodo-head:hover{background:#fbf6f2}
-.vbtodo-head .cnt{background:var(--terra);color:#fff;border-radius:10px;padding:1px 9px;font-size:12px;font-weight:700}
+.vbtodo-head .cnt{background:var(--graphite);color:#fff;border-radius:10px;padding:1px 9px;font-size:12px;font-weight:700}
 .vbtodo-head .cnt.zero{background:#66bb6a}
 .vbtodo-head .car{margin-left:auto;color:var(--muted);font-size:12px}
 .vbtodo-body{border:1px solid var(--line);border-top:none;border-radius:0 0 8px 8px;padding:6px 8px;max-height:44vh;overflow:auto}
@@ -257,7 +258,7 @@ details.cwarn .cwarn-body{padding:0 14px 12px}
 .vbtodo-body .vt-rep:hover{filter:none;opacity:1}
 .vbtodo-body .vt-rep.on{filter:none;opacity:1;border-color:#66bb6a;background:#eef7f0}
 /* подсветка найденного занятия в сетке */
-.les.les-hl{outline:3px solid var(--terra);outline-offset:1px;box-shadow:0 0 0 3px rgba(181,83,42,.35),0 0 12px 3px rgba(181,83,42,.45);position:relative;z-index:3}
+.les.les-hl{outline:2px solid var(--graphite);outline-offset:1px;box-shadow:0 0 0 3px rgba(44,47,53,.18),0 0 12px 3px rgba(44,47,53,.14);position:relative;z-index:3}
 /* название/номер группы на плитке занятия */
 .les .les-grp{display:block;font-size:10px;font-weight:600;color:var(--muted);line-height:1.25;margin-top:1px}
 /* редактируемое название группы на вкладке «Группы» */
@@ -271,7 +272,7 @@ details.cwarn .cwarn-body{padding:0 14px 12px}
 #groupsTable tr.grp-done .grp-name b{text-decoration:line-through}
 /* редактор детей в модалке занятия */
 #kidsTable{width:100%;border-collapse:collapse;margin-top:4px}
-#kidsTable th{background:var(--coal);color:#fff;font-size:10px;font-weight:600;padding:4px 3px;text-align:center;line-height:1.1}
+#kidsTable th{background:var(--graphite);color:#fff;font-size:10px;font-weight:600;padding:4px 3px;text-align:center;line-height:1.1}
 #kidsTable th.k-name{text-align:left;padding-left:6px}
 #kidsTable td{border:1px solid var(--line);padding:2px 3px;text-align:center;vertical-align:middle}
 #kidsTable td.k-name{text-align:left}
@@ -300,7 +301,7 @@ details.cwarn .cwarn-body{padding:0 14px 12px}
 #courseTable .ly-col{background:rgba(120,90,60,.05);border-left:1px dashed var(--line)}
 #courseTable th{white-space:normal;line-height:1.15;vertical-align:middle}
 #courseTable th.sortable{cursor:pointer;user-select:none}
-#courseTable th.sortable:hover{background:var(--terra);color:#fff}
+#courseTable th.sortable:hover{background:var(--graphite);color:#fff}
 #courseTable th.sorted{color:#DDBB4E}
 /* выравнивание: шапка = значения */
 #courseTable th.a-left,#courseTable td.a-left{text-align:left}
@@ -339,7 +340,7 @@ details.cwarn .cwarn-body{padding:0 14px 12px}
 #priceTable th.a-right,#priceTable td.a-right{text-align:right}
 #priceTable th.a-center,#priceTable td.a-center{text-align:center}
 #priceTable th.sortable{cursor:pointer;user-select:none;white-space:nowrap}
-#priceTable th.sortable:hover{background:var(--terra);color:#fff}
+#priceTable th.sortable:hover{background:var(--graphite);color:#fff}
 #priceTable th.sorted{color:#DDBB4E}
 #priceTable .pr-name{min-width:240px}
 #priceTable td.pr-price,#priceTable td.pr-single,#priceTable td.pr-sub{font-weight:600}
@@ -354,7 +355,7 @@ tr.rowlocked input,tr.rowlocked select{background:#EAF3EC;border-color:#cfe3d4;c
 .ctag .x{cursor:pointer;color:var(--muted);font-weight:700}
 .ctag .x:hover{color:var(--red)}
 
-#gridTable tr.gridhead-repeat td{background:var(--coal);color:var(--sand);font-weight:600;font-size:11px;text-align:center;padding:8px 9px}
+#gridTable tr.gridhead-repeat td{background:var(--graphite);color:var(--sand);font-weight:600;font-size:11px;text-align:center;padding:8px 9px}
 #gridTable tr.gridhead-repeat td.tslot-h{text-align:left}
 
 .les-tools{display:flex;gap:2px;justify-content:flex-end;margin-bottom:0;height:13px}
@@ -366,7 +367,7 @@ tr.rowlocked input,tr.rowlocked select{background:#EAF3EC;border-color:#cfe3d4;c
 .navmode{display:flex;gap:4px;align-items:center;padding:5px 12px 5px 0;margin-right:10px;border-right:1px solid var(--line)}
 .navmode .nm{padding:6px 14px;border:1px solid var(--line);background:transparent;color:var(--coal);font-weight:600;font-size:13px;cursor:pointer;border-radius:8px;line-height:1.2}
 .navmode .nm:hover{background:var(--sand-l)}
-.navmode .nm.on{background:var(--coal);color:#fff;border-color:var(--coal)}
+.navmode .nm.on{background:var(--graphite);color:#fff;border-color:var(--graphite)}
 
 /* --- выпадающее меню «⋯ Ещё» --- */
 .more-wrap{position:relative;display:inline-block}
@@ -402,7 +403,7 @@ details.kid-move>div .cell{min-width:230px}
 .cli-letters{display:flex;flex-wrap:wrap;gap:4px;margin-bottom:2px}
 .cli-lbtn{min-width:30px;padding:5px 8px;border:1px solid var(--line);background:#fff;border-radius:7px;cursor:pointer;font-weight:700;font-size:13px;color:var(--muted);line-height:1}
 .cli-lbtn:hover{background:var(--sand-l);color:var(--coal)}
-.cli-lbtn.on{background:var(--terra);color:#fff;border-color:var(--terra)}
+.cli-lbtn.on{background:var(--graphite);color:#fff;border-color:var(--terra)}
 details.client{border:1px solid var(--line);border-radius:9px;margin-bottom:6px;background:#fff;overflow:hidden}
 details.client>summary{cursor:pointer;list-style:none;padding:9px 12px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:14px}
 details.client>summary::-webkit-details-marker{display:none}
@@ -3087,7 +3088,7 @@ function setGridEco(v){ _gridEco=v||""; renderGrid(); }
 function _courseEcoOf(course){ const c=courseFromLib(course); return (c&&c.eco)||""; }
 function _gridEcoBarHtml(){
   const b=(v,lab)=>`<button class="${_gridEco===v?'on':''}" onclick="setGridEco('${v}')">${lab}</button>`;
-  return `<div class="ecofilt" title="Показать занятия только выбранного направления">${b('','Все')}${b('Прознание','Прознание')}${b('CODDY','CODDY')}</div>`
+  return `<div class="ecofilt" title="Показать занятия только выбранного направления">${b('','Все')}${b('Прознание','Прознание')}${b('CODDY','CODDY')}${b('Детали','Детали')}</div>`
     +`<div class="gridlegend"><span><i style="background:#A49E93"></i>Прознание</span><span><i style="background:var(--blue)"></i>CODDY</span><span><i style="background:var(--green)"></i>Детали</span></div>`;
 }
 function _printDayTableHTML(day){
@@ -4484,9 +4485,9 @@ function mayParse(){
     <div style="max-height:46vh;overflow:auto;border:1px solid var(--line);border-radius:8px">
     <table style="width:100%;border-collapse:collapse;font-size:12px">
       <thead><tr>
-        <th style="background:var(--coal);color:#fff;padding:6px 8px;text-align:left;position:sticky;top:0">Курс из списка</th>
-        <th style="background:var(--coal);color:#fff;padding:6px 8px;width:52px;position:sticky;top:0">Детей</th>
-        <th style="background:var(--coal);color:#fff;padding:6px 8px;text-align:left;position:sticky;top:0">Курс в расписании</th>
+        <th style="background:var(--graphite);color:#fff;padding:6px 8px;text-align:left;position:sticky;top:0">Курс из списка</th>
+        <th style="background:var(--graphite);color:#fff;padding:6px 8px;width:52px;position:sticky;top:0">Детей</th>
+        <th style="background:var(--graphite);color:#fff;padding:6px 8px;text-align:left;position:sticky;top:0">Курс в расписании</th>
       </tr></thead>
       <tbody>${_mayCourses.map((c,i)=>`<tr>
         <td style="border:1px solid var(--line);padding:4px 8px">${esc(c.src)}</td>
@@ -5331,7 +5332,7 @@ function _reportHTML(forPrint){
     ${kp("Потенциал/нед",fmt(T.revWeekAll)+" р","если подтвердят все","var(--muted)")}
   </div>
   <div class="tscroll"><table style="width:100%;border-collapse:collapse;font-size:12px">
-    <thead><tr>${['Группа','Курс','Педагог','День·время','Вмест.','Записано','🟢','🔴','🟡','Молчат','Заполн.','Оборот/нед'].map((t,i)=>`<th style="background:var(--coal);color:#fff;padding:6px 8px;text-align:${i<4?'left':'center'};position:sticky;top:0">${t}</th>`).join("")}</tr></thead><tbody>`;
+    <thead><tr>${['Группа','Курс','Педагог','День·время','Вмест.','Записано','🟢','🔴','🟡','Молчат','Заполн.','Оборот/нед'].map((t,i)=>`<th style="background:var(--graphite);color:#fff;padding:6px 8px;text-align:${i<4?'left':'center'};position:sticky;top:0">${t}</th>`).join("")}</tr></thead><tbody>`;
   const td=(v,al)=>`<td style="padding:5px 8px;border-bottom:1px solid var(--line);text-align:${al||'left'}">${v}</td>`;
   rows.forEach(r=>{
     // название группы — клик открывает карточку занятия (по стабильному id, индекс считаем в момент клика).
