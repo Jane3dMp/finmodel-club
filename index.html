@@ -5267,7 +5267,7 @@ async function openKidCard(alfaId,name,kid){
   if(!alfaId && !name){ body.innerHTML=_kidCardTop(kid)+'<div class="callout">Нет связи с Альфой — заполните ЭВ 26/27, остальное подтянется после «⟳» у ребёнка.</div>'; return; }
   try{
     const token=await _alfaIdToken();
-    const payload = alfaId ? {customerId:alfaId} : {name:name};
+    const payload = alfaId ? {customerId:alfaId, full:1} : {name:name, full:1};   // full=1 → «Счета и абонементы» (customer-tariff)
     let r=null, lastErr=null;
     for(let a=0;a<2;a++){
       try{ r=await fetch(ALFA_PROXY+"?action=history",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+token},body:JSON.stringify(payload)}); lastErr=null; break; }
@@ -5314,13 +5314,32 @@ function _kidCardAlfa(j){
       <div style="margin:4px 0 10px;border:1px solid var(--line);border-radius:8px;padding:2px 10px">${evPrev.map((x,i)=>`<div style="padding:6px 0;font-size:12px;line-height:1.45;overflow-wrap:anywhere${i<evPrev.length-1?';border-bottom:1px solid #f0ebe4':''}"><b>${x[1]}:</b> ${esc(custom[x[0]])}</div>`).join("")}</div>`;
   }
   try{ if(j.debug) console.log("🪪 карточка ребёнка · debug Альфы:", j.debug); }catch(e){}
-  const emptyActive = "Активных групп нет"+(j.debug?` · членств в Альфе: ${j.debug.cgi||0}`:"");
-  h+=_kidCardGroups("🟢 Активные абонементы (группы)", active, emptyActive);
-  const actIds=new Set(active.map(a=>a.group_id));
-  const arch=hist.filter(x=>!actIds.has(x.group_id));
-  const per=(dOnly(j.from)||"01.09.2025")+"–"+(dOnly(j.to)||"31.05.2026");
-  h+=_kidCardGroups("🗄 Архивные абонементы ("+per+")", arch, "Архивных групп нет");
+  // «Счета и абонементы» (как в карточке клиента Альфы) — из customer-tariff
+  const subs=j.subs||[], subsArch=j.subsArch||[];
+  const emptySubs = "Активных абонементов нет"+(j.debug&&j.debug.tariffCount!=null?` · всего в Альфе: ${j.debug.tariffCount}`:"");
+  h+=_kidCardSubs("💳 Счета и абонементы", subs, emptySubs);
+  if(subsArch.length) h+=_kidCardSubs("🗄 Архивные абонементы ("+subsArch.length+")", subsArch, "");
   return h;
+}
+/* один блок «Счета и абонементы» (активные/архивные) — из customer-tariff Альфы */
+function _kidCardSubs(title, arr, empty){
+  const dOnly=v=>v?String(v).slice(0,10).split("-").reverse().join("."):"";
+  if(!arr.length) return `<label style="font-weight:600">${title}:</label><div style="font-size:12px;color:var(--muted);margin:4px 0 10px">${empty}</div>`;
+  const money=v=>(v===null||v===undefined||v==="")?"":(fmt(Math.round(+v))+" р");
+  const rest=x=>{
+    const p=[];
+    const b=money(x.balance); if(b) p.push(`<b style="color:${(+x.balance)<0?'var(--red)':'var(--green)'}">${b}</b>`);
+    if(x.lessons!=null&&x.lessons!=="") p.push(`${x.lessons} ур.`);
+    return p.length?("Остаток: "+p.join(" · ")):"";
+  };
+  return `<label style="font-weight:600">${title}:</label>
+    <div style="max-height:34vh;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:6px 10px;margin:4px 0 10px">
+    ${arr.map(x=>`<div style="padding:6px 0;border-bottom:1px solid #f0ebe4">
+      <div style="font-weight:600">${esc(x.name||'Абонемент')}</div>
+      ${x.subject?`<div style="font-size:12px;color:var(--coal)">${esc(x.subject)}</div>`:''}
+      <div style="font-size:11px;color:var(--muted)">${dOnly(x.b_date)}${x.e_date?' – '+dOnly(x.e_date):''}${x.note?' · '+esc(x.note):''}</div>
+      ${rest(x)?`<div style="font-size:12px;color:var(--terra-d)">${rest(x)}</div>`:''}
+    </div>`).join("")}</div>`;
 }
 /* точечно подтянуть из Альфы возраст (ДР) и связь (alfaId) ОДНОГО ребёнка — для новеньких,
    чтобы не гонять полную синхронизацию контактов. Возраст хранится в карточке (k.dob). */

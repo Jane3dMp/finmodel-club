@@ -215,32 +215,51 @@ switch ($action) {
             'paid_till'   => $c0['paid_till'] ?? null,
             'next_lesson' => $c0['next_lesson_date'] ?? null,
         ];
-        // тарифы/оплаты («настоящие абонементы») — только по запросу full=1 (не тормозим лёгкую 👤).
-        // У этого клуба абонементов-сущностей может не быть (customer-tariff часто пуст) — отдаём best-effort.
-        $tariffs = [];
+        // «Счета и абонементы» (в Alfa — счета/абонементы клиента) = customer-tariff.
+        // Тянем только по full=1 (карточка 🪪), чтобы лёгкая 👤-история оставалась быстрой.
+        // Отдаём: название абонемента, курс (через справочник предметов), период, остаток
+        // (деньги + уроки), заметку («майский …»), флаг активный/архивный. Сырой первый item —
+        // в debug.tariffRaw, чтобы сверить реальные имена полей с боевой Альфой и донастроить.
+        $subs = []; $subsArch = []; $tariffRaw = null; $tariffCount = 0;
         if (!empty($in['full'])) {
-            $ct = alfa_http('POST', "$host/customer-tariff/index", ['customer_id' => $cid, 'page' => 0, 'count' => 50], $token, true, 8);
-            foreach (($ct['items'] ?? []) as $t) {
+            // справочник предметов: id => name (курс абонемента)
+            $subjMap = [];
+            $sj = alfa_http('POST', "$host/subject/index", ['page' => 0, 'count' => 500], $token, true, 8);
+            foreach (($sj['items'] ?? []) as $sji) { if (isset($sji['id'])) $subjMap[(int)$sji['id']] = (string)($sji['name'] ?? ''); }
+
+            $ct = alfa_http('POST', "$host/customer-tariff/index", ['customer_id' => $cid, 'page' => 0, 'count' => 100], $token, true, 10);
+            $items = $ct['items'] ?? [];
+            $tariffCount = count($items);
+            if ($tariffCount && is_array($items[0] ?? null)) $tariffRaw = $items[0];   // сырой первый — для сверки полей
+            $numN = fn($v) => ($v === null || $v === '' || !is_numeric($v)) ? null : (0 + $v);
+            foreach ($items as $t) {
                 if (!is_array($t)) continue;
-                $tariffs[] = ['type' => 'tariff',
-                    'name'   => $t['tariff_name'] ?? ($t['name'] ?? ('Тариф #' . ($t['id'] ?? ''))),
-                    'b_date' => isset($t['b_date']) ? substr((string)$t['b_date'], 0, 10) : null,
-                    'e_date' => isset($t['e_date']) ? substr((string)$t['e_date'], 0, 10) : null,
-                    'lessons' => $t['lesson_count'] ?? ($t['balance'] ?? null)];
+                // курс: по subject_ids (или subject_id)
+                $sids = $t['subject_ids'] ?? ($t['subject_id'] ?? null);
+                if (!is_array($sids)) $sids = ($sids === null || $sids === '') ? [] : [$sids];
+                $subjNames = [];
+                foreach ($sids as $sid) { $nm = $subjMap[(int)$sid] ?? ''; if ($nm !== '') $subjNames[] = $nm; }
+                $b = isset($t['b_date']) ? substr((string)$t['b_date'], 0, 10) : null;
+                $e = isset($t['e_date']) ? substr((string)$t['e_date'], 0, 10) : null;
+                // остаток по счёту: деньги (balance) и уроки (кандидаты имён — сверим по tariffRaw)
+                $balance = $numN($t['balance'] ?? null);
+                $lessons = $numN($t['lesson_count'] ?? ($t['balance_lesson'] ?? ($t['lesson_left'] ?? ($t['paid_count'] ?? null))));
+                $isActive = isset($t['is_active']) ? ((int)$t['is_active'] === 1) : ($e === null || $e >= $today);
+                $row = [
+                    'name'    => $t['tariff_name'] ?? ($t['name'] ?? ('Абонемент #' . ($t['id'] ?? ''))),
+                    'subject' => implode(', ', $subjNames),
+                    'b_date'  => $b, 'e_date' => $e,
+                    'balance' => $balance, 'lessons' => $lessons,
+                    'note'    => is_scalar($t['note'] ?? null) ? trim((string)$t['note']) : '',
+                ];
+                if ($isActive) $subs[] = $row; else $subsArch[] = $row;
             }
-            $pay = alfa_http('POST', "$host/pay/index", ['customer_id' => $cid, 'page' => 0, 'count' => 50], $token, true, 8);
-            foreach (($pay['items'] ?? []) as $p) {
-                if (!is_array($p)) continue;
-                $tariffs[] = ['type' => 'pay',
-                    'name'   => $p['note'] ?? ($p['document_number'] ?? 'Оплата'),
-                    'b_date' => isset($p['date']) ? substr((string)$p['date'], 0, 10) : (isset($p['payment_date']) ? substr((string)$p['payment_date'], 0, 10) : null),
-                    'amount' => $p['income'] ?? ($p['amount'] ?? null)];
-            }
+            usort($subsArch, fn($a, $b) => strcmp((string)($b['e_date'] ?? ''), (string)($a['e_date'] ?? '')));   // архивные — новые сверху
         }
         json_out(['ok' => true, 'customerId' => $cid, 'branch' => alfa_branch(), 'matched' => $matchedName,
                   'summary' => $summary, 'history' => $history, 'active' => $active, 'custom' => $custom,
-                  'tariffs' => $tariffs, 'from' => $from, 'to' => $to,
-                  'debug' => ['cgi' => count($cgiItems), 'lessons' => count($lesItems), 'groups' => count($gid), 'active' => count($active), 'today' => $today, 'cgiItems' => $cgiDbg]]);
+                  'subs' => $subs, 'subsArch' => $subsArch, 'from' => $from, 'to' => $to,
+                  'debug' => ['cgi' => count($cgiItems), 'lessons' => count($lesItems), 'groups' => count($gid), 'active' => count($active), 'today' => $today, 'cgiItems' => $cgiDbg, 'tariffCount' => $tariffCount, 'tariffRaw' => $tariffRaw]]);
         break;
 
     // --- СОЗДАТЬ НОВОГО КЛИЕНТА (ребёнка) в Alfa (WRITE) ---
