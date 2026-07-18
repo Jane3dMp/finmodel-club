@@ -991,6 +991,7 @@ const DEFAULT_STATE = {
   _wageMode: "kpi", // модель ЗП: kpi | fix
   _fixRates: {},    // фикс-ставки: {педагог: {длительность_мин: ставка}}
   assume: { weeksPerMonth:4, targetProfitShare:18, ownerSalary:0 },
+  children: {},   // наши поля ребёнка по alfaId: {alfaId:{name,parentName,phone,dob,evzz}} — один на ребёнка, а не на группу
   gasUrl: "https://script.google.com/macros/s/AKfycbxJajbntVctGjXImc1hVhWimvOkXHcNCkuVFpszEbA8ad-B40Lj2Q8gdMMTBar4YLnsew/exec"
 };
 const LS_KEY = "proznanie_finmodel_v1";
@@ -3598,7 +3599,7 @@ function renderKidsEditor(){
       <td class="k-name"><div style="display:flex;align-items:center;gap:5px"><input type="text" class="k-in-name" style="flex:1;min-width:0;width:auto" value="${esc(k.n)}" placeholder="Фамилия Имя" oninput="refreshLesWage()">${k.dob?`<span style="font-size:11px;color:var(--blue);white-space:nowrap" title="Возраст из Альфы (ДР ${esc(String(k.dob).slice(0,10))})">${esc(_ageStr(k.dob))}</span>`:''}${_fbIsAdmin?`<button type="button" class="btn ghost sm" style="padding:0 5px;font-size:11px" title="Подтянуть возраст и связь этого ребёнка из Альфы (по ФИО)" onclick="kidAlfaUpdate(${i})">⟳</button>`:''}</div></td>
       ${KID_FLAGS.map(f=>`<td><input type="checkbox" class="k-in-${f.k}" ${k[f.k]?"checked":""} title="${f.lab}" onchange="kidFlagChanged()"></td>`).join("")}
       <td><input type="text" class="k-in-c" value="${esc(k.c||"")}" placeholder="—"></td>
-      <td><div style="display:inline-flex;gap:3px;align-items:center;white-space:nowrap"><button type="button" class="btn ghost sm" style="padding:1px 6px${k.vbSent?';background:#e6f4ea;border-color:#66bb6a':''}" ${k.phone?"":"disabled"} title="${k.phone?(k.vbSent?('Отправлено'+(k.vbSentAt?' '+_vbDate(k.vbSentAt):'')+' · клик — отправить снова, правый клик — снять отметку'):('Viber → '+esc(k.phone))):'Нет телефона — сначала «📞 Контакты из Альфы»'}" onclick="kidViber(${i})" oncontextmenu="event.preventDefault();kidViberReset(${i});return false">${k.vbSent?'✅':'📨'}</button>${k.alfaId?`<button type="button" class="btn ghost sm" style="padding:1px 5px" title="История ребёнка в Альфе — куда ходил, баланс" onclick="kidHist(${i})">👤</button>`:''}${_fbIsAdmin?`<button type="button" class="btn ghost sm" style="padding:1px 5px${k.evzz?';background:#eef3ee;border-color:#66bb6a':''}" title="Карточка ребёнка — ЭВ, телефон, активные/архивные абонементы из Альфы${k.evzz?(' · ЭВ 26/27: '+esc(k.evzz)):''}" onclick="kidCard(${i})">🪪</button>`:''}</div></td>
+      <td><div style="display:inline-flex;gap:3px;align-items:center;white-space:nowrap"><button type="button" class="btn ghost sm" style="padding:1px 6px${k.vbSent?';background:#e6f4ea;border-color:#66bb6a':''}" ${k.phone?"":"disabled"} title="${k.phone?(k.vbSent?('Отправлено'+(k.vbSentAt?' '+_vbDate(k.vbSentAt):'')+' · клик — отправить снова, правый клик — снять отметку'):('Viber → '+esc(k.phone))):'Нет телефона — сначала «📞 Контакты из Альфы»'}" onclick="kidViber(${i})" oncontextmenu="event.preventDefault();kidViberReset(${i});return false">${k.vbSent?'✅':'📨'}</button>${k.alfaId?`<button type="button" class="btn ghost sm" style="padding:1px 5px" title="История ребёнка в Альфе — куда ходил, баланс" onclick="kidHist(${i})">👤</button>`:''}${_fbIsAdmin?(function(){const ez=kidEvzz(k);return `<button type="button" class="btn ghost sm" style="padding:1px 5px${ez?';background:#eef3ee;border-color:#66bb6a':''}" title="Карточка ребёнка — ЭВ, телефон, активные/архивные абонементы из Альфы${ez?(' · ЭВ 26/27: '+esc(ez)):''}" onclick="kidCard(${i})">🪪</button>`;})():''}</div></td>
       <td><select class="k-in-reply cell" style="font-size:11px;padding:3px 2px;min-width:96px" onchange="kidFlagChanged()">${VB_REPLY.map(r=>`<option value="${r[0]}" ${k.vbReply===r[0]?'selected':''}>${r[1]}</option>`).join("")}</select></td>
       <td style="text-align:center"><details class="kid-move"><summary title="Перевести в другую группу">↔</summary><div><select class="cell kmv-sel">${moveOpts}</select><button type="button" class="btn sm" onclick="kidMoveToGroup(${i}, this.previousElementSibling.value)">Перевести</button></div></details></td>
       <td><span class="k-del" title="Удалить" onclick="kidDel(${i})">×</span></td>
@@ -4166,6 +4167,31 @@ const KID_FLAGS=[
   {k:"call",  ic:"📵", lab:"Недозвон"}
 ];
 function _blankKid(n){ return {n:cleanKidName(n), may:false, sched:false, no:false, call:false, c:"", phone:"", alfaId:null, dob:"", evzz:"", vbSent:false, vbSentAt:"", vbReply:"", vbReplyAt:"" }; }
+/* ===== НАШИ ПОЛЯ РЕБЁНКА по alfaId (узел S.children) — один на ребёнка, а не на группу ===== */
+function _childRec(alfaId, create){
+  const k=(alfaId!=null&&alfaId!=="")?String(alfaId):""; if(!k) return null;
+  if(!S.children||typeof S.children!=="object") S.children={};
+  if(!S.children[k] && create) S.children[k]={};
+  return S.children[k]||null;
+}
+/* ЭВ 26/27 ребёнка: если есть связь с Альфой — из S.children (единый), иначе — старое поле на киде */
+function kidEvzz(k){
+  if(!k) return "";
+  if(k.alfaId!=null && k.alfaId!==""){ const r=S.children&&S.children[String(k.alfaId)]; if(r&&Object.prototype.hasOwnProperty.call(r,"evzz")) return r.evzz||""; }
+  return k.evzz||"";
+}
+/* однопроходная лифтовка: перенести имеющиеся поля с кидов сетки в S.children по alfaId (идемпотентно) */
+function _migrateChildren(){
+  if(!S.children||typeof S.children!=="object") S.children={};
+  (S.grid||[]).forEach(l=>kidsOf(l).forEach(k=>{
+    if(k.alfaId==null||k.alfaId==="") return;
+    const key=String(k.alfaId); let r=S.children[key]; if(!r) r=S.children[key]={};
+    if(k.n && !r.name) r.name=k.n;
+    if(k.phone && !r.phone) r.phone=k.phone;
+    if(k.dob && !r.dob) r.dob=k.dob;
+    if(k.evzz && (r.evzz==null||r.evzz==="")) r.evzz=k.evzz;
+  }));
+}
 /* возраст из даты рождения Альфы (dob = "YYYY-MM-DD...") */
 function _ageFromDob(dob){ if(!dob) return null; const d=new Date(String(dob).slice(0,10)); if(isNaN(d.getTime())) return null;
   const now=new Date(); let a=now.getFullYear()-d.getFullYear(); const m=now.getMonth()-d.getMonth();
@@ -4816,11 +4842,11 @@ const ALFA_HOST_URL="https://proznanie4eee.s20.online";
 function closeAlfaHist(){ document.getElementById("alfaHistModal").classList.remove("show"); }
 function kidHist(i){ _kidsFromDOM(); const k=_editKids[i]; if(k) openAlfaHistory(k.alfaId,k.n); }
 /* ===== КАРТОЧКА РЕБЁНКА (ЭВ 26/27 наш + телефон/ЭВ/абонементы из Альфы) ===== */
-let _kidCardRef={name:""};   // на кого открыта карточка — чтобы сохранить ЭВ 26/27 во все группы ребёнка
+let _kidCardRef={name:"",alfaId:null};   // на кого открыта карточка (имя + связь с Альфой)
 function kidCard(i){
   _kidsFromDOM();
   const k=_editKids[i]; if(!k||!k.n){ toast("Пустая строка"); return; }
-  _kidCardRef={name:k.n};
+  _kidCardRef={name:k.n, alfaId:(k.alfaId!=null?k.alfaId:null)};
   openKidCard(k.alfaId, k.n, k);
 }
 /* открыть карточку ребёнка ПО ИМЕНИ из любого места (сетка, «Клиенты» и т.д.) */
@@ -4828,27 +4854,46 @@ function openKidCardByName(name){
   name=String(name||"").trim(); if(!name) return;
   let kid=null;
   (S.grid||[]).some(l=>kidsOf(l).some(k=>{ if(_sameKid(k.n,name)){ kid=k; return true; } return false; }));
-  _kidCardRef={name:name};
+  _kidCardRef={name:name, alfaId:(kid&&kid.alfaId!=null?kid.alfaId:null)};
   const k=kid||{n:name,alfaId:null,evzz:""};
   openKidCard(k.alfaId, name, k);
 }
 function _kidCardTop(kid){
-  const ev=(kid&&kid.evzz)||"";
+  const ev=kidEvzz(kid);
+  const aid=(kid&&kid.alfaId!=null&&kid.alfaId!=="")?kid.alfaId:((_kidCardRef&&_kidCardRef.alfaId!=null)?_kidCardRef.alfaId:null);
+  const noLink=(aid==null||aid==="");
+  const rec=noLink?null:(S.children&&S.children[String(aid)]);
+  const parent=(rec&&rec.parentName)||"";
   return `<div class="callout" style="margin-bottom:10px;border-color:var(--terra)">
     <label style="font-weight:600">ЭВ 26/27 — этап взаимодействия <span style="font-weight:400;color:var(--muted)">(наш; позже уйдёт в Альфу)</span></label>
     <input id="kidEvzz" class="cell wide" style="margin-top:4px" value="${esc(ev)}" placeholder="напр.: продлил / думает / новый набор" onchange="saveKidEvzz(this.value)">
+    <label style="font-weight:600;display:block;margin-top:8px">Родитель (заказчик)</label>
+    <input id="kidParent" class="cell wide" style="margin-top:4px" value="${esc(parent)}" placeholder="${noLink?'сначала свяжите ребёнка с Альфой (⟳)':'ФИО родителя'}" ${noLink?'disabled':''} onchange="saveKidParent(this.value)">
+    ${noLink?'<div style="font-size:11px;color:var(--muted);margin-top:4px">Ребёнок пока не связан с Альфой — ЭВ хранится по имени; свяжите (⟳ в карточке занятия), чтобы поля хранились по ID и не двоились.</div>':''}
   </div>`;
 }
 function saveKidEvzz(v){
   v=String(v||"").trim(); const nm=_kidCardRef.name; if(!nm) return;
+  const aid=(_kidCardRef&&_kidCardRef.alfaId!=null&&_kidCardRef.alfaId!=="")?_kidCardRef.alfaId:null;
   let n=0;
-  // источник правды — реальные объекты детей в сетке (kidsOf возвращает ссылки), пишем во все группы ребёнка
-  (S.grid||[]).forEach(l=>kidsOf(l).forEach(k=>{ if(_sameKid(k.n, nm)){ k.evzz=v; n++; } }));
-  // если открыта карточка занятия — держим её буфер в синхроне (иначе НЕ трогаем чужой урок)
-  const lesOpen=(function(){ const m=document.getElementById("lesModal"); return m && m.classList.contains("show"); })();
-  if(lesOpen && Array.isArray(_editKids)) _editKids.forEach(k=>{ if(_sameKid(k.n, nm)) k.evzz=v; });
+  if(aid!=null){
+    _childRec(aid,true).evzz=v;   // единый источник по alfaId — во всех группах сразу
+    (S.grid||[]).forEach(l=>kidsOf(l).forEach(k=>{ if(String(k.alfaId)===String(aid)) n++; }));
+  } else {
+    // без связи с Альфой — по-старому на кидов сетки (по имени), во все группы ребёнка
+    (S.grid||[]).forEach(l=>kidsOf(l).forEach(k=>{ if(_sameKid(k.n, nm)){ k.evzz=v; n++; } }));
+    const lesOpen=(function(){ const m=document.getElementById("lesModal"); return m && m.classList.contains("show"); })();
+    if(lesOpen && Array.isArray(_editKids)) _editKids.forEach(k=>{ if(_sameKid(k.n, nm)) k.evzz=v; });
+  }
   persistLocal(); if(typeof fbSchedulePush==="function") fbSchedulePush();
   toast(v?("ЭВ 26/27 сохранён"+(n>1?(" · во всех группах ребёнка ("+n+")"):"")):"ЭВ 26/27 очищен");
+}
+function saveKidParent(v){
+  const aid=(_kidCardRef&&_kidCardRef.alfaId!=null&&_kidCardRef.alfaId!=="")?_kidCardRef.alfaId:null;
+  if(aid==null){ toast("Нет связи с Альфой"); return; }
+  _childRec(aid,true).parentName=String(v||"").trim();
+  persistLocal(); if(typeof fbSchedulePush==="function") fbSchedulePush();
+  toast("Родитель сохранён");
 }
 function closeKidCard(){ document.getElementById("kidCardModal").classList.remove("show"); }
 async function openKidCard(alfaId,name,kid){
@@ -4872,7 +4917,7 @@ async function openKidCard(alfaId,name,kid){
     if(j.notFound){ body.innerHTML=_kidCardTop(kid)+`<div class="callout">В Альфе не нашли по имени «${esc(name||"")}». Возможно, другое написание.</div>`; return; }
     const cid=j.customerId||alfaId;
     if(cid){ link.href=ALFA_HOST_URL+"/company/"+(j.branch||1)+"/customer/view?id="+cid; link.style.display=""; }
-    if(cid && kid && !kid.alfaId){ kid.alfaId=cid; persistLocal(); }   // нашли по имени — запомним связь
+    if(cid){ if(_kidCardRef) _kidCardRef.alfaId=cid; if(kid && !kid.alfaId){ kid.alfaId=cid; persistLocal(); } }   // нашли по имени — запомним связь (для хранения по ID)
     body.innerHTML=_kidCardTop(kid)+_kidCardAlfa(j);
   }catch(e){
     let msg=(e&&e.message)||String(e);
@@ -6079,6 +6124,7 @@ function _migrateSingle(){
 }
 function renderAll(){
   _migrateSingle();
+  _migrateChildren();
   renderCourses(); renderPlanner(); renderGrid(); renderGroups(); renderClients(); if(typeof renderPrice==="function") renderPrice(); if(typeof renderReal==="function") renderReal(); renderMay(); renderStaff(); renderFixed(); renderTax(); renderBreak(); renderSettings(); renderDash(); if(typeof renderReport==="function") renderReport(); onSlider(); renderConflictBanner(); renderScenarioBar(); updateNavHeightDelayed();
 }
 function toast(m){ const t=document.getElementById("toast"); t.textContent=m; t.classList.add("show");
