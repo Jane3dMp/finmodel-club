@@ -342,6 +342,11 @@ details.cwarn .cwarn-body{padding:0 14px 12px}
 #goals .gauge-val .gauge-max{font-size:14px;font-weight:600;color:var(--muted);margin-left:3px}
 #goals .gauge-lab{font-size:11.5px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);font-weight:700;margin-top:6px}
 #goals .gauge-sub{font-size:11px;color:var(--muted);margin-top:2px}
+#goals .goalstats{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;margin-bottom:22px}
+#goals .gs{background:#fff;border:1px solid var(--line);border-radius:12px;padding:13px 16px}
+#goals .gs-lab{display:block;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);font-weight:600}
+#goals .gs-val{display:block;font-size:26px;font-weight:800;letter-spacing:-.02em;margin-top:3px;font-variant-numeric:tabular-nums}
+#goals .gs-sub{display:block;font-size:11px;color:var(--muted);margin-top:2px}
 
 /* мотивационный дашборд набора */
 #goals .goaltop{display:flex;align-items:center;gap:16px;background:var(--graphite);color:#fff;border-radius:14px;padding:16px 22px;margin-bottom:16px}
@@ -2841,7 +2846,7 @@ function renderDash(){
    ${kpi("Выручка/мес",fmt(T.rev)+" р","coal","по проведённым занятиям")}
    ${kpi("Чистая прибыль",fmt(T.netProfit)+" р",profCls,"после налогов и ЗП собств.")}
    ${kpi("Рентабельность",(T.rev>0?fmt1(T.netProfit/T.rev*100):0)+"%",profCls,"чистая прибыль / выручка")}
-   ${kpi("Детей (мест занято)",fmt(T.kids),"blue","сумма по группам")}
+   ${kpi("Плановая ёмкость",fmt(T.kids),"blue","факт детей × групп (модель)")}
    ${kpi("Занятий/мес",fmt(T.lessons),"blue","всего по расписанию")}
    ${kpi("Доля ФОТ",fmt1(fotShare)+"%",fotShare>55?"red":"green","педагоги + админ-команда")}
    ${kpi("Доля аренды",fmt1(rentShare)+"%",rentShare>12?"red":"green","ориентир 8–12%")}
@@ -5544,26 +5549,33 @@ function _confirmedCount(){
   const unplaced=(typeof _mayUnplacedByCourse==='function')?Object.values(_mayUnplacedByCourse()).reduce((a,b)=>a+b,0):0;
   return Object.values(map).filter(o=>!o.no && (o.may||o.yes)).length + unplaced;
 }
-/* воронка для спидометров: уникальные дети; подтвердили/отказ/думают — среди НЕ купивших майский; молчат — от всех */
+/* воронка для спидометров — считаем ПО ЗАПИСЯМ в группы (как в «Отчёте по набору»):
+   группа → уникальные по имени внутри группы; ребёнок на 2 курсах = 2 записи.
+   Подтвердили/отказ/думают — среди НЕ купивших майский; молчат — от всех записей.
+   Плюс уникальные дети (по ФИО глобально) и «мест на ребёнка». */
 function _goalsFunnel(){
-  const map={};
-  (S.grid||[]).forEach(l=>kidsOf(l).forEach(k=>{ const key=_nameKey(k.n); if(!key) return;
-    const o=map[key]||(map[key]={may:false,sent:false,reply:'',no:false});
-    if(k.may) o.may=true; if(k.vbSent) o.sent=true; if(k.no) o.no=true;
-    const rank=r=>r==='yes'?3:r==='no'?2:r==='maybe'?1:0;
-    if(rank(k.vbReply)>rank(o.reply)) o.reply=k.vbReply;
+  const groups={};
+  (S.grid||[]).forEach(l=>{
+    const course=l.course||"—";
+    const key=(l.group&&l.group.trim())?("g:"+l.group.trim()):("c:"+course+"|"+(l.day||"")+"|"+(l.start||""));
+    const g=groups[key]||(groups[key]={kids:{}});
+    kidsOf(l).forEach(k=>{ const nn=_normName(k.n); if(!nn) return;
+      const p=g.kids[nn]||(g.kids[nn]={may:false,sent:false,reply:'',no:false});
+      if(k.may) p.may=true; if(k.vbSent) p.sent=true; if(k.no) p.no=true;
+      const rank=r=>r==='yes'?3:r==='no'?2:r==='maybe'?1:0;
+      if(rank(k.vbReply)>rank(p.reply)) p.reply=k.vbReply;
+    });
+  });
+  let records=0,sent=0,nonMay=0,nmYes=0,nmNo=0,nmMaybe=0,silent=0;
+  Object.keys(groups).forEach(gk=>Object.values(groups[gk].kids).forEach(p=>{
+    records++;
+    if(p.sent) sent++;
+    if(!p.may){ nonMay++; if(p.reply==='yes')nmYes++; else if(p.reply==='no'||p.no)nmNo++; else if(p.reply==='maybe')nmMaybe++; }
+    if(!p.reply && !p.no) silent++;
   }));
-  const arr=Object.values(map);
-  const nonMay=arr.filter(k=>!k.may);
-  return {
-    total:arr.length,
-    sent:arr.filter(k=>k.sent).length,
-    nonMay:nonMay.length,
-    nmYes:nonMay.filter(k=>k.reply==='yes').length,
-    nmNo:nonMay.filter(k=>k.reply==='no'||k.no).length,
-    nmMaybe:nonMay.filter(k=>k.reply==='maybe').length,
-    silent:arr.filter(k=>!k.reply && !k.no).length   // молчат = нет ответа (из всех)
-  };
+  const uniq=new Set(); (S.grid||[]).forEach(l=>kidsOf(l).forEach(k=>{ const key=_nameKey(k.n); if(key) uniq.add(key); }));
+  const unique=uniq.size;
+  return {records,sent,nonMay,nmYes,nmNo,nmMaybe,silent,unique,perChild:unique>0?records/unique:0};
 }
 /* полукруглый спидометр: значение val из max, стрелка + дуга */
 function _gauge(val,max,color,label,sub){
@@ -5598,16 +5610,22 @@ function renderGoals(){
       <div class="goaltop-bar"><i style="width:${pct}%"></i></div>
       <div class="goaltop-pct">${pct}%</div>
     </div>`;
-  // воронка — спидометры
+  // воронка — спидометры (по ЗАПИСЯМ в группы, как в «Отчёте»)
   const F=_goalsFunnel();
   h+=`<div class="gaugegrid">`
-    +_gauge(F.total, goal, "var(--green)", "Детей в расписании", "цель "+goal)
-    +_gauge(F.sent, F.total, "var(--blue)", "Отправлено", "из "+F.total+" в расписании")
+    +_gauge(F.records, goal, "var(--green)", "Детей в расписании", "записей в группы · цель "+goal)
+    +_gauge(F.sent, F.records, "var(--blue)", "Отправлено", "из "+F.records+" записей")
     +_gauge(F.nmYes, F.nonMay, "var(--green)", "Подтвердили", "из "+F.nonMay+" без майского")
     +_gauge(F.nmNo, F.nonMay, "var(--red)", "Отказ", "из "+F.nonMay+" без майского")
     +_gauge(F.nmMaybe, F.nonMay, "#C9922E", "Думают", "из "+F.nonMay+" без майского")
-    +_gauge(F.silent, F.total, "#9A948A", "Молчат", "из "+F.total+" всего")
+    +_gauge(F.silent, F.records, "#9A948A", "Молчат", "из "+F.records+" всего")
     +`</div>`;
+  // отдельные показатели: уникальные дети и мест на ребёнка
+  h+=`<div class="goalstats">
+      <div class="gs"><span class="gs-lab">Уникальных детей</span><span class="gs-val">${F.unique}</span><span class="gs-sub">реальные головы (ребёнок на 2 курсах = 1)</span></div>
+      <div class="gs"><span class="gs-lab">Записей в группы</span><span class="gs-val">${F.records}</span><span class="gs-sub">мест занято (ребёнок на 2 курсах = 2)</span></div>
+      <div class="gs"><span class="gs-lab">Мест на ребёнка</span><span class="gs-val">${fmt1(F.perChild)}</span><span class="gs-sub">записей ÷ уникальных детей</span></div>
+    </div>`;
   // движение по группам — с фильтром по бренду; клик по названию открывает карточку занятия
   const dn=["","Пн","Вт","Ср","Чт","Пт","Сб","Вс"];
   const tName=t=>(typeof shortName==="function"?shortName(t):t)||"";
