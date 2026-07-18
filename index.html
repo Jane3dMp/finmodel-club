@@ -11,6 +11,7 @@
   --terra:#B0800F; --terra-d:#916A0A; --coal:#20201D; --sand:#EAE9E5;
   --sand-l:#F4F3F0; --cream:#FBFAF8; --green:#3B7A57; --red:#B0493D;
   --blue:#1F5BC0; --line:#E4E2DD; --muted:#847F76;   /* --blue = фирменный CODDY-синий (кобальт #0052CC), чуть приглушён для 8-часового комфорта */
+  --acc-soft:#FBF2CE; --acc-ink:#6B5411;   /* спокойный пастельно-жёлтый акцент (активная вкладка) вместо «горчичного» */
 }
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:'Segoe UI',system-ui,-apple-system,sans-serif;background:var(--cream);
@@ -40,7 +41,7 @@ nav.tabs .wrap{display:flex;gap:1px 2px;flex-wrap:wrap;width:100%;max-width:96vw
 .tab{padding:9px 15px;font-size:14px;font-weight:600;color:var(--muted);cursor:pointer;
   border:none;background:none;border-bottom:3px solid transparent;white-space:nowrap;line-height:1.2}
 .tab:hover{color:var(--coal)}
-.tab.active{color:var(--coal);border-bottom-color:var(--terra);background:var(--cream)}
+.tab.active{color:var(--acc-ink);background:var(--acc-soft);border-bottom-color:transparent;border-radius:9px 9px 0 0}
 
 .panel{display:none;padding-top:16px}
 /* расписание — почти на всю ширину экрана, узкие поля по бокам */
@@ -52,7 +53,7 @@ h2.sec{font-size:19px;margin-bottom:4px;color:var(--coal)}
 .card{background:#fff;border:1px solid var(--line);border-radius:11px;padding:18px;margin-bottom:16px;
   box-shadow:0 1px 3px rgba(28,20,16,.04)}
 .card h3{font-size:15px;margin-bottom:12px;display:flex;align-items:center;gap:8px}
-.card h3::before{content:'';width:4px;height:16px;background:var(--terra);border-radius:2px}
+.card h3::before{content:'';width:4px;height:16px;background:#D8D3C8;border-radius:2px}
 
 table{width:100%;border-collapse:collapse;font-size:14px}
 th{background:var(--coal);color:var(--sand);padding:9px 10px;text-align:left;font-weight:600;font-size:13px}
@@ -123,9 +124,19 @@ small.note{font-size:11px;color:var(--muted)}
 .modal{background:#fff;border-radius:12px;padding:22px;max-width:480px;width:90%;max-height:calc(100vh - 40px);overflow-y:auto;overscroll-behavior:contain;margin:auto}
 .modal h3{margin-bottom:12px}
 .modal input{width:100%;border:1px solid var(--line);border-radius:7px;padding:9px;margin:6px 0;font-size:13px}
-.dayTabs{display:flex;gap:6px;margin-bottom:14px;flex-wrap:wrap}
-.dayb{padding:8px 16px;border:1px solid var(--line);background:#fff;border-radius:8px;cursor:pointer;font-weight:600;font-size:13px;position:relative}
-.dayb.on{background:var(--terra);color:#fff;border-color:var(--terra)}
+.dayTabs{display:flex;gap:5px;margin-bottom:12px;flex-wrap:wrap;background:#fff;border:1px solid var(--line);border-radius:12px;padding:5px;width:fit-content}
+.dayb{padding:8px 15px;border:1px solid transparent;background:transparent;border-radius:9px;cursor:pointer;font-weight:600;font-size:13px;position:relative;color:var(--coal)}
+.dayb:hover{background:var(--sand-l)}
+/* фильтр по бренду + легенда над сеткой */
+.gridbar{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:14px}
+.ecofilt{display:inline-flex;gap:3px;background:#fff;border:1px solid var(--line);border-radius:11px;padding:4px}
+.ecofilt button{border:0;background:transparent;color:var(--muted);font:inherit;font-size:13px;font-weight:600;padding:6px 14px;border-radius:8px;cursor:pointer}
+.ecofilt button:hover{background:var(--sand-l)}
+.ecofilt button.on{background:var(--coal);color:#fff}
+.gridlegend{display:flex;gap:14px;font-size:12px;color:var(--muted);margin-left:auto;flex-wrap:wrap;align-items:center}
+.gridlegend span{display:inline-flex;align-items:center;gap:5px}
+.gridlegend i{width:9px;height:9px;border-radius:3px;display:inline-block}
+.dayb.on{background:var(--coal);color:#fff;border-color:var(--coal)}
 .dayb .badge{background:var(--coal);color:#fff;border-radius:9px;padding:0 6px;font-size:10px;margin-left:4px}
 .dayb.on .badge{background:rgba(255,255,255,.3)}
 #gridTable{table-layout:fixed}
@@ -585,6 +596,7 @@ details.client .cli-badges{margin-left:auto;font-size:12px;color:var(--muted)}
   <div id="kidSearchResults" class="kidsearch-res"></div>
  </div>
  <div class="dayTabs" id="dayTabs"></div>
+ <div class="gridbar" id="gridEcoBar"></div>
  <div id="vbTodo" class="vbtodo"></div>
  <div id="conflictBanner"></div>
  <div class="card">
@@ -3050,6 +3062,15 @@ function wageForLesson(course, students, lesson){
 /* ====== РЕНДЕР СЕТКИ ====== */
 function shortName(n){ if(!n) return "—"; const p=String(n).split(" "); return p.length>=2?p[0]+" "+p[1][0]+".":n; }
 function setDay(d){ curDay=d; renderGrid(); }
+/* фильтр сетки по бренду: "" (все) | "Прознание" | "CODDY". Детали отдельной кнопки нет — видны в «Все». */
+let _gridEco="";
+function setGridEco(v){ _gridEco=v||""; renderGrid(); }
+function _courseEcoOf(course){ const c=courseFromLib(course); return (c&&c.eco)||""; }
+function _gridEcoBarHtml(){
+  const b=(v,lab)=>`<button class="${_gridEco===v?'on':''}" onclick="setGridEco('${v}')">${lab}</button>`;
+  return `<div class="ecofilt" title="Показать занятия только выбранного направления">${b('','Все')}${b('Прознание','Прознание')}${b('CODDY','CODDY')}</div>`
+    +`<div class="gridlegend"><span><i style="background:#A49E93"></i>Прознание</span><span><i style="background:var(--blue)"></i>CODDY</span><span><i style="background:var(--green)"></i>Детали</span></div>`;
+}
 function _printDayTableHTML(day){
   // строит чистую таблицу расписания одного дня для печати (без кнопок и DnD)
   const dayL=S.grid.filter(l=>l.day===day);
@@ -3119,10 +3140,11 @@ function renderGrid(){
     dt+=`<button class="dayb ${d===curDay?'on':''}" onclick="setDay(${d})">${DAY_NAMES[d]}${cnt?` <span class="badge">${cnt}</span>`:''}</button>`;
   }
   document.getElementById("dayTabs").innerHTML=dt;
+  const ecoBar=document.getElementById("gridEcoBar"); if(ecoBar) ecoBar.innerHTML=_gridEcoBarHtml();
   document.getElementById("gridDayTitle").textContent=DAY_FULL[curDay];
   renderVbTodo();
 
-  const dayL=S.grid.filter(l=>l.day===curDay);
+  const dayL=S.grid.filter(l=>l.day===curDay && (!_gridEco || _courseEcoOf(l.course)===_gridEco));
   let h=`<thead><tr><th style="width:54px">Время</th>`;
   ROOMS.forEach(r=>h+=`<th>${r}</th>`);
   h+=`</tr></thead><tbody>`;
