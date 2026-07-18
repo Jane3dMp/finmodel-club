@@ -379,6 +379,38 @@ details.cwarn .cwarn-body{padding:0 14px 12px}
 #goals .gb .gb-val{width:34px;text-align:right;font-weight:700;font-variant-numeric:tabular-nums}
 @media(max-width:560px){#goals .goalcard-top{flex-direction:column;text-align:center}#goals .gb .gb-lab{width:120px}}
 
+/* ===== «Набор»: тёплая тема — кремовый + чёрный + жёлтый (референс Crextio) ===== */
+#goals{--g-cream:#FAF6EC;--g-ink:#1C1B18;--g-dark:#24221D;--g-gold:#F1CE55;--g-gold-s:#F7E29A;--g-track:#ECE1C6;--g-line:#EEE4CB;--g-muted:#8C8677;
+  background:linear-gradient(140deg,#FCFAF3 0%,#FAF5E6 44%,#F3E6BF 100%);
+  border-radius:26px;border:1px solid var(--g-line);box-shadow:0 10px 34px rgba(70,58,20,.07);
+  padding:22px 26px 30px;margin-top:6px}
+#goals h2.sec{font-size:27px;letter-spacing:-.025em;color:var(--g-ink);margin-bottom:2px}
+#goals .sec-desc{color:var(--g-muted)}
+#goals .kidsearch{max-width:940px;margin-left:auto;margin-right:auto}
+/* верхняя полоса подтверждений — тёмная карточка с жёлтой заливкой */
+#goals .goaltop{background:var(--g-dark);border-radius:22px;padding:18px 26px;box-shadow:0 8px 24px rgba(40,34,20,.16)}
+#goals .goaltop-lab{opacity:.55}
+#goals .goaltop-num span{opacity:.5}
+#goals .goaltop-bar{height:14px;background:rgba(255,255,255,.10)}
+#goals .goaltop-bar i{background:linear-gradient(90deg,var(--g-gold-s),var(--g-gold))}
+#goals .goaltop-pct{color:var(--g-gold)}
+/* спидометры — светлые тёплые карточки */
+#goals .gauge{background:#FFFDF6;border:1px solid var(--g-line);border-radius:22px;padding:16px 14px 17px;box-shadow:0 4px 14px rgba(70,58,20,.05)}
+#goals .gauge-lab{color:var(--g-muted)}
+#goals .gauge-sub{color:#A8A08D}
+/* KPI-плитки (уникальные / записи / места) — крупные числа на креме */
+#goals .goalstats .gs{background:#FFFDF6;border:1px solid var(--g-line);border-radius:20px;padding:15px 18px;box-shadow:0 4px 14px rgba(70,58,20,.05)}
+#goals .goalstats .gs-lab{color:var(--g-muted)}
+#goals .goalstats .gs-val{font-size:32px;color:var(--g-ink)}
+#goals .goalstats .gs-sub{color:#A8A08D}
+/* фильтр брендов — пилюли (чёрная активная) */
+#goals .ecofilt{background:#FBF7EC;border-color:var(--g-line);border-radius:999px;padding:4px}
+#goals .ecofilt button{border-radius:999px;padding:6px 16px;color:#5A5548}
+#goals .ecofilt button:hover{background:#F1E9D3}
+#goals .ecofilt button.on{background:var(--g-ink);color:#fff}
+/* таблица «движение по группам» — мягче и скруглённее */
+#goals .tscroll{border-radius:18px;border-color:var(--g-line);box-shadow:0 4px 14px rgba(70,58,20,.05);background:#FFFDF6}
+
 /* реальный оборот (майская акция) */
 #realTable th.a-left,#realTable td.a-left{text-align:left}
 #realTable th.a-right,#realTable td.a-right{text-align:right}
@@ -5593,7 +5625,7 @@ function _gauge(val,max,color,label,sub){
   const nx=(100+70*Math.cos(rad)).toFixed(1), ny=(100-70*Math.sin(rad)).toFixed(1);
   return `<div class="gauge">
     <svg viewBox="0 0 200 108" class="gauge-svg" aria-hidden="true">
-      <path d="M20 100 A80 80 0 0 1 180 100" fill="none" stroke="var(--sand-l)" stroke-width="14" stroke-linecap="round"/>
+      <path d="M20 100 A80 80 0 0 1 180 100" fill="none" stroke="var(--g-track,#ECE1C6)" stroke-width="14" stroke-linecap="round"/>
       <path d="M20 100 A80 80 0 0 1 180 100" fill="none" stroke="${color}" stroke-width="14" stroke-linecap="round" stroke-dasharray="${(frac*arcLen).toFixed(1)} ${arcLen.toFixed(1)}"/>
       <line x1="100" y1="100" x2="${nx}" y2="${ny}" stroke="var(--coal)" stroke-width="3.2" stroke-linecap="round"/>
       <circle cx="100" cy="100" r="6" fill="var(--coal)"/>
@@ -5621,14 +5653,14 @@ function renderGoals(){
     </div>`;
   // 6 спидометров в две строки по 3
   h+=`<div class="gaugerow gr-3">`
-    +_gauge(F.records, goal, "var(--green)", "Детей в расписании", "записей · цель "+goal)
-    +_gauge(F.silent, F.records, "#9A948A", "Молчат", "из "+F.records+" — без ответа")
-    +_gauge(F.sent, F.records, "var(--blue)", "Отправлено", "из "+F.records+" записей")
+    +_gauge(F.records, goal, "#1C1B18", "Детей в расписании", "записей · цель "+goal)
+    +_gauge(F.silent, F.records, "#B4AC9C", "Молчат", "из "+F.records+" — без ответа")
+    +_gauge(F.sent, F.records, "#E3B23C", "Отправлено", "из "+F.records+" записей")
     +`</div>`;
   h+=`<div class="gaugerow gr-3">`
-    +_gauge(F.nmYes, F.nonMay, "var(--green)", "Подтвердили", "без майского · из "+F.nonMay)
-    +_gauge(F.nmNo, F.nonMay, "var(--red)", "Отказ", "без майского · из "+F.nonMay)
-    +_gauge(F.nmMaybe, F.nonMay, "#C9922E", "Думают", "без майского · из "+F.nonMay)
+    +_gauge(F.nmYes, F.nonMay, "#4F9E63", "Подтвердили", "без майского · из "+F.nonMay)
+    +_gauge(F.nmNo, F.nonMay, "#C6553F", "Отказ", "без майского · из "+F.nonMay)
+    +_gauge(F.nmMaybe, F.nonMay, "#E0A02E", "Думают", "без майского · из "+F.nonMay)
     +`</div>`;
   // отдельные показатели: уникальные дети и мест на ребёнка
   h+=`<div class="goalstats">
