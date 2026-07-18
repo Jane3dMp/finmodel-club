@@ -136,6 +136,22 @@ small.note{font-size:11px;color:var(--muted)}
 .gridlegend{display:flex;gap:14px;font-size:12px;color:var(--muted);margin-left:auto;flex-wrap:wrap;align-items:center}
 .gridlegend span{display:inline-flex;align-items:center;gap:5px}
 .gridlegend i{width:9px;height:9px;border-radius:3px;display:inline-block}
+/* дни + фильтр — единый блок прямо над сеткой */
+.grid-controls{display:flex;flex-direction:column;gap:10px;margin-bottom:12px}
+.grid-day-h{font-size:15px;margin:0}
+.grid-controls .dayTabs,.grid-controls .gridbar{margin-bottom:0}
+/* сворачиваемые предупреждения (перехлёсты/пересечения, двухразовые курсы) */
+details.cwarn{background:var(--sand-l);border:1px solid var(--line);border-left:4px solid var(--red);border-radius:8px;margin-bottom:10px;overflow:hidden}
+details.cwarn.info{border-left-color:var(--blue)}
+details.cwarn.ok{border-left-color:var(--green)}
+details.cwarn>summary{cursor:pointer;padding:9px 14px;font-size:13px;font-weight:600;color:var(--red);list-style:none;display:flex;align-items:center;gap:8px;user-select:none}
+details.cwarn.info>summary{color:var(--blue)}
+details.cwarn.ok>summary{color:var(--green);cursor:default}
+details.cwarn>summary::-webkit-details-marker{display:none}
+details.cwarn.ok>summary::after{content:''}
+details.cwarn>summary::after{content:'▸';margin-left:auto;color:var(--muted);font-size:11px;transition:transform .15s}
+details.cwarn[open]>summary::after{transform:rotate(90deg)}
+details.cwarn .cwarn-body{padding:0 14px 12px}
 .dayb.on{background:var(--coal);color:#fff;border-color:var(--coal)}
 .dayb .badge{background:var(--coal);color:#fff;border-radius:9px;padding:0 6px;font-size:10px;margin-left:4px}
 .dayb.on .badge{background:rgba(255,255,255,.3)}
@@ -595,15 +611,18 @@ details.client .cli-badges{margin-left:auto;font-size:12px;color:var(--muted)}
   <button class="kidsearch-clear" type="button" title="Очистить" onclick="clearKidSearch()">×</button>
   <div id="kidSearchResults" class="kidsearch-res"></div>
  </div>
- <div class="dayTabs" id="dayTabs"></div>
- <div class="gridbar" id="gridEcoBar"></div>
  <div id="vbTodo" class="vbtodo"></div>
  <div id="conflictBanner"></div>
+ <div id="visitcheck"></div>
  <div class="card">
-  <h3 id="gridDayTitle">День</h3>
   <div id="unassigned"></div>
   <div id="offgrid"></div>
-  <div id="visitcheck"></div>
+  <!-- дни + фильтр по бренду — прямо над сеткой -->
+  <div class="grid-controls">
+   <h3 id="gridDayTitle" class="grid-day-h">День</h3>
+   <div class="dayTabs" id="dayTabs"></div>
+   <div class="gridbar" id="gridEcoBar"></div>
+  </div>
   <div class="tscroll"><table id="gridTable"></table></div>
   <small class="note">Клик по пустой ячейке — добавить занятие. Клик по занятию — редактировать. ЗП за занятие зависит от числа детей (вкладка «Педсостав» → справочник ставок).</small>
  </div>
@@ -3234,10 +3253,10 @@ function renderGrid(){
       if(v>=2 && n%2!==0) warn.push({name, n});
     });
     if(warn.length){
-      let w=`<div class="callout" style="border-left-color:var(--blue)"><b style="color:var(--blue)">ℹ Проверьте двухразовые курсы.</b> У этих курсов в карточке стоит «2×/нед», но в расписании за неделю нечётное число занятий — возможно, где-то у группы стоит только одна плитка вместо двух:<ul style="margin:6px 0 0 18px;font-size:12px;line-height:1.6">`;
-      warn.forEach(x=>{ w+=`<li><b>${esc(x.name)}</b> — ${x.n} занят. в неделю (нечётное)</li>`; });
-      w+=`</ul><div class="muted" style="font-size:11px;margin-top:4px">Подсказка не покрывает все случаи: если две разные группы и у обеих по одному занятию, число будет чётным, но обе неполные. Сверяйтесь с фактом по группам.</div></div>`;
-      vBox.innerHTML=w;
+      let body=`У этих курсов в карточке стоит «2×/нед», но в расписании за неделю нечётное число занятий — возможно, где-то у группы стоит только одна плитка вместо двух:<ul style="margin:6px 0 0 18px;font-size:12px;line-height:1.6">`;
+      warn.forEach(x=>{ body+=`<li><b>${esc(x.name)}</b> — ${x.n} занят. в неделю (нечётное)</li>`; });
+      body+=`</ul><div class="muted" style="font-size:11px;margin-top:4px">Подсказка не покрывает все случаи: если две разные группы и у обеих по одному занятию, число будет чётным, но обе неполные. Сверяйтесь с фактом по группам.</div>`;
+      vBox.innerHTML=`<details class="cwarn info" ${_warnOpen('vc')?'open':''} ontoggle="_warnToggle('vc',this.open)"><summary>ℹ Проверьте двухразовые курсы — ${warn.length}</summary><div class="cwarn-body">${body}</div></details>`;
     } else vBox.innerHTML="";
   }
 
@@ -6087,28 +6106,32 @@ function _childConflicts(){
   });
   return out;
 }
+/* состояние «свёрнуто/развёрнуто» для предупреждений (запоминается) — свёрнуто по умолчанию */
+function _warnOpen(k){ try{ return localStorage.getItem("warn_"+k)==="1"; }catch(e){ return false; } }
+function _warnToggle(k,v){ try{ localStorage.setItem("warn_"+k, v?"1":"0"); }catch(e){} }
 function renderConflictBanner(){
   const box=document.getElementById("conflictBanner"); if(!box) return;
   const c=findConflicts();
   const rt=Object.keys(c);          // пересечения педагогов/кабинетов (по индексу занятия)
   const kc=_childConflicts();       // перехлёсты у детей по времени
   const dayNames=["","Понедельник","Вторник","Среда","Четверг","Пятница","Суббота","Воскресенье"];
-  if(!rt.length && !kc.length){ box.innerHTML=`<div class="callout" style="border-left-color:var(--green)"><b style="color:var(--green)">✓ Конфликтов нет</b> — педагоги, кабинеты и дети по времени не пересекаются.</div>`; return; }
-  let html=`<div class="callout" style="border-left-color:var(--red)">`;
+  if(!rt.length && !kc.length){ box.innerHTML=`<details class="cwarn ok" open><summary>✓ Конфликтов нет — педагоги, кабинеты и дети по времени не пересекаются</summary></details>`; return; }
   const gl=g=>esc(g.course)+(g.group?(" "+esc(g.group)):"");
+  let body="";
   if(kc.length){
-    html+=`<b style="color:var(--red)">⚠ Перехлёсты у детей: ${kc.length}</b> — ребёнок в одно время в двух занятиях:
+    body+=`<b style="color:var(--red)">⚠ Перехлёсты у детей: ${kc.length}</b> — ребёнок в одно время в двух занятиях:
       <ul style="margin:6px 0 0 18px;font-size:12px;line-height:1.6">`
       +kc.slice(0,20).map(x=>`<li><b>${esc(x.name)}</b> · ${dayNames[x.day]}: «${gl(x.a)}» ${esc(x.a.start)}–${esc(x.a.end)} ✕ «${gl(x.b)}» ${esc(x.b.start)}–${esc(x.b.end)}</li>`).join("")
       +`</ul>${kc.length>20?`<div class="muted" style="font-size:11px;margin-top:4px">…и ещё ${kc.length-20}</div>`:""}`;
   }
   if(rt.length){
-    html+=`${kc.length?'<div style="height:8px"></div>':''}<b style="color:var(--red)">⚠ Пересечения педагогов/кабинетов: ${rt.length}</b>
+    body+=`${kc.length?'<div style="height:8px"></div>':''}<b style="color:var(--red)">⚠ Пересечения педагогов/кабинетов: ${rt.length}</b>
       <ul style="margin:6px 0 0 18px;font-size:12px;line-height:1.6">`
       +rt.slice(0,12).map(i=>{ const l=S.grid[i]; return `<li><b>${dayNames[l.day]} ${l.start}</b> · ${esc(l.course)}: ${[...new Set(c[i])].map(esc).join("; ")}</li>`; }).join("")
       +`</ul>${rt.length>12?`<div class="muted" style="font-size:11px;margin-top:4px">…и ещё ${rt.length-12}</div>`:""}`;
   }
-  box.innerHTML=html+`</div>`;
+  const sum=[kc.length?("перехлёсты у детей: "+kc.length):"",rt.length?("пересечения педагогов/кабинетов: "+rt.length):""].filter(Boolean).join(" · ");
+  box.innerHTML=`<details class="cwarn" ${_warnOpen('confl')?'open':''} ontoggle="_warnToggle('confl',this.open)"><summary>⚠ Конфликты — ${sum}</summary><div class="cwarn-body">${body}</div></details>`;
 }
 
 
