@@ -588,8 +588,13 @@ details.client .cli-badges{margin-left:auto;font-size:12px;color:var(--muted)}
 
 <!-- ===== НАБОР — мотивационный дашборд целей (менеджеры) ===== -->
 <section class="panel" id="goals">
- <h2 class="sec"><span data-ic="target"></span>Набор — цели и движение</h2>
- <div class="sec-desc">Две цели сезона и как мы к ним идём: вернуть прошлогодних (майские + подтвердившие продолжение) и набрать новых. Клик по названию группы внизу открывает карточку занятия.</div>
+ <h2 class="sec"><span data-ic="target"></span>Набор — движение</h2>
+ <div class="sec-desc">Кто точно подтвердил участие и как идёт воронка. Клик по названию группы открывает карточку занятия.</div>
+ <div class="kidsearch">
+  <input type="search" class="kidsearch-in" placeholder="🔍 Найти ребёнка по ФИО — ищет во всех днях недели" oninput="renderKidSearchEl(this)" autocomplete="off">
+  <button class="kidsearch-clear" type="button" title="Очистить" onclick="clearKidSearchEl(this)">×</button>
+  <div class="kidsearch-res"></div>
+ </div>
  <div id="goalsBody"></div>
 </section>
 
@@ -676,6 +681,11 @@ details.client .cli-badges{margin-left:auto;font-size:12px;color:var(--muted)}
 <section class="panel" id="groups">
  <h2 class="sec">Группы</h2>
  <div class="sec-desc">Все группы, собранные из расписания: курс, педагог, дни и время, сколько детей вписано (из «мест») и сколько с 💰. Клик по «→» открывает группу в сетке.</div>
+ <div class="kidsearch">
+  <input type="search" class="kidsearch-in" placeholder="🔍 Найти ребёнка по ФИО — ищет во всех днях недели" oninput="renderKidSearchEl(this)" autocomplete="off">
+  <button class="kidsearch-clear" type="button" title="Очистить" onclick="clearKidSearchEl(this)">×</button>
+  <div class="kidsearch-res"></div>
+ </div>
  <div id="groupsBody"></div>
 </section>
 
@@ -4412,27 +4422,31 @@ function _ksHlName(name,q){
 }
 function clearKidSearch(){
   const inp=document.getElementById("kidSearchInput");
-  if(inp) inp.value="";
-  renderKidSearch();
-  if(inp) inp.focus();
+  if(inp){ inp.value=""; renderKidSearchEl(inp); inp.focus(); }
+}
+/* очистка ЛЮБОГО поля поиска (по обёртке .kidsearch) */
+function clearKidSearchEl(btn){
+  const wrap=btn&&btn.closest(".kidsearch"); if(!wrap) return;
+  const inp=wrap.querySelector(".kidsearch-in"); if(!inp) return;
+  inp.value=""; renderKidSearchEl(inp); inp.focus();
 }
 function refreshKidSearch(){
   const inp=document.getElementById("kidSearchInput");
-  if(inp && inp.value.trim().length>=2) renderKidSearch();
+  if(inp && inp.value.trim().length>=2) renderKidSearchEl(inp);
 }
-function renderKidSearch(){
-  const inp=document.getElementById("kidSearchInput");
-  const box=document.getElementById("kidSearchResults");
-  if(!inp||!box) return;
-  const wrap=inp.closest(".kidsearch");
+function renderKidSearch(){ const inp=document.getElementById("kidSearchInput"); if(inp) renderKidSearchEl(inp); }
+/* универсальный поиск ребёнка: работает с любым полем .kidsearch-in (на любой вкладке) */
+function renderKidSearchEl(inp){
+  const wrap=inp&&inp.closest(".kidsearch"); if(!wrap) return;
+  const box=wrap.querySelector(".kidsearch-res"); if(!box) return;
   const raw=inp.value.trim();
-  if(wrap) wrap.classList.toggle("has-q", raw.length>0);
+  wrap.classList.toggle("has-q", raw.length>0);
   const q=_ksNorm(raw);
   if(q.length<2){ box.innerHTML = raw.length ? '<div class="ksr-empty">Введите минимум 2 буквы</div>' : ''; return; }
   const hits=[];
-  (S.grid||[]).forEach((l,idx)=>{
+  (S.grid||[]).forEach(l=>{
     kidsOf(l).forEach(k=>{
-      if(_ksNorm(k.n).includes(q)) hits.push({idx, day:l.day||0, name:String(k.n||""), start:l.start||"", end:l.end||"", room:l.room||"—", course:l.course||"", teacher:l.teacher||"", no:!!k.no});
+      if(_ksNorm(k.n).includes(q)) hits.push({id:l.id||"", day:l.day||0, name:String(k.n||""), start:l.start||"", end:l.end||"", room:l.room||"—", course:l.course||"", teacher:l.teacher||"", no:!!k.no});
     });
   });
   if(!hits.length){ box.innerHTML='<div class="ksr-empty">Ничего не найдено по «'+esc(raw)+'»</div>'; return; }
@@ -4442,13 +4456,16 @@ function renderKidSearch(){
   let cur=-1;
   hits.forEach(h=>{
     if(h.day!==cur){ cur=h.day; html+='<div class="ksr-day">'+esc(DAY_FULL[h.day]||("День "+h.day))+'</div>'; }
-    html+='<div class="ksr-item'+(h.no?' ksr-no':'')+'" onclick="gotoKidLesson('+h.idx+')" title="Перейти к занятию в сетке">'
+    const jid=esc(h.id).replace(/'/g,"\\'");
+    html+='<div class="ksr-item'+(h.no?' ksr-no':'')+'" onclick="gotoKidLessonId(\''+jid+'\')" title="Перейти к занятию в сетке">'
       +'<span class="ksr-name">'+_ksHlName(h.name,raw)+(h.no?' <span style="font-size:10px">(не придёт)</span>':'')+'</span>'
       +'<span class="ksr-meta">'+esc(h.course)+' · '+esc(h.start)+'–'+esc(h.end)+' · каб. '+esc(h.room)+' · '+esc(shortName(h.teacher))+'</span>'
       +'</div>';
   });
   box.innerHTML=html;
 }
+/* переход к занятию по стабильному id (индекс считаем в момент клика — не «скачет») */
+function gotoKidLessonId(id){ const idx=_lesIdx(id); if(idx<0){ toast("Занятие не найдено"); return; } gotoKidLesson(idx); }
 function gotoKidLesson(idx){
   const les=(S.grid||[])[idx];
   if(!les) return;
@@ -5518,6 +5535,8 @@ function _confirmedCount(){
   const unplaced=(typeof _mayUnplacedByCourse==='function')?Object.values(_mayUnplacedByCourse()).reduce((a,b)=>a+b,0):0;
   return Object.values(map).filter(o=>!o.no && (o.may||o.yes)).length + unplaced;
 }
+let _goalsEco="";   // фильтр «Движения по группам» по бренду
+function setGoalsEco(v){ _goalsEco=v||""; renderGoals(); }
 function renderGoals(){
   const box=document.getElementById("goalsBody"); if(!box) return;
   const {rows,T}=_ownerReport();
@@ -5539,14 +5558,20 @@ function renderGoals(){
     +kpi("Отказ / думают",T.no+" / "+T.maybe,"red","🔴 / 🟡")
     +kpi("Молчат",String(T.none),"coal","ждут ответа")
     +`</div>`;
-  // движение по группам — клик по названию открывает карточку занятия
+  // движение по группам — с фильтром по бренду; клик по названию открывает карточку занятия
   const dn=["","Пн","Вт","Ср","Чт","Пт","Сб","Вс"];
   const tName=t=>(typeof shortName==="function"?shortName(t):t)||"";
-  h+=`<h3 style="font-size:15px;margin:6px 0 10px;display:flex;align-items:center;gap:8px"><span data-ic="report"></span>Движение по группам</h3>
+  const eb=(v,lab)=>`<button class="${_goalsEco===v?'on':''}" onclick="setGoalsEco('${v}')">${lab}</button>`;
+  const frows=_goalsEco?rows.filter(r=>_courseEcoOf(r.course)===_goalsEco):rows;
+  h+=`<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:6px 0 10px">
+      <h3 style="font-size:15px;margin:0;display:flex;align-items:center;gap:8px"><span data-ic="report"></span>Движение по группам</h3>
+      <div class="ecofilt" style="margin-left:auto" title="Показать группы только выбранного направления">${eb('','Все')}${eb('Прознание','Прознание')}${eb('CODDY','CODDY')}${eb('Детали','Детали')}</div>
+    </div>
     <div class="tscroll"><table style="width:100%;border-collapse:collapse;font-size:12px">
     <thead><tr>${['Группа','Курс','Педагог','День·время','Записано','🟢','🔴','🟡','Молчат','Заполн.'].map((t,i)=>`<th style="background:var(--graphite);color:#fff;padding:6px 8px;text-align:${i<4?'left':'center'};position:sticky;top:0">${t}</th>`).join("")}</tr></thead><tbody>`;
   const td=(v,al)=>`<td style="padding:5px 8px;border-bottom:1px solid var(--line);text-align:${al||'left'}">${v}</td>`;
-  rows.forEach(r=>{
+  if(!frows.length) h+=`<tr><td colspan="10" style="text-align:center;color:var(--muted);padding:14px">Нет групп выбранного направления</td></tr>`;
+  frows.forEach(r=>{
     const nm=r.id?`<span class="grp-name" title="Открыть карточку занятия" onclick="editLes(_lesIdx('${esc(r.id)}'))"><b>${esc(r.name)}</b></span>`:`<b>${esc(r.name)}</b>`;
     h+=`<tr style="${r.risk?'background:#fdecea':''}">`
       +td((r.risk?'⚠ ':'')+nm)+td(esc(r.course))+td(esc(tName(r.teacher)))+td((dn[r.day]||'')+' '+esc(r.time||''))
