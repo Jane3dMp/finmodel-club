@@ -267,24 +267,6 @@ switch ($action) {
             }
             usort($mayPays, fn($a, $b) => strcmp((string)$b['date'], (string)$a['date']));
 
-            // ВРЕМЕННАЯ разведка: связь «майский платёж (ctt_id) → абонемент → курс».
-            // customer-tariff по customer_id/id пуст → пробуем сущность ctt и тарифы. Уберём, когда найдём.
-            $probe2 = [];
-            $dumpN = function ($rr, $n = 1) {
-                $its = is_array($rr['items'] ?? null) ? $rr['items'] : [];
-                return ['err' => $rr['__err'] ?? null, 'total' => $rr['total'] ?? null, 'count' => count($its),
-                        'keys0' => (count($its) && is_array($its[0] ?? null)) ? array_keys($its[0]) : null,
-                        'raw' => array_slice($its, 0, $n)];
-            };
-            $firstCtt = 0; foreach ($pays as $p) { $c3 = (int)($p['ctt_id'] ?? 0); if ($c3) { $firstCtt = $c3; break; } }
-            foreach ($brList as $br) {
-                $hb = 'https://' . alfa_host() . '/v2api/' . $br;
-                $probe2["ctt_cust_b$br"] = $dumpN(alfa_http('POST', "$hb/ctt/index", ['customer_id' => $cid, 'page' => 0, 'count' => 20], $token, true, 5), 2);
-                if ($firstCtt) $probe2["ctt_byid_b$br"] = $dumpN(alfa_http('POST', "$hb/ctt/index", ['id' => $firstCtt, 'page' => 0, 'count' => 3], $token, true, 5), 1);
-            }
-            $probe2['custtar_global'] = $dumpN(alfa_http('POST', 'https://' . alfa_host() . '/v2api/customer-tariff/index', ['customer_id' => $cid, 'page' => 0, 'count' => 20], $token, true, 5), 2);
-            $probe2['tariffs'] = $dumpN(alfa_http('POST', 'https://' . alfa_host() . '/v2api/' . $brList[0] . '/tariff/index', ['page' => 0, 'count' => 300], $token, true, 6), 3);
-
             // «Абонементы с 1 сентября» = курсы договора из кастомного поля клиента custom_dogovora
             // (у клуба сущность абонемента не ведётся — customer-tariff пуст даже по ctt_id платежа).
             // custom_dogovora = JSON-массив названий курсов, напр. ["7 навыков…","Roblox + Blender"].
@@ -345,7 +327,7 @@ switch ($action) {
                   'summary' => $summary, 'history' => $history, 'active' => $active, 'custom' => $custom,
                   'subs' => $subs, 'subsArch' => $subsArch, 'paySrc' => $paySrc,
                   'mayPays' => $mayPays ?? [], 'dogovora' => $dogovora ?? [], 'school' => $school ?? '', 'klass' => $klass ?? '', 'from' => $from, 'to' => $to,
-                  'debug' => ['cgi' => count($cgiItems), 'lessons' => count($lesItems), 'groups' => count($gid), 'active' => count($active), 'today' => $today, 'tariffCount' => $tariffCount, 'payCount' => $payCount, 'custBranches' => $brList, 'ct' => $ctDbg, 'probe2' => $probe2 ?? null]]);
+                  'debug' => ['cgi' => count($cgiItems), 'lessons' => count($lesItems), 'groups' => count($gid), 'active' => count($active), 'today' => $today, 'tariffCount' => $tariffCount, 'payCount' => $payCount, 'custBranches' => $brList, 'ct' => $ctDbg]]);
         break;
 
     // --- СОЗДАТЬ НОВОГО КЛИЕНТА (ребёнка) в Alfa (WRITE) ---
