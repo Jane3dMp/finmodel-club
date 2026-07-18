@@ -334,82 +334,82 @@ details.cwarn .cwarn-body{padding:0 14px 12px}
 #courseTable th.c-lyrev,#courseTable td.c-lyrev{width:88px;min-width:88px}
 #courseTable td.c-price input,#courseTable td.c-single input,#courseTable td.c-sub input,#courseTable td.c-groups input,#courseTable td.c-fill input{width:100%}
 
-/* спидометры набора */
-#goals #goalsBody{max-width:940px;margin:0 auto}   /* сузить дашборд, свободные поля по бокам */
-#goals .gaugerow{display:grid;gap:14px;margin-bottom:14px;justify-content:center}
-#goals .gaugerow.gr-3{grid-template-columns:repeat(3,minmax(180px,290px))}
-#goals .goalstats{margin-top:8px}
-@media(max-width:720px){#goals .gaugerow.gr-3{grid-template-columns:repeat(auto-fit,minmax(150px,1fr))}}
-#goals .gauge{background:#fff;border:1px solid var(--line);border-radius:14px;padding:14px 12px 15px;text-align:center;box-shadow:0 1px 3px rgba(28,20,16,.04)}
-#goals .gauge-svg{width:100%;max-width:184px;height:auto;display:block;margin:0 auto}
-#goals .gauge-val{font-size:30px;font-weight:800;letter-spacing:-.02em;line-height:1;margin-top:-4px;font-variant-numeric:tabular-nums}
-#goals .gauge-val .gauge-max{font-size:14px;font-weight:600;color:var(--muted);margin-left:3px}
-#goals .gauge-lab{font-size:11.5px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);font-weight:700;margin-top:6px}
-#goals .gauge-sub{font-size:11px;color:var(--muted);margin-top:2px}
-#goals .goalstats{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;margin-bottom:22px}
-#goals .gs{background:#fff;border:1px solid var(--line);border-radius:12px;padding:13px 16px}
-#goals .gs-lab{display:block;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);font-weight:600}
-#goals .gs-val{display:block;font-size:26px;font-weight:800;letter-spacing:-.02em;margin-top:3px;font-variant-numeric:tabular-nums}
-#goals .gs-sub{display:block;font-size:11px;color:var(--muted);margin-top:2px}
+/* спидометры набора / отчёта по набору (общий дашборд #goals + #report) */
+:is(#goals #goalsBody,#report #reportBody){max-width:940px;margin:0 auto}   /* сузить дашборд, свободные поля по бокам */
+:is(#goals,#report) .gaugerow{display:grid;gap:14px;margin-bottom:14px;justify-content:center}
+:is(#goals,#report) .gaugerow.gr-3{grid-template-columns:repeat(3,minmax(180px,290px))}
+:is(#goals,#report) .goalstats{margin-top:8px}
+@media(max-width:720px){:is(#goals,#report) .gaugerow.gr-3{grid-template-columns:repeat(auto-fit,minmax(150px,1fr))}}
+:is(#goals,#report) .gauge{background:#fff;border:1px solid var(--line);border-radius:14px;padding:14px 12px 15px;text-align:center;box-shadow:0 1px 3px rgba(28,20,16,.04)}
+:is(#goals,#report) .gauge-svg{width:100%;max-width:184px;height:auto;display:block;margin:0 auto}
+:is(#goals,#report) .gauge-val{font-size:30px;font-weight:800;letter-spacing:-.02em;line-height:1;margin-top:-4px;font-variant-numeric:tabular-nums}
+:is(#goals,#report) .gauge-val .gauge-max{font-size:14px;font-weight:600;color:var(--muted);margin-left:3px}
+:is(#goals,#report) .gauge-lab{font-size:11.5px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);font-weight:700;margin-top:6px}
+:is(#goals,#report) .gauge-sub{font-size:11px;color:var(--muted);margin-top:2px}
+:is(#goals,#report) .goalstats{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;margin-bottom:22px}
+:is(#goals,#report) .gs{background:#fff;border:1px solid var(--line);border-radius:12px;padding:13px 16px}
+:is(#goals,#report) .gs-lab{display:block;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);font-weight:600}
+:is(#goals,#report) .gs-val{display:block;font-size:26px;font-weight:800;letter-spacing:-.02em;margin-top:3px;font-variant-numeric:tabular-nums}
+:is(#goals,#report) .gs-sub{display:block;font-size:11px;color:var(--muted);margin-top:2px}
 
 /* мотивационный дашборд набора */
-#goals .goaltop{display:flex;align-items:center;gap:16px;background:var(--graphite);color:#fff;border-radius:14px;padding:16px 22px;margin-bottom:16px}
-#goals .goaltop-lab{font-size:11px;text-transform:uppercase;letter-spacing:.06em;opacity:.7}
-#goals .goaltop-num{font-size:30px;font-weight:800;letter-spacing:-.02em;font-variant-numeric:tabular-nums;line-height:1.1}
-#goals .goaltop-num span{font-size:16px;font-weight:600;opacity:.6}
-#goals .goaltop-bar{flex:1;height:12px;background:rgba(255,255,255,.15);border-radius:8px;overflow:hidden}
-#goals .goaltop-bar i{display:block;height:100%;background:linear-gradient(90deg,#3B7A57,#1F5BC0);border-radius:8px;transition:width .5s}
-#goals .goaltop-pct{font-size:24px;font-weight:800;font-variant-numeric:tabular-nums}
-#goals .goalgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:16px;margin-bottom:18px}
-#goals .goalcard{background:#fff;border:1px solid var(--line);border-radius:16px;padding:20px 22px;box-shadow:0 1px 3px rgba(28,20,16,.04)}
-#goals .goalcard-top{display:flex;align-items:center;gap:20px}
-#goals .donut{position:relative;width:156px;height:156px;flex:none}
-#goals .donut-c{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center}
-#goals .donut-c .dn{font-size:40px;font-weight:800;line-height:1;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
-#goals .donut-c .dd{font-size:12px;color:var(--muted);margin-top:3px;display:flex;align-items:center;gap:4px}
-#goals .donut-c .dd input{width:56px;padding:2px 4px;font-size:12px}
-#goals .goal-title{font-size:17px;font-weight:700;letter-spacing:-.01em}
-#goals .goal-pct{font-size:34px;font-weight:800;letter-spacing:-.02em;margin-top:2px;line-height:1}
-#goals .goal-left{font-size:13px;color:var(--muted);margin-top:4px}
-#goals .goalbreak{margin-top:18px;display:flex;flex-direction:column;gap:9px}
-#goals .gb{display:flex;align-items:center;gap:10px;font-size:12.5px}
-#goals .gb .gb-lab{width:160px;color:var(--text);flex:none}
-#goals .gb .gb-bar{flex:1;height:8px;background:var(--sand-l);border-radius:6px;overflow:hidden}
-#goals .gb .gb-bar i{display:block;height:100%;border-radius:6px;transition:width .5s}
-#goals .gb .gb-val{width:34px;text-align:right;font-weight:700;font-variant-numeric:tabular-nums}
-@media(max-width:560px){#goals .goalcard-top{flex-direction:column;text-align:center}#goals .gb .gb-lab{width:120px}}
+:is(#goals,#report) .goaltop{display:flex;align-items:center;gap:16px;background:var(--graphite);color:#fff;border-radius:14px;padding:16px 22px;margin-bottom:16px}
+:is(#goals,#report) .goaltop-lab{font-size:11px;text-transform:uppercase;letter-spacing:.06em;opacity:.7}
+:is(#goals,#report) .goaltop-num{font-size:30px;font-weight:800;letter-spacing:-.02em;font-variant-numeric:tabular-nums;line-height:1.1}
+:is(#goals,#report) .goaltop-num span{font-size:16px;font-weight:600;opacity:.6}
+:is(#goals,#report) .goaltop-bar{flex:1;height:12px;background:rgba(255,255,255,.15);border-radius:8px;overflow:hidden}
+:is(#goals,#report) .goaltop-bar i{display:block;height:100%;background:linear-gradient(90deg,#3B7A57,#1F5BC0);border-radius:8px;transition:width .5s}
+:is(#goals,#report) .goaltop-pct{font-size:24px;font-weight:800;font-variant-numeric:tabular-nums}
+:is(#goals,#report) .goalgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:16px;margin-bottom:18px}
+:is(#goals,#report) .goalcard{background:#fff;border:1px solid var(--line);border-radius:16px;padding:20px 22px;box-shadow:0 1px 3px rgba(28,20,16,.04)}
+:is(#goals,#report) .goalcard-top{display:flex;align-items:center;gap:20px}
+:is(#goals,#report) .donut{position:relative;width:156px;height:156px;flex:none}
+:is(#goals,#report) .donut-c{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center}
+:is(#goals,#report) .donut-c .dn{font-size:40px;font-weight:800;line-height:1;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+:is(#goals,#report) .donut-c .dd{font-size:12px;color:var(--muted);margin-top:3px;display:flex;align-items:center;gap:4px}
+:is(#goals,#report) .donut-c .dd input{width:56px;padding:2px 4px;font-size:12px}
+:is(#goals,#report) .goal-title{font-size:17px;font-weight:700;letter-spacing:-.01em}
+:is(#goals,#report) .goal-pct{font-size:34px;font-weight:800;letter-spacing:-.02em;margin-top:2px;line-height:1}
+:is(#goals,#report) .goal-left{font-size:13px;color:var(--muted);margin-top:4px}
+:is(#goals,#report) .goalbreak{margin-top:18px;display:flex;flex-direction:column;gap:9px}
+:is(#goals,#report) .gb{display:flex;align-items:center;gap:10px;font-size:12.5px}
+:is(#goals,#report) .gb .gb-lab{width:160px;color:var(--text);flex:none}
+:is(#goals,#report) .gb .gb-bar{flex:1;height:8px;background:var(--sand-l);border-radius:6px;overflow:hidden}
+:is(#goals,#report) .gb .gb-bar i{display:block;height:100%;border-radius:6px;transition:width .5s}
+:is(#goals,#report) .gb .gb-val{width:34px;text-align:right;font-weight:700;font-variant-numeric:tabular-nums}
+@media(max-width:560px){:is(#goals,#report) .goalcard-top{flex-direction:column;text-align:center}:is(#goals,#report) .gb .gb-lab{width:120px}}
 
-/* ===== «Набор»: тёплая тема — кремовый + чёрный + жёлтый (референс Crextio) ===== */
-#goals{--g-cream:#FAF6EC;--g-ink:#1C1B18;--g-dark:#24221D;--g-gold:#F1CE55;--g-gold-s:#F7E29A;--g-track:#ECE1C6;--g-line:#EEE4CB;--g-muted:#8C8677;
+/* ===== «Набор» + «Отчёт»: тёплая тема — кремовый + чёрный + жёлтый (референс Crextio) ===== */
+#goals,#report{--g-cream:#FAF6EC;--g-ink:#1C1B18;--g-dark:#24221D;--g-gold:#F1CE55;--g-gold-s:#F7E29A;--g-track:#ECE1C6;--g-line:#EEE4CB;--g-muted:#8C8677;
   background:linear-gradient(140deg,#FCFAF3 0%,#FAF5E6 44%,#F3E6BF 100%);
   border-radius:26px;border:1px solid var(--g-line);box-shadow:0 10px 34px rgba(70,58,20,.07);
   padding:22px 26px 30px;margin-top:6px}
-#goals h2.sec{font-size:27px;letter-spacing:-.025em;color:var(--g-ink);margin-bottom:2px}
-#goals .sec-desc{color:var(--g-muted)}
-#goals .kidsearch{max-width:940px;margin-left:auto;margin-right:auto}
+:is(#goals,#report) h2.sec{font-size:27px;letter-spacing:-.025em;color:var(--g-ink);margin-bottom:2px}
+:is(#goals,#report) .sec-desc{color:var(--g-muted)}
+:is(#goals,#report) .kidsearch{max-width:940px;margin-left:auto;margin-right:auto}
 /* верхняя полоса подтверждений — тёмная карточка с жёлтой заливкой */
-#goals .goaltop{background:var(--g-dark);border-radius:22px;padding:18px 26px;box-shadow:0 8px 24px rgba(40,34,20,.16)}
-#goals .goaltop-lab{opacity:.55}
-#goals .goaltop-num span{opacity:.5}
-#goals .goaltop-bar{height:14px;background:rgba(255,255,255,.10)}
-#goals .goaltop-bar i{background:linear-gradient(90deg,var(--g-gold-s),var(--g-gold))}
-#goals .goaltop-pct{color:var(--g-gold)}
+:is(#goals,#report) .goaltop{background:var(--g-dark);border-radius:22px;padding:18px 26px;box-shadow:0 8px 24px rgba(40,34,20,.16)}
+:is(#goals,#report) .goaltop-lab{opacity:.55}
+:is(#goals,#report) .goaltop-num span{opacity:.5}
+:is(#goals,#report) .goaltop-bar{height:14px;background:rgba(255,255,255,.10)}
+:is(#goals,#report) .goaltop-bar i{background:linear-gradient(90deg,var(--g-gold-s),var(--g-gold))}
+:is(#goals,#report) .goaltop-pct{color:var(--g-gold)}
 /* спидометры — светлые тёплые карточки */
-#goals .gauge{background:#FFFDF6;border:1px solid var(--g-line);border-radius:22px;padding:16px 14px 17px;box-shadow:0 4px 14px rgba(70,58,20,.05)}
-#goals .gauge-lab{color:var(--g-muted)}
-#goals .gauge-sub{color:#A8A08D}
-/* KPI-плитки (уникальные / записи / места) — крупные числа на креме */
-#goals .goalstats .gs{background:#FFFDF6;border:1px solid var(--g-line);border-radius:20px;padding:15px 18px;box-shadow:0 4px 14px rgba(70,58,20,.05)}
-#goals .goalstats .gs-lab{color:var(--g-muted)}
-#goals .goalstats .gs-val{font-size:32px;color:var(--g-ink)}
-#goals .goalstats .gs-sub{color:#A8A08D}
+:is(#goals,#report) .gauge{background:#FFFDF6;border:1px solid var(--g-line);border-radius:22px;padding:16px 14px 17px;box-shadow:0 4px 14px rgba(70,58,20,.05)}
+:is(#goals,#report) .gauge-lab{color:var(--g-muted)}
+:is(#goals,#report) .gauge-sub{color:#A8A08D}
+/* KPI-плитки — крупные числа на креме */
+:is(#goals,#report) .goalstats .gs{background:#FFFDF6;border:1px solid var(--g-line);border-radius:20px;padding:15px 18px;box-shadow:0 4px 14px rgba(70,58,20,.05)}
+:is(#goals,#report) .goalstats .gs-lab{color:var(--g-muted)}
+:is(#goals,#report) .goalstats .gs-val{font-size:32px;color:var(--g-ink)}
+:is(#goals,#report) .goalstats .gs-sub{color:#A8A08D}
 /* фильтр брендов — пилюли (чёрная активная) */
-#goals .ecofilt{background:#FBF7EC;border-color:var(--g-line);border-radius:999px;padding:4px}
-#goals .ecofilt button{border-radius:999px;padding:6px 16px;color:#5A5548}
-#goals .ecofilt button:hover{background:#F1E9D3}
-#goals .ecofilt button.on{background:var(--g-ink);color:#fff}
+:is(#goals,#report) .ecofilt{background:#FBF7EC;border-color:var(--g-line);border-radius:999px;padding:4px}
+:is(#goals,#report) .ecofilt button{border-radius:999px;padding:6px 16px;color:#5A5548}
+:is(#goals,#report) .ecofilt button:hover{background:#F1E9D3}
+:is(#goals,#report) .ecofilt button.on{background:var(--g-ink);color:#fff}
 /* таблица «движение по группам» — мягче и скруглённее */
-#goals .tscroll{border-radius:18px;border-color:var(--g-line);box-shadow:0 4px 14px rgba(70,58,20,.05);background:#FFFDF6}
+:is(#goals,#report) .tscroll{border-radius:18px;border-color:var(--g-line);box-shadow:0 4px 14px rgba(70,58,20,.05);background:#FFFDF6}
 
 /* реальный оборот (майская акция) */
 #realTable th.a-left,#realTable td.a-left{text-align:left}
@@ -986,25 +986,28 @@ details.client .cli-badges{margin-left:auto;font-size:12px;color:var(--muted)}
  </div>
 </div>
 
-<div class="modal-bg" id="addKidModal">
+<div class="modal-bg" id="addKidModal" style="z-index:90">
  <div class="modal" style="max-width:460px">
   <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
-   <h3 style="margin:0">➕ Новый ребёнок → в группу</h3>
+   <h3 id="akTitle" style="margin:0">➕ Новый ребёнок → в группу</h3>
    <button class="btn ghost sm" style="margin-left:auto" onclick="closeAddKid()">Закрыть</button>
   </div>
-  <p style="font-size:12px;color:var(--muted);margin:0 0 8px;line-height:1.4">Впишет ребёнка в выбранную группу расписания. Сразу появится в «Клиентах», «Группах», «Наборе» и «Расписании». Данные — в этой модели; в Альфу не уходит.</p>
+  <p style="font-size:12px;color:var(--muted);margin:0 0 8px;line-height:1.4">Заполните <b>все</b> поля. Ребёнок сразу появится в «Клиентах», «Группах», «Наборе» и «Расписании». Данные — в этой модели; в Альфу не уходит.</p>
   <label style="font-weight:600">ФИО ребёнка *</label>
-  <input id="akName" class="cell wide" style="margin-bottom:6px" placeholder="Фамилия Имя" onkeydown="if(event.key==='Enter'){event.preventDefault();document.getElementById('akGroup').focus();}">
-  <label style="font-weight:600">Группа *</label>
-  <select id="akGroup" class="cell wide" style="margin-bottom:6px"></select>
+  <input id="akName" class="cell wide" style="margin-bottom:6px" placeholder="Фамилия Имя">
+  <div id="akGroupRow">
+   <label style="font-weight:600">Группа *</label>
+   <select id="akGroup" class="cell wide" style="margin-bottom:6px"></select>
+  </div>
+  <div id="akGroupFixed" style="display:none;margin-bottom:6px;font-size:12px;color:var(--muted)">Группа: <b id="akGroupFixedName" style="color:var(--coal)"></b></div>
   <div class="row2" style="gap:10px">
-   <div><label style="font-weight:600">Телефон <span style="font-weight:400;color:var(--muted)">(необяз.)</span></label><input id="akPhone" class="cell wide" placeholder="+375 29 ..."></div>
-   <div><label style="font-weight:600">Дата рождения</label><input id="akDob" type="date" class="cell wide"></div>
+   <div><label style="font-weight:600">Телефон *</label><input id="akPhone" class="cell wide" placeholder="+375 29 ..."></div>
+   <div><label style="font-weight:600">Дата рождения *</label><input id="akDob" type="date" class="cell wide"></div>
   </div>
   <div id="akResult" style="margin-top:10px;font-size:12px"></div>
   <div class="hd-actions les-foot" style="margin-top:12px">
    <button class="btn ghost sm" onclick="closeAddKid()">Отмена</button>
-   <button class="btn sm" style="margin-left:auto" onclick="saveAddKid()">Добавить в группу</button>
+   <button class="btn sm" id="akSaveBtn" style="margin-left:auto" onclick="saveAddKid()">Добавить в группу</button>
   </div>
  </div>
 </div>
@@ -3806,13 +3809,33 @@ function kidMoveToGroup(kidIndex, targetKey){
   if(typeof renderMay==="function") renderMay();
   toast("Переведён(а): "+(kid.n)+" → "+(target.label||target.course||"группа"));
 }
-/* ---- «Новый ребёнок → в группу»: создать ребёнка и вписать во все занятия выбранной группы ---- */
-function openAddKid(presetKey){
+/* ---- «Новый ребёнок»: единое окно для «в группу» (Клиенты/Группы/Расписание) и «в занятие» (карточка) ---- */
+let _addKidMode="grid";   // "grid" — выбор группы из списка; "lesson" — добавляем в открытую карточку занятия
+function openAddKid(presetKey, mode){
+  _addKidMode=(mode==="lesson")?"lesson":"grid";
   const nm=document.getElementById("akName"); if(nm) nm.value="";
   ["akPhone","akDob"].forEach(id=>{ const e=document.getElementById(id); if(e) e.value=""; });
-  const sel=document.getElementById("akGroup");
-  if(sel){ sel.innerHTML=_gridGroupOptsHtml(); if(presetKey) sel.value=presetKey; }
   const r=document.getElementById("akResult"); if(r) r.textContent="";
+  const row=document.getElementById("akGroupRow"), fixed=document.getElementById("akGroupFixed");
+  const title=document.getElementById("akTitle"), saveBtn=document.getElementById("akSaveBtn");
+  if(_addKidMode==="lesson"){
+    // группа = открытая карточка занятия; выбор группы прячем, показываем фикс-подпись
+    if(row) row.style.display="none";
+    if(fixed){ fixed.style.display="";
+      const idx=(typeof _modalLesIdx==="function")?_modalLesIdx():-1; const l=S.grid&&S.grid[idx];
+      const gn=l?((l.group&&l.group.trim())||l.course||"без номера"):"—";
+      const nmEl=document.getElementById("akGroupFixedName"); if(nmEl) nmEl.textContent=gn;
+    }
+    if(title) title.textContent="➕ Новый ребёнок → в занятие";
+    if(saveBtn) saveBtn.textContent="Добавить";
+  } else {
+    if(fixed) fixed.style.display="none";
+    if(row) row.style.display="";
+    const sel=document.getElementById("akGroup");
+    if(sel){ sel.innerHTML=_gridGroupOptsHtml(); if(presetKey) sel.value=presetKey; }
+    if(title) title.textContent="➕ Новый ребёнок → в группу";
+    if(saveBtn) saveBtn.textContent="Добавить в группу";
+  }
   document.getElementById("addKidModal").classList.add("show");
   if(nm) setTimeout(()=>nm.focus(),30);
 }
@@ -3821,14 +3844,27 @@ function saveAddKid(){
   const r=document.getElementById("akResult");
   const warn=m=>{ if(r){ r.textContent=m; r.style.color="var(--red)"; } };
   const name=cleanKidName((document.getElementById("akName").value||"").trim());
-  const key=document.getElementById("akGroup").value;
+  const phone=(document.getElementById("akPhone").value||"").trim();
+  const dob=(document.getElementById("akDob").value||"").trim();
   if(!name){ warn("Впишите ФИО ребёнка."); return; }
+  if(!phone){ warn("Впишите телефон родителя."); return; }
+  if(!dob){ warn("Укажите дату рождения."); return; }
+  const kid=_blankKid(name); kid.phone=phone; kid.dob=dob;
+  // ── режим «в занятие»: добавляем в редактор открытой карточки (сохранится по «Сохранить») ──
+  if(_addKidMode==="lesson"){
+    if(typeof _kidsFromDOM==="function") _kidsFromDOM();
+    if(_editKids.some(k=>_sameKid(k.n,name))){ warn("«"+name+"» уже есть в этом занятии."); return; }
+    _editKids.push(kid);
+    if(typeof renderKidsEditor==="function") renderKidsEditor();
+    closeAddKid();
+    toast("Добавлен(а): "+name+" (не забудьте «Сохранить»)");
+    return;
+  }
+  // ── режим «в группу»: вписываем во все занятия выбранной группы ──
+  const key=document.getElementById("akGroup").value;
   if(!key){ warn("Выберите группу."); return; }
   const g=_gridGroupList().find(x=>x.key===key);
   if(!g){ warn("Группа не найдена — обновите страницу."); return; }
-  const kid=_blankKid(name);
-  kid.phone=(document.getElementById("akPhone").value||"").trim();
-  kid.dob=(document.getElementById("akDob").value||"").trim();
   let added=0;
   g.idxs.forEach(idx=>{ const l=S.grid[idx]; if(!Array.isArray(l.kids)) l.kids=[];
     if(!l.kids.some(k=>_sameKid(k.n,name))){ l.kids.push(JSON.parse(JSON.stringify(kid))); added++; }
@@ -3839,6 +3875,7 @@ function saveAddKid(){
   if(typeof renderClients==="function") renderClients();
   if(typeof renderMay==="function") renderMay();
   if(typeof renderGoals==="function") renderGoals();
+  if(typeof renderReport==="function") renderReport();
   closeAddKid();
   toast(added===0 ? ("«"+name+"» уже есть в этой группе") : ("Добавлен(а): "+name+" → "+(g.label||g.course||"группа")));
 }
@@ -3882,8 +3919,7 @@ function renderKidsEditor(){
   refreshLesWage();
 }
 function kidFlagChanged(){ _kidsFromDOM(); renderKidsEditor(); }
-function kidAdd(){ _kidsFromDOM(); _editKids.push(_blankKid("")); renderKidsEditor();
-  const inp=document.querySelectorAll("#kidsTable .k-in-name"); if(inp.length) inp[inp.length-1].focus(); }
+function kidAdd(){ openAddKid(null,'lesson'); }   // единое окно (ФИО+телефон+ДР обязательны)
 function kidDel(i){ _kidsFromDOM(); _editKids.splice(i,1); renderKidsEditor(); }
 function kidPasteList(){
   const t=prompt("Вставьте список детей (по одному в строку, нумерация не обязательна):","");
@@ -5558,7 +5594,11 @@ function _reportHTML(forPrint){
   h+=`<p style="font-size:11px;color:var(--muted);margin-top:8px">Оборот/нед = подтвердивших × цена × визитов/нед (из данных курса). «Молчат» = отправлено, но родитель пока не ответил. Группа = поле «Группа» занятия, иначе курс+время.</p>`;
   return h;
 }
-function renderReport(){ const b=document.getElementById("reportBody"); if(!b) return; b.innerHTML=_fbIsAdmin?_reportHTML():'<div class="sec-desc">Отчёт доступен только администратору.</div>'; }
+function renderReport(){ const b=document.getElementById("reportBody"); if(!b) return;
+  if(!_fbIsAdmin){ b.innerHTML='<div class="sec-desc">Отчёт доступен только администратору.</div>'; return; }
+  b.innerHTML=_goalsDashHTML({finance:true, report:true});   // тот же дашборд, что в «Наборе», + финансы и группы риска
+  if(typeof _paintIcons==="function") _paintIcons(b);
+}
 function printReport(){
   const w=window.open("","_blank"); if(!w){ toast("Разрешите всплывающие окна"); return; }
   const css=`body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;padding:20px}
@@ -5700,13 +5740,15 @@ function _gauge(val,max,color,label,sub){
   </div>`;
 }
 let _goalsEco="";   // фильтр «Движения по группам» по бренду
-function setGoalsEco(v){ _goalsEco=v||""; renderGoals(); }
+function setGoalsEco(v){ _goalsEco=v||""; _renderGoalsAll(); }
 let _goalsSort={col:"",dir:1};   // сортировка таблицы «Движение по группам»
-function goalsSort(col){ if(_goalsSort.col===col) _goalsSort.dir*=-1; else _goalsSort={col,dir:1}; renderGoals(); }
+function goalsSort(col){ if(_goalsSort.col===col) _goalsSort.dir*=-1; else _goalsSort={col,dir:1}; _renderGoalsAll(); }
 function _goalTh(col,lab,align){ const a=_goalsSort.col===col?(_goalsSort.dir>0?" ▲":" ▼"):""; return `<th style="background:var(--graphite);color:#fff;padding:6px 8px;text-align:${align};position:sticky;top:0;cursor:pointer;user-select:none;white-space:nowrap" onclick="goalsSort('${col}')" title="Сортировать">${lab}${a}</th>`; }
-function renderGoals(){
-  const box=document.getElementById("goalsBody"); if(!box) return;
-  const {rows}=_ownerReport();
+/* Общий дашборд «Набора»: используется и во вкладке «Набор» (Работа), и в «Отчёте по набору» (Финмодель).
+   opts.finance — добавить карточки оборота/потенциала (только в «Отчёте»); opts.report — группы риска + пояснение. */
+function _goalsDashHTML(opts){
+  opts=opts||{};
+  const {rows,T}=_ownerReport();
   const F=_goalsFunnel();
   const goal=(+S.goalReturn||500)+(+S.goalNew||350);
   // верхняя полоса: подтвердили участие ИЗ ОБЩЕГО числа вписанных (записей)
@@ -5727,13 +5769,22 @@ function renderGoals(){
     +_gauge(F.nmNo, F.nonMay, "#C6553F", "Отказ", "без майского · из "+F.nonMay)
     +_gauge(F.nmMaybe, F.nonMay, "#E0A02E", "Думают", "без майского · из "+F.nonMay)
     +`</div>`;
-  // отдельные показатели: уникальные дети и мест на ребёнка
+  // отдельные показатели: уникальные дети («количество рук»), записи, мест на ребёнка
   h+=`<div class="goalstats">
       <div class="gs"><span class="gs-lab">Уникальных детей</span><span class="gs-val">${F.unique}</span><span class="gs-sub">реальные головы (ребёнок на 2 курсах = 1)</span></div>
       <div class="gs"><span class="gs-lab">Записей в группы</span><span class="gs-val">${F.records}</span><span class="gs-sub">мест занято (ребёнок на 2 курсах = 2)</span></div>
       <div class="gs"><span class="gs-lab">Мест на ребёнка</span><span class="gs-val">${fmt1(F.perChild)}</span><span class="gs-sub">записей ÷ уникальных детей</span></div>
     </div>`;
-  // движение по группам — с фильтром по бренду; клик по названию открывает карточку занятия
+  // финансовые показатели — только в «Отчёте» (в «Работе»/«Наборе» их нет)
+  if(opts.finance){
+    const wpm=T.wpm||4;
+    h+=`<div class="goalstats">
+      <div class="gs"><span class="gs-lab">Оборот / нед (подтв.)</span><span class="gs-val" style="color:var(--green)">${fmt(T.revWeekYes)} р</span><span class="gs-sub">от подтвердивших</span></div>
+      <div class="gs"><span class="gs-lab">Оборот / мес (подтв.)</span><span class="gs-val" style="color:var(--green)">${fmt(Math.round(T.revWeekYes*wpm))} р</span><span class="gs-sub">×${wpm} недель</span></div>
+      <div class="gs"><span class="gs-lab">Потенциал / нед</span><span class="gs-val" style="color:var(--g-muted,#8C8677)">${fmt(T.revWeekAll)} р</span><span class="gs-sub">если подтвердят все</span></div>
+    </div>`;
+  }
+  // движение по группам — с фильтром по бренду и сортировкой; клик по названию открывает карточку занятия
   const dn=["","Пн","Вт","Ср","Чт","Пт","Сб","Вс"];
   const tName=t=>(typeof shortName==="function"?shortName(t):t)||"";
   const eb=(v,lab)=>`<button class="${_goalsEco===v?'on':''}" onclick="setGoalsEco('${v}')">${lab}</button>`;
@@ -5768,9 +5819,20 @@ function renderGoals(){
     +`</tr>`;
   });
   h+=`</tbody></table></div>`;
-  box.innerHTML=h;
+  // группы риска + пояснение — только в «Отчёте»
+  if(opts.report){
+    const risky=rows.filter(r=>r.risk);
+    if(risky.length) h+=`<div class="callout" style="margin-top:14px;border-color:var(--red)"><b>⚠ Группы риска (${risky.length})</b> — подтверждений меньше половины записанных:<br>${risky.map(r=>esc(r.name)+' <span style="color:var(--muted)">(🟢'+r.yes+' из '+r.total+')</span>').join(" · ")}</div>`;
+    h+=`<p style="font-size:11px;color:var(--g-muted,#8C8677);margin-top:8px">Оборот/нед = подтвердивших × цена × визитов/нед. «Молчат» = отправлено, но родитель пока не ответил.</p>`;
+  }
+  return h;
+}
+function renderGoals(){
+  const box=document.getElementById("goalsBody"); if(!box) return;
+  box.innerHTML=_goalsDashHTML({finance:false});
   if(typeof _paintIcons==="function") _paintIcons(box);
 }
+function _renderGoalsAll(){ if(typeof renderGoals==="function") renderGoals(); if(typeof renderReport==="function") renderReport(); }
 
 let _vtplMode="reg", _vtplEdit={reg:"",may:"",start:""};
 function editViberTpl(){
