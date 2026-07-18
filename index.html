@@ -22,20 +22,20 @@ header .wrap{padding:0 16px}
 .htop{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px}
 .brand{font-size:20px;font-weight:700;letter-spacing:.3px}
 .brand span{color:var(--terra)}
-.sub{font-size:12px;color:#C9BBA6;margin-top:2px}
+.sub{font-size:12px;color:#B7B3AB;margin-top:2px}
 .syncbox{display:flex;align-items:center;gap:8px;font-size:12px}
 .dot{width:9px;height:9px;border-radius:50%;background:#888}
 .dot.ok{background:var(--green)} .dot.err{background:var(--red)} .dot.local{background:var(--terra)} .dot.warn{background:#e6a417;animation:dotpulse 1s infinite}
 @keyframes dotpulse{50%{opacity:.35}}
-.btn{background:var(--terra);color:#fff;border:none;padding:8px 14px;border-radius:7px;
+.btn{background:var(--coal);color:#fff;border:none;padding:8px 14px;border-radius:7px;
   font-size:13px;font-weight:600;cursor:pointer;transition:.15s}
-.btn:hover{background:var(--terra-d)}
-.btn.ghost{background:transparent;border:1px solid var(--terra);color:var(--terra)}
-.btn.ghost:hover{background:var(--sand-l)}
+.btn:hover{background:#39352D}
+.btn.ghost{background:transparent;border:1px solid var(--line);color:var(--coal)}
+.btn.ghost:hover{background:var(--sand-l);border-color:#CFCBC2}
 .btn.sm{padding:6px 11px;font-size:13px}
 .btn.gray{background:#6b6256}.btn.gray:hover{background:#544c42}
 
-nav.tabs{display:flex;background:var(--sand);border-bottom:2px solid var(--terra);position:sticky;top:0;z-index:30}
+nav.tabs{display:flex;background:var(--sand);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:30}
 nav.tabs .wrap{display:flex;gap:1px 2px;flex-wrap:wrap;width:100%;max-width:96vw;padding:0 20px}
 .tab{padding:9px 15px;font-size:14px;font-weight:600;color:var(--muted);cursor:pointer;
   border:none;background:none;border-bottom:3px solid transparent;white-space:nowrap;line-height:1.2}
@@ -77,7 +77,7 @@ select.cell{border:1px solid var(--line);border-radius:5px;padding:4px;font-size
 .pos{color:var(--green);font-weight:600}.neg{color:var(--red);font-weight:600}
 
 .kpigrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px;margin-bottom:18px}
-.kpi{background:#fff;border:1px solid var(--line);border-left:4px solid var(--terra);
+.kpi{background:#fff;border:1px solid var(--line);border-left:4px solid var(--coal);
   border-radius:9px;padding:13px 15px;position:relative}
 .kpi .k-eye{position:absolute;top:8px;right:9px;cursor:pointer;font-size:13px;opacity:.35;
   user-select:none;line-height:1;transition:opacity .15s}
@@ -274,7 +274,7 @@ small.note{font-size:11px;color:var(--muted)}
 #courseTable th{white-space:normal;line-height:1.15;vertical-align:middle}
 #courseTable th.sortable{cursor:pointer;user-select:none}
 #courseTable th.sortable:hover{background:var(--terra);color:#fff}
-#courseTable th.sorted{color:#FED634}
+#courseTable th.sorted{color:#DDBB4E}
 /* выравнивание: шапка = значения */
 #courseTable th.a-left,#courseTable td.a-left{text-align:left}
 #courseTable th.a-right,#courseTable td.a-right{text-align:right}
@@ -313,7 +313,7 @@ small.note{font-size:11px;color:var(--muted)}
 #priceTable th.a-center,#priceTable td.a-center{text-align:center}
 #priceTable th.sortable{cursor:pointer;user-select:none;white-space:nowrap}
 #priceTable th.sortable:hover{background:var(--terra);color:#fff}
-#priceTable th.sorted{color:#FED634}
+#priceTable th.sorted{color:#DDBB4E}
 #priceTable .pr-name{min-width:240px}
 #priceTable td.pr-price,#priceTable td.pr-single,#priceTable td.pr-sub{font-weight:600}
 
@@ -337,9 +337,9 @@ tr.rowlocked input,tr.rowlocked select{background:#EAF3EC;border-color:#cfe3d4;c
 
 /* --- переключатель режимов «Работа»/«Финмодель» --- */
 .navmode{display:flex;gap:4px;align-items:center;padding:5px 12px 5px 0;margin-right:10px;border-right:1px solid var(--line)}
-.navmode .nm{padding:6px 14px;border:1px solid var(--terra);background:transparent;color:var(--terra);font-weight:700;font-size:13px;cursor:pointer;border-radius:8px;line-height:1.2}
+.navmode .nm{padding:6px 14px;border:1px solid var(--line);background:transparent;color:var(--coal);font-weight:600;font-size:13px;cursor:pointer;border-radius:8px;line-height:1.2}
 .navmode .nm:hover{background:var(--sand-l)}
-.navmode .nm.on{background:var(--terra);color:#fff}
+.navmode .nm.on{background:var(--coal);color:#fff;border-color:var(--coal)}
 
 /* --- выпадающее меню «⋯ Ещё» --- */
 .more-wrap{position:relative;display:inline-block}
