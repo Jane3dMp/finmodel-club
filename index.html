@@ -335,7 +335,12 @@ details.cwarn .cwarn-body{padding:0 14px 12px}
 #courseTable td.c-price input,#courseTable td.c-single input,#courseTable td.c-sub input,#courseTable td.c-groups input,#courseTable td.c-fill input{width:100%}
 
 /* спидометры набора */
-#goals .gaugegrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(168px,1fr));gap:14px;margin-bottom:22px}
+#goals .gaugerow{display:grid;gap:14px;margin-bottom:14px;justify-content:start}
+#goals .gaugerow.gr-1{grid-template-columns:minmax(180px,300px)}
+#goals .gaugerow.gr-2{grid-template-columns:repeat(2,minmax(180px,300px))}
+#goals .gaugerow.gr-3{grid-template-columns:repeat(3,minmax(180px,300px))}
+#goals .gaugerow:last-of-type{margin-bottom:22px}
+@media(max-width:760px){#goals .gaugerow{grid-template-columns:repeat(auto-fit,minmax(155px,1fr))!important}}
 #goals .gauge{background:#fff;border:1px solid var(--line);border-radius:14px;padding:14px 12px 15px;text-align:center;box-shadow:0 1px 3px rgba(28,20,16,.04)}
 #goals .gauge-svg{width:100%;max-width:184px;height:auto;display:block;margin:0 auto}
 #goals .gauge-val{font-size:30px;font-weight:800;letter-spacing:-.02em;line-height:1;margin-top:-4px;font-variant-numeric:tabular-nums}
@@ -5612,13 +5617,17 @@ function renderGoals(){
     </div>`;
   // воронка — спидометры (по ЗАПИСЯМ в группы, как в «Отчёте»)
   const F=_goalsFunnel();
-  h+=`<div class="gaugegrid">`
-    +_gauge(F.records, goal, "var(--green)", "Детей в расписании", "записей в группы · цель "+goal)
+  h+=`<div class="gaugerow gr-2">`
+    +_gauge(F.records, goal, "var(--green)", "Детей в расписании", "записей · цель "+goal)
+    +_gauge(F.silent, F.records, "#9A948A", "Молчат", "из "+F.records+" — без ответа")
+    +`</div>`;
+  h+=`<div class="gaugerow gr-1">`
     +_gauge(F.sent, F.records, "var(--blue)", "Отправлено", "из "+F.records+" записей")
-    +_gauge(F.nmYes, F.nonMay, "var(--green)", "Подтвердили", "из "+F.nonMay+" без майского")
-    +_gauge(F.nmNo, F.nonMay, "var(--red)", "Отказ", "из "+F.nonMay+" без майского")
-    +_gauge(F.nmMaybe, F.nonMay, "#C9922E", "Думают", "из "+F.nonMay+" без майского")
-    +_gauge(F.silent, F.records, "#9A948A", "Молчат", "из "+F.records+" всего")
+    +`</div>`;
+  h+=`<div class="gaugerow gr-3">`
+    +_gauge(F.nmYes, F.nonMay, "var(--green)", "Подтвердили", "без майского · из "+F.nonMay)
+    +_gauge(F.nmNo, F.nonMay, "var(--red)", "Отказ", "без майского · из "+F.nonMay)
+    +_gauge(F.nmMaybe, F.nonMay, "#C9922E", "Думают", "без майского · из "+F.nonMay)
     +`</div>`;
   // отдельные показатели: уникальные дети и мест на ребёнка
   h+=`<div class="goalstats">
