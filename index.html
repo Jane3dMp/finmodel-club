@@ -491,6 +491,11 @@ details.kid-move>div .cell{min-width:230px}
 .cli-lbtn:hover{background:var(--sand-l);color:var(--coal)}
 .cli-lbtn.on{background:var(--graphite);color:#fff;border-color:var(--terra)}
 #clientsBody{max-width:900px;margin:0 auto}
+.cli-addrow{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;margin-bottom:10px;
+  padding:11px 14px;border:1.5px dashed #C9C3B6;border-radius:11px;background:#fff;color:var(--coal);
+  font-weight:700;font-size:14px;cursor:pointer;transition:.15s}
+.cli-addrow:hover{background:var(--acc-soft);border-color:var(--acc-ink);border-style:solid}
+.cli-addrow .plus{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;background:var(--graphite);color:#fff;font-size:15px;line-height:1}
 details.client{border:1px solid var(--line);border-radius:9px;margin-bottom:6px;background:#fff;overflow:hidden}
 details.client>summary{cursor:pointer;list-style:none;padding:9px 12px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:14px}
 details.client>summary::-webkit-details-marker{display:none}
@@ -693,6 +698,7 @@ details.client .cli-badges{margin-left:auto;font-size:12px;color:var(--muted)}
  <div class="sec-desc">Главный ввод. Расставляете занятия по дням, кабинетам и времени — из этого считаются группы для плана и фонд ЗП педагогов (по ставке для числа детей). Стартовая сетка загружена из вашей выгрузки Альфы (06–12.04).</div>
  <div class="kpigrid" id="gridSummary"></div>
  <div class="hd-actions">
+  <button class="btn sm" onclick="openAddKid()" title="Создать нового ребёнка и вписать в группу">➕ Новый ребёнок</button>
   <button class="btn sm" onclick="printSchedule()" title="Распечатать расписание для менеджеров"><i data-ic="print"></i>Печать</button>
   <div class="more-wrap">
    <button class="btn ghost sm more-toggle" onclick="toggleMore(this)">⋯ Ещё</button>
@@ -976,6 +982,29 @@ details.client .cli-badges{margin-left:auto;font-size:12px;color:var(--muted)}
   <div class="hd-actions les-foot" style="margin-top:12px">
    <button class="btn ghost sm" onclick="newKidDryRun()">🔎 Проверить (что уйдёт)</button>
    <button class="btn sm" onclick="newKidCreate()">Создать в Альфе</button>
+  </div>
+ </div>
+</div>
+
+<div class="modal-bg" id="addKidModal">
+ <div class="modal" style="max-width:460px">
+  <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
+   <h3 style="margin:0">➕ Новый ребёнок → в группу</h3>
+   <button class="btn ghost sm" style="margin-left:auto" onclick="closeAddKid()">Закрыть</button>
+  </div>
+  <p style="font-size:12px;color:var(--muted);margin:0 0 8px;line-height:1.4">Впишет ребёнка в выбранную группу расписания. Сразу появится в «Клиентах», «Группах», «Наборе» и «Расписании». Данные — в этой модели; в Альфу не уходит.</p>
+  <label style="font-weight:600">ФИО ребёнка *</label>
+  <input id="akName" class="cell wide" style="margin-bottom:6px" placeholder="Фамилия Имя" onkeydown="if(event.key==='Enter'){event.preventDefault();document.getElementById('akGroup').focus();}">
+  <label style="font-weight:600">Группа *</label>
+  <select id="akGroup" class="cell wide" style="margin-bottom:6px"></select>
+  <div class="row2" style="gap:10px">
+   <div><label style="font-weight:600">Телефон <span style="font-weight:400;color:var(--muted)">(необяз.)</span></label><input id="akPhone" class="cell wide" placeholder="+375 29 ..."></div>
+   <div><label style="font-weight:600">Дата рождения</label><input id="akDob" type="date" class="cell wide"></div>
+  </div>
+  <div id="akResult" style="margin-top:10px;font-size:12px"></div>
+  <div class="hd-actions les-foot" style="margin-top:12px">
+   <button class="btn ghost sm" onclick="closeAddKid()">Отмена</button>
+   <button class="btn sm" style="margin-left:auto" onclick="saveAddKid()">Добавить в группу</button>
   </div>
  </div>
 </div>
@@ -3777,6 +3806,42 @@ function kidMoveToGroup(kidIndex, targetKey){
   if(typeof renderMay==="function") renderMay();
   toast("Переведён(а): "+(kid.n)+" → "+(target.label||target.course||"группа"));
 }
+/* ---- «Новый ребёнок → в группу»: создать ребёнка и вписать во все занятия выбранной группы ---- */
+function openAddKid(presetKey){
+  const nm=document.getElementById("akName"); if(nm) nm.value="";
+  ["akPhone","akDob"].forEach(id=>{ const e=document.getElementById(id); if(e) e.value=""; });
+  const sel=document.getElementById("akGroup");
+  if(sel){ sel.innerHTML=_gridGroupOptsHtml(); if(presetKey) sel.value=presetKey; }
+  const r=document.getElementById("akResult"); if(r) r.textContent="";
+  document.getElementById("addKidModal").classList.add("show");
+  if(nm) setTimeout(()=>nm.focus(),30);
+}
+function closeAddKid(){ document.getElementById("addKidModal").classList.remove("show"); }
+function saveAddKid(){
+  const r=document.getElementById("akResult");
+  const warn=m=>{ if(r){ r.textContent=m; r.style.color="var(--red)"; } };
+  const name=cleanKidName((document.getElementById("akName").value||"").trim());
+  const key=document.getElementById("akGroup").value;
+  if(!name){ warn("Впишите ФИО ребёнка."); return; }
+  if(!key){ warn("Выберите группу."); return; }
+  const g=_gridGroupList().find(x=>x.key===key);
+  if(!g){ warn("Группа не найдена — обновите страницу."); return; }
+  const kid=_blankKid(name);
+  kid.phone=(document.getElementById("akPhone").value||"").trim();
+  kid.dob=(document.getElementById("akDob").value||"").trim();
+  let added=0;
+  g.idxs.forEach(idx=>{ const l=S.grid[idx]; if(!Array.isArray(l.kids)) l.kids=[];
+    if(!l.kids.some(k=>_sameKid(k.n,name))){ l.kids.push(JSON.parse(JSON.stringify(kid))); added++; }
+  });
+  persistLocal(); if(typeof fbSchedulePush==="function") fbSchedulePush();
+  if(typeof renderGrid==="function") renderGrid();
+  if(typeof renderGroups==="function") renderGroups();
+  if(typeof renderClients==="function") renderClients();
+  if(typeof renderMay==="function") renderMay();
+  if(typeof renderGoals==="function") renderGoals();
+  closeAddKid();
+  toast(added===0 ? ("«"+name+"» уже есть в этой группе") : ("Добавлен(а): "+name+" → "+(g.label||g.course||"группа")));
+}
 function renderKidsEditor(){
   const box=document.getElementById("kidsBox");
   if(!box) return;
@@ -5804,6 +5869,7 @@ function renderGroups(){
       <span class="hd-grp"><select id="grpCourse" class="cell" style="max-width:230px" title="Показать только выбранный курс" onchange="_groupsCourse=this.value;renderGroups()"><option value="">📚 Все курсы (${courseList.length})</option>${courseList.map(c=>`<option ${c===_groupsCourse?"selected":""}>${esc(c)}</option>`).join("")}</select></span>
       <span class="hd-sep"></span>
       <span class="hd-grp"><button class="btn ${_groupsHideDone?'':'ghost'} sm" onclick="_groupsHideDone=!_groupsHideDone;renderGroups()" title="Спрятать/показать закреплённые (готовые) группы">${_groupsHideDone?'👁 Показать готовые':'📌 Скрыть готовые'} (${doneCount})</button></span>
+      <span class="hd-grp"><button class="btn sm" onclick="openAddKid()" title="Создать нового ребёнка и вписать в группу">➕ Новый ребёнок</button></span>
     </div>
     <div class="tscroll"><table id="groupsTable"><thead><tr>
       <th style="width:30px" title="Закреп (готово)">📌</th>${_grpTh("name","Группа","left")}${_grpTh("kids","Детей","center")}${_grpTh("paid","💰","center")}${_grpTh("course","Курс","left")}${_grpTh("teacher","Педагог","left")}${_grpTh("sched","Расписание","left")}${_grpTh("room","Каб.","center")}<th></th>
@@ -5864,7 +5930,8 @@ function renderClients(){
     <div class="cli-letters">${lbtn('Все','')}${letters.map(L=>lbtn(L,L)).join("")}</div>
     <div class="kidsearch" style="margin:8px 0 10px">
       <input id="clientsQ" type="search" class="kidsearch-in" placeholder="🔍 Поиск ребёнка по ФИО" value="${esc(_clientsQuery)}" oninput="_clientsQuery=this.value;clientsRerenderKeepFocus()" autocomplete="off">
-    </div>`;
+    </div>
+    <div class="cli-addrow" title="Создать нового ребёнка и вписать в группу" onclick="openAddKid()"><span class="plus">+</span> Новый ребёнок</div>`;
   if(!shown.length){ box.innerHTML=html+`<div style="color:var(--muted);padding:10px 2px">${clients.length?'Никого не найдено.':'В расписании пока нет детей.'}</div>`; return; }
   shown.forEach(c=>{
     const courses=[...new Set(c.enroll.map(e=>e.course).filter(Boolean))];
