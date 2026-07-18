@@ -5315,13 +5315,16 @@ function _kidCardAlfa(j){
       <div style="margin:4px 0 10px;border:1px solid var(--line);border-radius:8px;padding:2px 10px">${evPrev.map((x,i)=>`<div style="padding:6px 0;font-size:12px;line-height:1.45;overflow-wrap:anywhere${i<evPrev.length-1?';border-bottom:1px solid #f0ebe4':''}"><b>${x[1]}:</b> ${esc(custom[x[0]])}</div>`).join("")}</div>`;
   }
   try{ if(j.debug){ console.log("🪪 карточка ребёнка · debug Альфы:", j.debug); console.log("🪪 debug (скопировать):", JSON.stringify(j.debug)); } }catch(e){}
-  // «Абонементы с 1 сентября» — курсы из договора (кастомное поле клиента custom_dogovora)
-  const dg=Array.isArray(j.dogovora)?j.dogovora.filter(Boolean):[];
-  if(dg.length){
-    h+=`<label style="font-weight:600">🎫 Абонементы с 1 сентября (по договору) — ${dg.length}:</label>
-      <div style="border:1px solid var(--green);border-radius:8px;padding:6px 10px;margin:4px 0 10px;font-size:13px;line-height:1.5;background:#f2f7f2">
-      ${dg.map(c=>`<div style="padding:3px 0;font-weight:600">• ${esc(c)}</div>`).join("")}</div>`;
+  // Купленные майские (закреплённые места на сентябрь) = платежи с пометкой «май»
+  const mp=Array.isArray(j.mayPays)?j.mayPays:[];
+  if(mp.length){
+    h+=`<label style="font-weight:600">🎫 Купленные майские (места на сентябрь) — ${mp.length}:</label>
+      <div style="border:1px solid var(--green);border-radius:8px;padding:6px 10px;margin:4px 0 10px;font-size:13px;background:#f2f7f2">
+      ${mp.map(x=>`<div style="display:flex;justify-content:space-between;gap:8px;padding:3px 0;align-items:baseline"><span>${esc(x.note||'майский')}${x.confirmed===false?' <span style="color:var(--red);font-size:11px">не подтв.</span>':''} <span style="color:var(--muted);font-size:11px">${dOnly(x.date)}</span></span><b style="color:var(--green);white-space:nowrap">${money(x.amount)}</b></div>`).join("")}</div>`;
   }
+  // По договору — планируемые курсы (кастомное поле; НЕ обязательно оплачены). Для контекста, мелко.
+  const dg=Array.isArray(j.dogovora)?j.dogovora.filter(Boolean):[];
+  if(dg.length) h+=`<div style="font-size:12px;color:var(--muted);margin:0 0 10px">📄 По договору: ${dg.map(esc).join(" · ")}</div>`;
   // «Счета и абонементы» (как в карточке клиента Альфы) — абонементы customer-tariff,
   // а у этого клуба фактически платежи pay (сумма + пометка «майский» + дата).
   const subs=j.subs||[], subsArch=j.subsArch||[];

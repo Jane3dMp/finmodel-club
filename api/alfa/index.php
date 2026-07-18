@@ -253,6 +253,20 @@ switch ($action) {
             }
             $payCount = count($pays);
 
+            // КУПЛЕННЫЕ МАЙСКИЕ = платежи с пометкой «май» (закреплённые места на сентябрь).
+            // Именно они — реальные покупки (у Авдеева их 2), в отличие от списка договора.
+            $mayPays = [];
+            foreach ($pays as $p) {
+                $note = is_scalar($p['note'] ?? null) ? trim((string)$p['note']) : '';
+                if ($note !== '' && mb_stripos($note, 'май') !== false) {
+                    $mayPays[] = ['amount' => $numN($p['income'] ?? ($p['amount'] ?? null)),
+                                  'date' => $isoOf($p['document_date'] ?? ($p['created_at'] ?? '')),
+                                  'note' => $note,
+                                  'confirmed' => ((int)($p['is_confirmed'] ?? 1) === 1)];
+                }
+            }
+            usort($mayPays, fn($a, $b) => strcmp((string)$b['date'], (string)$a['date']));
+
             // «Абонементы с 1 сентября» = курсы договора из кастомного поля клиента custom_dogovora
             // (у клуба сущность абонемента не ведётся — customer-tariff пуст даже по ctt_id платежа).
             // custom_dogovora = JSON-массив названий курсов, напр. ["7 навыков…","Roblox + Blender"].
@@ -312,7 +326,7 @@ switch ($action) {
         json_out(['ok' => true, 'customerId' => $cid, 'branch' => alfa_branch(), 'matched' => $matchedName,
                   'summary' => $summary, 'history' => $history, 'active' => $active, 'custom' => $custom,
                   'subs' => $subs, 'subsArch' => $subsArch, 'paySrc' => $paySrc,
-                  'dogovora' => $dogovora ?? [], 'school' => $school ?? '', 'klass' => $klass ?? '', 'from' => $from, 'to' => $to,
+                  'mayPays' => $mayPays ?? [], 'dogovora' => $dogovora ?? [], 'school' => $school ?? '', 'klass' => $klass ?? '', 'from' => $from, 'to' => $to,
                   'debug' => ['cgi' => count($cgiItems), 'lessons' => count($lesItems), 'groups' => count($gid), 'active' => count($active), 'today' => $today, 'tariffCount' => $tariffCount, 'payCount' => $payCount, 'custBranches' => $brList, 'ct' => $ctDbg]]);
         break;
 
