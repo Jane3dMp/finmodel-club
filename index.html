@@ -334,6 +334,33 @@ details.cwarn .cwarn-body{padding:0 14px 12px}
 #courseTable th.c-lyrev,#courseTable td.c-lyrev{width:88px;min-width:88px}
 #courseTable td.c-price input,#courseTable td.c-single input,#courseTable td.c-sub input,#courseTable td.c-groups input,#courseTable td.c-fill input{width:100%}
 
+/* мотивационный дашборд набора */
+#goals .goaltop{display:flex;align-items:center;gap:16px;background:var(--graphite);color:#fff;border-radius:14px;padding:16px 22px;margin-bottom:16px}
+#goals .goaltop-lab{font-size:11px;text-transform:uppercase;letter-spacing:.06em;opacity:.7}
+#goals .goaltop-num{font-size:30px;font-weight:800;letter-spacing:-.02em;font-variant-numeric:tabular-nums;line-height:1.1}
+#goals .goaltop-num span{font-size:16px;font-weight:600;opacity:.6}
+#goals .goaltop-bar{flex:1;height:12px;background:rgba(255,255,255,.15);border-radius:8px;overflow:hidden}
+#goals .goaltop-bar i{display:block;height:100%;background:linear-gradient(90deg,#3B7A57,#1F5BC0);border-radius:8px;transition:width .5s}
+#goals .goaltop-pct{font-size:24px;font-weight:800;font-variant-numeric:tabular-nums}
+#goals .goalgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:16px;margin-bottom:18px}
+#goals .goalcard{background:#fff;border:1px solid var(--line);border-radius:16px;padding:20px 22px;box-shadow:0 1px 3px rgba(28,20,16,.04)}
+#goals .goalcard-top{display:flex;align-items:center;gap:20px}
+#goals .donut{position:relative;width:156px;height:156px;flex:none}
+#goals .donut-c{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center}
+#goals .donut-c .dn{font-size:40px;font-weight:800;line-height:1;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+#goals .donut-c .dd{font-size:12px;color:var(--muted);margin-top:3px;display:flex;align-items:center;gap:4px}
+#goals .donut-c .dd input{width:56px;padding:2px 4px;font-size:12px}
+#goals .goal-title{font-size:17px;font-weight:700;letter-spacing:-.01em}
+#goals .goal-pct{font-size:34px;font-weight:800;letter-spacing:-.02em;margin-top:2px;line-height:1}
+#goals .goal-left{font-size:13px;color:var(--muted);margin-top:4px}
+#goals .goalbreak{margin-top:18px;display:flex;flex-direction:column;gap:9px}
+#goals .gb{display:flex;align-items:center;gap:10px;font-size:12.5px}
+#goals .gb .gb-lab{width:160px;color:var(--text);flex:none}
+#goals .gb .gb-bar{flex:1;height:8px;background:var(--sand-l);border-radius:6px;overflow:hidden}
+#goals .gb .gb-bar i{display:block;height:100%;border-radius:6px;transition:width .5s}
+#goals .gb .gb-val{width:34px;text-align:right;font-weight:700;font-variant-numeric:tabular-nums}
+@media(max-width:560px){#goals .goalcard-top{flex-direction:column;text-align:center}#goals .gb .gb-lab{width:120px}}
+
 /* реальный оборот (майская акция) */
 #realTable th.a-left,#realTable td.a-left{text-align:left}
 #realTable th.a-right,#realTable td.a-right{text-align:right}
@@ -468,6 +495,7 @@ details.client .cli-badges{margin-left:auto;font-size:12px;color:var(--muted)}
  <button class="tab" data-t="report"><i data-ic="report"></i>Отчёт по набору</button>
  <button class="tab" data-t="courses">Курсы и маржа</button>
  <button class="tab" data-t="real"><i data-ic="real"></i>Реальный оборот</button>
+ <button class="tab" data-t="goals"><i data-ic="target"></i>Набор</button>
  <button class="tab" data-t="planner">Планировщик загрузки</button>
  <button class="tab" data-t="grid">Расписание (сетка)</button>
  <button class="tab" data-t="groups">Группы</button>
@@ -556,6 +584,13 @@ details.client .cli-badges{margin-left:auto;font-size:12px;color:var(--muted)}
  <div class="kpigrid" id="realKpi"></div>
  <div class="tscroll"><table id="realTable"></table></div>
  <div class="callout" style="margin-top:12px;font-size:12px">Майские считаются автоматически по отметке 💰 в расписании (уникальные дети на курс). Текущая цена, «Факт детей», «Групп» и «Визиты» — с вкладки «Курсы и маржа». «Майская цена» хранится отдельно и на модель/маржу не влияет.</div>
+</section>
+
+<!-- ===== НАБОР — мотивационный дашборд целей (менеджеры) ===== -->
+<section class="panel" id="goals">
+ <h2 class="sec"><span data-ic="target"></span>Набор — цели и движение</h2>
+ <div class="sec-desc">Две цели сезона и как мы к ним идём: вернуть прошлогодних (майские + подтвердившие продолжение) и набрать новых. Клик по названию группы внизу открывает карточку занятия.</div>
+ <div id="goalsBody"></div>
 </section>
 
 <!-- ===== ПРАЙС ДЛЯ МЕНЕДЖЕРОВ (только просмотр) ===== -->
@@ -1064,6 +1099,8 @@ const DEFAULT_STATE = {
   _fixRates: {},    // фикс-ставки: {педагог: {длительность_мин: ставка}}
   assume: { weeksPerMonth:4, targetProfitShare:18, ownerSalary:0 },
   children: {},   // наши поля ребёнка по alfaId: {alfaId:{name,parentName,phone,dob,evzz}} — один на ребёнка, а не на группу
+  goalReturn: 500,   // цель: вернуть прошлогодних
+  goalNew: 350,      // цель: набрать новых
   gasUrl: "https://script.google.com/macros/s/AKfycbxJajbntVctGjXImc1hVhWimvOkXHcNCkuVFpszEbA8ad-B40Lj2Q8gdMMTBar4YLnsew/exec"
 };
 const LS_KEY = "proznanie_finmodel_v1";
@@ -1415,13 +1452,13 @@ function fbStart(){
   });
 }
 /* ---- вкладки по ролям ---- */
-const TAB_DEFS=[["dash","Дашборд"],["report","Отчёт по набору"],["courses","Курсы и маржа"],["real","Реальный оборот"],["planner","Планировщик загрузки"],["grid","Расписание (сетка)"],["groups","Группы"],["clients","Клиенты"],["price","Прайс"],["may","Майский"],["staff","Педсостав и ФОТ"],["fixed","Постоянные расходы"],["tax","Налоги РБ и ФОТ"],["break","Точка безубыточности"],["scenario","Сценарии"],["settings","Параметры"]];
-const MANAGER_DEFAULT_TABS=["grid","groups","clients","may"];
-const ALWAYS_TABS={clients:1,price:1};   // видны всем ролям, даже если не отмечены в доступах
+const TAB_DEFS=[["dash","Дашборд"],["report","Отчёт по набору"],["courses","Курсы и маржа"],["real","Реальный оборот"],["planner","Планировщик загрузки"],["goals","Набор"],["grid","Расписание (сетка)"],["groups","Группы"],["clients","Клиенты"],["price","Прайс"],["may","Майский"],["staff","Педсостав и ФОТ"],["fixed","Постоянные расходы"],["tax","Налоги РБ и ФОТ"],["break","Точка безубыточности"],["scenario","Сценарии"],["settings","Параметры"]];
+const MANAGER_DEFAULT_TABS=["grid","groups","clients","may","goals"];
+const ALWAYS_TABS={clients:1,price:1,goals:1};   // видны всем ролям, даже если не отмечены в доступах
 const ADMIN_TABS={report:1};     // только для админа, не назначаются менеджерам
 function _defaultTabsMap(){ const m={}; MANAGER_DEFAULT_TABS.forEach(function(k){ m[k]=true; }); return m; }
 /* ---- режимы навигации: «Работа» (ежедневное) и «Финмодель» (финансы) ---- */
-const TAB_MODES={grid:"work",groups:"work",clients:"work",price:"work",may:"work",dash:"fin",report:"fin",courses:"fin",real:"fin",planner:"fin",staff:"fin",fixed:"fin",tax:"fin","break":"fin",scenario:"fin",settings:"fin"};
+const TAB_MODES={grid:"work",groups:"work",clients:"work",price:"work",may:"work",goals:"work",dash:"fin",report:"fin",courses:"fin",real:"fin",planner:"fin",staff:"fin",fixed:"fin",tax:"fin","break":"fin",scenario:"fin",settings:"fin"};
 let _tabAccess=null;   // null = все вкладки (админ / до входа), иначе {tabKey:true}
 let navMode=(function(){ try{ return localStorage.getItem("navMode")||"work"; }catch(e){ return "work"; } })();
 function _tabAllowed(k){ if(ADMIN_TABS[k]) return _fbIsAdmin; return ALWAYS_TABS[k]===1 || !_tabAccess || _tabAccess[k]===true; }
@@ -2281,7 +2318,8 @@ const ICONS={
   download:'<path d="M12 3v11"/><path d="M8 10l4 4 4-4"/><path d="M4 20h16"/>',
   phone:'<path d="M6 3l3 5-2 2a12 12 0 0 0 5 5l2-2 5 3-1.5 3A16 16 0 0 1 3 4.5z"/>',
   pen:'<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13.5 6.5l4 4"/>',
-  plug:'<path d="M9 7V3"/><path d="M15 7V3"/><path d="M7 7h10v3a5 5 0 0 1-10 0z"/><path d="M12 15v6"/>'
+  plug:'<path d="M9 7V3"/><path d="M15 7V3"/><path d="M7 7h10v3a5 5 0 0 1-10 0z"/><path d="M12 15v6"/>',
+  target:'<circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="4.5"/><circle cx="12" cy="12" r="1" fill="currentColor" stroke="none"/>'
 };
 function ic(name){ const p=ICONS[name]; return p?('<svg class="ic" viewBox="0 0 24 24" aria-hidden="true">'+p+'</svg>'):''; }
 function _paintIcons(root){ (root||document).querySelectorAll('[data-ic]:not([data-ic-done])').forEach(function(el){ const n=el.getAttribute('data-ic'); if(ICONS[n]){ el.innerHTML=ic(n); el.setAttribute('data-ic-done','1'); } }); }
@@ -5396,6 +5434,112 @@ function printReport(){
     ${_reportHTML(true)}</body></html>`);
   w.document.close(); w.focus(); setTimeout(()=>{ try{ w.print(); }catch(e){} },350);
 }
+
+/* ===== МОТИВАЦИОННЫЙ ДАШБОРД НАБОРА (для менеджеров): цели 500 возврат + 350 новых ===== */
+function _goalsData(){
+  const map={};
+  (S.grid||[]).forEach(l=>{ const nw=!!l.newIntake;
+    kidsOf(l).forEach(k=>{ const key=_nameKey(k.n); if(!key) return;
+      const o=map[key]||(map[key]={isNew:false,isRet:false,may:false,reply:'',no:false});
+      if(nw) o.isNew=true; else o.isRet=true;
+      if(k.may) o.may=true; if(k.no) o.no=true;
+      const rank=r=>r==='yes'?3:r==='no'?2:r==='maybe'?1:0;
+      if(rank(k.vbReply)>rank(o.reply)) o.reply=k.vbReply;
+    });
+  });
+  const arr=Object.values(map);
+  const unplaced=(typeof _mayUnplacedByCourse==='function')?Object.values(_mayUnplacedByCourse()).reduce((a,b)=>a+b,0):0;
+  const ret=arr.filter(k=>k.isRet);              // прошлогодние (в невыделенных «новым набором» группах)
+  const nw=arr.filter(k=>k.isNew && !k.isRet);   // чисто новые (только в группах «новый набор»)
+  const retMay=ret.filter(k=>k.may && !k.no).length + unplaced;         // майские (оплатили продолжение)
+  const retYes=ret.filter(k=>!k.may && !k.no && k.reply==='yes').length; // подтвердили продолжение
+  const retWork=ret.filter(k=>!k.no && !k.may && k.reply!=='yes').length;// в работе (написали/молчат/думают)
+  const retNo=ret.filter(k=>k.no || k.reply==='no').length;             // отказ / не придёт
+  const newYes=nw.filter(k=>!k.no && k.reply==='yes').length;
+  const newTotal=nw.filter(k=>!k.no).length;
+  return {retMay,retYes,retSecured:retMay+retYes,retWork,retNo,retPool:ret.length,newTotal,newYes,newPool:nw.length,unplaced};
+}
+function _donut(pct,color){
+  const size=156,r=size/2-13,c=2*Math.PI*r,off=c*(1-Math.max(0,Math.min(1,pct)));
+  return `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" aria-hidden="true">
+    <circle cx="${size/2}" cy="${size/2}" r="${r}" fill="none" stroke="var(--sand-l)" stroke-width="13"/>
+    <circle cx="${size/2}" cy="${size/2}" r="${r}" fill="none" stroke="${color}" stroke-width="13" stroke-linecap="round"
+      stroke-dasharray="${c.toFixed(1)}" stroke-dashoffset="${off.toFixed(1)}" transform="rotate(-90 ${size/2} ${size/2})"/></svg>`;
+}
+function _gbar(lab,val,total,color){
+  const w=total>0?Math.min(100,Math.round(val/total*100)):0;
+  return `<div class="gb"><span class="gb-lab">${lab}</span><span class="gb-bar"><i style="width:${w}%;background:${color}"></i></span><span class="gb-val">${val}</span></div>`;
+}
+function saveGoal(which,v){ v=Math.max(0,parseInt(v,10)||0); if(which==='ret') S.goalReturn=v; else S.goalNew=v; persistLocal(); if(typeof fbSchedulePush==="function") fbSchedulePush(); renderGoals(); }
+function renderGoals(){
+  const box=document.getElementById("goalsBody"); if(!box) return;
+  const g=_goalsData();
+  const gRet=+S.goalReturn||500, gNew=+S.goalNew||350;
+  const retDone=g.retSecured, retLeft=Math.max(0,gRet-retDone), retPct=gRet>0?retDone/gRet:0;
+  const newDone=g.newTotal, newLeft=Math.max(0,gNew-newDone), newPct=gNew>0?newDone/gNew:0;
+  const totalDone=retDone+newDone, totalGoal=gRet+gNew, totalPct=totalGoal>0?Math.round(totalDone/totalGoal*100):0;
+  const RET="#3B7A57", NEW="var(--blue)";
+  const goalInp=(which,val)=>_fbIsAdmin?`<input type="number" value="${val}" onchange="saveGoal('${which}',this.value)" style="width:64px">`:`<b>${val}</b>`;
+  // верхняя мотивационная строка
+  let h=`<div class="goaltop">
+      <div class="goaltop-l"><div class="goaltop-lab">Собрано всего</div><div class="goaltop-num">${totalDone} <span>/ ${totalGoal}</span></div></div>
+      <div class="goaltop-bar"><i style="width:${totalPct}%"></i></div>
+      <div class="goaltop-pct">${totalPct}%</div>
+    </div>`;
+  // две большие цели
+  h+=`<div class="goalgrid">
+    <div class="goalcard">
+      <div class="goalcard-top">
+        <div class="donut">${_donut(retPct,RET)}<div class="donut-c"><div class="dn">${retDone}</div><div class="dd">из ${goalInp('ret',gRet)}</div></div></div>
+        <div class="goalcard-info">
+          <div class="goal-title">Возврат прошлогодних</div>
+          <div class="goal-pct" style="color:${RET}">${Math.round(retPct*100)}%</div>
+          <div class="goal-left">${retLeft>0?('осталось подтвердить <b>'+retLeft+'</b>'):'цель достигнута 🎉'}</div>
+        </div>
+      </div>
+      <div class="goalbreak">
+        ${_gbar('💚 Майские (оплатили)',g.retMay,gRet,RET)}
+        ${_gbar('✅ Подтвердили',g.retYes,gRet,'#6AA57E')}
+        ${_gbar('⏳ В работе',g.retWork,gRet,'#C9922E')}
+        ${_gbar('🔴 Отказ / не придёт',g.retNo,gRet,'var(--red)')}
+      </div>
+    </div>
+    <div class="goalcard">
+      <div class="goalcard-top">
+        <div class="donut">${_donut(newPct,NEW)}<div class="donut-c"><div class="dn">${newDone}</div><div class="dd">из ${goalInp('new',gNew)}</div></div></div>
+        <div class="goalcard-info">
+          <div class="goal-title">Новый набор</div>
+          <div class="goal-pct" style="color:${NEW}">${Math.round(newPct*100)}%</div>
+          <div class="goal-left">${newLeft>0?('осталось набрать <b>'+newLeft+'</b>'):'цель достигнута 🎉'}</div>
+        </div>
+      </div>
+      <div class="goalbreak">
+        ${_gbar('👶 Вписано новых',g.newTotal,gNew,NEW)}
+        ${_gbar('✅ Подтвердили',g.newYes,gNew,'#5B84D6')}
+      </div>
+    </div>
+  </div>`;
+  // воронка по группам (как в отчёте, но без денег) — с этого листа всё открывается
+  const {rows}=_ownerReport();
+  const dn=["","Пн","Вт","Ср","Чт","Пт","Сб","Вс"];
+  const tName=t=>(typeof shortName==="function"?shortName(t):t)||"";
+  h+=`<h3 style="font-size:15px;margin:6px 0 10px;display:flex;align-items:center;gap:8px"><span data-ic="report"></span>Движение по группам</h3>
+    <div class="tscroll"><table style="width:100%;border-collapse:collapse;font-size:12px">
+    <thead><tr>${['Группа','Курс','Педагог','День·время','Записано','🟢','🔴','🟡','Молчат','Заполн.'].map((t,i)=>`<th style="background:var(--graphite);color:#fff;padding:6px 8px;text-align:${i<4?'left':'center'};position:sticky;top:0">${t}</th>`).join("")}</tr></thead><tbody>`;
+  const td=(v,al)=>`<td style="padding:5px 8px;border-bottom:1px solid var(--line);text-align:${al||'left'}">${v}</td>`;
+  rows.forEach(r=>{
+    const nm=r.id?`<span class="grp-name" title="Открыть карточку занятия" onclick="editLes(_lesIdx('${esc(r.id)}'))"><b>${esc(r.name)}</b></span>`:`<b>${esc(r.name)}</b>`;
+    h+=`<tr style="${r.risk?'background:#fdecea':''}">`
+      +td((r.risk?'⚠ ':'')+nm)+td(esc(r.course))+td(esc(tName(r.teacher)))+td((dn[r.day]||'')+' '+esc(r.time||''))
+      +td(r.total,'center')+td('<b style="color:'+RET+'">'+r.yes+'</b>','center')+td(r.no||'','center')+td(r.maybe||'','center')
+      +td('<span style="color:var(--muted)">'+(r.none||'')+'</span>','center')+td(r.cap>0?r.fill+'%':'—','center')
+    +`</tr>`;
+  });
+  h+=`</tbody></table></div>`;
+  box.innerHTML=h;
+  if(typeof _paintIcons==="function") _paintIcons(box);
+}
+
 let _vtplMode="reg", _vtplEdit={reg:"",may:"",start:""};
 function editViberTpl(){
   _vtplEdit={ reg:(S.viberTpl||VIBER_TPL_DEFAULT), may:(S.viberTplMay||VIBER_TPL_MAY_DEFAULT), start:(S.viberStart||VIBER_START_DEFAULT) };
@@ -6269,7 +6413,7 @@ function _migrateSingle(){
 function renderAll(){
   _migrateSingle();
   _migrateChildren();
-  renderCourses(); renderPlanner(); renderGrid(); renderGroups(); renderClients(); if(typeof renderPrice==="function") renderPrice(); if(typeof renderReal==="function") renderReal(); renderMay(); renderStaff(); renderFixed(); renderTax(); renderBreak(); renderSettings(); renderDash(); if(typeof renderReport==="function") renderReport(); onSlider(); renderConflictBanner(); renderScenarioBar(); updateNavHeightDelayed();
+  renderCourses(); renderPlanner(); renderGrid(); renderGroups(); renderClients(); if(typeof renderPrice==="function") renderPrice(); if(typeof renderReal==="function") renderReal(); if(typeof renderGoals==="function") renderGoals(); renderMay(); renderStaff(); renderFixed(); renderTax(); renderBreak(); renderSettings(); renderDash(); if(typeof renderReport==="function") renderReport(); onSlider(); renderConflictBanner(); renderScenarioBar(); updateNavHeightDelayed();
 }
 function toast(m){ const t=document.getElementById("toast"); t.textContent=m; t.classList.add("show");
   clearTimeout(t._h); t._h=setTimeout(()=>t.classList.remove("show"),2200); }
@@ -6362,6 +6506,7 @@ document.querySelectorAll(".tab").forEach(tb=>tb.onclick=()=>{
   tb.classList.add("active");
   document.getElementById(tb.dataset.t).classList.add("active");
   if(tb.dataset.t==="report" && typeof renderReport==="function") renderReport();
+  if(tb.dataset.t==="goals" && typeof renderGoals==="function") renderGoals();
   updateNavHeightDelayed();
 });
 /* стартовый режим навигации («Работа» по умолчанию, запоминается в браузере) */
