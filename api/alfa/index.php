@@ -220,17 +220,47 @@ switch ($action) {
         // Отдаём: название абонемента, курс (через справочник предметов), период, остаток
         // (деньги + уроки), заметку («майский …»), флаг активный/архивный. Сырой первый item —
         // в debug.tariffRaw, чтобы сверить реальные имена полей с боевой Альфой и донастроить.
-        $subs = []; $subsArch = []; $tariffRaw = null; $tariffCount = 0;
+        $subs = []; $subsArch = []; $tariffRaw = null; $tariffCount = 0; $ctDbg = []; $brList = [];
         if (!empty($in['full'])) {
-            // справочник предметов: id => name (курс абонемента)
+            // Филиалы клиента: абонементы/справочники в Alfa привязаны к филиалу, а дефолтный
+            // филиал не всегда тот, где лежит клиент → берём из карточки клиента ($c0).
+            $custBr = [];
+            $bids = $c0['branch_ids'] ?? ($c0['branch'] ?? null);
+            if (is_array($bids)) { foreach ($bids as $bb) { $bb = (int)$bb; if ($bb) $custBr[$bb] = 1; } }
+            elseif ($bids) { $custBr[(int)$bids] = 1; }
+            if (!$custBr) $custBr[alfa_branch()] = 1;
+            $brList = array_keys($custBr);
+
+            // справочник предметов (id => name) — из первого филиала клиента
             $subjMap = [];
-            $sj = alfa_http('POST', "$host/subject/index", ['page' => 0, 'count' => 500], $token, true, 8);
+            $sj = alfa_http('POST', 'https://' . alfa_host() . '/v2api/' . $brList[0] . '/subject/index', ['page' => 0, 'count' => 500], $token, true, 8);
             foreach (($sj['items'] ?? []) as $sji) { if (isset($sji['id'])) $subjMap[(int)$sji['id']] = (string)($sji['name'] ?? ''); }
 
-            $ct = alfa_http('POST', "$host/customer-tariff/index", ['customer_id' => $cid, 'page' => 0, 'count' => 100], $token, true, 10);
-            $items = $ct['items'] ?? [];
+            // «Счета и абонементы» (customer-tariff) — по КАЖДОМУ филиалу клиента, мержим
+            $items = [];
+            foreach ($brList as $br) {
+                $hb = 'https://' . alfa_host() . '/v2api/' . $br;
+                $ct = alfa_http('POST', "$hb/customer-tariff/index", ['customer_id' => $cid, 'page' => 0, 'count' => 100], $token, true, 10);
+                $its = is_array($ct['items'] ?? null) ? $ct['items'] : [];
+                foreach ($its as $t) $items[] = $t;
+                $ctDbg[] = ['branch' => $br, 'err' => $ct['__err'] ?? null, 'total' => $ct['total'] ?? null, 'count' => count($its),
+                            'keys0' => (count($its) && is_array($its[0] ?? null)) ? array_keys($its[0]) : null];
+            }
             $tariffCount = count($items);
             if ($tariffCount && is_array($items[0] ?? null)) $tariffRaw = $items[0];   // сырой первый — для сверки полей
+
+            // если абонементов нет — зонд по альтернативным сущностям (диагностика, где лежат «Счета и абонементы»)
+            if ($tariffCount === 0) {
+                foreach (['pay', 'invoice', 'subscription', 'customer-pay'] as $ep) {
+                    $hb = 'https://' . alfa_host() . '/v2api/' . $brList[0];
+                    $rr = alfa_http('POST', "$hb/$ep/index", ['customer_id' => $cid, 'page' => 0, 'count' => 30], $token, true, 6);
+                    $its = is_array($rr['items'] ?? null) ? $rr['items'] : [];
+                    $ctDbg[] = ['probe' => $ep, 'err' => $rr['__err'] ?? null, 'total' => $rr['total'] ?? null, 'count' => count($its),
+                                'keys0' => (count($its) && is_array($its[0] ?? null)) ? array_keys($its[0]) : null,
+                                'raw0' => $its[0] ?? null];
+                }
+            }
+
             $numN = fn($v) => ($v === null || $v === '' || !is_numeric($v)) ? null : (0 + $v);
             foreach ($items as $t) {
                 if (!is_array($t)) continue;
@@ -259,7 +289,7 @@ switch ($action) {
         json_out(['ok' => true, 'customerId' => $cid, 'branch' => alfa_branch(), 'matched' => $matchedName,
                   'summary' => $summary, 'history' => $history, 'active' => $active, 'custom' => $custom,
                   'subs' => $subs, 'subsArch' => $subsArch, 'from' => $from, 'to' => $to,
-                  'debug' => ['cgi' => count($cgiItems), 'lessons' => count($lesItems), 'groups' => count($gid), 'active' => count($active), 'today' => $today, 'cgiItems' => $cgiDbg, 'tariffCount' => $tariffCount, 'tariffRaw' => $tariffRaw]]);
+                  'debug' => ['cgi' => count($cgiItems), 'lessons' => count($lesItems), 'groups' => count($gid), 'active' => count($active), 'today' => $today, 'cgiItems' => $cgiDbg, 'tariffCount' => $tariffCount, 'tariffRaw' => $tariffRaw, 'custBranches' => $brList, 'ct' => $ctDbg]]);
         break;
 
     // --- СОЗДАТЬ НОВОГО КЛИЕНТА (ребёнка) в Alfa (WRITE) ---
