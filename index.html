@@ -1014,8 +1014,8 @@ details.client .cli-badges{margin-left:auto;font-size:12px;color:var(--muted)}
 
 <div class="modal-bg" id="remindModal" style="z-index:95">
  <div class="modal" style="max-width:400px;text-align:center">
-  <div style="font-size:42px;line-height:1;margin-bottom:6px">💬</div>
-  <h3 style="margin:0 0 8px;font-size:20px;line-height:1.3">Время напомнить будущим клиентам о нас :)</h3>
+  <div id="remindEmoji" style="font-size:42px;line-height:1;margin-bottom:6px">💬</div>
+  <h3 id="remindMsg" style="margin:0 0 8px;font-size:20px;line-height:1.3">Время напомнить будущим клиентам о нас :)</h3>
   <p style="font-size:13px;color:var(--muted);margin:0 0 18px;line-height:1.5">Напишите в Viber тем, кто ещё молчит — блок «не отправлено за день» на «Расписании» и воронка на «Наборе».</p>
   <div style="display:flex;gap:10px;justify-content:center;align-items:center;flex-wrap:wrap">
    <button class="btn" onclick="closeRemind()">Понятно 👍</button>
@@ -6870,7 +6870,43 @@ setTimeout(()=>{ if(_lastSnap===null) _lastSnap=_snap(); updateUndoBtn(); }, 0);
    Состояние — только в localStorage (per-device UI), модель/Firebase не трогает. */
 function _remTodayKey(){ const d=new Date(); return d.getFullYear()+"-"+(d.getMonth()+1)+"-"+d.getDate(); }
 function _remSlotKey(){ return _remTodayKey()+"-"+new Date().getHours(); }
-function openRemind(){ const m=document.getElementById("remindModal"); if(m) m.classList.add("show"); }
+/* 20 весёлых вариантов — каждый показ берём НЕ такой, как в прошлый раз (одинаковое бесит) */
+const REMIND_MSGS=[
+  {e:"😏",t:"Родители сами себя не запишут. Пора в Viber!"},
+  {e:"✊",t:"Тук-тук! Это будущие клиенты стучатся. Открываем Viber?"},
+  {e:"👀",t:"Пока ты читаешь это — кто-то пишет твоим родителям. Успей первым!"},
+  {e:"💬",t:"Viber соскучился по твоим сообщениям."},
+  {e:"🙂",t:"Один родитель = одна улыбка (и +1 к набору). Пишем!"},
+  {e:"🧊",t:"Молчащие родители сами себя не разморозят. Помоги им!"},
+  {e:"☕",t:"Кофе выпит? Тогда за рассылку!"},
+  {e:"✨",t:"Напомни родителям, что мы существуем и мы классные."},
+  {e:"🔔",t:"Час пробил! Время сеять добро и записи."},
+  {e:"💛",t:"Будущий клиент думает о нас. Помоги ему решиться."},
+  {e:"😅",t:"Не откладывай на потом — потом придёт следующее напоминание."},
+  {e:"👣",t:"Каждое сообщение — шаг к полной группе."},
+  {e:"🥰",t:"Родители любят внимание. Подари им его — в Viber."},
+  {e:"😌",t:"План по набору сам себя не выполнит… или выполнит? Пиши!"},
+  {e:"💪",t:"Секунда мужества — и ты уже пишешь родителю."},
+  {e:"🎬",t:"Viber, родители, ты. Классическое трио. Погнали!"},
+  {e:"🎯",t:"Ещё пара сообщений — и группа набрана."},
+  {e:"📩",t:"Дети ждут крутых занятий. Родители ждут твоего сообщения."},
+  {e:"🦸",t:"Время маленького подвига: написать тем, кто молчит."},
+  {e:"🚀",t:"Три… два… один… рассылка пошла!"}
+];
+function _remPickIdx(){
+  const n=REMIND_MSGS.length; if(n<=1) return 0;
+  let last=parseInt(localStorage.getItem("remMsgIdx"),10); if(isNaN(last)) last=-1;
+  let i; do{ i=Math.floor(Math.random()*n); }while(i===last);
+  try{ localStorage.setItem("remMsgIdx", i); }catch(e){}
+  return i;
+}
+function openRemind(){
+  const m=document.getElementById("remindModal"); if(!m) return;
+  const msg=REMIND_MSGS[_remPickIdx()]||REMIND_MSGS[0];
+  const t=document.getElementById("remindMsg"), e=document.getElementById("remindEmoji");
+  if(t) t.textContent=msg.t; if(e) e.textContent=msg.e;
+  m.classList.add("show");
+}
 function closeRemind(){ const m=document.getElementById("remindModal"); if(m) m.classList.remove("show"); }
 function remindMuteToday(){ try{ localStorage.setItem("remMuteDay", _remTodayKey()); }catch(e){} closeRemind(); if(typeof toast==="function") toast("Напоминания скрыты до завтра"); }
 function _remCheck(){
