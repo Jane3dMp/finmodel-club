@@ -243,6 +243,35 @@ switch ($action) {
                   'debug' => ['cgi' => count($cgiItems), 'lessons' => count($lesItems), 'groups' => count($gid), 'active' => count($active), 'today' => $today, 'cgiItems' => $cgiDbg]]);
         break;
 
+    // --- СОЗДАТЬ НОВОГО КЛИЕНТА (ребёнка) в Alfa (WRITE) ---
+    //     dryRun=true → только показать payload; dryRun=false → реально создать.
+    case 'createCustomer':
+        @set_time_limit(30);
+        $name = trim((string)($in['name'] ?? ''));
+        if ($name === '') json_out(['ok' => false, 'error' => 'Пустое ФИО ребёнка']);
+        $parent = trim((string)($in['parentName'] ?? ''));
+        $phone  = trim((string)($in['phone'] ?? ''));
+        $dob    = trim((string)($in['dob'] ?? ''));      // YYYY-MM-DD
+        $evzz   = trim((string)($in['evzz'] ?? ''));
+        $branch = alfa_branch();
+
+        $payload = ['name' => $name, 'branch_ids' => [$branch], 'is_study' => 1];
+        if ($phone  !== '') $payload['phone']       = [$phone];
+        if ($dob    !== '') $payload['dob']         = $dob;
+        if ($parent !== '') $payload['legal_name']  = $parent;   // «Заказчик» в Alfa
+        if ($evzz   !== '') $payload['custom_evzz'] = $evzz;     // ЭВ 26/27
+
+        if (!empty($in['dryRun'])) {
+            json_out(['ok' => true, 'dryRun' => true, 'payload' => $payload, 'branch' => $branch]);
+        }
+        $res   = alfa_create('customer', $payload);
+        $newId = $res['id'] ?? ($res['model']['id'] ?? ($res['items'][0]['id'] ?? null));
+        if ($newId === null) {
+            json_out(['ok' => false, 'error' => 'Alfa не вернула id (проверьте поля).', 'payload' => $payload, 'raw' => $res]);
+        }
+        json_out(['ok' => true, 'created' => true, 'id' => $newId, 'branch' => $branch, 'payload' => $payload]);
+        break;
+
     // --- справочники для маппинга модель→Alfa (READ) ---
     case 'refs':
         $out = [

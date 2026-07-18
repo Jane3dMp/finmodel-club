@@ -804,10 +804,36 @@ details.client .cli-badges{margin-left:auto;font-size:12px;color:var(--muted)}
  <div class="modal" style="max-width:600px">
   <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
    <h3 id="kidCardTitle" style="margin:0">🪪 Карточка ребёнка</h3>
-   <a id="kidCardLink" class="btn ghost sm" href="#" target="_blank" rel="noopener" style="display:none;margin-left:auto">🔗 В Альфе</a>
+   <button class="btn ghost sm" style="margin-left:auto" onclick="openNewKid()" title="Создать нового ребёнка (клиента) в AlfaCRM">➕ Новый</button>
+   <a id="kidCardLink" class="btn ghost sm" href="#" target="_blank" rel="noopener" style="display:none">🔗 В Альфе</a>
    <button class="btn ghost sm" onclick="closeKidCard()">Закрыть</button>
   </div>
   <div id="kidCardBody" style="font-size:13px"></div>
+ </div>
+</div>
+
+<div class="modal-bg" id="newKidModal">
+ <div class="modal" style="max-width:480px">
+  <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
+   <h3 style="margin:0">➕ Новый ребёнок → в Альфу</h3>
+   <button class="btn ghost sm" style="margin-left:auto" onclick="closeNewKid()">Закрыть</button>
+  </div>
+  <p style="font-size:12px;color:var(--muted);margin:0 0 8px;line-height:1.4">Создаёт нового клиента в AlfaCRM. Сначала «Проверить» — покажу, что именно уйдёт; создаётся только по кнопке «Создать в Альфе» с подтверждением.</p>
+  <label style="font-weight:600">ФИО ребёнка *</label>
+  <input id="nkName" class="cell wide" style="margin-bottom:6px" placeholder="Фамилия Имя Отчество">
+  <label style="font-weight:600">Родитель (заказчик)</label>
+  <input id="nkParent" class="cell wide" style="margin-bottom:6px" placeholder="ФИО родителя">
+  <label style="font-weight:600">Телефон</label>
+  <input id="nkPhone" class="cell wide" style="margin-bottom:6px" placeholder="+375 29 ...">
+  <div class="row2" style="gap:10px">
+   <div><label style="font-weight:600">Дата рождения</label><input id="nkDob" type="date" class="cell wide"></div>
+   <div><label style="font-weight:600">ЭВ 26/27</label><input id="nkEvzz" class="cell wide" placeholder="напр.: новый набор"></div>
+  </div>
+  <div id="nkResult" style="margin-top:10px;font-size:12px"></div>
+  <div class="hd-actions les-foot" style="margin-top:12px">
+   <button class="btn ghost sm" onclick="newKidDryRun()">🔎 Проверить (что уйдёт)</button>
+   <button class="btn sm" onclick="newKidCreate()">Создать в Альфе</button>
+  </div>
  </div>
 </div>
 
@@ -4894,6 +4920,39 @@ function saveKidParent(v){
   _childRec(aid,true).parentName=String(v||"").trim();
   persistLocal(); if(typeof fbSchedulePush==="function") fbSchedulePush();
   toast("Родитель сохранён");
+}
+/* ===== СОЗДАНИЕ НОВОГО РЕБЁНКА (клиента) В АЛЬФЕ ===== */
+function openNewKid(){ ["nkName","nkParent","nkPhone","nkDob","nkEvzz"].forEach(id=>{const e=document.getElementById(id); if(e) e.value="";}); const r=document.getElementById("nkResult"); if(r) r.innerHTML=""; document.getElementById("newKidModal").classList.add("show"); const n=document.getElementById("nkName"); if(n) n.focus(); }
+function closeNewKid(){ document.getElementById("newKidModal").classList.remove("show"); }
+function _newKidPayload(){
+  const g=id=>((document.getElementById(id)||{}).value||"").trim();
+  return { name:g("nkName"), parentName:g("nkParent"), phone:g("nkPhone"), dob:g("nkDob"), evzz:g("nkEvzz") };
+}
+async function _newKidCall(dry){
+  const p=_newKidPayload(); if(!p.name){ toast("Впишите ФИО ребёнка"); return null; }
+  const box=document.getElementById("nkResult"); box.innerHTML=dry?"Проверяю…":"Создаю в Альфе…";
+  const token=await _alfaIdToken();
+  const r=await fetch(ALFA_PROXY+"?action=createCustomer",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+token},body:JSON.stringify(Object.assign({dryRun:!!dry},p))});
+  const j=await r.json().catch(()=>({ok:false,error:"ответ не JSON ("+r.status+")"}));
+  if(!r.ok||!j.ok) throw new Error(j.error||("ошибка "+r.status));
+  return {p,j};
+}
+async function newKidDryRun(){
+  const box=document.getElementById("nkResult");
+  try{ const res=await _newKidCall(true); if(!res) return;
+    box.innerHTML=`<div class="callout"><b>Уйдёт в Альфу (пока НЕ создано):</b><pre style="white-space:pre-wrap;font-size:11px;margin:6px 0 0;overflow-wrap:anywhere">${esc(JSON.stringify(res.j.payload,null,2))}</pre><div style="font-size:11px;color:var(--muted);margin-top:4px">«legal_name» — это «Заказчик» в Альфе, «custom_evzz» — ЭВ 26/27. Если поле называется иначе — скажите, поправлю.</div></div>`;
+  }catch(e){ box.innerHTML=`<div class="callout" style="border-color:var(--red)">Не получилось: ${esc((e&&e.message)||e)}</div>`; }
+}
+async function newKidCreate(){
+  const p=_newKidPayload(); if(!p.name){ toast("Впишите ФИО ребёнка"); return; }
+  if(!confirm("Создать НОВОГО клиента в AlfaCRM?\n\n"+p.name+(p.parentName?("\nРодитель: "+p.parentName):"")+"\n\nЭто реальная запись в вашу CRM.")) return;
+  const box=document.getElementById("nkResult");
+  try{ const res=await _newKidCall(false); if(!res) return;
+    const id=res.j.id, br=res.j.branch||1;
+    if(id!=null){ const rec=_childRec(id,true); rec.name=p.name; if(p.parentName)rec.parentName=p.parentName; if(p.phone)rec.phone=p.phone; if(p.dob)rec.dob=p.dob; if(p.evzz)rec.evzz=p.evzz; persistLocal(); if(typeof fbSchedulePush==="function") fbSchedulePush(); }
+    box.innerHTML=`<div class="callout" style="border-color:var(--green)"><b>Создан в Альфе ✅</b> · ID: <b>${esc(String(id))}</b>${id!=null?` · <a href="${ALFA_HOST_URL}/company/${esc(String(br))}/customer/view?id=${esc(String(id))}" target="_blank" rel="noopener" style="color:var(--terra)">открыть в Альфе</a>`:''}</div>`;
+    toast("Ребёнок создан в Альфе");
+  }catch(e){ box.innerHTML=`<div class="callout" style="border-color:var(--red)">Не получилось: ${esc((e&&e.message)||e)}</div>`; }
 }
 function closeKidCard(){ document.getElementById("kidCardModal").classList.remove("show"); }
 async function openKidCard(alfaId,name,kid){
