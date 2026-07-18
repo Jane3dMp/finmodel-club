@@ -1510,9 +1510,9 @@ function _applyTabAccess(tabsMap){
 let _startTabDone=false;
 const START_TAB_ADMIN="report";
 function _applyStartTab(){
-  if(_startTabDone || !_fbIsAdmin) return;
+  if(_startTabDone) return;
   _startTabDone=true;
-  activateTab(START_TAB_ADMIN);   // сам переключит режим на «Финмодель»
+  activateTab(_fbIsAdmin ? START_TAB_ADMIN : "goals");   // админ → «Отчёт»; менеджер → «Набор» (стартовая)
 }
 /* ---- выпадающие меню «⋯ Ещё» / «☰ Меню» ---- */
 function closeAllMore(){ document.querySelectorAll(".more-menu.show").forEach(function(m){ m.classList.remove("show"); }); }
@@ -5507,67 +5507,39 @@ function _gbar(lab,val,total,color){
   return `<div class="gb"><span class="gb-lab">${lab}</span><span class="gb-bar"><i style="width:${w}%;background:${color}"></i></span><span class="gb-val">${val}</span></div>`;
 }
 function saveGoal(which,v){ v=Math.max(0,parseInt(v,10)||0); if(which==='ret') S.goalReturn=v; else S.goalNew=v; persistLocal(); if(typeof fbSchedulePush==="function") fbSchedulePush(); renderGoals(); }
+/* «точно подтвердили участие» = майские (оплатили) ИЛИ ответ «да» — уникальные, без «не придёт».
+   Не зависит от классификации старый/новый (её пока заглушили — из Альфы тянется некорректно). */
+function _confirmedCount(){
+  const map={};
+  (S.grid||[]).forEach(l=>kidsOf(l).forEach(k=>{ const key=_nameKey(k.n); if(!key) return;
+    const o=map[key]||(map[key]={may:false,yes:false,no:false});
+    if(k.may) o.may=true; if(k.vbReply==='yes') o.yes=true; if(k.no) o.no=true;
+  }));
+  const unplaced=(typeof _mayUnplacedByCourse==='function')?Object.values(_mayUnplacedByCourse()).reduce((a,b)=>a+b,0):0;
+  return Object.values(map).filter(o=>!o.no && (o.may||o.yes)).length + unplaced;
+}
 function renderGoals(){
   const box=document.getElementById("goalsBody"); if(!box) return;
-  const g=_goalsData();
-  const gRet=+S.goalReturn||500, gNew=+S.goalNew||350;
-  const retDone=g.retSecured, retLeft=Math.max(0,gRet-retDone), retPct=gRet>0?retDone/gRet:0;
-  const newDone=g.newTotal, newLeft=Math.max(0,gNew-newDone), newPct=gNew>0?newDone/gNew:0;
-  const totalDone=retDone+newDone, totalGoal=gRet+gNew, totalPct=totalGoal>0?Math.round(totalDone/totalGoal*100):0;
-  const RET="#3B7A57", NEW="var(--blue)";
-  const goalInp=(which,val)=>_fbIsAdmin?`<input type="number" value="${val}" onchange="saveGoal('${which}',this.value)" style="width:64px">`:`<b>${val}</b>`;
-  // строка про источник классификации старых/новых
-  let h="";
-  if(_fbIsAdmin){
-    h+=`<div class="hd-actions" style="margin-bottom:12px;align-items:center;gap:10px">
-      <button id="oldRosterBtn" class="btn ghost sm" onclick="pullOldRoster()" title="Один раз пройтись по Альфе и посчитать посещения за прошлый год — кто ходил ≥${OLD_VISIT_TH} раз, тот «старый»"><span data-ic="history"></span>Определить старых из Альфы</button>
-      <span style="font-size:12px;color:var(--muted)">${g.hasRoster?('обновлено: '+(g.rosterAt||'—')+' · критерий: ≥'+OLD_VISIT_TH+' посещ. за 01.09.2025–31.05.2026'):'ещё не выгружено — счёт приблизительный'}</span>
+  const {rows,T}=_ownerReport();
+  const confirmed=_confirmedCount();
+  const goal=(+S.goalReturn||500)+(+S.goalNew||350);
+  const pct=goal>0?Math.min(100,Math.round(confirmed/goal*100)):0;
+  const rate=T.kids?Math.round(T.yes/T.kids*100):0;
+  // «Собрали» = кто точно подтвердил участие (майские + «да»), из общей цели сезона (850)
+  let h=`<div class="goaltop">
+      <div class="goaltop-l"><div class="goaltop-lab">Собрали — точно подтвердили участие</div><div class="goaltop-num">${confirmed} <span>/ ${goal}</span></div></div>
+      <div class="goaltop-bar"><i style="width:${pct}%"></i></div>
+      <div class="goaltop-pct">${pct}%</div>
     </div>`;
-  }
-  if(!g.hasRoster){
-    h+=`<div class="callout" style="border-left-color:var(--blue);margin-bottom:12px;font-size:12.5px"><b>Классификация приблизительная.</b> Пока «старый» = у кого есть связь с Альфой. Для точного счёта по <b>≥${OLD_VISIT_TH} посещениям за прошлый год</b> нажмите «Определить старых из Альфы»${_fbIsAdmin?'':' (у администратора)'}.</div>`;
-  }
-  // верхняя мотивационная строка
-  h+=`<div class="goaltop">
-      <div class="goaltop-l"><div class="goaltop-lab">Собрано всего</div><div class="goaltop-num">${totalDone} <span>/ ${totalGoal}</span></div></div>
-      <div class="goaltop-bar"><i style="width:${totalPct}%"></i></div>
-      <div class="goaltop-pct">${totalPct}%</div>
-    </div>`;
-  // две большие цели
-  h+=`<div class="goalgrid">
-    <div class="goalcard">
-      <div class="goalcard-top">
-        <div class="donut">${_donut(retPct,RET)}<div class="donut-c"><div class="dn">${retDone}</div><div class="dd">из ${goalInp('ret',gRet)}</div></div></div>
-        <div class="goalcard-info">
-          <div class="goal-title">Возврат прошлогодних</div>
-          <div class="goal-pct" style="color:${RET}">${Math.round(retPct*100)}%</div>
-          <div class="goal-left">${retLeft>0?('осталось подтвердить <b>'+retLeft+'</b>'):'цель достигнута 🎉'}</div>
-        </div>
-      </div>
-      <div class="goalbreak">
-        ${_gbar('💚 Майские (оплатили)',g.retMay,gRet,RET)}
-        ${_gbar('✅ Подтвердили',g.retYes,gRet,'#6AA57E')}
-        ${_gbar('⏳ В работе',g.retWork,gRet,'#C9922E')}
-        ${_gbar('🔴 Отказ / не придёт',g.retNo,gRet,'var(--red)')}
-      </div>
-    </div>
-    <div class="goalcard">
-      <div class="goalcard-top">
-        <div class="donut">${_donut(newPct,NEW)}<div class="donut-c"><div class="dn">${newDone}</div><div class="dd">из ${goalInp('new',gNew)}</div></div></div>
-        <div class="goalcard-info">
-          <div class="goal-title">Новый набор</div>
-          <div class="goal-pct" style="color:${NEW}">${Math.round(newPct*100)}%</div>
-          <div class="goal-left">${newLeft>0?('осталось набрать <b>'+newLeft+'</b>'):'цель достигнута 🎉'}</div>
-        </div>
-      </div>
-      <div class="goalbreak">
-        ${_gbar('👶 Вписано новых',g.newTotal,gNew,NEW)}
-        ${_gbar('✅ Подтвердили',g.newYes,gNew,'#5B84D6')}
-      </div>
-    </div>
-  </div>`;
-  // воронка по группам (как в отчёте, но без денег) — с этого листа всё открывается
-  const {rows}=_ownerReport();
+  // воронка — плитки как в «Отчёте по набору»
+  h+=`<div class="kpigrid" style="margin-bottom:20px">`
+    +kpi("Детей в расписании",fmt(T.kids),"coal","всего записано")
+    +kpi("Отправлено",T.sent+" / "+T.kids,"coal","приглашений в Viber")
+    +kpi("Подтвердили",String(T.yes),"green",rate+"% от записанных")
+    +kpi("Отказ / думают",T.no+" / "+T.maybe,"red","🔴 / 🟡")
+    +kpi("Молчат",String(T.none),"coal","ждут ответа")
+    +`</div>`;
+  // движение по группам — клик по названию открывает карточку занятия
   const dn=["","Пн","Вт","Ср","Чт","Пт","Сб","Вс"];
   const tName=t=>(typeof shortName==="function"?shortName(t):t)||"";
   h+=`<h3 style="font-size:15px;margin:6px 0 10px;display:flex;align-items:center;gap:8px"><span data-ic="report"></span>Движение по группам</h3>
@@ -5578,7 +5550,7 @@ function renderGoals(){
     const nm=r.id?`<span class="grp-name" title="Открыть карточку занятия" onclick="editLes(_lesIdx('${esc(r.id)}'))"><b>${esc(r.name)}</b></span>`:`<b>${esc(r.name)}</b>`;
     h+=`<tr style="${r.risk?'background:#fdecea':''}">`
       +td((r.risk?'⚠ ':'')+nm)+td(esc(r.course))+td(esc(tName(r.teacher)))+td((dn[r.day]||'')+' '+esc(r.time||''))
-      +td(r.total,'center')+td('<b style="color:'+RET+'">'+r.yes+'</b>','center')+td(r.no||'','center')+td(r.maybe||'','center')
+      +td(r.total,'center')+td('<b style="color:var(--green)">'+r.yes+'</b>','center')+td(r.no||'','center')+td(r.maybe||'','center')
       +td('<span style="color:var(--muted)">'+(r.none||'')+'</span>','center')+td(r.cap>0?r.fill+'%':'—','center')
     +`</tr>`;
   });
