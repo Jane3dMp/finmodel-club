@@ -5315,28 +5315,19 @@ function _kidCardAlfa(j){
       <div style="margin:4px 0 10px;border:1px solid var(--line);border-radius:8px;padding:2px 10px">${evPrev.map((x,i)=>`<div style="padding:6px 0;font-size:12px;line-height:1.45;overflow-wrap:anywhere${i<evPrev.length-1?';border-bottom:1px solid #f0ebe4':''}"><b>${x[1]}:</b> ${esc(custom[x[0]])}</div>`).join("")}</div>`;
   }
   try{ if(j.debug){ console.log("🪪 карточка ребёнка · debug Альфы:", j.debug); console.log("🪪 debug (скопировать):", JSON.stringify(j.debug)); } }catch(e){}
-  // Купленные майские (закреплённые места на сентябрь) = платежи с пометкой «май»
+  // Купленные майские (закреплённые места на сентябрь) = платежи с пометкой «май».
+  // ⚠️ Курс каждого майского Альфа через API НЕ отдаёт (связь только во внутр. абонементе) — показываем
+  // сумму+дату майских и отдельно курсы по договору (это и есть кандидаты, что оформлено на сентябрь).
   const mays=Array.isArray(j.mayPays)?j.mayPays:[];
   const dg=Array.isArray(j.dogovora)?j.dogovora.filter(Boolean):[];
   if(mays.length){
-    // Альфа не отдаёт курс каждого майского через API → определяем по СУММЕ платежа и «майской цене»
-    // курса из модели (среди договорных курсов ребёнка), жадно, каждый курс — один раз.
-    const pool=dg.map(dc=>{
-      const mn=(typeof mayCourseMatch==="function")?mayCourseMatch(dc):"";
-      const c=mn?(S.courses||[]).find(x=>x.course===mn):null;
-      return {alfa:dc, mp:c?(+c.mayPrice||+c.price||0):0};
-    }).filter(d=>d.mp>0);
-    mays.forEach(x=>{
-      const amt=Math.round(+x.amount||0);
-      const idx=pool.findIndex(d=>Math.abs(Math.round(d.mp)-amt)<=1);
-      if(idx>=0){ x._course=pool[idx].alfa; pool.splice(idx,1); }
-    });
     h+=`<label style="font-weight:600">🎫 Купленные майские (места на сентябрь) — ${mays.length}:</label>
       <div style="border:1px solid var(--green);border-radius:8px;padding:6px 10px;margin:4px 0 10px;font-size:13px;background:#f2f7f2">
-      ${mays.map(x=>`<div style="display:flex;justify-content:space-between;gap:8px;padding:3px 0;align-items:baseline"><span>${x._course?`<b>${esc(x._course)}</b>`:esc(x.note||'майский')}${x.confirmed===false?' <span style="color:var(--red);font-size:11px">не подтв.</span>':''} <span style="color:var(--muted);font-size:11px">${dOnly(x.date)}${x._course?'':' · курс не определён'}</span></span><b style="color:var(--green);white-space:nowrap">${money(x.amount)}</b></div>`).join("")}</div>`;
+      ${mays.map(x=>`<div style="display:flex;justify-content:space-between;gap:8px;padding:3px 0;align-items:baseline"><span>${esc(x.note||'майский')}${x.confirmed===false?' <span style="color:var(--red);font-size:11px">не подтв.</span>':''} <span style="color:var(--muted);font-size:11px">${dOnly(x.date)}</span></span><b style="color:var(--green);white-space:nowrap">${money(x.amount)}</b></div>`).join("")}</div>`;
   }
-  // По договору — планируемые курсы (кастомное поле; НЕ обязательно оплачены). Для контекста, мелко.
-  if(dg.length) h+=`<div style="font-size:12px;color:var(--muted);margin:0 0 10px">📄 По договору: ${dg.map(esc).join(" · ")}</div>`;
+  if(dg.length) h+=`<label style="font-weight:600">📄 Курсы по договору (на сентябрь) — ${dg.length}:</label>
+      <div style="border:1px solid var(--line);border-radius:8px;padding:6px 10px;margin:4px 0 10px;font-size:13px;background:#faf9f5">
+      ${dg.map(c=>`<div style="padding:3px 0;font-weight:600">• ${esc(c)}</div>`).join("")}</div>`;
   // «Счета и абонементы» (как в карточке клиента Альфы) — абонементы customer-tariff,
   // а у этого клуба фактически платежи pay (сумма + пометка «майский» + дата).
   const subs=j.subs||[], subsArch=j.subsArch||[];
