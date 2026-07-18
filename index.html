@@ -1012,6 +1012,18 @@ details.client .cli-badges{margin-left:auto;font-size:12px;color:var(--muted)}
  </div>
 </div>
 
+<div class="modal-bg" id="remindModal" style="z-index:95">
+ <div class="modal" style="max-width:400px;text-align:center">
+  <div style="font-size:42px;line-height:1;margin-bottom:6px">💬</div>
+  <h3 style="margin:0 0 8px;font-size:20px;line-height:1.3">Время напомнить будущим клиентам о нас :)</h3>
+  <p style="font-size:13px;color:var(--muted);margin:0 0 18px;line-height:1.5">Напишите в Viber тем, кто ещё молчит — блок «не отправлено за день» на «Расписании» и воронка на «Наборе».</p>
+  <div style="display:flex;gap:10px;justify-content:center;align-items:center;flex-wrap:wrap">
+   <button class="btn" onclick="closeRemind()">Понятно 👍</button>
+   <button class="btn ghost sm" onclick="remindMuteToday()" title="Больше не показывать сегодня">Не сегодня</button>
+  </div>
+ </div>
+</div>
+
 <div class="modal-bg" id="logModal">
  <div class="modal" style="max-width:920px">
   <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
@@ -6853,6 +6865,30 @@ if(S.gasUrl){
 } else { ensureCurrentInList(); setSync("local","Локальный режим"); renderAll(); markReady(); }
 /* инициализация истории отмены после старта */
 setTimeout(()=>{ if(_lastSnap===null) _lastSnap=_snap(); updateUndoBtn(); }, 0);
+
+/* ===== Почасовое напоминание 11:00–18:00: «Время напомнить будущим клиентам о нас» =====
+   Состояние — только в localStorage (per-device UI), модель/Firebase не трогает. */
+function _remTodayKey(){ const d=new Date(); return d.getFullYear()+"-"+(d.getMonth()+1)+"-"+d.getDate(); }
+function _remSlotKey(){ return _remTodayKey()+"-"+new Date().getHours(); }
+function openRemind(){ const m=document.getElementById("remindModal"); if(m) m.classList.add("show"); }
+function closeRemind(){ const m=document.getElementById("remindModal"); if(m) m.classList.remove("show"); }
+function remindMuteToday(){ try{ localStorage.setItem("remMuteDay", _remTodayKey()); }catch(e){} closeRemind(); if(typeof toast==="function") toast("Напоминания скрыты до завтра"); }
+function _remCheck(){
+  try{
+    const h=new Date().getHours();
+    if(h<11 || h>18) return;                                          // окно 11:00–18:00 включительно
+    const login=document.getElementById("fbLogin");
+    if(login && login.style.display!=="none") return;                 // ещё не вошли — не мешаем
+    if(document.querySelector(".modal-bg.show")) return;              // открыта другая модалка — покажем в следующую минуту
+    if(localStorage.getItem("remMuteDay")===_remTodayKey()) return;   // нажали «Не сегодня»
+    const slot=_remSlotKey();
+    if(localStorage.getItem("remLastSlot")===slot) return;            // этот час уже показывали
+    localStorage.setItem("remLastSlot", slot);
+    openRemind();
+  }catch(e){}
+}
+setInterval(_remCheck, 60000);   // проверяем раз в минуту, показываем раз в час
+setTimeout(_remCheck, 6000);     // и вскоре после загрузки (если открыли посреди рабочего часа)
 /* Живая модель: всё автосохраняется в Firebase и localStorage. Перед уходом
    не показываем предупреждений (как в Альфе) — только тихо дожимаем отложенную
    запись, чтобы даже мгновенное обновление страницы ничего не потеряло. */
