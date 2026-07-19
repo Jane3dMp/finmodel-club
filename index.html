@@ -1830,13 +1830,12 @@ function showPeek(v){
         <div class="pk-t"><div class="l">Действий</div><div class="v">${g("actions")}</div></div>
       </div>
       ${lead}
-      <div class="pk-cd">Закроется через <b id="peekCd">5</b> сек</div>
+      <div style="margin-top:14px"><button class="btn sm" onclick="closePeek()">Закрыть</button></div>
     </div>`;
   m.classList.add("show");
-  let left=5; const cd=document.getElementById("peekCd");
-  const t=setInterval(function(){ left--; if(cd) cd.textContent=Math.max(0,left);
-    if(left<=0){ clearInterval(t); m.classList.remove("show"); _peekBusy=false; } }, 1000);
+  _peekBusy=false;
 }
+function closePeek(){ const m=document.getElementById("peekModal"); if(m) m.classList.remove("show"); _peekBusy=false; }
 /* ===== АВТОСНИМКИ (страховка от потери данных) — отдельный узел history/{сценарий} ===== */
 let _histTimer=null, _lastSnapHash="";
 function _fbHistRef(){ return (_fbDb && FB_ON) ? _fbDb.ref("history/"+_fbKey(currentScenarioName())) : null; }
