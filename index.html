@@ -2555,7 +2555,7 @@ function printPrice(){
 function _mayCountForCourse(name){
   const seen=new Set();
   (S.grid||[]).forEach(l=>{ if(l.course!==name) return;
-    kidsOf(l).forEach(k=>{ if(k&&k.may){ const nn=_normName(k.n); if(nn) seen.add(nn); } });
+    kidsOf(l).forEach(k=>{ if(k&&k.may){ const nn=_nameKey(k.n); if(nn) seen.add(nn); } });   // тёзки = разные дети
   });
   return seen.size;
 }
@@ -5613,7 +5613,7 @@ function _ownerReport(){
     }
     const g=groups[key];
     kidsOf(l).forEach(k=>{
-      const nn=_normName(k.n); if(!nn) return;
+      const nn=_nameKey(k.n); if(!nn) return;   // дедуп внутри группы по ПОЛНОМУ ФИО (тёзки = разные дети)
       const p=g.kids[nn]||{name:k.n,sent:false,reply:"",no:false};
       p.sent=p.sent||!!k.vbSent; p.no=p.no||!!k.no;
       const rank=r=>r==="yes"?3:r==="no"?2:r==="maybe"?1:0;
@@ -5787,7 +5787,7 @@ function _goalsFunnel(){
     const course=l.course||"—";
     const key=(l.group&&l.group.trim())?("g:"+l.group.trim()):("c:"+course+"|"+(l.day||"")+"|"+(l.start||""));
     const g=groups[key]||(groups[key]={kids:{}});
-    kidsOf(l).forEach(k=>{ const nn=_normName(k.n); if(!nn) return;
+    kidsOf(l).forEach(k=>{ const nn=_nameKey(k.n); if(!nn) return;   // дедуп внутри группы по ПОЛНОМУ ФИО (тёзки = разные)
       const p=g.kids[nn]||(g.kids[nn]={may:false,sent:false,reply:'',no:false});
       if(k.may) p.may=true; if(k.vbSent) p.sent=true; if(k.no) p.no=true;
       const rank=r=>r==='yes'?3:r==='no'?2:r==='maybe'?1:0;
@@ -5982,7 +5982,7 @@ function renderGroups(){
   const groups=order.map(k=>{ const g=map[k];
     g.key=k; g.done=!!(S.groupsDone||{})[k];
     const names=new Set(), paid=new Set();
-    g.idxs.forEach(i=>kidsOf(S.grid[i]).forEach(kd=>{ const n=_normName(kd.n); if(!n) return; names.add(n); if(kd.may) paid.add(n); }));
+    g.idxs.forEach(i=>kidsOf(S.grid[i]).forEach(kd=>{ const n=_nameKey(kd.n); if(!n) return; names.add(n); if(kd.may) paid.add(n); }));   // тёзки = разные дети
     g.kids=names.size; g.paid=paid.size;
     g.cap=Math.max(0,...g.idxs.map(i=>+S.grid[i].students||0));
     const seen=new Set(), sc=[];
@@ -6176,7 +6176,7 @@ function mayGroupsOf(courseName){
     groups[gk].idxs.push(idx);
   });
   return order.map(k=>{ const g=groups[k];
-    g.count=new Set(g.idxs.flatMap(i=>kidsOf(S.grid[i]).map(k=>_normName(k.n)))).size;
+    g.count=new Set(g.idxs.flatMap(i=>kidsOf(S.grid[i]).map(k=>_nameKey(k.n)))).size;   // тёзки = разные дети
     // если номера группы нет — подписываем педагогом, чтобы занятие было узнаваемо
     let nm=g.label;
     if(!nm) nm=(g.teacher?shortName(g.teacher):"без номера группы");
