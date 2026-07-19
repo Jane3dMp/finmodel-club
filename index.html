@@ -1663,7 +1663,9 @@ function showAchievements(auto){
     const name=((v.email||_fbUserEmail())||"").split("@")[0];
     renderAchieve(today, prev, prevK, name);
     document.getElementById("achieveModal").classList.add("show");
-  }).catch(function(e){ if(!auto) toast("Не удалось загрузить итоги: "+((e&&e.message)||e)); });
+  }).catch(function(e){ if(auto) return; const msg=(e&&e.message)||String(e);
+    if(/permission|denied/i.test(msg)) toast("Статистика ещё не включена: опубликуйте правила Firebase для узла «stats» (Realtime Database → Rules).");
+    else toast("Не удалось загрузить итоги: "+msg); });
 }
 function renderAchieve(today, prev, prevK, name){
   const g=k=>+(today&&today[k]||0), p=k=>prev?+(prev[k]||0):null;
