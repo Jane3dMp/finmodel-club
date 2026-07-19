@@ -4974,7 +4974,7 @@ function alfaBuildMatch(customers){
     const key=_normName(c.name); if(!key) return;
     const phone=(c.phones&&c.phones.find(p=>String(p).replace(/\D/g,"").length>=6))||"";
     if(!idx.has(key)) idx.set(key,[]);
-    idx.get(key).push({id:c.id,name:c.name,phone:phone,dob:c.dob||""});
+    idx.get(key).push({id:c.id,name:c.name,phone:phone,dob:c.dob||"",balance:(c.balance!=null?c.balance:null)});
   });
   // уникальные дети модели (+ набор полных ФИО на каждое «Фамилия Имя» — для детекта тёзок)
   const kids=new Map();
@@ -5044,13 +5044,14 @@ function alfaApply(){
   });
   // карта нормимя → {phone,id}
   const set=new Map();
-  M.willSet.forEach(w=>{ if(w.pick&&w.pick.phone) set.set(w.kid.key,{phone:w.pick.phone,id:w.pick.id,dob:w.pick.dob||""}); });
+  M.willSet.forEach(w=>{ if(w.pick&&w.pick.phone) set.set(w.kid.key,{phone:w.pick.phone,id:w.pick.id,dob:w.pick.dob||"",balance:(w.pick.balance!=null?w.pick.balance:null)}); });
 
   let updated=0;
   (S.grid||[]).forEach(l=>kidsOf(l).forEach(k=>{
     const v=set.get(_normName(k.n)); if(!v) return;
     if(k.phone!==v.phone || k.alfaId!==v.id || (v.dob&&k.dob!==v.dob)){ k.phone=v.phone; k.alfaId=v.id; if(v.dob) k.dob=v.dob; updated++; }
     else if(v.dob && !k.dob){ k.dob=v.dob; }
+    if(v.balance!=null) k.alfaBalance=v.balance;   // активный баланс из Альфы (последний известный)
   }));
   persistLocal(); if(typeof fbSchedulePush==="function") fbSchedulePush();
   if(typeof renderGrid==="function") renderGrid(); refreshKidSearch();
@@ -6140,6 +6141,9 @@ function renderGroups(){
 
 /* ===== ВКЛАДКА «КЛИЕНТЫ» — все дети + на какие курсы/группы вписаны и статус ===== */
 let _clientsQuery="", _clientsLetter="";
+/* бейдж активного баланса (из Альфы, последний известный при подтяжке контактов/новых) */
+function _cliBal(b){ if(b==null||b==="") return ""; const n=Math.round(+b||0);
+  return ` · <span style="color:${n<0?'var(--red)':'var(--green)'}" title="Активный баланс — из Альфы (последняя подтяжка)">${fmt(n)} р</span>`; }
 function _clientEnrollStatus(e){
   const s=[];
   if(e.may) s.push('<span style="color:var(--green)">💰 майский</span>');
@@ -6180,15 +6184,16 @@ function renderClients(){
   const map={};
   (S.grid||[]).forEach(l=>kidsOf(l).forEach(k=>{
     const key=_nameKey(k.n); if(!key) return;
-    if(!map[key]) map[key]={name:k.n, dob:k.dob||"", enroll:[]};
+    if(!map[key]) map[key]={name:k.n, dob:k.dob||"", enroll:[], balance:null};
     if(!map[key].dob && k.dob) map[key].dob=k.dob;
+    if(map[key].balance==null && k.alfaBalance!=null && k.alfaBalance!=="") map[key].balance=k.alfaBalance;   // активный баланс из Альфы
     if(map[key].name.split(" ").length < String(k.n).trim().split(" ").length) map[key].name=k.n; // берём наиболее полное написание
     map[key].enroll.push({ id:l.id||"", course:l.course||"", group:l.group||"", day:l.day||0, start:l.start||"", end:l.end||"",
       room:l.room||"", teacher:l.teacher||"", may:!!k.may, sched:!!k.sched, no:!!k.no, call:!!k.call, vbReply:k.vbReply||"", comment:k.c||"" });
   }));
   // дети из списка ожидания (без группы) — тоже показываем в «Клиентах»
   (Array.isArray(S.waitlist)?S.waitlist:[]).forEach(w=>{ if(!w||!w.n) return; const key=_nameKey(w.n); if(!key||map[key]) return;
-    map[key]={name:w.n, dob:w.dob||"", enroll:[], waiting:true, wl:w}; });
+    map[key]={name:w.n, dob:w.dob||"", enroll:[], waiting:true, wl:w, balance:(w.alfaBalance!=null?w.alfaBalance:null)}; });
   const clients=Object.values(map).sort((a,b)=>a.name.localeCompare(b.name,"ru"));
   const _firstLetter=nm=>((String(nm).trim().split(/\s+/)[0]||"")[0]||"").toUpperCase();
   const letters=[...new Set(clients.map(c=>_firstLetter(c.name)).filter(Boolean))].sort((a,b)=>a.localeCompare(b,"ru"));
@@ -6211,7 +6216,7 @@ function renderClients(){
     if(c.waiting){   // ребёнок без группы — список ожидания
       const w=c.wl||{};
       html+=`<details class="client">
-        <summary>${nameEl}<span class="cli-badges"><span style="color:#C9922E">⏳ без группы — список ожидания</span></span></summary>
+        <summary>${nameEl}<span class="cli-badges"><span style="color:#C9922E">⏳ без группы — список ожидания</span>${_cliBal(c.balance)}</span></summary>
         <div class="cli-list" style="padding:8px 10px">
           <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
             <select class="cell wl-sel" style="max-width:280px">${_gridGroupOptsHtml()}</select>
@@ -6234,7 +6239,7 @@ function renderClients(){
       </div>`).join("");
     html+=`<details class="client">
       <summary>${nameEl}
-        <span class="cli-badges">${courses.length} курс(ов)${paid?` · <span style="color:var(--green)">💰 ${paid}</span>`:''}</span></summary>
+        <span class="cli-badges">${courses.length} курс(ов)${paid?` · <span style="color:var(--green)">💰 ${paid}</span>`:''}${_cliBal(c.balance)}</span></summary>
       <div class="cli-list">${rows}</div>
     </details>`;
   });
@@ -6355,6 +6360,7 @@ function alfaNewApply(){
   picks.forEach(c=>{ const nk=_nameKey(c.name);
     if(_gridHasKid(nk) || S.waitlist.some(w=>_nameKey(w.n)===nk)) return;   // уже в системе
     const kid=_blankKid(c.name); kid.alfaId=c.id; if(c.phones&&c.phones[0]) kid.phone=c.phones[0]; if(c.dob) kid.dob=c.dob;
+    if(c.balance!=null) kid.alfaBalance=c.balance;   // активный баланс из Альфы
     kid.wlAt=new Date().toISOString(); S.waitlist.push(kid); added++;
   });
   persistLocal(); if(typeof fbSchedulePush==="function") fbSchedulePush();

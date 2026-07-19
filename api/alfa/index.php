@@ -73,6 +73,7 @@ switch ($action) {
                             'phones'   => array_values(array_filter(array_map('strval', (array)$phones))),
                             'is_study' => (int)($c['is_study'] ?? 0),
                             'dob'      => $c['dob'] ?? null,
+                            'balance'  => $c['balance'] ?? null,   // активный баланс (остаток по счёту клиента)
                             // дата создания клиента (для «подтянуть новых») — берём первый непустой кандидат
                             'created'  => $c['dt_add'] ?? ($c['created_at'] ?? ($c['b_date'] ?? ($c['added'] ?? null))),
                             'branch_ids' => [],
