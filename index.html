@@ -456,6 +456,13 @@ details.cwarn .cwarn-body{padding:0 14px 12px}
 .pk-lr .mm{font-size:12px;color:#5A5548;white-space:nowrap}
 .pk-lr.lead{background:#FBF2CE;border-color:#EBD98F}
 #peekModal.show .modal{animation:achpop .26s cubic-bezier(.2,.8,.3,1.3)}
+/* плавающая кнопка «подсмотреть итоги отдела» — всегда под рукой, правый нижний угол */
+#peekFab{position:fixed;right:18px;bottom:18px;z-index:70;width:54px;height:54px;border-radius:50%;border:none;
+  background:linear-gradient(140deg,#24221D 0%,#7A5A22 150%);color:#fff;font-size:23px;cursor:pointer;
+  box-shadow:0 8px 22px rgba(40,34,20,.32);display:flex;align-items:center;justify-content:center;transition:transform .15s,box-shadow .15s}
+#peekFab:hover{transform:scale(1.09);box-shadow:0 10px 26px rgba(40,34,20,.4)}
+#peekFab:active{transform:scale(.96)}
+@media(max-width:560px){#peekFab{right:14px;bottom:14px;width:50px;height:50px;font-size:21px}}
 
 /* ===== Админский дашборд «Статистика менеджеров» — стиль инфографики ===== */
 #mgrStatBody .ms-sum{background:linear-gradient(135deg,#FCFAF3,#F4E7C2);border:1px solid #EEE4CB;border-radius:18px;padding:14px 18px;margin-bottom:14px;box-shadow:0 6px 18px rgba(70,58,20,.06)}
@@ -609,7 +616,6 @@ details.client .cli-cols .cc-bal{width:74px;font-weight:600}
      <button class="btn ghost sm" id="logBtn" onclick="openLog()" title="Журнал действий — кто и что менял" style="display:none"><i data-ic="journal"></i>Журнал</button>
      <button class="btn ghost sm" id="mgrStatBtn" onclick="openMgrStat()" title="Статистика всех менеджеров за день" style="display:none"><i data-ic="report"></i>Статистика</button>
      <button class="btn ghost sm" onclick="showAchievements()" title="Мои итоги дня — инфографика">🏆 Мои итоги</button>
-     <button class="btn ghost sm" onclick="peekTeam()" title="Быстро подсмотреть итоги всего отдела за сегодня (окно на 3 сек)">👀 Итоги отдела</button>
      <div class="menu-sep"></div>
      <button class="btn ghost sm" onclick="openScnMenu()" title="Отдельные модели: годы и сценарии «что если»">⋮ Версии модели</button>
      <button class="btn ghost sm" onclick="openSync()" title="Резервная Google-таблица">Хранилище</button>
@@ -1114,6 +1120,7 @@ details.client .cli-cols .cc-bal{width:74px;font-weight:600}
 <div class="modal-bg" id="peekModal" style="z-index:97">
  <div class="modal"><div id="peekBody"></div></div>
 </div>
+<button id="peekFab" onclick="peekTeam()" title="Подсмотреть итоги отдела">👀</button>
 
 <div class="modal-bg" id="remindModal" style="z-index:95">
  <div class="modal" style="max-width:400px;text-align:center">
@@ -1781,7 +1788,7 @@ function _achCheck(){
 setInterval(_achCheck, 60000);
 setTimeout(_achCheck, 8000);
 /* ===== «ПОДСМОТРЕТЬ ИТОГИ ОТДЕЛА» (всем, на 3 сек; кто сколько подсматривал — видит только админ) ===== */
-let _peekBusy=false;
+let _peekBusy=false, _peekTimer=null;
 function peekTeam(){
   if(_peekBusy) return;
   if(!_fbDb || !FB_ON){ toast("Итоги отдела доступны после входа в аккаунт"); return; }
@@ -1830,12 +1837,12 @@ function showPeek(v){
         <div class="pk-t"><div class="l">Действий</div><div class="v">${g("actions")}</div></div>
       </div>
       ${lead}
-      <div style="margin-top:14px"><button class="btn sm" onclick="closePeek()">Закрыть</button></div>
     </div>`;
   m.classList.add("show");
-  _peekBusy=false;
+  clearTimeout(_peekTimer);
+  _peekTimer=setTimeout(function(){ m.classList.remove("show"); _peekBusy=false; }, 5000);   // само закрывается через 5 сек (без видимого отсчёта)
 }
-function closePeek(){ const m=document.getElementById("peekModal"); if(m) m.classList.remove("show"); _peekBusy=false; }
+function closePeek(){ clearTimeout(_peekTimer); const m=document.getElementById("peekModal"); if(m) m.classList.remove("show"); _peekBusy=false; }
 /* ===== АВТОСНИМКИ (страховка от потери данных) — отдельный узел history/{сценарий} ===== */
 let _histTimer=null, _lastSnapHash="";
 function _fbHistRef(){ return (_fbDb && FB_ON) ? _fbDb.ref("history/"+_fbKey(currentScenarioName())) : null; }
