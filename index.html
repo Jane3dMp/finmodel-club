@@ -433,6 +433,24 @@ details.cwarn .cwarn-body{padding:0 14px 12px}
 #achieveModal.show .modal{animation:achpop .28s cubic-bezier(.2,.8,.3,1.2)}
 @media(max-width:520px){.ach-grid{grid-template-columns:repeat(2,1fr)}.ach-big{flex-direction:column}}
 
+/* ===== «Подсмотреть итоги отдела» (3 сек) ===== */
+#peekModal .modal{max-width:460px;padding:0;overflow:hidden;border-radius:22px;text-align:center}
+.pk-hero{background:linear-gradient(140deg,#1F5BC0 0%,#3A352B 70%,#7A5A22 150%);color:#fff;padding:20px 22px 18px}
+.pk-hero .t{font-size:20px;font-weight:800;letter-spacing:-.02em}
+.pk-hero .s{font-size:12px;opacity:.75;margin-top:2px}
+.pk-big{display:flex;gap:10px;margin-top:14px}
+.pk-b{flex:1;background:rgba(255,255,255,.12);border-radius:16px;padding:12px}
+.pk-b .l{font-size:10.5px;opacity:.8;text-transform:uppercase;letter-spacing:.04em}
+.pk-b .v{font-size:40px;font-weight:800;line-height:1;margin-top:3px}
+.pk-body{padding:14px 18px 18px;background:linear-gradient(180deg,#FCFAF3,#FAF5E6)}
+.pk-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.pk-t{background:#FFFDF6;border:1px solid #EEE4CB;border-radius:12px;padding:8px}
+.pk-t .l{font-size:10px;color:#8C8677;text-transform:uppercase}
+.pk-t .v{font-size:22px;font-weight:800;line-height:1;margin-top:2px}
+.pk-cd{margin-top:12px;font-size:13px;color:#8C8677;font-weight:600}
+.pk-cd b{display:inline-block;min-width:20px;color:#B0493D;font-size:16px}
+#peekModal.show .modal{animation:achpop .26s cubic-bezier(.2,.8,.3,1.3)}
+
 /* ===== Админский дашборд «Статистика менеджеров» — стиль инфографики ===== */
 #mgrStatBody .ms-sum{background:linear-gradient(135deg,#FCFAF3,#F4E7C2);border:1px solid #EEE4CB;border-radius:18px;padding:14px 18px;margin-bottom:14px;box-shadow:0 6px 18px rgba(70,58,20,.06)}
 #mgrStatBody .ms-sum .h{font-weight:800;font-size:15px;letter-spacing:-.01em;margin-bottom:8px}
@@ -585,6 +603,7 @@ details.client .cli-cols .cc-bal{width:74px;font-weight:600}
      <button class="btn ghost sm" id="logBtn" onclick="openLog()" title="Журнал действий — кто и что менял" style="display:none"><i data-ic="journal"></i>Журнал</button>
      <button class="btn ghost sm" id="mgrStatBtn" onclick="openMgrStat()" title="Статистика всех менеджеров за день" style="display:none"><i data-ic="report"></i>Статистика</button>
      <button class="btn ghost sm" onclick="showAchievements()" title="Мои итоги дня — инфографика">🏆 Мои итоги</button>
+     <button class="btn ghost sm" onclick="peekTeam()" title="Быстро подсмотреть итоги всего отдела за сегодня (окно на 3 сек)">👀 Итоги отдела</button>
      <div class="menu-sep"></div>
      <button class="btn ghost sm" onclick="openScnMenu()" title="Отдельные модели: годы и сценарии «что если»">⋮ Версии модели</button>
      <button class="btn ghost sm" onclick="openSync()" title="Резервная Google-таблица">Хранилище</button>
@@ -1086,6 +1105,10 @@ details.client .cli-cols .cc-bal{width:74px;font-weight:600}
  <div class="modal"><div id="achieveBody"></div></div>
 </div>
 
+<div class="modal-bg" id="peekModal" style="z-index:97">
+ <div class="modal"><div id="peekBody"></div></div>
+</div>
+
 <div class="modal-bg" id="remindModal" style="z-index:95">
  <div class="modal" style="max-width:400px;text-align:center">
   <div id="remindEmoji" style="font-size:42px;line-height:1;margin-bottom:6px">💬</div>
@@ -1536,9 +1559,10 @@ function _pushLog(parts){
     const uid=_fbUid();
     if(uid && firebase.database.ServerValue && typeof firebase.database.ServerValue.increment==="function"){
       const inc=firebase.database.ServerValue.increment, dk=_dayKeyOf();
-      const cnt=_mgrCount(parts.join(" · ")), base="stats/"+uid+"/"+dk+"/", upd={};
+      const cnt=_mgrCount(parts.join(" · ")), base="stats/"+uid+"/"+dk+"/", tb="teamstats/"+dk+"/", upd={};
       upd[base+"actions"]=inc(1); upd[base+"at"]=firebase.database.ServerValue.TIMESTAMP;
-      STAT_KEYS.forEach(k=>{ if(cnt[k]) upd[base+k]=inc(cnt[k]); });
+      upd[tb+"actions"]=inc(1);   // командный агрегат отдела (читают все — для «подсмотреть итоги»)
+      STAT_KEYS.forEach(k=>{ if(cnt[k]){ upd[base+k]=inc(cnt[k]); upd[tb+k]=inc(cnt[k]); } });
       upd["stats/"+uid+"/email"]=email;
       _fbDb.ref().update(upd);
     }
@@ -1592,7 +1616,7 @@ function renderLog(){
   body.innerHTML=h;
 }
 /* ===== СТАТИСТИКА МЕНЕДЖЕРОВ за день (по журналу действий) — только админ ===== */
-let _mgrLogData=[];
+let _mgrLogData=[], _peeksData={};
 function _mgrCount(t){
   t=String(t||""); const c=re=>{ const m=t.match(re); return m?m.length:0; };
   const paidMarks=c(/💰/g), paidRm=c(/снята 💰/g);
@@ -1611,7 +1635,8 @@ function openMgrStat(){
   if(body) body.innerHTML='<div style="color:var(--muted);padding:10px 0">Загружаю журнал…</div>';
   _fbDb.ref("logs").limitToLast(6000).once("value").then(function(s){
     const v=s.val()||{}; _mgrLogData=Object.keys(v).map(k=>v[k]).filter(e=>e&&e.at);
-    renderMgrStat();
+    _fbDb.ref("peeks").once("value").then(function(ps){ _peeksData=ps.val()||{}; renderMgrStat(); })
+      .catch(function(){ _peeksData={}; renderMgrStat(); });   // подсмотры — не критично, если нет
   }).catch(function(e){ if(body) body.innerHTML='<div style="color:var(--red);padding:10px 0">Не удалось загрузить журнал: '+esc((e&&e.message)||"")+'</div>'; });
 }
 function closeMgrStat(){ const m=document.getElementById("mgrStatModal"); if(m) m.classList.remove("show"); }
@@ -1670,6 +1695,13 @@ function renderMgrStat(){
       <div class="ms-b">${heroFor(g.cnt,pc)}${gridFor(g.cnt,pc)}</div>
     </div>`;
   });
+  // «подсматривали итоги отдела» — только тебе (кто сколько раз нажал 👀)
+  const peeks=Object.values(_peeksData||{}).filter(x=>x&&(+x.count>0)).sort((a,b)=>(+b.count)-(+a.count));
+  if(peeks.length){
+    const pd=ts=>{ if(!ts) return ""; const d=new Date(ts),z=n=>String(n).padStart(2,"0"); return z(d.getDate())+"."+z(d.getMonth()+1)+" "+z(d.getHours())+":"+z(d.getMinutes()); };
+    h+=`<div class="ms-sum" style="margin-top:6px"><div class="h">👀 Подсматривали итоги отдела <span style="font-weight:400;color:#8C8677;font-size:12px">· всего нажатий: ${peeks.reduce((a,x)=>a+(+x.count||0),0)}</span></div>
+      <div style="display:flex;flex-direction:column;gap:6px">${peeks.map(x=>`<div style="display:flex;align-items:center;gap:10px;font-size:13px"><b style="min-width:120px">${esc(x.name||(x.email||"—").split("@")[0])}</b><span style="font-weight:800;font-size:16px">${+x.count||0}</span><span style="color:#8C8677;font-size:11px">раз${x.at?(" · последний "+pd(x.at)):""}</span></div>`).join("")}</div></div>`;
+  }
   body.innerHTML=h;
 }
 /* ===== ИНФОГРАФИКА «Итоги дня» (менеджеру — только свои; авто в 18:00 или по кнопке) ===== */
@@ -1741,6 +1773,53 @@ function _achCheck(){
 }
 setInterval(_achCheck, 60000);
 setTimeout(_achCheck, 8000);
+/* ===== «ПОДСМОТРЕТЬ ИТОГИ ОТДЕЛА» (всем, на 3 сек; кто сколько подсматривал — видит только админ) ===== */
+let _peekBusy=false;
+function peekTeam(){
+  if(_peekBusy) return;
+  if(!_fbDb || !FB_ON){ toast("Итоги отдела доступны после входа в аккаунт"); return; }
+  _peekBusy=true;
+  _fbDb.ref("teamstats/"+_dayKeyOf()).once("value").then(function(s){
+    showPeek(s.val()||{});
+    // засчитать нажатие (только запись в свой узел; читает статистику подсмотров только админ)
+    try{ const uid=_fbUid();
+      if(uid && firebase.database.ServerValue && typeof firebase.database.ServerValue.increment==="function"){
+        _fbDb.ref().update({
+          ["peeks/"+uid+"/count"]:firebase.database.ServerValue.increment(1),
+          ["peeks/"+uid+"/name"]:(_fbUserEmail()||"").split("@")[0],
+          ["peeks/"+uid+"/email"]:_fbUserEmail(),
+          ["peeks/"+uid+"/at"]:firebase.database.ServerValue.TIMESTAMP });
+      }
+    }catch(e){}
+  }).catch(function(e){ _peekBusy=false; const msg=(e&&e.message)||String(e);
+    if(/permission|denied/i.test(msg)) toast("Итоги отдела ещё не включены (правила Firebase для «teamstats»/«peeks»).");
+    else toast("Не удалось подсмотреть: "+msg); });
+}
+function showPeek(v){
+  const m=document.getElementById("peekModal"), body=document.getElementById("peekBody");
+  if(!m||!body){ _peekBusy=false; return; }
+  const g=k=>+(v&&v[k]||0);
+  body.innerHTML=`<div class="pk-hero">
+      <div class="t">👀 Итоги отдела · сегодня</div>
+      <div class="s">Быстрый взгляд — окно закроется само</div>
+      <div class="pk-big">
+        <div class="pk-b"><div class="l">Отправлено Viber</div><div class="v">${g("sent")}</div></div>
+        <div class="pk-b"><div class="l">Записано детей</div><div class="v">${g("enrolled")}</div></div>
+      </div>
+    </div>
+    <div class="pk-body">
+      <div class="pk-grid">
+        <div class="pk-t"><div class="l">Ответов</div><div class="v">${g("replies")}</div></div>
+        <div class="pk-t"><div class="l">💰 отметок</div><div class="v" style="color:#3B7A57">${g("paid")}</div></div>
+        <div class="pk-t"><div class="l">Действий</div><div class="v">${g("actions")}</div></div>
+      </div>
+      <div class="pk-cd">Закроется через <b id="peekCd">3</b> сек</div>
+    </div>`;
+  m.classList.add("show");
+  let left=3; const cd=document.getElementById("peekCd");
+  const t=setInterval(function(){ left--; if(cd) cd.textContent=Math.max(0,left);
+    if(left<=0){ clearInterval(t); m.classList.remove("show"); _peekBusy=false; } }, 1000);
+}
 /* ===== АВТОСНИМКИ (страховка от потери данных) — отдельный узел history/{сценарий} ===== */
 let _histTimer=null, _lastSnapHash="";
 function _fbHistRef(){ return (_fbDb && FB_ON) ? _fbDb.ref("history/"+_fbKey(currentScenarioName())) : null; }
