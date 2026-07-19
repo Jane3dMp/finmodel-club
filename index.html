@@ -992,7 +992,7 @@ details.client .cli-badges{margin-left:auto;font-size:12px;color:var(--muted)}
    <h3 id="akTitle" style="margin:0">➕ Новый ребёнок → в группу</h3>
    <button class="btn ghost sm" style="margin-left:auto" onclick="closeAddKid()">Закрыть</button>
   </div>
-  <p style="font-size:12px;color:var(--muted);margin:0 0 8px;line-height:1.4">Заполните <b>все</b> поля. Ребёнок сразу появится в «Клиентах», «Группах», «Наборе» и «Расписании». Данные — в этой модели; в Альфу не уходит.</p>
+  <p style="font-size:12px;color:var(--muted);margin:0 0 8px;line-height:1.4">Заполните <b>все</b> поля. Ребёнок сразу появится в «Клиентах», «Группах», «Наборе» и «Расписании». В AlfaCRM — только если поставите галочку ниже.</p>
   <label style="font-weight:600">ФИО ребёнка *</label>
   <input id="akName" class="cell wide" style="margin-bottom:6px" placeholder="Фамилия Имя">
   <div id="akGroupRow">
@@ -1003,6 +1003,12 @@ details.client .cli-badges{margin-left:auto;font-size:12px;color:var(--muted)}
   <div class="row2" style="gap:10px">
    <div><label style="font-weight:600">Телефон *</label><input id="akPhone" class="cell wide" placeholder="+375 29 ..."></div>
    <div><label style="font-weight:600">Дата рождения *</label><input id="akDob" type="date" class="cell wide"></div>
+  </div>
+  <div id="akAlfaRow" style="display:none">
+   <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-top:8px;font-weight:600">
+    <input type="checkbox" id="akToAlfa" style="width:auto"> 📤 Также завести в AlfaCRM
+   </label>
+   <div style="font-size:11px;color:var(--muted);margin:2px 0 0">Создаст клиента в CRM (ФИО + телефон + ДР) и спросит подтверждение. Без галочки — только в этой модели.</div>
   </div>
   <div id="akResult" style="margin-top:10px;font-size:12px"></div>
   <div class="hd-actions les-foot" style="margin-top:12px">
@@ -3837,6 +3843,8 @@ function openAddKid(presetKey, mode){
   _addKidMode=(mode==="lesson")?"lesson":"grid";
   const nm=document.getElementById("akName"); if(nm) nm.value="";
   ["akPhone","akDob"].forEach(id=>{ const e=document.getElementById(id); if(e) e.value=""; });
+  const alf=document.getElementById("akToAlfa"); if(alf) alf.checked=false;
+  const alfRow=document.getElementById("akAlfaRow"); if(alfRow) alfRow.style.display=_fbIsAdmin?"":"none";   // создание в CRM — только админ (у менеджеров нет доступа к записи в Альфу)
   const r=document.getElementById("akResult"); if(r) r.textContent="";
   const row=document.getElementById("akGroupRow"), fixed=document.getElementById("akGroupFixed");
   const title=document.getElementById("akTitle"), saveBtn=document.getElementById("akSaveBtn");
@@ -3868,6 +3876,7 @@ function saveAddKid(){
   const name=cleanKidName((document.getElementById("akName").value||"").trim());
   const phone=(document.getElementById("akPhone").value||"").trim();
   const dob=(document.getElementById("akDob").value||"").trim();
+  const toAlfa=!!((document.getElementById("akToAlfa")||{}).checked);
   if(!name){ warn("Впишите ФИО ребёнка."); return; }
   if(!phone){ warn("Впишите телефон родителя."); return; }
   if(!dob){ warn("Укажите дату рождения."); return; }
@@ -3880,6 +3889,7 @@ function saveAddKid(){
     if(typeof renderKidsEditor==="function") renderKidsEditor();
     closeAddKid();
     toast("Добавлен(а): "+name+" (не забудьте «Сохранить»)");
+    if(toAlfa) _addKidToAlfa(name,phone,dob,"lesson");
     return;
   }
   // ── режим «в группу»: вписываем во все занятия выбранной группы ──
@@ -3900,6 +3910,31 @@ function saveAddKid(){
   if(typeof renderReport==="function") renderReport();
   closeAddKid();
   toast(added===0 ? ("«"+name+"» уже есть в этой группе") : ("Добавлен(а): "+name+" → "+(g.label||g.course||"группа")));
+  if(toAlfa) _addKidToAlfa(name,phone,dob,"grid");
+}
+/* Завести только что созданного ребёнка в AlfaCRM (по галочке в модалке). Реальная запись в CRM →
+   спрашиваем подтверждение. При успехе проставляем alfaId созданному ребёнку (карта/редактор). */
+async function _addKidToAlfa(name,phone,dob,mode){
+  if(!confirm("Завести «"+name+"» в AlfaCRM?\n\nЭто реальная запись в вашу CRM — уйдут ФИО"+(phone?", телефон":"")+(dob?", дата рождения":"")+".")) return;
+  toast("Создаю в Альфе: "+shortName(name)+"…");
+  try{
+    const token=await _alfaIdToken();
+    const r=await fetch(ALFA_PROXY+"?action=createCustomer",{method:"POST",
+      headers:{"Content-Type":"application/json","Authorization":"Bearer "+token},
+      body:JSON.stringify({name:name, phone:phone, dob:dob, dryRun:false})});
+    const j=await r.json().catch(()=>({ok:false,error:"ответ не JSON ("+r.status+")"}));
+    if(!r.ok||!j.ok) throw new Error(j.error||("ошибка "+r.status));
+    const id=j.id;
+    if(id!=null){
+      const key=_nameKey(name);
+      if(mode==="lesson"){ const k=(_editKids||[]).find(x=>_nameKey(x.n)===key); if(k){ k.alfaId=id; if(typeof renderKidsEditor==="function") renderKidsEditor(); } }
+      else { (S.grid||[]).forEach(l=>kidsOf(l).forEach(k=>{ if(_nameKey(k.n)===key && !k.alfaId) k.alfaId=id; })); }
+      try{ const rec=_childRec(id,true); rec.name=name; if(phone)rec.phone=phone; if(dob)rec.dob=dob; }catch(e){}
+      persistLocal(); if(typeof fbSchedulePush==="function") fbSchedulePush();
+      if(typeof renderGrid==="function") renderGrid();
+    }
+    toast("Создан в Альфе ✅: "+shortName(name)+(id!=null?(" · ID "+id):""));
+  }catch(e){ toast("В Альфу не ушло: "+((e&&e.message)||e)); }
 }
 function renderKidsEditor(){
   const box=document.getElementById("kidsBox");
