@@ -433,6 +433,24 @@ details.cwarn .cwarn-body{padding:0 14px 12px}
 #achieveModal.show .modal{animation:achpop .28s cubic-bezier(.2,.8,.3,1.2)}
 @media(max-width:520px){.ach-grid{grid-template-columns:repeat(2,1fr)}.ach-big{flex-direction:column}}
 
+/* ===== Админский дашборд «Статистика менеджеров» — стиль инфографики ===== */
+#mgrStatBody .ms-sum{background:linear-gradient(135deg,#FCFAF3,#F4E7C2);border:1px solid #EEE4CB;border-radius:18px;padding:14px 18px;margin-bottom:14px;box-shadow:0 6px 18px rgba(70,58,20,.06)}
+#mgrStatBody .ms-sum .h{font-weight:800;font-size:15px;letter-spacing:-.01em;margin-bottom:8px}
+#mgrStatBody .ms-card{border:1px solid #EEE4CB;border-radius:18px;overflow:hidden;margin-bottom:12px;box-shadow:0 6px 18px rgba(70,58,20,.07);background:#fff}
+#mgrStatBody .ms-top{background:linear-gradient(140deg,#24221D 0%,#3A352B 60%,#7A5A22 150%);color:#fff;padding:12px 16px;display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+#mgrStatBody .ms-top .nm{font-size:17px;font-weight:800;letter-spacing:-.01em}
+#mgrStatBody .ms-top .em{font-size:11px;opacity:.55}
+#mgrStatBody .ms-top .mt{font-size:12px;opacity:.8;margin-left:auto}
+#mgrStatBody .ms-b{padding:12px 16px 16px}
+#mgrStatBody .ms-hero{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:9px}
+#mgrStatBody .ms-hcard{flex:1;min-width:130px;background:#FFFDF6;border:1px solid #EEE4CB;border-radius:14px;padding:10px 12px}
+#mgrStatBody .ms-hcard .l{font-size:10.5px;color:#8C8677;text-transform:uppercase;letter-spacing:.03em}
+#mgrStatBody .ms-hcard .v{font-size:32px;font-weight:800;line-height:1;letter-spacing:-.02em;margin-top:2px;font-variant-numeric:tabular-nums}
+#mgrStatBody .ms-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(98px,1fr));gap:8px}
+#mgrStatBody .ms-t{background:#FFFDF6;border:1px solid #EEE4CB;border-radius:12px;padding:8px 10px}
+#mgrStatBody .ms-t .l{font-size:10px;color:#8C8677;text-transform:uppercase;letter-spacing:.02em}
+#mgrStatBody .ms-t .v{font-size:22px;font-weight:800;line-height:1;margin-top:2px;font-variant-numeric:tabular-nums}
+
 /* реальный оборот (майская акция) */
 #realTable th.a-left,#realTable td.a-left{text-align:left}
 #realTable th.a-right,#realTable td.a-right{text-align:right}
@@ -1605,30 +1623,40 @@ function renderMgrStat(){
   const mgrs=Object.values(byM).sort((a,b)=>b.actions-a.actions);
   const tot={actions:0,parts:0,cnt:_mgrCount("")};
   mgrs.forEach(g=>{ tot.actions+=g.actions; tot.parts+=g.parts; for(const k in g.cnt) tot.cnt[k]+=g.cnt[k]; });
-  const tile=(lab,val,col)=>`<div style="border:1px solid var(--line);border-radius:10px;padding:8px 10px;min-width:86px;background:#fff">
-     <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.03em">${lab}</div>
-     <div style="font-size:22px;font-weight:800;color:${col||'var(--coal)'}">${val}</div></div>`;
   const tm=ts=>{ const d=new Date(ts),p=n=>String(n).padStart(2,"0"); return p(d.getHours())+":"+p(d.getMinutes()); };
   const ds=ts=>{ const d=new Date(ts),p=n=>String(n).padStart(2,"0"); return p(d.getDate())+"."+p(d.getMonth()+1)+"."+String(d.getFullYear()).slice(2); };
-  const tilesFor=c=>[
-    tile("Записал",c.enrolled,"var(--green)"), tile("Отправил Viber",c.sent,"var(--blue)"),
-    tile("Ответов",c.replies), tile("💰 отметок",c.paid,c.paid?"var(--green)":""),
-    tile("Отказов ❌",c.refusal,c.refusal?"var(--red)":""), tile("Переносов",c.moved),
-    tile("Убрал детей",c.removed), tile("Занятий +/−",c.lesAdd+" / "+c.lesDel), tile("Правок",c.edits)
-  ].join("");
+  // дельты к ПРОШЛОМУ дню (только в режиме «за день»): собираем по email→день из всего журнала
+  const _agg=list=>{ const c=_mgrCount(""); list.forEach(e=>{ const x=_mgrCount(e.text); for(const k in x) c[k]+=x[k]; }); return c; };
+  const eDay={};
+  if(!allMode && day) _mgrLogData.forEach(e=>{ const em=e.email||"—", dk=_dk(e.at); (eDay[em]=eDay[em]||{}); (eDay[em][dk]=eDay[em][dk]||[]).push(e); });
+  const prevOf=em=>{ if(allMode||!day||!eDay[em]) return null; const pk=Object.keys(eDay[em]).filter(k=>k<day).sort().pop(); return pk?_agg(eDay[em][pk]):null; };
+  const prevTot=(!allMode&&day)?(function(){ const pk=[...new Set(_mgrLogData.map(e=>_dk(e.at)))].filter(k=>k<day).sort().pop(); return pk?_agg(_mgrLogData.filter(e=>_dk(e.at)===pk)):null; })():null;
+  // хелперы вёрстки
+  const hcard=(lab,cur,prev,col)=>`<div class="ms-hcard"><div class="l">${lab}</div><div class="v" style="color:${col||'#20201D'}">${cur}</div>${prev!=null?_achDelta(cur,prev):''}</div>`;
+  const t=(lab,cur,prev,col)=>`<div class="ms-t"><div class="l">${lab}</div><div class="v" style="color:${col||'#20201D'}">${cur}</div>${prev!=null?_achDelta(cur,prev):''}</div>`;
+  const heroFor=(c,pc)=>`<div class="ms-hero">${hcard("Отправил Viber",c.sent,pc?pc.sent:null,"#1F5BC0")}${hcard("Записал детей",c.enrolled,pc?pc.enrolled:null,"#3B7A57")}</div>`;
+  const gridFor=(c,pc)=>{ const p=k=>pc?pc[k]:null; return `<div class="ms-grid">`
+    +t("Ответов",c.replies,p("replies"))
+    +t("💰 отметок",c.paid,p("paid"),c.paid?"#3B7A57":"")
+    +t("Отказов ❌",c.refusal,p("refusal"),c.refusal?"#B0493D":"")
+    +t("Переносов",c.moved,p("moved"))
+    +t("Убрал детей",c.removed,p("removed"))
+    +t("Занятий +/−",c.lesAdd+" / "+c.lesDel,null)
+    +t("Правок",c.edits,p("edits"))
+    +`</div>`; };
   const allFirst=Math.min(...mgrs.map(g=>g.first)), allLast=Math.max(...mgrs.map(g=>g.last));
   const allDays=new Set(); mgrs.forEach(g=>g.days.forEach(x=>allDays.add(x)));
-  let h=`<div class="callout" style="margin-bottom:10px">Менеджеров активно: <b>${mgrs.length}</b> · всего действий: <b>${tot.actions}</b> · отдельных правок: <b>${tot.parts}</b>${allMode?` · дней: <b>${allDays.size}</b> · период: <b>${ds(allFirst)}–${ds(allLast)}</b>`:''}</div>
-    <div style="font-weight:700;margin:0 0 6px">${allMode?'Итого за всё время':'Итого за день'}</div>
-    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px">${tilesFor(tot.cnt)}</div>`;
-  mgrs.forEach(g=>{ const who=(g.email||"—").split("@")[0];
-    const meta=allMode?`📅 ${ds(g.first)}–${ds(g.last)} · дней: <b>${g.days.size}</b> · действий: <b>${g.actions}</b>`:`🕒 ${tm(g.first)}–${tm(g.last)} · действий: <b>${g.actions}</b>`;
-    h+=`<div style="border:1px solid var(--line);border-radius:14px;padding:12px 14px;margin-bottom:10px;box-shadow:0 1px 3px rgba(28,20,16,.04)">
-      <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:8px">
-        <b style="font-size:16px">${esc(who)}</b><span style="font-size:12px;color:var(--muted)">${esc(g.email||"")}</span>
-        <span style="font-size:12px;color:var(--muted);margin-left:auto">${meta}</span>
-      </div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap">${tilesFor(g.cnt)}</div>
+  // Итого
+  let h=`<div class="ms-sum">
+      <div class="h">${allMode?'Итого за всё время':'Итого за день'} <span style="font-weight:400;color:#8C8677;font-size:12px">· менеджеров: ${mgrs.length} · действий: ${tot.actions}${allMode?` · дней: ${allDays.size} · ${ds(allFirst)}–${ds(allLast)}`:''}</span></div>
+      ${heroFor(tot.cnt,prevTot)}${gridFor(tot.cnt,prevTot)}
+    </div>`;
+  // по каждому менеджеру
+  mgrs.forEach(g=>{ const who=(g.email||"—").split("@")[0]; const pc=prevOf(g.email);
+    const meta=allMode?`📅 ${ds(g.first)}–${ds(g.last)} · дней: ${g.days.size} · действий: ${g.actions}`:`🕒 ${tm(g.first)}–${tm(g.last)} · действий: ${g.actions}`;
+    h+=`<div class="ms-card">
+      <div class="ms-top"><span class="nm">${esc(who)}</span><span class="em">${esc(g.email||"")}</span><span class="mt">${meta}</span></div>
+      <div class="ms-b">${heroFor(g.cnt,pc)}${gridFor(g.cnt,pc)}</div>
     </div>`;
   });
   body.innerHTML=h;
