@@ -42,10 +42,21 @@ function cors(): void {
 }
 
 // ---------- Каталог для кэша (токены Alfa, сертификаты Google) ----------
+// Имя каталога солится путём приложения → сосед по shared-хостингу не может заранее
+// занять предсказуемый путь и отравить кэш сертификатов/токена (dir 0700, файлы 0600).
 function cache_dir(): string {
-    $d = sys_get_temp_dir() . '/alfaproxy';
+    static $d = null;
+    if ($d !== null) return $d;
+    $salt = substr(hash('sha256', __DIR__), 0, 20);
+    $d = sys_get_temp_dir() . '/alfaproxy_' . $salt;
     if (!is_dir($d)) @mkdir($d, 0700, true);
     return $d;
+}
+// Атомарная запись кэша: temp-файл + rename, права 0600 (без гонок/усечения и не читаемо соседями).
+function cache_write(string $file, string $data): void {
+    $tmp = $file . '.' . getmypid() . '.tmp';
+    if (@file_put_contents($tmp, $data, LOCK_EX) !== false) { @chmod($tmp, 0600); @rename($tmp, $file); }
+    else { @file_put_contents($file, $data, LOCK_EX); @chmod($file, 0600); }
 }
 
 // =====================================================================
@@ -85,7 +96,7 @@ function google_secure_certs(): array {
 
     $ttl = 3600;
     if (preg_match('/max-age=(\d+)/i', $headers, $m)) $ttl = max(60, (int)$m[1]);
-    @file_put_contents($cacheFile, json_encode(['exp' => time() + $ttl, 'certs' => $certs]));
+    cache_write($cacheFile, json_encode(['exp' => time() + $ttl, 'certs' => $certs]));
     return $certs;
 }
 
@@ -165,7 +176,7 @@ function alfa_token(): string {
         ['email' => $a['email'] ?? '', 'api_key' => $a['api_key'] ?? ''], null);
     $token = $resp['token'] ?? '';
     if ($token === '') json_out(['ok' => false, 'error' => 'AlfaCRM не выдал токен — проверьте email/api_key', 'alfa' => $resp], 502);
-    @file_put_contents($cacheFile, json_encode(['exp' => time() + 3000, 'token' => $token]));
+    cache_write($cacheFile, json_encode(['exp' => time() + 3000, 'token' => $token]));
     return $token;
 }
 
@@ -220,7 +231,7 @@ function alfa_branch(): int {
     $r = alfa_http('POST', 'https://' . alfa_host() . '/v2api/branch/index',
         ['is_active' => 1, 'page' => 0], alfa_token());
     $resolved = (int)($r['items'][0]['id'] ?? 1);
-    @file_put_contents($cacheFile, json_encode(['exp' => time() + 86400, 'branch' => $resolved]));
+    cache_write($cacheFile, json_encode(['exp' => time() + 86400, 'branch' => $resolved]));
     return $resolved;
 }
 

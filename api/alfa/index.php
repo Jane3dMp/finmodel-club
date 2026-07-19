@@ -139,11 +139,19 @@ switch ($action) {
             if (($bb && $bb > $to) || ($ee && $ee < $from)) continue;   // не пересекается с окном прошлого года
             $note($gid, $gidc, $ee ?: $bb);
         }
-        // 2) уроки в окне (пробуем разные имена фильтров — лишние Alfa игнорирует)
-        $les = alfa_http('POST', "$host/lesson/index",
-            ['customer_id' => $cid, 'date_from' => $from, 'date_to' => $to, 'b_date' => $from, 'e_date' => $to, 'page' => 0, 'count' => 150],
-            $token, true, 14);
-        $lesItems = isset($les['__err']) ? [] : ($les['items'] ?? []);
+        // 2) уроки в окне с ПАГИНАЦИЕЙ (Alfa отдаёт ≤50 на страницу; у активного ребёнка за год >150 уроков —
+        //    без пагинации терялись ранние группы/расписание). Лимит 20 страниц = 1000 уроков.
+        $lesItems = [];
+        for ($lp = 0; $lp < 20; $lp++) {
+            $les = alfa_http('POST', "$host/lesson/index",
+                ['customer_id' => $cid, 'date_from' => $from, 'date_to' => $to, 'b_date' => $from, 'e_date' => $to, 'page' => $lp, 'count' => 100],
+                $token, true, 14);
+            if (isset($les['__err'])) break;
+            $batch = $les['items'] ?? [];
+            foreach ($batch as $ls) $lesItems[] = $ls;
+            $total = (int)($les['total'] ?? 0);
+            if (count($batch) === 0 || count($lesItems) >= $total) break;
+        }
         $gsched = [];   // group_id => набор слотов "деньНедели|начало|конец" (из фактических уроков)
         $hm = function ($v) { return preg_match('/(\d{1,2}:\d{2})/', (string)$v, $m) ? $m[1] : ''; };
         foreach ($lesItems as $ls) {
@@ -276,7 +284,7 @@ switch ($action) {
                         'subject' => implode(', ', $subjNames), 'b_date' => $bIso, 'e_date' => $eIso,
                         'balance' => $numN($t['balance'] ?? null),
                         'lessons' => $numN($t['paid_count'] ?? ($t['paid_lesson_count'] ?? null)),
-                        'note' => $note, 'may' => ($note !== '' && mb_stripos($note, 'май') !== false)];
+                        'note' => $note, 'may' => ($note !== '' && mb_stripos($note, 'майск') !== false)];
                 if ($eIso === '' || $eIso >= $today) $subs[] = $row; else $subsArch[] = $row;
             }
             usort($subs, fn($a, $b) => strcmp((string)($b['e_date'] ?? ''), (string)($a['e_date'] ?? '')));
@@ -315,7 +323,10 @@ switch ($action) {
         if ($parent !== '') $payload['legal_name']  = $parent;   // «Заказчик» в Alfa
         if ($evzz   !== '') $payload['custom_evzz'] = $evzz;     // ЭВ 26/27
 
-        if (!empty($in['dryRun'])) {
+        // По умолчанию — СУХОЙ прогон. Реальное создание в CRM только при явном dryRun:false
+        // (защита от случайного/повторного POST без флага).
+        $live = array_key_exists('dryRun', $in) && $in['dryRun'] === false;
+        if (!$live) {
             json_out(['ok' => true, 'dryRun' => true, 'payload' => $payload, 'branch' => $branch]);
         }
         $res   = alfa_create('customer', $payload);
