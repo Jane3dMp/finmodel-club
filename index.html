@@ -3601,8 +3601,11 @@ function delLesByIdx(idx){
   const l=S.grid[idx]; if(!l) return;
   if(l.pinned){ toast("Занятие закреплено — сначала открепите"); return; }
   if(!confirm("Удалить занятие «"+l.course+" "+l.start+"»?")) return;
-  S.grid.splice(idx,1); persistLocal(); renderGrid(); renderStaff(); if(typeof renderGroups==="function") renderGroups();
-  toast("Занятие удалено");
+  const _cand=kidsOf(l).map(k=>JSON.parse(JSON.stringify(k)));   // дети этого занятия — вдруг осиротеют
+  S.grid.splice(idx,1);
+  const _wlAdded=(typeof _reconcileWaitlist==="function")?_reconcileWaitlist(_cand):0; if(typeof _cleanWaitlist==="function") _cleanWaitlist();
+  persistLocal(); renderGrid(); renderStaff(); if(typeof renderGroups==="function") renderGroups(); if(typeof renderClients==="function") renderClients();
+  toast(_wlAdded>0?("Занятие удалено · "+_wlAdded+" реб. без группы → список ожидания"):"Занятие удалено");
 }
 
 function togglePin(idx){
@@ -4009,6 +4012,11 @@ function saveLes(){
   { const gEl=document.getElementById("mGroup"); if(gEl) l.group=(gEl.value||"").trim(); }
   l.students=+document.getElementById("mStud").value||0;
   l.note=(document.getElementById("mNote").value||"").trim();
+  // снимок состава ДО записи — чтобы удалённых из группы (осиротевших) отправить в список ожидания
+  const _wlCand=[];
+  { const grp=(l.group&&String(l.group).trim()), gk=(l.course||"")+"||"+String(l.group||"").trim();
+    (S.grid||[]).forEach(o=>{ if(!o) return; const inScope=grp?(((o.course||"")+"||"+String(o.group||"").trim())===gk):(o===l);
+      if(inScope) kidsOf(o).forEach(k=>_wlCand.push(JSON.parse(JSON.stringify(k)))); }); }
   // слить детей, ДОБАВЛЕННЫХ удалённо в эту группу, пока карточка была открыта — иначе «Сохранить»
   // затирает их (перезапись состава всей группы). Только добавления → потерять ничего не может.
   const _radd=_remoteAddedForGroup(l);
@@ -4016,11 +4024,13 @@ function saveLes(){
   l.kids=_editKids.filter(k=>k.n);
   l.newIntake=!!document.getElementById("mNewIntake")?.checked;
   const synced=_syncGroupKids(l);   // одна группа (курс+№) = один состав во всех её занятиях
+  const _wlAdded=_reconcileWaitlist(_wlCand); _cleanWaitlist();   // удалённые из последней группы → в ожидание
   _savedInModal=true;               // наша правка новее — closeLes не должен откатить её отложенным remote
   persistLocal();
   if(FB_ON && typeof fbPush==="function"){ try{ clearTimeout(_fbPushTimer); fbPush(); }catch(e){} }  // сразу в Firebase — до окна гонки
-  closeLes(); renderGrid(); renderStaff(); renderGroups(); renderMay();
-  if(_radd.length) toast("Пока вы редактировали, в группу добавили детей ("+_radd.length+") — они сохранены");
+  closeLes(); renderGrid(); renderStaff(); renderGroups(); renderMay(); if(typeof renderClients==="function") renderClients();
+  if(_wlAdded>0) toast("Ребёнок убран из группы — не удалён, ждёт в «Клиентах» (список ожидания)");
+  else if(_radd.length) toast("Пока вы редактировали, в группу добавили детей ("+_radd.length+") — они сохранены");
   else if(synced>0) toast("Состав применён и к другим занятиям группы: "+synced);
 }
 /* Дети, добавленные УДАЛЁННО (в отложенном _fbPending) в занятия ЭТОЙ группы, которых НЕ было в нашей
@@ -6129,8 +6139,31 @@ function _clientEnrollStatus(e){
   if(e.call) s.push('📵 недозвон');
   return s.length?s.join(' · '):'<span style="color:var(--muted)">—</span>';
 }
+/* ===== СПИСОК ОЖИДАНИЯ (дети без группы) =====
+   Ребёнок существует только в занятиях. Чтобы удаление из ПОСЛЕДНЕЙ группы не стирало его из
+   системы, осиротевшего кладём в S.waitlist (со всеми полями: телефон/alfaId/ДР/ЭВ). Когда снова
+   попадает в группу — убираем из ожидания. Удаление из ожидания спрашивает про архив в Альфе. */
+function _gridHasKid(nk){ if(!nk) return false; return (S.grid||[]).some(l=>kidsOf(l).some(k=>_nameKey(k.n)===nk)); }
+function _cleanWaitlist(){   // убрать из ожидания тех, кто снова попал в расписание
+  if(!Array.isArray(S.waitlist) || !S.waitlist.length) return false;
+  const before=S.waitlist.length;
+  S.waitlist=S.waitlist.filter(w=>w&&w.n&&!_gridHasKid(_nameKey(w.n)));
+  return S.waitlist.length!==before;
+}
+function _reconcileWaitlist(cands){   // кандидаты-осиротевшие: если больше нигде в гриде — в ожидание
+  if(!Array.isArray(cands)||!cands.length) return 0;
+  if(!Array.isArray(S.waitlist)) S.waitlist=[];
+  let added=0;
+  cands.forEach(k=>{ if(!k||!k.n) return; const nk=_nameKey(k.n); if(!nk) return;
+    if(_gridHasKid(nk)) return;                          // ещё где-то в расписании — не сирота
+    if(S.waitlist.some(w=>_nameKey(w.n)===nk)) return;   // уже в ожидании
+    const w=JSON.parse(JSON.stringify(k)); w.wlAt=new Date().toISOString(); S.waitlist.push(w); added++;
+  });
+  return added;
+}
 function renderClients(){
   const box=document.getElementById("clientsBody"); if(!box) return;
+  if(_cleanWaitlist()){ persistLocal(); if(typeof fbSchedulePush==="function") fbSchedulePush(); }
   // собрать всех детей по полному имени (Фамилия Имя Отчество — тёзок не сливаем)
   const map={};
   (S.grid||[]).forEach(l=>kidsOf(l).forEach(k=>{
@@ -6141,6 +6174,9 @@ function renderClients(){
     map[key].enroll.push({ id:l.id||"", course:l.course||"", group:l.group||"", day:l.day||0, start:l.start||"", end:l.end||"",
       room:l.room||"", teacher:l.teacher||"", may:!!k.may, sched:!!k.sched, no:!!k.no, call:!!k.call, vbReply:k.vbReply||"", comment:k.c||"" });
   }));
+  // дети из списка ожидания (без группы) — тоже показываем в «Клиентах»
+  (Array.isArray(S.waitlist)?S.waitlist:[]).forEach(w=>{ if(!w||!w.n) return; const key=_nameKey(w.n); if(!key||map[key]) return;
+    map[key]={name:w.n, dob:w.dob||"", enroll:[], waiting:true, wl:w}; });
   const clients=Object.values(map).sort((a,b)=>a.name.localeCompare(b.name,"ru"));
   const _firstLetter=nm=>((String(nm).trim().split(/\s+/)[0]||"")[0]||"").toUpperCase();
   const letters=[...new Set(clients.map(c=>_firstLetter(c.name)).filter(Boolean))].sort((a,b)=>a.localeCompare(b,"ru"));
@@ -6158,6 +6194,22 @@ function renderClients(){
     <div class="cli-addrow" title="Создать нового ребёнка и вписать в группу" onclick="openAddKid()"><span class="plus">+</span> Новый ребёнок</div>`;
   if(!shown.length){ box.innerHTML=html+`<div style="color:var(--muted);padding:10px 2px">${clients.length?'Никого не найдено.':'В расписании пока нет детей.'}</div>`; return; }
   shown.forEach(c=>{
+    const nameEl=`<b class="cli-name" style="cursor:pointer;text-decoration:underline dotted" title="Открыть карточку ребёнка" onclick="event.stopPropagation();event.preventDefault();openKidCardByName('${_jsStr(c.name)}')">${esc(c.name)}</b>${c.dob?` <span style="font-size:11px;color:var(--blue)">· ${esc(_ageStr(c.dob))}</span>`:''}`;
+    if(c.waiting){   // ребёнок без группы — список ожидания
+      const w=c.wl||{};
+      html+=`<details class="client">
+        <summary>${nameEl}<span class="cli-badges"><span style="color:#C9922E">⏳ без группы — список ожидания</span></span></summary>
+        <div class="cli-list" style="padding:8px 10px">
+          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+            <select class="cell wl-sel" style="max-width:280px">${_gridGroupOptsHtml()}</select>
+            <button class="btn sm" onclick="wlPlace('${_jsStr(c.name)}', this.previousElementSibling.value)" title="Вписать этого ребёнка в выбранную группу">Вписать в группу</button>
+            <button class="btn ghost sm" style="margin-left:auto" onclick="wlDelete('${_jsStr(c.name)}')" title="Убрать из системы (спросит про архив в Альфе)">🗑 Убрать</button>
+          </div>
+          ${(w.phone||w.alfaId||w.wlAt)?`<div style="font-size:11px;color:var(--muted);margin-top:6px">${w.phone?('📞 '+esc(w.phone)):''}${w.alfaId?(' · Альфа ID '+esc(String(w.alfaId))):''}${w.wlAt?(' · в ожидании с '+esc(String(w.wlAt).slice(0,10).split("-").reverse().join("."))):''}</div>`:''}
+        </div>
+      </details>`;
+      return;
+    }
     const courses=[...new Set(c.enroll.map(e=>e.course).filter(Boolean))];
     const paid=c.enroll.filter(e=>e.may).length;
     const rows=c.enroll.slice().sort((a,b)=>(a.day-b.day)||String(a.start).localeCompare(String(b.start))).map(e=>
@@ -6168,7 +6220,7 @@ function renderClients(){
         <span class="cli-st">${_clientEnrollStatus(e)}</span>
       </div>`).join("");
     html+=`<details class="client">
-      <summary><b class="cli-name" style="cursor:pointer;text-decoration:underline dotted" title="Открыть карточку ребёнка" onclick="event.stopPropagation();event.preventDefault();openKidCardByName('${_jsStr(c.name)}')">${esc(c.name)}</b>${c.dob?` <span style="font-size:11px;color:var(--blue)">· ${esc(_ageStr(c.dob))}</span>`:''}
+      <summary>${nameEl}
         <span class="cli-badges">${courses.length} курс(ов)${paid?` · <span style="color:var(--green)">💰 ${paid}</span>`:''}</span></summary>
       <div class="cli-list">${rows}</div>
     </details>`;
@@ -6176,6 +6228,54 @@ function renderClients(){
   box.innerHTML=html;
 }
 function clientsRerenderKeepFocus(){ renderClients(); const el=document.getElementById("clientsQ"); if(el){ const v=el.value; el.focus(); el.value=""; el.value=v; } }
+/* вписать ребёнка из списка ожидания в выбранную группу (со всеми его полями) */
+function wlPlace(name, key){
+  if(!key){ toast("Выберите группу"); return; }
+  const nk=_nameKey(name);
+  const wi=(S.waitlist||[]).findIndex(w=>_nameKey(w.n)===nk);
+  if(wi<0){ toast("Не найдено в ожидании"); return; }
+  const g=_gridGroupList().find(x=>x.key===key); if(!g){ toast("Группа не найдена"); return; }
+  const w=S.waitlist[wi]; const kid=JSON.parse(JSON.stringify(w)); delete kid.wlAt;
+  let added=0;
+  g.idxs.forEach(idx=>{ const l=S.grid[idx]; if(!Array.isArray(l.kids)) l.kids=[];
+    if(!l.kids.some(x=>_sameKid(x.n, kid.n))){ l.kids.push(JSON.parse(JSON.stringify(kid))); added++; } });
+  S.waitlist.splice(wi,1);
+  persistLocal(); if(typeof fbSchedulePush==="function") fbSchedulePush();
+  if(typeof renderGrid==="function") renderGrid(); if(typeof renderGroups==="function") renderGroups();
+  if(typeof renderMay==="function") renderMay(); if(typeof renderGoals==="function") renderGoals();
+  renderClients();
+  toast("Вписан(а) из ожидания: "+w.n+" → "+(g.label||g.course||"группа"));
+}
+/* убрать ребёнка из списка ожидания (совсем). Если он связан с Альфой — спросить про архив там,
+   чтобы не осталось так: у нас удалён, а в Альфе активен. */
+async function wlDelete(name){
+  const nk=_nameKey(name);
+  const wi=(S.waitlist||[]).findIndex(w=>_nameKey(w.n)===nk);
+  if(wi<0) return;
+  const w=S.waitlist[wi];
+  if(!confirm("Убрать «"+w.n+"» из системы?\n\nОн в списке ожидания (без группы). После удаления его не будет в админке.")) return;
+  if(w.alfaId){
+    const arch=confirm("Ребёнок связан с AlfaCRM (ID "+w.alfaId+").\n\nАрхивировать его и в Альфе, чтобы там не остался активным?\n\nОК — архивировать в Альфе · Отмена — оставить в Альфе как есть.");
+    if(arch) await _archiveInAlfa(w.alfaId, w.n);
+  }
+  const j=(S.waitlist||[]).findIndex(x=>_nameKey(x.n)===nk); if(j>=0) S.waitlist.splice(j,1);
+  persistLocal(); if(typeof fbSchedulePush==="function") fbSchedulePush();
+  renderClients();
+  toast("Убран из системы: "+w.n);
+}
+async function _archiveInAlfa(alfaId, name){
+  toast("Архивирую в Альфе: "+shortName(name)+"…");
+  try{
+    const token=await _alfaIdToken();
+    const r=await fetch(ALFA_PROXY+"?action=archiveCustomer",{method:"POST",
+      headers:{"Content-Type":"application/json","Authorization":"Bearer "+token},
+      body:JSON.stringify({customerId:alfaId, dryRun:false})});
+    const j=await r.json().catch(()=>({ok:false,error:"ответ не JSON ("+r.status+")"}));
+    try{ console.log("🗄 archiveCustomer — ответ Альфы:", j); }catch(e){}
+    if(!r.ok||!j.ok){ const raw=j.raw?(" · Альфа: "+JSON.stringify(j.raw).slice(0,300)):""; throw new Error((j.error||("ошибка "+r.status))+raw); }
+    toast("Архивирован в Альфе ✅: "+shortName(name));
+  }catch(e){ toast("В Альфе НЕ архивирован: "+((e&&e.message)||e)+" — проверьте вручную"); }
+}
 
 /* ===== ВКЛАДКА «МАЙСКИЙ» — постоянная сверка оплат с расписанием ===== */
 let _mayFilter="all", _mayQuery="", _mayAddOpen=false, _mayHideDone=false;

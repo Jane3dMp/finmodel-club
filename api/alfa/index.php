@@ -340,6 +340,23 @@ switch ($action) {
         json_out(['ok' => true, 'created' => true, 'id' => $newId, 'branch' => $branch, 'payload' => $payload]);
         break;
 
+    // --- АРХИВИРОВАТЬ КЛИЕНТА в Alfa (WRITE) — когда убираем ребёнка из нашей системы ---
+    //     «Архив» = снять статус учащегося (is_study=0). dryRun по умолчанию; сырой ответ в raw для сверки.
+    case 'archiveCustomer':
+        @set_time_limit(20);
+        $cid = (int)($in['customerId'] ?? 0);
+        if (!$cid) json_out(['ok' => false, 'error' => 'Не передан id клиента']);
+        $live = array_key_exists('dryRun', $in) && $in['dryRun'] === false;
+        $payload = ['is_study' => 0];
+        if (!$live) json_out(['ok' => true, 'dryRun' => true, 'customerId' => $cid, 'payload' => $payload]);
+        $res  = alfa_call('customer', 'update?id=' . $cid, $payload);   // POST /v2api/{branch}/customer/update?id=X
+        $okId = $res['id'] ?? ($res['model']['id'] ?? null);
+        if ($okId === null) {
+            json_out(['ok' => false, 'error' => 'Alfa не подтвердила архивацию (проверьте поля).', 'customerId' => $cid, 'payload' => $payload, 'raw' => $res]);
+        }
+        json_out(['ok' => true, 'archived' => true, 'id' => $okId, 'raw' => $res]);
+        break;
+
     // --- ПОСЕЩЕНИЯ ЗА ПРОШЛЫЙ ГОД по клиентам (для «старый/новый») ---
     //     На вход список id (батч). Для каждого считаем ПРОВЕДЁННЫЕ уроки в окне, где ребёнок присутствовал.
     case 'visitcounts':
