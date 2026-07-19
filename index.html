@@ -449,6 +449,12 @@ details.cwarn .cwarn-body{padding:0 14px 12px}
 .pk-t .v{font-size:22px;font-weight:800;line-height:1;margin-top:2px}
 .pk-cd{margin-top:12px;font-size:13px;color:#8C8677;font-weight:600}
 .pk-cd b{display:inline-block;min-width:20px;color:#B0493D;font-size:16px}
+.pk-lead{margin-top:12px;display:flex;flex-direction:column;gap:6px;text-align:left}
+.pk-lr{display:flex;align-items:center;gap:8px;background:#FFFDF6;border:1px solid #EEE4CB;border-radius:12px;padding:7px 11px}
+.pk-lr .rk{font-size:15px;width:22px;text-align:center}
+.pk-lr .nm{font-weight:700;flex:1;font-size:13px}
+.pk-lr .mm{font-size:12px;color:#5A5548;white-space:nowrap}
+.pk-lr.lead{background:#FBF2CE;border-color:#EBD98F}
 #peekModal.show .modal{animation:achpop .26s cubic-bezier(.2,.8,.3,1.3)}
 
 /* ===== Админский дашборд «Статистика менеджеров» — стиль инфографики ===== */
@@ -1559,10 +1565,11 @@ function _pushLog(parts){
     const uid=_fbUid();
     if(uid && firebase.database.ServerValue && typeof firebase.database.ServerValue.increment==="function"){
       const inc=firebase.database.ServerValue.increment, dk=_dayKeyOf();
-      const cnt=_mgrCount(parts.join(" · ")), base="stats/"+uid+"/"+dk+"/", tb="teamstats/"+dk+"/", upd={};
+      const cnt=_mgrCount(parts.join(" · ")), base="stats/"+uid+"/"+dk+"/", tb="teamstats/"+dk+"/", mb=tb+"mgr/"+uid+"/", upd={};
       upd[base+"actions"]=inc(1); upd[base+"at"]=firebase.database.ServerValue.TIMESTAMP;
       upd[tb+"actions"]=inc(1);   // командный агрегат отдела (читают все — для «подсмотреть итоги»)
-      STAT_KEYS.forEach(k=>{ if(cnt[k]){ upd[base+k]=inc(cnt[k]); upd[tb+k]=inc(cnt[k]); } });
+      upd[mb+"actions"]=inc(1); upd[mb+"name"]=(email||"").split("@")[0];   // и разбивка по менеджеру (мини-лидерборд)
+      STAT_KEYS.forEach(k=>{ if(cnt[k]){ upd[base+k]=inc(cnt[k]); upd[tb+k]=inc(cnt[k]); upd[mb+k]=inc(cnt[k]); } });
       upd["stats/"+uid+"/email"]=email;
       _fbDb.ref().update(upd);
     }
@@ -1799,6 +1806,15 @@ function showPeek(v){
   const m=document.getElementById("peekModal"), body=document.getElementById("peekBody");
   if(!m||!body){ _peekBusy=false; return; }
   const g=k=>+(v&&v[k]||0);
+  // мини-лидерборд по менеджерам (сортировка по Viber, затем по записям)
+  const mgr=(v&&v.mgr)||{};
+  const rows=Object.keys(mgr).map(function(u){ const m=mgr[u]||{};
+    return {name:m.name||"—", sent:+(m.sent||0), enrolled:+(m.enrolled||0), replies:+(m.replies||0)}; })
+    .filter(function(x){ return x.name!=="—" || x.sent || x.enrolled; })
+    .sort(function(a,b){ return (b.sent-a.sent)||(b.enrolled-a.enrolled); });
+  const medal=function(i){ return i===0?"🥇":i===1?"🥈":i===2?"🥉":(i+1+"."); };
+  const lead=rows.length?`<div class="pk-lead">${rows.map(function(x,i){
+    return `<div class="pk-lr${i===0?' lead':''}"><span class="rk">${medal(i)}</span><span class="nm">${esc(x.name)}</span><span class="mm">📨 ${x.sent} · ✍️ ${x.enrolled} · 💬 ${x.replies}</span></div>`; }).join("")}</div>`:'';
   body.innerHTML=`<div class="pk-hero">
       <div class="t">👀 Итоги отдела · сегодня</div>
       <div class="s">Быстрый взгляд — окно закроется само</div>
@@ -1813,10 +1829,11 @@ function showPeek(v){
         <div class="pk-t"><div class="l">💰 отметок</div><div class="v" style="color:#3B7A57">${g("paid")}</div></div>
         <div class="pk-t"><div class="l">Действий</div><div class="v">${g("actions")}</div></div>
       </div>
-      <div class="pk-cd">Закроется через <b id="peekCd">3</b> сек</div>
+      ${lead}
+      <div class="pk-cd">Закроется через <b id="peekCd">5</b> сек</div>
     </div>`;
   m.classList.add("show");
-  let left=3; const cd=document.getElementById("peekCd");
+  let left=5; const cd=document.getElementById("peekCd");
   const t=setInterval(function(){ left--; if(cd) cd.textContent=Math.max(0,left);
     if(left<=0){ clearInterval(t); m.classList.remove("show"); _peekBusy=false; } }, 1000);
 }
