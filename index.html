@@ -3969,6 +3969,10 @@ function saveLes(){
   { const gEl=document.getElementById("mGroup"); if(gEl) l.group=(gEl.value||"").trim(); }
   l.students=+document.getElementById("mStud").value||0;
   l.note=(document.getElementById("mNote").value||"").trim();
+  // слить детей, ДОБАВЛЕННЫХ удалённо в эту группу, пока карточка была открыта — иначе «Сохранить»
+  // затирает их (перезапись состава всей группы). Только добавления → потерять ничего не может.
+  const _radd=_remoteAddedForGroup(l);
+  _radd.forEach(k=>{ if(!_editKids.some(x=>_nameKey(x.n)===_nameKey(k.n))) _editKids.push(k); });
   l.kids=_editKids.filter(k=>k.n);
   l.newIntake=!!document.getElementById("mNewIntake")?.checked;
   const synced=_syncGroupKids(l);   // одна группа (курс+№) = один состав во всех её занятиях
@@ -3976,7 +3980,28 @@ function saveLes(){
   persistLocal();
   if(FB_ON && typeof fbPush==="function"){ try{ clearTimeout(_fbPushTimer); fbPush(); }catch(e){} }  // сразу в Firebase — до окна гонки
   closeLes(); renderGrid(); renderStaff(); renderGroups(); renderMay();
-  if(synced>0) toast("Состав применён и к другим занятиям группы: "+synced);
+  if(_radd.length) toast("Пока вы редактировали, в группу добавили детей ("+_radd.length+") — они сохранены");
+  else if(synced>0) toast("Состав применён и к другим занятиям группы: "+synced);
+}
+/* Дети, добавленные УДАЛЁННО (в отложенном _fbPending) в занятия ЭТОЙ группы, которых НЕ было в нашей
+   базе (_fbLast) и нет у нас в _editKids — их надо долить при «Сохранить», иначе перезапись состава
+   группы их сотрёт. Только ДОБАВЛЕНИЯ (удаления с других компов не навязываем). Без номера группы — пусто. */
+function _remoteAddedForGroup(l){
+  if(!_fbPending || !_fbPending.grid || !l || !l.group || !String(l.group).trim()) return [];
+  const key=(l.course||"")+"||"+String(l.group).trim();
+  const base=(_fbLast&&_fbLast.grid)||{};
+  const baseKeys=new Set();
+  for(const id in base){ const o=base[id]; if(o && ((o.course||"")+"||"+String(o.group||"").trim())===key) (o.kids||[]).forEach(k=>{ const nk=_nameKey(k&&k.n); if(nk) baseKeys.add(nk); }); }
+  const have=new Set((_editKids||[]).map(k=>_nameKey(k&&k.n)).filter(Boolean));
+  const add=[], seen=new Set();
+  for(const id in _fbPending.grid){ const o=_fbPending.grid[id];
+    if(!o || ((o.course||"")+"||"+String(o.group||"").trim())!==key) continue;
+    (o.kids||[]).forEach(k=>{ const nk=_nameKey(k&&k.n); if(!nk) return;
+      if(baseKeys.has(nk)||have.has(nk)||seen.has(nk)) return;   // был в базе / уже у нас / уже добавили
+      seen.add(nk); add.push(JSON.parse(JSON.stringify(k)));
+    });
+  }
+  return add;
 }
 /* Синхронизировать состав детей по всем занятиям одной группы (тот же курс + тот же номер группы).
    Возвращает, во сколько ДРУГИХ занятий скопирован состав. Без номера группы не синхронизируем. */
