@@ -3943,12 +3943,15 @@ function kidPasteList(){
   const t=prompt("Вставьте список детей (по одному в строку, нумерация не обязательна):","");
   if(t===null) return;
   _kidsFromDOM();
+  let added=0, dup=0;
   String(t).split(/\r?\n/).forEach(ln=>{
     const nm=ln.replace(/^\s*\d+\s*[.)]\s*/,"").trim();
-    if(nm) _editKids.push(_blankKid(nm));
+    if(!nm) return;
+    if(_editKids.some(k=>_sameKid(k.n,nm))){ dup++; return; }   // уже в занятии — не дублируем
+    _editKids.push(_blankKid(nm)); added++;
   });
   renderKidsEditor();
-  toast("Добавлено детей: "+_editKids.length);
+  toast("Добавлено: "+added+(dup?(" · пропущено дублей: "+dup):""));
 }
 
 function saveLes(){
@@ -4689,7 +4692,7 @@ function _nameWords(s){
 }
 function _sameKid(a,b){
   const A=_nameWords(a), B=_nameWords(b), n=Math.min(A.length,B.length);
-  if(n<2) return false;                      // слишком мало слов — не рискуем сливать
+  if(n<2){ return A.length===1 && B.length===1 && A[0]===B[0] && A[0]!==""; }  // однословные — только точное равенство (иначе дедуп/поиск/💰 по «Алиса» молча не срабатывали); 1-слово vs 2-слова остаётся неоднозначным → false
   for(let i=0;i<n;i++){ if(A[i]!==B[i]) return false; }
   return true;
 }
@@ -4887,16 +4890,18 @@ function alfaBuildMatch(customers){
     if(!idx.has(key)) idx.set(key,[]);
     idx.get(key).push({id:c.id,name:c.name,phone:phone,dob:c.dob||""});
   });
-  // уникальные дети модели
+  // уникальные дети модели (+ набор полных ФИО на каждое «Фамилия Имя» — для детекта тёзок)
   const kids=new Map();
   (S.grid||[]).forEach(l=>kidsOf(l).forEach(k=>{
     const key=_normName(k.n); if(!key) return;
-    if(!kids.has(key)) kids.set(key,{key,name:k.n,hasPhone:false});
-    if(k.phone) kids.get(key).hasPhone=true;
+    if(!kids.has(key)) kids.set(key,{key,name:k.n,hasPhone:false,fulls:new Set()});
+    const kk=kids.get(key); kk.fulls.add(_nameKey(k.n));
+    if(k.phone) kk.hasPhone=true;
   }));
 
-  const willSet=[], ambiguous=[], notFound=[];
+  const willSet=[], ambiguous=[], notFound=[], namesakes=[];
   kids.forEach(kid=>{
+    if(kid.fulls && kid.fulls.size>1){ namesakes.push(kid); return; }   // тёзки (разные полные ФИО на одно «Фамилия Имя») — авто по ФИО поставит чужой телефон/alfaId, только вручную (🪪 → ⟳)
     const m=idx.get(kid.key)||[];
     const withPhone=m.filter(x=>x.phone);
     if(withPhone.length===0){ if(m.length){ willSet.push({kid,pick:m[0]}); } else notFound.push(kid); return; }
@@ -4905,7 +4910,7 @@ function alfaBuildMatch(customers){
     else ambiguous.push({kid,options:withPhone});
   });
 
-  _alfaMatch={willSet,ambiguous,notFound,total:kids.size,alfaCount:customers.length};
+  _alfaMatch={willSet,ambiguous,notFound,namesakes,total:kids.size,alfaCount:customers.length};
   alfaRenderMatch();
 }
 
@@ -4916,8 +4921,13 @@ function alfaRenderMatch(){
     <div class="callout" style="margin-bottom:10px">
       Из Альфы: <b>${M.alfaCount}</b> · детей в расписании: <b>${M.total}</b><br>
       Проставим телефон: <b>${newPhones}</b> · неоднозначных: <b>${M.ambiguous.length}</b> ·
-      не найдено в Альфе: <b>${M.notFound.length}</b>
+      не найдено в Альфе: <b>${M.notFound.length}</b>${(M.namesakes&&M.namesakes.length)?` · <span style="color:var(--red)">тёзки (вручную): <b>${M.namesakes.length}</b></span>`:""}
     </div>
+    ${(M.namesakes&&M.namesakes.length)?`
+      <label style="color:var(--red)">Тёзки — одинаковое «Фамилия Имя» у разных детей; авто поставит чужой телефон. Проставьте вручную: карточка занятия → у ребёнка «⟳» (по полному ФИО):</label>
+      <div style="max-height:20vh;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:6px 10px;margin-bottom:8px;font-size:12px;line-height:1.6">
+        ${M.namesakes.map(k=>`• ${esc(k.name)} <span style="color:var(--muted)">(${k.fulls.size} разных ФИО)</span>`).join("<br>")}
+      </div>`:""}
     ${M.ambiguous.length?`
       <label>Несколько разных телефонов на одно ФИО — выбери нужный:</label>
       <div style="max-height:26vh;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:6px 10px;margin-bottom:8px">
@@ -5197,8 +5207,10 @@ function kidCard(i){
 /* открыть карточку ребёнка ПО ИМЕНИ из любого места (сетка, «Клиенты» и т.д.) */
 function openKidCardByName(name){
   name=String(name||"").trim(); if(!name) return;
+  const key=_nameKey(name);
   let kid=null;
-  (S.grid||[]).some(l=>kidsOf(l).some(k=>{ if(_sameKid(k.n,name)){ kid=k; return true; } return false; }));
+  (S.grid||[]).some(l=>kidsOf(l).some(k=>{ if(_nameKey(k.n)===key){ kid=k; return true; } return false; }));   // точное совпадение полного имени — тёзок не путаем
+  if(!kid) (S.grid||[]).some(l=>kidsOf(l).some(k=>{ if(_sameKid(k.n,name)){ kid=k; return true; } return false; }));  // иначе префиксное
   _kidCardRef={name:name, alfaId:(kid&&kid.alfaId!=null?kid.alfaId:null)};
   const k=kid||{n:name,alfaId:null,evzz:""};
   openKidCard(k.alfaId, name, k);
@@ -5395,7 +5407,9 @@ async function kidAlfaUpdate(i){
     if(!r.ok||!j.ok) throw new Error(j.error||("Ошибка "+r.status));
     if(j.notFound || !j.customerId){ toast("В Альфе не найден: "+shortName(nm)); return; }
     const s=j.summary||{};
-    const kk=_editKids[i]; if(!kk) return;
+    _kidsFromDOM();   // пока шёл запрос, пользователь мог править строки — берём свежий снимок и ищем ребёнка по имени, не по индексу
+    const kk=_editKids.find(x=>_nameKey(x.n)===_nameKey(nm)) || _editKids[i];
+    if(!kk){ toast("Строка ребёнка изменилась — повторите ⟳"); return; }
     if(s.dob) kk.dob=s.dob;
     if(j.customerId) kk.alfaId=j.customerId;
     // телефон родителя — вручную его нигде не вводят, приходит только из Альфы → обновляем
@@ -5424,6 +5438,7 @@ async function kidsPullAges(){
     // сопоставление: строгое по словам, иначе мягко по «Фамилия Имя» (ловит усечённые/без отчества)
     const byN2={}; cust.forEach(c=>{ const n=_normName(c.name); if(n && !byN2[n]) byN2[n]=c; });
     const findC=(name)=>{ const s=cust.find(x=>_sameKid(x.name, name)); return s||byN2[_normName(name)]||null; };
+    _kidsFromDOM();   // пока шёл запрос, пользователь мог править ФИО/поля — берём свежий снимок, иначе ререндер их сотрёт
     let nAge=0, nMiss=0;
     _editKids.forEach(k=>{ if(!k.n) return;
       const c=findC(k.n);
@@ -6274,6 +6289,11 @@ function mayMoveGroup(i, sel){
   const g=mayGroupsOf(courseName).find(x=>x.key===targetKey); if(!g){ toast("Группа не найдена"); return; }
   const fam=_courseBase(courseName);
   const nm=mayCleanFio(r.fio);
+  // тёзки: если имя из списка совпадает с НЕСКОЛЬКИМИ разными полными ФИО в этом курсе — не гадаем,
+  // иначе удалим/перенесём не того ребёнка. Просим сделать вручную (↔ в карточке занятия).
+  const _mk=new Set();
+  (S.grid||[]).forEach(l=>{ if(_courseBase(l.course)!==fam) return; kidsOf(l).forEach(k=>{ if(_sameKid(k.n, r.fio)) _mk.add(_nameKey(k.n)); }); });
+  if(_mk.size>1){ toast("Тёзки: «"+nm+"» в этом курсе несколько ("+_mk.size+" разных ФИО). Переведите вручную — карточка занятия → «↔»."); return; }
   const targetIdxs=new Set(g.idxs);
   // текущая карточка ребёнка в этом семействе (со всеми полями) + была ли 💰
   let proto=null, wasPaid=false;
