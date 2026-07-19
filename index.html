@@ -1082,6 +1082,7 @@ details.client .cli-badges{margin-left:auto;font-size:12px;color:var(--muted)}
   <div class="hd-actions les-foot" style="position:sticky;bottom:-22px;background:#fff;padding:12px 0 2px;margin-top:10px;border-top:1px solid var(--line);z-index:1">
    <button class="btn sm" onclick="saveViberTpl()">Сохранить</button>
    <button class="btn ghost sm" onclick="resetViberTpl()" title="Загрузить новый тёплый текст по умолчанию">↺ Сбросить на новый</button>
+   <button class="btn ghost sm" id="vtplRestoreBtn" style="display:none" onclick="restoreViberTplBackup()" title="Вернуть ваш прежний текст, заменённый при обновлении">↩ Вернуть мой прежний</button>
    <button class="btn ghost sm" onclick="closeVtpl()">Закрыть</button>
   </div>
  </div>
@@ -2815,7 +2816,7 @@ function renderFixed(){
   const g1=document.getElementById("fixed1"), g2=document.getElementById("fixed2");
   let h1="",h2="";
   for(const k in S.fixed){
-    const safe=esc(k).replace(/'/g,"\\'");
+    const safe=_jsStr(k);
     const row=`<div class="field" style="gap:8px">
       <input class="cell wide" style="flex:1" value="${esc(k)}" onchange="renameFixed('${safe}',this.value)" title="название статьи">
       <input type="number" style="width:90px" value="${S.fixed[k]}" onchange="updFixed('${safe}',this.value)">
@@ -4186,7 +4187,7 @@ function renderFixRates(){
     durs.forEach(d=>{
       const v=(fr[d]!=null?fr[d]:"");
       cells+=`<td><input class="cell" type="number" style="width:80px" value="${v}" placeholder="—"
-        onchange="setFixRate('${esc(name).replace(/'/g,"\\'")}',${d},this.value)"></td>`;
+        onchange="setFixRate('${_jsStr(name)}',${d},this.value)"></td>`;
     });
     body+=`<tr><td style="min-width:200px">${esc(name)}</td>${cells}</tr>`;
   });
@@ -4224,7 +4225,7 @@ function renderStaff(){
   else { st.sort((a,b)=>b.wageWeek-a.wageWeek); }
   st.forEach(s=>{
     const idx=S.staff.findIndex(x=>x.name===s.name);
-    const safeName=esc(s.name).replace(/'/g,"\\'");
+    const safeName=_jsStr(s.name);
     const lk=(idx>=0 && S.staff[idx]._locked), da=lk?'disabled':'';
     const lockBtn=`<span class="pin" onclick="lockStaff(${idx})" title="${lk?'Закреплено':'Закрепить педагога'}">${lk?'📌':(idx>=0?'📍':'')}</span>`;
     h+=`<tr class="${lk?'rowlocked':''}">
@@ -4322,7 +4323,7 @@ function syncStaffFull(){
 
 function teacherCoursesCell(idx, courses, locked){
   // теги выбранных курсов
-  let tags=courses.map(c=>`<span class="ctag">${esc(c)}${locked?'':`<span class="x" onclick="removeTeacherCourse(${idx},'${esc(c).replace(/'/g,"\\'")}')">×</span>`}</span>`).join("");
+  let tags=courses.map(c=>`<span class="ctag">${esc(c)}${locked?'':`<span class="x" onclick="removeTeacherCourse(${idx},'${_jsStr(c)}')">×</span>`}</span>`).join("");
   if(!courses.length) tags='<span class="muted">— нет курсов —</span>';
   // выпадашка добавления (только курсы, которых ещё нет)
   let addSel="";
@@ -4397,7 +4398,7 @@ function renderWageRef(){
   h+=`<th></th></tr></thead><tbody>`;
   Object.keys(S.wageTable).sort().forEach(name=>{
     const t=S.wageTable[name].tiers;
-    const safe=esc(name).replace(/'/g,"\\'");
+    const safe=_jsStr(name);
     // выпадашка курсов из библиотеки (+ текущее имя, если его нет в библиотеке)
     const libNames=S.courses.map(c=>c.name);
     const inLib=libNames.includes(name);
@@ -4667,7 +4668,7 @@ function renderKidSearchEl(inp){
   let cur=-1;
   hits.forEach(h=>{
     if(h.day!==cur){ cur=h.day; html+='<div class="ksr-day">'+esc(DAY_FULL[h.day]||("День "+h.day))+'</div>'; }
-    const jid=esc(h.id).replace(/'/g,"\\'");
+    const jid=_jsStr(h.id);
     html+='<div class="ksr-item'+(h.no?' ksr-no':'')+'" onclick="gotoKidLessonId(\''+jid+'\')" title="Перейти к занятию в сетке">'
       +'<span class="ksr-name">'+_ksHlName(h.name,raw)+(h.no?' <span style="font-size:10px">(не придёт)</span>':'')+'</span>'
       +'<span class="ksr-meta">'+esc(h.course)+' · '+esc(h.start)+'–'+esc(h.end)+' · каб. '+esc(h.room)+' · '+esc(shortName(h.teacher))+'</span>'
@@ -5963,11 +5964,20 @@ function _vtplLoad(){
   const rb=document.getElementById("vtplTabReg"), mb=document.getElementById("vtplTabMay");
   if(rb) rb.className="btn "+(_vtplMode==="reg"?"":"ghost")+" sm";
   if(mb) mb.className="btn "+(_vtplMode==="may"?"":"ghost")+" sm";
+  // кнопка «↩ Вернуть мой прежний» — только в режиме «обычный» и если есть сохранённый бэкап
+  const rst=document.getElementById("vtplRestoreBtn");
+  if(rst) rst.style.display=(_vtplMode==="reg" && (S.viberTplBackup||"").trim())?"":"none";
   renderVtplPreview();
 }
 function vtplSetMode(m){ _vtplSaveDraft(); _vtplMode=m; _vtplLoad(); }
 function closeVtpl(){ document.getElementById("vtplModal").classList.remove("show"); }
 function resetViberTpl(){ const def=_vtplMode==="may"?VIBER_TPL_MAY_DEFAULT:VIBER_TPL_DEFAULT; _vtplEdit[_vtplMode]=def; document.getElementById("vtplText").value=def; renderVtplPreview(); }
+function restoreViberTplBackup(){
+  const bk=(S.viberTplBackup||"").trim();
+  if(!bk){ toast("Прежнего шаблона нет"); return; }
+  _vtplMode="reg"; _vtplEdit.reg=bk; document.getElementById("vtplText").value=bk; renderVtplPreview();
+  toast("Прежний текст восстановлен — нажмите «Сохранить»");
+}
 /* образец для предпросмотра: реальные данные открытого занятия + условное имя ребёнка */
 function _vtplSampleLes(){
   const im=document.getElementById("lesModal");

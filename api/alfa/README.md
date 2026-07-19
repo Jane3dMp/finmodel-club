@@ -40,6 +40,23 @@
 `config.php` в git не попадает и автозаливкой не перезаписывается (он в `.gitignore`
 и в `exclude` GitHub Actions).
 
+## ⚠️ Защита `config.php` от чтения по URL
+
+`config.php` содержит ключ Alfa, и его нельзя отдавать по прямой ссылке. Сейчас его
+прячет `.htaccess` (`Require all denied` + `Options -Indexes`). **Это работает только
+на Apache/LiteSpeed, читающих `.htaccess`.** HostFly (shared) — Apache, поэтому ок.
+
+Если прокси когда-нибудь переедет на **nginx**, `.htaccess` игнорируется и
+`GET …/api/alfa/config.php` вернёт исходник с ключом. Тогда обязательно добавить в
+конфиг nginx (в `server`/`location` сайта):
+
+```nginx
+location ~ /api/alfa/config\.php$ { deny all; return 404; }
+```
+
+Более надёжный вариант при любом сервере — хранить `config.php` ВЫШЕ корня сайта
+и подключать `require __DIR__.'/../../config.php';`. Пока (Apache) не требуется.
+
 ## Требования сервера
 
 PHP 8.0+, расширения `curl`, `openssl`, `json` (стандартные). Исходящий HTTPS
