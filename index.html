@@ -2412,6 +2412,9 @@ function renderCourses(){
   t.innerHTML=h;
 }
 function esc(s){return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");}
+/* безопасная вставка строки в JS-литерал внутри inline-обработчика: сначала HTML-esc, затем
+   экранируем backslash и одинарную кавычку (имя, кончающееся на «\», иначе ломало onclick) */
+function _jsStr(s){return esc(String(s==null?"":s)).replace(/\\/g,"\\\\").replace(/'/g,"\\'");}
 /* ===== ПАК ЛИНЕЙНЫХ ИКОНОК (Lucide-стиль, наследуют цвет текста) ===== */
 const ICONS={
   report:'<path d="M4 20V11"/><path d="M10 20V5"/><path d="M16 20v-6"/><path d="M3 20h18"/>',
@@ -3389,7 +3392,7 @@ function renderGrid(){
             ${les.note?`<span class="les-notet" title="${esc(les.note)}">📝 ${esc(les.note)}</span>`:""}
             ${kidsOf(les).length?`<span class="les-kids">${kidsOf(les).map((k,ki)=>{
                 const ic=kidIcons(k);
-                const jn=esc(k.n).replace(/'/g,"\\'");
+                const jn=_jsStr(k.n);
                 return `<span class="lk lk-click${k.no?' lk-no':''}" title="Открыть карточку ребёнка" onclick="event.stopPropagation();openKidCardByName('${jn}')">${ki+1}. ${esc(k.n)}${ic?` <span class="lk-ic">${ic}</span>`:""}</span>`;
               }).join("")}</span>`:""}
           </div></td>`;
@@ -5164,6 +5167,9 @@ function _migrateViberTpl(){
   const looksOld = cur==="" || VIBER_TPL_OLDS.indexOf(cur)>=0
                    || (cur.indexOf("{бренд}")<0 && cur.indexOf("{вступление}")<0);
   if(looksOld && S.viberTpl!==VIBER_TPL_DEFAULT){
+    // текст без плейсхолдеров может быть РУЧНЫМ шаблоном (не старым дефолтом) — перед заменой
+    // сохраняем копию в S.viberTplBackup (один раз), чтобы ничего не потерять и можно было вернуть
+    if(cur!=="" && VIBER_TPL_OLDS.indexOf(cur)<0 && !S.viberTplBackup) S.viberTplBackup=cur;
     S.viberTpl=VIBER_TPL_DEFAULT;
     persistLocal();
     if(typeof fbSchedulePush==="function") fbSchedulePush();
@@ -6116,7 +6122,7 @@ function renderClients(){
         <span class="cli-st">${_clientEnrollStatus(e)}</span>
       </div>`).join("");
     html+=`<details class="client">
-      <summary><b class="cli-name" style="cursor:pointer;text-decoration:underline dotted" title="Открыть карточку ребёнка" onclick="event.stopPropagation();event.preventDefault();openKidCardByName('${esc(c.name).replace(/'/g,"\\'")}')">${esc(c.name)}</b>${c.dob?` <span style="font-size:11px;color:var(--blue)">· ${esc(_ageStr(c.dob))}</span>`:''}
+      <summary><b class="cli-name" style="cursor:pointer;text-decoration:underline dotted" title="Открыть карточку ребёнка" onclick="event.stopPropagation();event.preventDefault();openKidCardByName('${_jsStr(c.name)}')">${esc(c.name)}</b>${c.dob?` <span style="font-size:11px;color:var(--blue)">· ${esc(_ageStr(c.dob))}</span>`:''}
         <span class="cli-badges">${courses.length} курс(ов)${paid?` · <span style="color:var(--green)">💰 ${paid}</span>`:''}</span></summary>
       <div class="cli-list">${rows}</div>
     </details>`;
@@ -6847,9 +6853,9 @@ function renderScnList(){
     const isCur=n===cur;
     h+=`<div style="display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--line);border-radius:8px;margin-bottom:6px;background:${isCur?'var(--sand-l)':'#fff'}">
       <span style="flex:1;font-weight:${isCur?'700':'500'};font-size:13px">${esc(n)}${isCur?' <span style="color:var(--green);font-size:11px">● открыта</span>':''}</span>
-      ${isCur?'':`<button class="btn sm" onclick="openScenario('${esc(n).replace(/'/g,"\\'")}')">Открыть</button>`}
-      <button class="btn ghost sm" onclick="renameScenario('${esc(n).replace(/'/g,"\\'")}')">Переименовать</button>
-      ${names.length>1?`<button class="btn gray sm" onclick="deleteScenarioByName('${esc(n).replace(/'/g,"\\'")}')">×</button>`:''}
+      ${isCur?'':`<button class="btn sm" onclick="openScenario('${_jsStr(n)}')">Открыть</button>`}
+      <button class="btn ghost sm" onclick="renameScenario('${_jsStr(n)}')">Переименовать</button>
+      ${names.length>1?`<button class="btn gray sm" onclick="deleteScenarioByName('${_jsStr(n)}')">×</button>`:''}
     </div>`;
   });
   document.getElementById("scnList").innerHTML=h;
