@@ -3923,7 +3923,8 @@ async function _addKidToAlfa(name,phone,dob,mode){
       headers:{"Content-Type":"application/json","Authorization":"Bearer "+token},
       body:JSON.stringify({name:name, phone:phone, dob:dob, dryRun:false})});
     const j=await r.json().catch(()=>({ok:false,error:"ответ не JSON ("+r.status+")"}));
-    if(!r.ok||!j.ok) throw new Error(j.error||("ошибка "+r.status));
+    try{ console.log("➕ createCustomer — ответ Альфы:", j); }catch(e){}
+    if(!r.ok||!j.ok){ const raw=j.raw?(" · Альфа: "+JSON.stringify(j.raw).slice(0,300)):""; throw new Error((j.error||("ошибка "+r.status))+raw); }
     const id=j.id;
     if(id!=null){
       const key=_nameKey(name);

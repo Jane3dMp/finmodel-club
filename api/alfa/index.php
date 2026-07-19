@@ -313,11 +313,14 @@ switch ($action) {
         if ($name === '') json_out(['ok' => false, 'error' => 'Пустое ФИО ребёнка']);
         $parent = trim((string)($in['parentName'] ?? ''));
         $phone  = trim((string)($in['phone'] ?? ''));
-        $dob    = trim((string)($in['dob'] ?? ''));      // YYYY-MM-DD
+        $dob    = trim((string)($in['dob'] ?? ''));      // приходит YYYY-MM-DD
+        // Alfa ждёт дату в формате ДД.ММ.ГГГГ (как отдаёт сама) — конвертируем из input[type=date]
+        if ($dob !== '' && preg_match('#^(\d{4})-(\d{2})-(\d{2})#', $dob, $dm)) $dob = "$dm[3].$dm[2].$dm[1]";
         $evzz   = trim((string)($in['evzz'] ?? ''));
         $branch = alfa_branch();
 
-        $payload = ['name' => $name, 'branch_ids' => [$branch], 'is_study' => 1];
+        // legal_type=1 — физлицо (обычно обязательно при создании клиента)
+        $payload = ['name' => $name, 'branch_ids' => [$branch], 'is_study' => 1, 'legal_type' => 1];
         if ($phone  !== '') $payload['phone']       = [$phone];
         if ($dob    !== '') $payload['dob']         = $dob;
         if ($parent !== '') $payload['legal_name']  = $parent;   // «Заказчик» в Alfa
