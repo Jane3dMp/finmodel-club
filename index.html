@@ -532,6 +532,7 @@ details.client .cli-badges{margin-left:auto;font-size:12px;color:var(--muted)}
      <button class="btn ghost sm" id="fbAdminBtn" onclick="openAdminPanel()" title="Заявки на доступ и вкладки пользователей" style="display:none"><i data-ic="access"></i>Доступы<span id="fbAdminBadge"></span></button>
      <button class="btn ghost sm" id="histBtn" onclick="openHistory()" title="История версий — снимки на случай потери данных" style="display:none"><i data-ic="history"></i>История</button>
      <button class="btn ghost sm" id="logBtn" onclick="openLog()" title="Журнал действий — кто и что менял" style="display:none"><i data-ic="journal"></i>Журнал</button>
+     <button class="btn ghost sm" id="mgrStatBtn" onclick="openMgrStat()" title="Статистика работы менеджеров за день" style="display:none"><i data-ic="report"></i>Статистика</button>
      <div class="menu-sep"></div>
      <button class="btn ghost sm" onclick="openScnMenu()" title="Отдельные модели: годы и сценарии «что если»">⋮ Версии модели</button>
      <button class="btn ghost sm" onclick="openSync()" title="Резервная Google-таблица">Хранилище</button>
@@ -1052,6 +1053,19 @@ details.client .cli-badges{margin-left:auto;font-size:12px;color:var(--muted)}
  </div>
 </div>
 
+<div class="modal-bg" id="mgrStatModal">
+ <div class="modal" style="max-width:960px">
+  <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;flex-wrap:wrap">
+   <h3 style="margin:0">📊 Статистика менеджеров</h3>
+   <label style="font-size:12px;color:var(--muted);display:flex;align-items:center;gap:6px">за день <input type="date" id="mgrStatDate" class="cell" style="width:auto" onchange="renderMgrStat()"></label>
+   <button class="btn ghost sm" onclick="openMgrStat()" title="Перечитать журнал из облака">↻ Обновить</button>
+   <button class="btn ghost sm" style="margin-left:auto" onclick="closeMgrStat()">Закрыть</button>
+  </div>
+  <p style="font-size:12px;color:var(--muted);margin-bottom:8px">Кто сколько сделал за выбранный день — по журналу действий. Записал детей, отправил Viber, ответы родителей, 💰-отметки, переносы и т.д.</p>
+  <div id="mgrStatBody"></div>
+ </div>
+</div>
+
 <div class="modal-bg" id="histModal">
  <div class="modal" style="max-width:600px">
   <h3>🕘 История версий</h3>
@@ -1504,6 +1518,70 @@ function renderLog(){
   h+='</tbody></table></div>';
   body.innerHTML=h;
 }
+/* ===== СТАТИСТИКА МЕНЕДЖЕРОВ за день (по журналу действий) — только админ ===== */
+let _mgrLogData=[];
+function _mgrCount(t){
+  t=String(t||""); const c=re=>{ const m=t.match(re); return m?m.length:0; };
+  const paidMarks=c(/💰/g), paidRm=c(/снята 💰/g);
+  return { enrolled:c(/вписан\(а\)/g), removed:c(/убран\(а\)/g), sent:c(/✅ Viber отправлен/g),
+    replies:c(/ответ \(/g), paid:Math.max(0,paidMarks-paidRm), refusal:c(/❌ не придёт/g),
+    moved:c(/время →/g), lesAdd:c(/➕ занятие/g), lesDel:c(/🗑 удалено занятие/g),
+    edits:c(/курс →|каб\. →|педагог →/g), comments:c(/коммент/g) };
+}
+function openMgrStat(){
+  const m=document.getElementById("mgrStatModal"); if(!m) return;
+  m.classList.add("show"); if(typeof closeAllMore==="function") closeAllMore();
+  const di=document.getElementById("mgrStatDate");
+  if(di && !di.value){ const d=new Date(),p=n=>String(n).padStart(2,"0"); di.value=d.getFullYear()+"-"+p(d.getMonth()+1)+"-"+p(d.getDate()); }
+  const body=document.getElementById("mgrStatBody");
+  if(!_fbDb){ if(body) body.innerHTML='<div style="color:var(--muted);padding:10px 0">Статистика доступна только при подключении к облаку (вход в аккаунт).</div>'; return; }
+  if(body) body.innerHTML='<div style="color:var(--muted);padding:10px 0">Загружаю журнал…</div>';
+  _fbDb.ref("logs").limitToLast(3000).once("value").then(function(s){
+    const v=s.val()||{}; _mgrLogData=Object.keys(v).map(k=>v[k]).filter(e=>e&&e.at);
+    renderMgrStat();
+  }).catch(function(e){ if(body) body.innerHTML='<div style="color:var(--red);padding:10px 0">Не удалось загрузить журнал: '+esc((e&&e.message)||"")+'</div>'; });
+}
+function closeMgrStat(){ const m=document.getElementById("mgrStatModal"); if(m) m.classList.remove("show"); }
+function renderMgrStat(){
+  const body=document.getElementById("mgrStatBody"); if(!body) return;
+  const di=document.getElementById("mgrStatDate"); const day=di?di.value:"";
+  let from=0,to=0;
+  if(day){ const a=day.split("-").map(Number); from=new Date(a[0],a[1]-1,a[2],0,0,0).getTime(); to=new Date(a[0],a[1]-1,a[2],23,59,59,999).getTime(); }
+  const entries=_mgrLogData.filter(e=>!day || (e.at>=from&&e.at<=to));
+  if(!entries.length){ body.innerHTML='<div class="callout">За этот день записей в журнале нет.</div>'; return; }
+  const byM={};
+  entries.forEach(e=>{ const em=e.email||"—";
+    if(!byM[em]) byM[em]={email:em, actions:0, parts:0, first:e.at, last:e.at, cnt:_mgrCount("")};
+    const g=byM[em]; g.actions++; g.parts+=(+e.n||0); if(e.at<g.first)g.first=e.at; if(e.at>g.last)g.last=e.at;
+    const c=_mgrCount(e.text); for(const k in c) g.cnt[k]+=c[k];
+  });
+  const mgrs=Object.values(byM).sort((a,b)=>b.actions-a.actions);
+  const tot={actions:0,parts:0,cnt:_mgrCount("")};
+  mgrs.forEach(g=>{ tot.actions+=g.actions; tot.parts+=g.parts; for(const k in g.cnt) tot.cnt[k]+=g.cnt[k]; });
+  const tile=(lab,val,col)=>`<div style="border:1px solid var(--line);border-radius:10px;padding:8px 10px;min-width:86px;background:#fff">
+     <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.03em">${lab}</div>
+     <div style="font-size:22px;font-weight:800;color:${col||'var(--coal)'}">${val}</div></div>`;
+  const tm=ts=>{ const d=new Date(ts),p=n=>String(n).padStart(2,"0"); return p(d.getHours())+":"+p(d.getMinutes()); };
+  const tilesFor=c=>[
+    tile("Записал",c.enrolled,"var(--green)"), tile("Отправил Viber",c.sent,"var(--blue)"),
+    tile("Ответов",c.replies), tile("💰 отметок",c.paid,c.paid?"var(--green)":""),
+    tile("Отказов ❌",c.refusal,c.refusal?"var(--red)":""), tile("Переносов",c.moved),
+    tile("Убрал детей",c.removed), tile("Занятий +/−",c.lesAdd+" / "+c.lesDel), tile("Правок",c.edits)
+  ].join("");
+  let h=`<div class="callout" style="margin-bottom:10px">Менеджеров активно: <b>${mgrs.length}</b> · всего действий: <b>${tot.actions}</b> · отдельных правок: <b>${tot.parts}</b></div>
+    <div style="font-weight:700;margin:0 0 6px">Итого за день</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px">${tilesFor(tot.cnt)}</div>`;
+  mgrs.forEach(g=>{ const who=(g.email||"—").split("@")[0];
+    h+=`<div style="border:1px solid var(--line);border-radius:14px;padding:12px 14px;margin-bottom:10px;box-shadow:0 1px 3px rgba(28,20,16,.04)">
+      <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:8px">
+        <b style="font-size:16px">${esc(who)}</b><span style="font-size:12px;color:var(--muted)">${esc(g.email||"")}</span>
+        <span style="font-size:12px;color:var(--muted);margin-left:auto">🕒 ${tm(g.first)}–${tm(g.last)} · действий: <b>${g.actions}</b></span>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">${tilesFor(g.cnt)}</div>
+    </div>`;
+  });
+  body.innerHTML=h;
+}
 /* ===== АВТОСНИМКИ (страховка от потери данных) — отдельный узел history/{сценарий} ===== */
 let _histTimer=null, _lastSnapHash="";
 function _fbHistRef(){ return (_fbDb && FB_ON) ? _fbDb.ref("history/"+_fbKey(currentScenarioName())) : null; }
@@ -1742,6 +1820,8 @@ function _fbUpdateAdminUI(){
   if(hb) hb.style.display=_fbIsAdmin?"":"none";
   const lg=document.getElementById("logBtn");
   if(lg) lg.style.display=_fbIsAdmin?"":"none";
+  const ms=document.getElementById("mgrStatBtn");
+  if(ms) ms.style.display=_fbIsAdmin?"":"none";
   if(_fbPendRef){ try{_fbPendRef.off();}catch(e){} _fbPendRef=null; }
   if(_fbIsAdmin && _fbDb){
     _fbPendRef=_fbDb.ref("pending");
