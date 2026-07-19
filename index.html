@@ -5299,6 +5299,7 @@ function openKidCardByName(name){
   const key=_nameKey(name);
   let kid=null;
   (S.grid||[]).some(l=>kidsOf(l).some(k=>{ if(_nameKey(k.n)===key){ kid=k; return true; } return false; }));   // точное совпадение полного имени — тёзок не путаем
+  if(!kid && Array.isArray(S.waitlist)) kid=S.waitlist.find(w=>w&&_nameKey(w.n)===key)||null;   // ребёнок из списка ожидания — со своим alfaId (иначе карточка грузит Альфу ПО ИМЕНИ и берёт чужого тёзку)
   if(!kid) (S.grid||[]).some(l=>kidsOf(l).some(k=>{ if(_sameKid(k.n,name)){ kid=k; return true; } return false; }));  // иначе префиксное
   _kidCardRef={name:name, alfaId:(kid&&kid.alfaId!=null?kid.alfaId:null)};
   const k=kid||{n:name,alfaId:null,evzz:""};
