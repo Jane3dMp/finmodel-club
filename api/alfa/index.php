@@ -45,6 +45,11 @@ switch ($action) {
         $filter['removed'] = $filter['removed'] ?? 0;
 
         $branches = alfa_all_branch_ids();
+        // имена филиалов (id => name) — чтобы клиент мог отличить «Детали» (взрослое пространство) от детских
+        $brNames = [];
+        $brResp = alfa_http('POST', 'https://' . alfa_host() . '/v2api/branch/index', ['is_active' => 1, 'page' => 0], alfa_token(), true, 8);
+        foreach (($brResp['items'] ?? []) as $b) { if (isset($b['id'])) $brNames[(int)$b['id']] = (string)($b['name'] ?? ''); }
+
         $byId     = [];          // дедуп по id (один ребёнок может быть в нескольких филиалах)
         $perPage  = 50;          // Alfa отдаёт максимум ~50 на страницу
         $maxPages = 200;         // предохранитель на филиал
@@ -58,18 +63,23 @@ switch ($action) {
                 $items = $r['items'] ?? [];
                 foreach ($items as $c) {
                     $id = $c['id'] ?? null;
-                    if ($id === null || isset($byId[$id])) continue;
-                    $phones = $c['phone'] ?? [];
-                    if (is_string($phones)) $phones = $phones === '' ? [] : [$phones];
-                    $byId[$id] = [
-                        'id'       => $id,
-                        'name'     => trim((string)($c['name'] ?? '')),
-                        'phones'   => array_values(array_filter(array_map('strval', (array)$phones))),
-                        'is_study' => (int)($c['is_study'] ?? 0),
-                        'dob'      => $c['dob'] ?? null,
-                        // дата создания клиента (для «подтянуть новых») — берём первый непустой кандидат
-                        'created'  => $c['dt_add'] ?? ($c['created_at'] ?? ($c['b_date'] ?? ($c['added'] ?? null))),
-                    ];
+                    if ($id === null) continue;
+                    if (!isset($byId[$id])) {
+                        $phones = $c['phone'] ?? [];
+                        if (is_string($phones)) $phones = $phones === '' ? [] : [$phones];
+                        $byId[$id] = [
+                            'id'       => $id,
+                            'name'     => trim((string)($c['name'] ?? '')),
+                            'phones'   => array_values(array_filter(array_map('strval', (array)$phones))),
+                            'is_study' => (int)($c['is_study'] ?? 0),
+                            'dob'      => $c['dob'] ?? null,
+                            // дата создания клиента (для «подтянуть новых») — берём первый непустой кандидат
+                            'created'  => $c['dt_add'] ?? ($c['created_at'] ?? ($c['b_date'] ?? ($c['added'] ?? null))),
+                            'branch_ids' => [],
+                        ];
+                    }
+                    // копим ВСЕ филиалы, где встретился клиент (чтобы отличить «только Детали» от детских)
+                    if (!in_array((int)$bid, $byId[$id]['branch_ids'], true)) $byId[$id]['branch_ids'][] = (int)$bid;
                 }
                 $total = (int)($r['total'] ?? 0);
                 $page++;
@@ -79,7 +89,7 @@ switch ($action) {
         }
 
         $all = array_values($byId);
-        json_out(['ok' => true, 'count' => count($all), 'customers' => $all,
+        json_out(['ok' => true, 'count' => count($all), 'customers' => $all, 'branchNames' => $brNames,
                   'branches' => count($branches), 'per_branch' => $perBranch]);
         break;
 

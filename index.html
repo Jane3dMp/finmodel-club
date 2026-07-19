@@ -6290,7 +6290,7 @@ async function _archiveInAlfa(alfaId, name){
   }catch(e){ toast("В Альфе НЕ архивирован: "+((e&&e.message)||e)+" — проверьте вручную"); }
 }
 /* ===== ПОДТЯНУТЬ НОВЫХ ДЕТЕЙ ИЗ АЛЬФЫ (в список ожидания) ===== */
-let _alfaNewCands=[];
+let _alfaNewCands=[], _alfaNewCleaned=0;
 function _alfaCreatedIso(v){ v=String(v||""); let m=v.match(/^(\d{4})-(\d{2})-(\d{2})/); if(m) return m[1]+"-"+m[2]+"-"+m[3]; m=v.match(/^(\d{2})\.(\d{2})\.(\d{4})/); if(m) return m[3]+"-"+m[2]+"-"+m[1]; return ""; }
 function closeAlfaNew(){ document.getElementById("alfaNewModal").classList.remove("show"); }
 async function openAlfaNew(){
@@ -6301,22 +6301,37 @@ async function openAlfaNew(){
     const r=await fetch(ALFA_PROXY+"?action=customers",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+token},body:JSON.stringify({})});
     const j=await r.json().catch(()=>({ok:false,error:"ответ не JSON ("+r.status+")"}));
     if(!r.ok||!j.ok) throw new Error(j.error||("ошибка "+r.status));
+    // «Детали» (взрослое пространство) — отдельная CRM, НЕ детские курсы. Исключаем клиентов,
+    // которые ТОЛЬКО в таких филиалах (по имени филиала «Детали»).
+    const brNames=j.branchNames||{};
+    const adultBr=new Set(Object.keys(brNames).filter(id=>/детал/i.test(brNames[id])).map(Number));
+    const isAdultOnly=c=>{ const b=Array.isArray(c.branch_ids)?c.branch_ids:[]; return b.length>0 && b.every(x=>adultBr.has(+x)); };
+    // почистить уже подтянутых взрослых из списка ожидания
+    let cleaned=0;
+    if(adultBr.size && Array.isArray(S.waitlist) && S.waitlist.length){
+      const adultAlfaIds=new Set((j.customers||[]).filter(isAdultOnly).map(c=>+c.id));
+      const before=S.waitlist.length;
+      S.waitlist=S.waitlist.filter(w=>!(w&&w.alfaId!=null && adultAlfaIds.has(+w.alfaId)));
+      cleaned=before-S.waitlist.length;
+      if(cleaned>0){ persistLocal(); if(typeof fbSchedulePush==="function") fbSchedulePush(); if(typeof renderClients==="function") renderClients(); }
+    }
     const have=new Set();
     (S.grid||[]).forEach(l=>kidsOf(l).forEach(k=>{ const nk=_nameKey(k.n); if(nk) have.add(nk); }));
     (S.waitlist||[]).forEach(w=>{ const nk=_nameKey(w.n); if(nk) have.add(nk); });
-    // кандидаты: есть в Альфе (учащиеся), нет у нас, с именем; новые сверху
-    const cands=(j.customers||[]).filter(c=>c&&c.name && (c.is_study!==0) && !have.has(_nameKey(c.name)));
+    // кандидаты: есть в Альфе (учащиеся), нет у нас, с именем, НЕ только из «Деталей»; новые сверху
+    const cands=(j.customers||[]).filter(c=>c&&c.name && (c.is_study!==0) && !have.has(_nameKey(c.name)) && !isAdultOnly(c));
     cands.forEach(c=>c._iso=_alfaCreatedIso(c.created));
     cands.sort((a,b)=>String(b._iso).localeCompare(String(a._iso)));
-    _alfaNewCands=cands;
+    _alfaNewCands=cands; _alfaNewCleaned=cleaned;
     renderAlfaNew();
   }catch(e){ document.getElementById("alfaNewBody").innerHTML=`<div class="callout" style="border-color:var(--red)">Не получилось: ${esc((e&&e.message)||e)}</div>`; }
 }
 function renderAlfaNew(){
   const body=document.getElementById("alfaNewBody"); const cands=_alfaNewCands;
-  if(!cands.length){ body.innerHTML=`<div class="callout" style="border-color:var(--green)">Новых нет — все учащиеся из Альфы уже в системе.</div>`; return; }
+  const cleanedNote=_alfaNewCleaned>0?`<div class="callout" style="border-color:var(--green);margin-bottom:8px">Убрано из ожидания взрослых из «Деталей»: <b>${_alfaNewCleaned}</b>.</div>`:"";
+  if(!cands.length){ body.innerHTML=cleanedNote+`<div class="callout" style="border-color:var(--green)">Новых нет — все учащиеся из Альфы (без «Деталей») уже в системе.</div>`; return; }
   const cut=new Date(Date.now()-30*864e5).toISOString().slice(0,10);
-  body.innerHTML=`<div class="callout" style="margin-bottom:8px">Есть в Альфе, нет у вас: <b>${cands.length}</b>. Отмеченные добавятся в «Список ожидания».</div>
+  body.innerHTML=cleanedNote+`<div class="callout" style="margin-bottom:8px">Есть в Альфе, нет у вас: <b>${cands.length}</b> <span style="color:var(--muted)">(без «Деталей»)</span>. Отмеченные добавятся в «Список ожидания».</div>
     <div style="max-height:44vh;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:6px 10px">
     ${cands.map((c,i)=>{ const recent=c._iso&&c._iso>=cut;
       return `<label style="display:flex;align-items:center;gap:8px;padding:4px 0;border-bottom:1px solid #f0ebe4;cursor:pointer">
