@@ -1346,7 +1346,8 @@ function fbPush(){
   _fbLast={ grid:newG, rest:newRest };
   setSync("warn","● Сохраняю…");
   _fbRef.update(updates).then(()=>{ _dirty=false; setSync("ok","✓ Сохранено · онлайн"); _pushLog(logParts); })
-    .catch(e=>{ setSync("err","⚠ Firebase: "+((e&&e.message)||"ошибка")); });
+    .catch(e=>{ _fbLast={ grid:oldG, rest:oldRest }; _dirty=true;   // запись не прошла → вернуть базу diff и повторить, иначе правки «потеряются»
+      setSync("err","⚠ Firebase: "+((e&&e.message)||"ошибка")+" · повтор…"); clearTimeout(_fbPushTimer); _fbPushTimer=setTimeout(fbPush,3000); });
 }
 /* ===== ЖУРНАЛ ДЕЙСТВИЙ (кто что менял) — отдельный узел logs/ в Firebase ===== */
 let _fbSeeding=false;   // true во время стартовой заливки пустого облака — такие правки не логируем
@@ -1836,6 +1837,10 @@ function undo(){
     toast("Действие отменено");
   }catch(e){ toast("Ошибка отмены"); }
   _histLock = false;
+  // отменённое состояние должно уехать в облако/таблицу (иначе у коллег останется старая версия,
+  // и отмена молча откатится при следующей синхронизации)
+  if(FB_ON){ _dirty=true; fbSchedulePush(); setSync("warn","● Сохраняю…"); }
+  else if(S.gasUrl){ _dirty=true; if(_ready) scheduleAutoSave(); setSync("warn","● Сохраняю…"); }
   updateUndoBtn();
 }
 function _resetHistory(){ _undoStack=[]; _lastSnap=_snap(); updateUndoBtn(); }
@@ -3815,7 +3820,7 @@ function kidMoveToGroup(kidIndex, targetKey){
   target.idxs.forEach(idx=>{ const l=S.grid[idx]; if(!Array.isArray(l.kids)) l.kids=[];
     if(!l.kids.some(k=>_sameKid(k.n, kid.n))) l.kids.push(JSON.parse(JSON.stringify(proto)));
   });
-  persistLocal(); if(typeof fbSchedulePush==="function") fbSchedulePush();
+  persistLocal(); _flushCardEdit();
   renderKidsEditor();
   if(typeof renderGrid==="function") renderGrid();
   if(typeof renderGroups==="function") renderGroups();
@@ -4025,6 +4030,7 @@ function togglePinModal(){
   const idx=_modalLesIdx();
   const l=S.grid[idx]; if(!l) return;
   togglePin(idx);
+  _flushCardEdit();   // закрепление из открытой карточки — зафиксировать сразу, иначе «Отмена» откатит
   document.getElementById("pinBtn").textContent=l.pinned?"Открепить":"Закрепить";
 }
 
@@ -4047,6 +4053,14 @@ function closeLes(){
     if(!_savedInModal) _applyRemote(p);
   }
   _savedInModal=false;
+}
+/* Правка, сделанная ИЗ ОТКРЫТОЙ карточки (Viber-отметка, перевод в группу, подтяжка из Альфы,
+   закрепление): пушим СРАЗУ (наша правка новее дебаунса) и отбрасываем устаревший отложенный
+   remote, чтобы «Отмена»/закрытие карточки не применили его поверх. Свежие чужие изменения
+   придут живым слушателем. */
+function _flushCardEdit(){
+  if(typeof FB_ON!=="undefined" && FB_ON){ try{ clearTimeout(_fbPushTimer); }catch(e){} if(typeof fbPush==="function") fbPush(); }
+  _fbPending=null;
 }
 
 /* перенос сетки → план (считаем группы по расставленным занятиям) */
@@ -5154,7 +5168,7 @@ async function kidViber(i){
   const copied=await _copyText(msg);
   _openViber(num);
   k.vbSent=true; k.vbSentAt=new Date().toISOString();   // пометить как отправленное
-  _commitEditKids(les); persistLocal(); if(typeof fbSchedulePush==="function") fbSchedulePush();
+  _commitEditKids(les); persistLocal(); _flushCardEdit();
   renderKidsEditor();
   toast(copied?"Текст в буфере — вставьте в Viber (Ctrl+V). Отмечено ✅":"Открываю Viber. Отмечено ✅");
 }
@@ -5163,7 +5177,7 @@ function kidViberReset(i){
   const les=S.grid[_modalLesIdx()]; const k=_editKids[i];
   if(!k) return;
   k.vbSent=false; k.vbSentAt="";
-  _commitEditKids(les); persistLocal(); if(typeof fbSchedulePush==="function") fbSchedulePush();
+  _commitEditKids(les); persistLocal(); _flushCardEdit();
   renderKidsEditor();
   toast("Отметка «отправлено» снята");
 }
@@ -5389,7 +5403,7 @@ async function kidAlfaUpdate(i){
     if(ph) kk.phone=ph;
     const idx=_modalLesIdx();
     if(S.grid[idx]) S.grid[idx].kids=_editKids.filter(x=>x.n);
-    persistLocal(); if(typeof fbSchedulePush==="function") fbSchedulePush();
+    persistLocal(); _flushCardEdit();
     renderKidsEditor();
     toast("Обновлено из Альфы: "+shortName(nm)+(s.dob?(" · "+_ageStr(s.dob)):" · возраст не указан")+(ph?" · 📞 телефон":" · телефона нет"));
   }catch(e){ toast("Не удалось: "+((e&&e.message)||e)); }
@@ -5420,7 +5434,7 @@ async function kidsPullAges(){
     });
     const idx=_modalLesIdx();
     if(S.grid[idx]) S.grid[idx].kids=_editKids.filter(x=>x.n);
-    persistLocal(); if(typeof fbSchedulePush==="function") fbSchedulePush();
+    persistLocal(); _flushCardEdit();
     renderKidsEditor();
     toast("Возраст подтянут: +"+nAge+(nMiss?(" · не найдено в Альфе: "+nMiss):""));
   }catch(e){ toast("Не удалось: "+((e&&e.message)||e)); }
