@@ -5193,7 +5193,6 @@ async function alfaFetch(){
     });
     const j=await r.json().catch(()=>({ok:false,error:"Ответ не JSON (код "+r.status+")"}));
     if(!r.ok||!j.ok){ throw new Error(j.error||("Ошибка прокси "+r.status)); }
-    try{ if(j.debug){ console.log("📞 customers debug — поля клиента:", j.debug); console.log("📞 debug (скопировать):", JSON.stringify(j.debug)); } }catch(e){}
     alfaBuildMatch(j.customers||[]);
   }catch(e){
     document.getElementById("alfaBody").innerHTML=

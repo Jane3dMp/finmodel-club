@@ -54,7 +54,6 @@ switch ($action) {
         $perPage  = 50;          // Alfa отдаёт максимум ~50 на страницу
         $maxPages = 200;         // предохранитель на филиал
         $perBranch = [];
-        $sample0 = null; $balKeys = [];   // диагностика: какие поля баланса реально приходят в СПИСКЕ
 
         foreach ($branches as $bid) {
             $page = 0; $before = count($byId);
@@ -65,9 +64,6 @@ switch ($action) {
                 foreach ($items as $c) {
                     $id = $c['id'] ?? null;
                     if ($id === null) continue;
-                    if ($sample0 === null && is_array($c)) { $sample0 = $c;
-                        foreach ($c as $kk => $vv) { if (preg_match('/balance|paid|debt|остат|money|sum|schet|счет/i', (string)$kk)) $balKeys[$kk] = is_scalar($vv) ? $vv : json_encode($vv, JSON_UNESCAPED_UNICODE); }
-                    }
                     if (!isset($byId[$id])) {
                         $phones = $c['phone'] ?? [];
                         if (is_string($phones)) $phones = $phones === '' ? [] : [$phones];
@@ -95,8 +91,7 @@ switch ($action) {
 
         $all = array_values($byId);
         json_out(['ok' => true, 'count' => count($all), 'customers' => $all, 'branchNames' => $brNames,
-                  'branches' => count($branches), 'per_branch' => $perBranch,
-                  'debug' => ['keys0' => is_array($sample0) ? array_keys($sample0) : null, 'balKeys' => $balKeys]]);
+                  'branches' => count($branches), 'per_branch' => $perBranch]);
         break;
 
     // --- история ребёнка: в каких группах был + краткая сводка (READ) ---
