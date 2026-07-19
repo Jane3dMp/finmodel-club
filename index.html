@@ -1900,7 +1900,7 @@ function restoreSnapshot(key){
 }
 
 /* ---- вход / регистрация / одобрение доступа ---- */
-const FB_ADMINS=["proznanie.mogilev@gmail.com","smalprince@gmail.com"];
+const FB_ADMINS=["proznanie.mogilev@gmail.com","smalprince@gmail.com","oks.kovaliova@gmail.com"];
 function _isAdminEmail(e){ return FB_ADMINS.indexOf(e)>=0; }
 let _fbMode="login", _fbApprRef=null, _fbGranted=false, _fbIsAdmin=false, _fbPendRef=null, _fbPendingData={}, _fbUsersData={};
 function _fbAuth(){ return (typeof firebase!=="undefined" && firebase.auth) ? firebase.auth() : null; }
