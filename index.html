@@ -411,6 +411,28 @@ details.cwarn .cwarn-body{padding:0 14px 12px}
 /* таблица «движение по группам» — мягче и скруглённее */
 :is(#goals,#report) .tscroll{border-radius:18px;border-color:var(--g-line);box-shadow:0 4px 14px rgba(70,58,20,.05);background:#FFFDF6}
 
+/* ===== ИНФОГРАФИКА «Итоги дня» (18:00) ===== */
+#achieveModal .modal{max-width:560px;padding:0;overflow:hidden;border-radius:22px}
+.ach-hero{background:linear-gradient(140deg,#24221D 0%,#3A352B 55%,#7A5A22 140%);color:#fff;padding:22px 24px 20px;position:relative}
+.ach-hero h2{margin:0;font-size:23px;letter-spacing:-.02em}
+.ach-hero .ach-sub{font-size:12px;opacity:.7;margin-top:2px}
+.ach-hero .ach-close{position:absolute;top:14px;right:16px;background:rgba(255,255,255,.14);border:0;color:#fff;border-radius:8px;padding:5px 10px;font:inherit;font-size:12px;cursor:pointer}
+.ach-big{display:flex;gap:12px;margin-top:16px}
+.ach-bigcard{flex:1;background:rgba(255,255,255,.10);border-radius:16px;padding:12px 14px}
+.ach-bigcard .l{font-size:11px;opacity:.75;text-transform:uppercase;letter-spacing:.04em}
+.ach-bigcard .v{font-size:38px;font-weight:800;line-height:1;letter-spacing:-.02em;margin-top:4px;font-variant-numeric:tabular-nums}
+.ach-body{padding:16px 20px 20px;background:linear-gradient(180deg,#FCFAF3,#FAF5E6)}
+.ach-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.ach-tile{background:#FFFDF6;border:1px solid #EEE4CB;border-radius:14px;padding:11px 12px;box-shadow:0 3px 10px rgba(70,58,20,.05)}
+.ach-tile .l{font-size:10.5px;color:#8C8677;text-transform:uppercase;letter-spacing:.03em}
+.ach-tile .v{font-size:26px;font-weight:800;letter-spacing:-.02em;line-height:1;margin-top:3px;font-variant-numeric:tabular-nums}
+.ach-d{display:inline-block;font-size:11px;font-weight:700;border-radius:20px;padding:1px 7px;margin-top:5px}
+.ach-d.up{background:#E8F3EA;color:#2E7D32}.ach-d.down{background:#FBEBE8;color:#B0493D}.ach-d.same{background:#EFECE4;color:#8C8677}
+.ach-banner{margin-top:14px;background:#FBF2CE;border:1px solid #EBD98F;border-radius:14px;padding:12px 14px;font-size:14px;font-weight:600;color:#6B5411;text-align:center;line-height:1.4}
+@keyframes achpop{from{transform:scale(.94);opacity:0}to{transform:scale(1);opacity:1}}
+#achieveModal.show .modal{animation:achpop .28s cubic-bezier(.2,.8,.3,1.2)}
+@media(max-width:520px){.ach-grid{grid-template-columns:repeat(2,1fr)}.ach-big{flex-direction:column}}
+
 /* реальный оборот (майская акция) */
 #realTable th.a-left,#realTable td.a-left{text-align:left}
 #realTable th.a-right,#realTable td.a-right{text-align:right}
@@ -532,7 +554,8 @@ details.client .cli-badges{margin-left:auto;font-size:12px;color:var(--muted)}
      <button class="btn ghost sm" id="fbAdminBtn" onclick="openAdminPanel()" title="Заявки на доступ и вкладки пользователей" style="display:none"><i data-ic="access"></i>Доступы<span id="fbAdminBadge"></span></button>
      <button class="btn ghost sm" id="histBtn" onclick="openHistory()" title="История версий — снимки на случай потери данных" style="display:none"><i data-ic="history"></i>История</button>
      <button class="btn ghost sm" id="logBtn" onclick="openLog()" title="Журнал действий — кто и что менял" style="display:none"><i data-ic="journal"></i>Журнал</button>
-     <button class="btn ghost sm" id="mgrStatBtn" onclick="openMgrStat()" title="Статистика работы менеджеров за день" style="display:none"><i data-ic="report"></i>Статистика</button>
+     <button class="btn ghost sm" id="mgrStatBtn" onclick="openMgrStat()" title="Статистика всех менеджеров за день" style="display:none"><i data-ic="report"></i>Статистика</button>
+     <button class="btn ghost sm" onclick="showAchievements()" title="Мои итоги дня — инфографика">🏆 Мои итоги</button>
      <div class="menu-sep"></div>
      <button class="btn ghost sm" onclick="openScnMenu()" title="Отдельные модели: годы и сценарии «что если»">⋮ Версии модели</button>
      <button class="btn ghost sm" onclick="openSync()" title="Резервная Google-таблица">Хранилище</button>
@@ -1030,6 +1053,10 @@ details.client .cli-badges{margin-left:auto;font-size:12px;color:var(--muted)}
  </div>
 </div>
 
+<div class="modal-bg" id="achieveModal" style="z-index:96">
+ <div class="modal"><div id="achieveBody"></div></div>
+</div>
+
 <div class="modal-bg" id="remindModal" style="z-index:95">
  <div class="modal" style="max-width:400px;text-align:center">
   <div id="remindEmoji" style="font-size:42px;line-height:1;margin-bottom:6px">💬</div>
@@ -1462,15 +1489,31 @@ function _logDescribe(oldG,newG,oldRest,newRest){
   return parts;
 }
 function _fbUserEmail(){ try{ const au=_fbAuth(); return (au&&au.currentUser&&au.currentUser.email)||"—"; }catch(e){ return "—"; } }
+function _fbUid(){ try{ const au=_fbAuth(); return (au&&au.currentUser&&au.currentUser.uid)||""; }catch(e){ return ""; } }
+function _dayKeyOf(ts){ const d=ts?new Date(ts):new Date(), p=n=>String(n).padStart(2,"0"); return d.getFullYear()+"-"+p(d.getMonth()+1)+"-"+p(d.getDate()); }
+const STAT_KEYS=["enrolled","sent","replies","paid","refusal","moved","removed","lesAdd","lesDel","edits"];
 function _pushLog(parts){
   if(!_fbDb || !FB_ON || _fbSeeding) return;
   if(!parts || !parts.length) return;
   const MAXP=10;
   let text=parts.slice(0,MAXP).join(" · ");
   if(parts.length>MAXP) text+=" · …и ещё "+(parts.length-MAXP);
-  const entry={ at: firebase.database.ServerValue.TIMESTAMP, email:_fbUserEmail(),
+  const email=_fbUserEmail();
+  const entry={ at: firebase.database.ServerValue.TIMESTAMP, email:email,
     scenario: currentScenarioName(), text:text, n:parts.length };
   try{ _fbDb.ref("logs").push(entry); }catch(e){}
+  // агрегат по менеджеру за день → stats/{uid}/{дата} (для «Моей статистики» и итогов 18:00; изоляция правилами)
+  try{
+    const uid=_fbUid();
+    if(uid && firebase.database.ServerValue && typeof firebase.database.ServerValue.increment==="function"){
+      const inc=firebase.database.ServerValue.increment, dk=_dayKeyOf();
+      const cnt=_mgrCount(parts.join(" · ")), base="stats/"+uid+"/"+dk+"/", upd={};
+      upd[base+"actions"]=inc(1); upd[base+"at"]=firebase.database.ServerValue.TIMESTAMP;
+      STAT_KEYS.forEach(k=>{ if(cnt[k]) upd[base+k]=inc(cnt[k]); });
+      upd["stats/"+uid+"/email"]=email;
+      _fbDb.ref().update(upd);
+    }
+  }catch(e){}
 }
 /* --- просмотр журнала (только админ) --- */
 let _logData=[], _logQuery="";
@@ -1590,6 +1633,73 @@ function renderMgrStat(){
   });
   body.innerHTML=h;
 }
+/* ===== ИНФОГРАФИКА «Итоги дня» (менеджеру — только свои; авто в 18:00 или по кнопке) ===== */
+const ACH_METR=[
+  {k:"enrolled",lab:"Записал детей",col:"#4F9E63"},
+  {k:"sent",lab:"Отправил Viber",col:"#1F5BC0"},
+  {k:"replies",lab:"Ответов родителей",col:"#8C6D1F"},
+  {k:"paid",lab:"Отметок 💰",col:"#4F9E63"},
+  {k:"moved",lab:"Переносов",col:"#6B7078"},
+  {k:"removed",lab:"Убрал детей",col:"#6B7078"}
+];
+function closeAchieve(){ const m=document.getElementById("achieveModal"); if(m) m.classList.remove("show"); }
+function _achDS(k){ const d=new Date(k+"T00:00:00"),z=n=>String(n).padStart(2,"0"); return z(d.getDate())+"."+z(d.getMonth()+1); }
+function _achDelta(cur,prev){
+  if(prev==null) return "";
+  const d=cur-prev;
+  if(d>0) return `<span class="ach-d up">▲ +${d}</span>`;
+  if(d<0) return `<span class="ach-d down">▼ ${d}</span>`;
+  return `<span class="ach-d same">= как тогда</span>`;
+}
+function showAchievements(auto){
+  const uid=_fbUid();
+  if(!uid || !_fbDb){ if(!auto) toast("Итоги доступны после входа в аккаунт"); return; }
+  _fbDb.ref("stats/"+uid).once("value").then(function(snap){
+    const v=snap.val()||{};
+    const days=Object.keys(v).filter(k=>/^\d{4}-\d{2}-\d{2}$/.test(k)).sort();
+    const todayK=_dayKeyOf(), today=v[todayK];
+    if(!today){ if(!auto) toast("Сегодня ещё нет действий — итоги появятся после первой правки"); return; }
+    const prevK=days.filter(d=>d<todayK).pop(), prev=prevK?v[prevK]:null;
+    const name=((v.email||_fbUserEmail())||"").split("@")[0];
+    renderAchieve(today, prev, prevK, name);
+    document.getElementById("achieveModal").classList.add("show");
+  }).catch(function(e){ if(!auto) toast("Не удалось загрузить итоги: "+((e&&e.message)||e)); });
+}
+function renderAchieve(today, prev, prevK, name){
+  const g=k=>+(today&&today[k]||0), p=k=>prev?+(prev[k]||0):null;
+  const hero=(k,lab)=>`<div class="ach-bigcard"><div class="l">${lab}</div><div class="v">${g(k)}</div>${prev?_achDelta(g(k),p(k)):''}</div>`;
+  const useful=x=>x?(+(x.enrolled||0)+ +(x.sent||0)*.5+ +(x.replies||0)+ +(x.paid||0)):0;
+  const tU=useful(today), pU=prev?useful(prev):0;
+  let banner;
+  if(!prev) banner="Первый день в статистике — завтра будет с чем сравнить! 🚀";
+  else if(tU>pU) banner="🔥 Сегодня лучше, чем "+_achDS(prevK)+"! Так держать!";
+  else if(tU===pU) banner="Ровно как "+_achDS(prevK)+" — стабильно 👍";
+  else banner="Сегодня потише, чем "+_achDS(prevK)+" — завтра наверстаем 💪";
+  document.getElementById("achieveBody").innerHTML=`<div class="ach-hero">
+      <button class="ach-close" onclick="closeAchieve()">Закрыть</button>
+      <h2>🏆 Итоги дня${name?(", "+esc(name)):""}!</h2>
+      <div class="ach-sub">${_achDS(_dayKeyOf())}${prev?(" · в сравнении с "+_achDS(prevK)):""}</div>
+      <div class="ach-big">${hero("sent","Отправил Viber")}${hero("enrolled","Записал детей")}</div>
+    </div>
+    <div class="ach-body">
+      <div class="ach-grid">${ACH_METR.map(m=>`<div class="ach-tile"><div class="l">${m.lab}</div><div class="v" style="color:${m.col}">${g(m.k)}</div>${prev?_achDelta(g(m.k),p(m.k)):''}</div>`).join("")}</div>
+      <div class="ach-banner">${banner}</div>
+    </div>`;
+}
+/* автопоказ итогов в 18:00 (раз в день, своих) */
+function _achCheck(){
+  try{
+    if(new Date().getHours()<18) return;                  // только с 18:00
+    const login=document.getElementById("fbLogin"); if(login && login.style.display!=="none") return;
+    if(document.querySelector(".modal-bg.show")) return;  // не поверх другой модалки — покажем в следующую минуту
+    if(!FB_ON || !_fbUid()) return;
+    if(localStorage.getItem("achDay")===_dayKeyOf()) return;
+    localStorage.setItem("achDay", _dayKeyOf());
+    showAchievements(true);
+  }catch(e){}
+}
+setInterval(_achCheck, 60000);
+setTimeout(_achCheck, 8000);
 /* ===== АВТОСНИМКИ (страховка от потери данных) — отдельный узел history/{сценарий} ===== */
 let _histTimer=null, _lastSnapHash="";
 function _fbHistRef(){ return (_fbDb && FB_ON) ? _fbDb.ref("history/"+_fbKey(currentScenarioName())) : null; }
