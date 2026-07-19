@@ -241,12 +241,13 @@ switch ($action) {
             // АБОНЕМЕНТЫ клиента: customer-tariff/index — ⚠️ customer_id В URL (в body Alfa игнорит → пусто!).
             // Ответ несёт tariff_id (→ название через tariff/index), subject_ids (→ КУРС через subject/index),
             // balance/paid_count (остаток), b/e_date (dd.mm.yyyy), note («майский …»).
-            $items = [];
+            $items = []; $seenT = [];
             foreach ($brList as $br) {
                 $hb = 'https://' . alfa_host() . '/v2api/' . $br;
                 $ct = alfa_http('POST', "$hb/customer-tariff/index?customer_id=" . $cid, ['page' => 0, 'count' => 100], $token, true, 8);
                 $its = is_array($ct['items'] ?? null) ? $ct['items'] : [];
-                foreach ($its as $t) $items[] = $t;
+                // ⚠️ с customer_id в URL Alfa отдаёт одни и те же абонементы в КАЖДОМ филиале → дедуп по id записи
+                foreach ($its as $t) { $tk = isset($t['id']) ? (int)$t['id'] : null; if ($tk !== null) { if (isset($seenT[$tk])) continue; $seenT[$tk] = 1; } $items[] = $t; }
                 $ctDbg[] = ['branch' => $br, 'err' => $ct['__err'] ?? null, 'count' => count($its)];
             }
 
