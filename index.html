@@ -590,6 +590,18 @@ details.client .cli-wait{font-size:12px;color:#C9922E;margin-left:10px;white-spa
 /* ребёнок только из каникул/интенсивов — помечаем, но не прячем насильно */
 details.client.alt{border-left:3px solid #9AA7B4}
 details.client .cli-alt{font-size:11px;color:#5C6B7A;background:#EEF2F6;border-radius:20px;padding:1px 8px;margin-left:6px;white-space:nowrap}
+/* значки филиалов: цифра филиала постоянного цвета — видно, кто где числится */
+.brdot{display:inline-flex;align-items:center;justify-content:center;min-width:16px;height:16px;padding:0 4px;border-radius:9px;
+  color:#fff;font-size:10px;font-weight:700;line-height:1;vertical-align:middle}
+.brdot.is-alt{box-shadow:inset 0 0 0 2px #fff,0 0 0 1.5px currentColor;opacity:.85}
+details.client .cli-brs{display:inline-flex;align-items:center;gap:3px;margin-left:6px;white-space:nowrap}
+details.client .cli-altmark{font-size:11px;margin-right:2px}
+.cli-brbar{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:8px 0 2px}
+.cli-brchip{display:inline-flex;align-items:center;gap:5px;font-size:12px;padding:4px 10px;border:1px solid var(--line);
+  background:#fff;border-radius:20px;cursor:pointer;color:var(--text)}
+.cli-brchip:hover{border-color:var(--graphite)}
+.cli-brchip.on{background:var(--graphite);color:#fff;border-color:var(--graphite)}
+.cli-altchk.off{opacity:.45;cursor:default}
 .cli-altbar{display:flex;align-items:center;gap:14px;flex-wrap:wrap;font-size:12px;margin:6px 0 2px}
 .cli-altchk{display:flex;align-items:center;gap:6px;cursor:pointer;user-select:none}
 .cli-brset summary{cursor:pointer;color:var(--muted)}
@@ -6614,6 +6626,8 @@ function renderGroups(){
 let _clientsQuery="", _clientsLetter="", _clientsSort={col:"name",dir:1};
 /* «скрыть каникулы/интенсивы» — личный режим просмотра, поэтому в localStorage, а не в общей модели */
 let _cliHideAlt=(()=>{ try{ return !!localStorage.getItem("cli_hide_alt"); }catch(e){ return false; } })();
+let _cliBrFilter=(()=>{ try{ return localStorage.getItem("cli_branch")||""; }catch(e){ return ""; } })();
+let _cliBrOnly=(()=>{ try{ return !!localStorage.getItem("cli_branch_only"); }catch(e){ return false; } })();
 /* сортировка списка «Клиенты» по клику на шапку (имя · курсы · 💰 май · баланс) */
 function cliSort(col){ if(_clientsSort.col===col) _clientsSort.dir*=-1; else _clientsSort={col,dir:(col==="name"?1:-1)}; renderClients(); }
 function _cliTh(col,lab,cls,tip){
@@ -6647,6 +6661,45 @@ function toggleAltBranch(id,on){
   persistLocal(); if(typeof fbSchedulePush==="function") fbSchedulePush(); renderClients();
 }
 function setHideAlt(on){ _cliHideAlt=!!on; try{ localStorage.setItem("cli_hide_alt",on?"1":""); }catch(e){} renderClients(); }
+/* фильтр по филиалу: "" — все, "none" — у кого филиалы не подтянуты, иначе id филиала */
+function setCliBranch(v){ _cliBrFilter=String(v==null?"":v); try{ localStorage.setItem("cli_branch",_cliBrFilter); }catch(e){} renderClients(); }
+function setCliBrOnly(on){ _cliBrOnly=!!on; try{ localStorage.setItem("cli_branch_only",on?"1":""); }catch(e){} renderClients(); }
+/* цветные значки филиалов у ребёнка: цифра = id филиала, цвет постоянный, подсказка — название.
+   Так видно глазами, кто «только каникулы», кто «и учебный, и интенсив». */
+const BR_COLORS=["#1F5BC0","#4F7A55","#C9922E","#8E5AA8","#B5532A","#3F8A8A"];
+function _brChips(br){
+  const alt=_altBranchIds();
+  return (br||[]).slice().sort((a,b)=>a-b).map(id=>{
+    const c=BR_COLORS[(+id)%BR_COLORS.length];
+    return `<span class="brdot${alt.has(+id)?" is-alt":""}" style="background:${c}" title="${esc(_brName(id))}${alt.has(+id)?" — не учебный год":""}">${esc(String(id))}</span>`;
+  }).join("");
+}
+/* Переключатель филиалов: «Все · Пожарный 640 · Каникулы 220 · Интенсивы 90 · без данных 12».
+   Считаем по ВСЕМ детям (не по отфильтрованным), чтобы цифры не прыгали при переключении. */
+function _cliBranchBarHTML(clients){
+  const nm=S.alfaBranchNames||{};
+  const ids=Object.keys(nm).map(Number).sort((a,b)=>a-b);
+  if(!ids.length) return "";
+  const alt=_altBranchIds();
+  const cnt={}, only={}; let none=0;
+  clients.forEach(c=>{ if(!c.br.length){ none++; return; }
+    c.br.forEach(b=>{ cnt[b]=(cnt[b]||0)+1; }); if(c.br.length===1) only[c.br[0]]=(only[c.br[0]]||0)+1; });
+  const chip=(v,lab,tip,extra)=>`<button class="cli-brchip${String(_cliBrFilter)===String(v)?" on":""}" onclick="setCliBranch('${v}')" title="${esc(tip)}">${lab}${extra||""}</button>`;
+  let h=`<div class="cli-brbar">`+chip("","Все","Показать всех детей");
+  ids.forEach(id=>{
+    if(!cnt[id] && !only[id]) return;                       // филиал без детей не показываем
+    const c=BR_COLORS[id%BR_COLORS.length];
+    h+=chip(id, `<span class="brdot" style="background:${c}">${id}</span> ${esc(nm[id]||("филиал "+id))}`,
+      (nm[id]||"")+": всего "+(cnt[id]||0)+", только этот филиал — "+(only[id]||0)+(alt.has(id)?" · не учебный год":""),
+      ` <b>${cnt[id]||0}</b>`);
+  });
+  if(none) h+=chip("none","без данных о филиале","Ребёнок не сопоставлен с Альфой или филиалы ещё не подтянуты"," <b>"+none+"</b>");
+  if(_cliBrFilter && _cliBrFilter!=="none"){
+    h+=`<label class="cli-altchk" title="Показать только тех, кто состоит ИСКЛЮЧИТЕЛЬНО в этом филиале (без учебных курсов)">
+      <input type="checkbox" ${_cliBrOnly?"checked":""} onchange="setCliBrOnly(this.checked)" style="width:auto"> только этот филиал</label>`;
+  }
+  return h+`</div>`;
+}
 /* строка фильтра «каникулы/интенсивы» + (админу) выбор, какие филиалы такими считать */
 function _altFilterHTML(altAll){
   const nm=S.alfaBranchNames||{}, alt=_altBranchIds();
@@ -6655,8 +6708,9 @@ function _altFilterHTML(altAll){
     return _fbIsAdmin?`<div class="cli-altbar"><span style="color:var(--muted)">Филиалы из Альфы ещё не подтянуты — нажмите «💰 Обновить балансы», и появится пометка «каникулы/интенсивы».</span></div>`:'';
   }
   const names=[...alt].map(_brName).join(", ")||"не выбраны";
-  const chk=`<label class="cli-altchk" title="Спрятать детей, которые ходили только на каникулы/интенсивы — чтобы работать по учебному году">
-      <input type="checkbox" ${_cliHideAlt?"checked":""} onchange="setHideAlt(this.checked)" style="width:auto"> Скрыть каникулы/интенсивы${altAll?` (${altAll})`:""}</label>`;
+  const brSel=_cliBrFilter&&_cliBrFilter!=="none";
+  const chk=`<label class="cli-altchk${brSel?" off":""}" title="${brSel?"Не действует, пока выбран конкретный филиал выше":"Спрятать детей, которые ходили только на каникулы/интенсивы — чтобы работать по учебному году"}">
+      <input type="checkbox" ${_cliHideAlt?"checked":""} ${brSel?"disabled":""} onchange="setHideAlt(this.checked)" style="width:auto"> Скрыть каникулы/интенсивы${altAll?` (${altAll})`:""}</label>`;
   const setup=_fbIsAdmin?`<details class="cli-brset"><summary>⚙ филиалы: ${esc(names)}</summary>
       <div class="cli-brlist">${Object.keys(nm).sort((a,b)=>a-b).map(id=>
         `<label><input type="checkbox" ${alt.has(+id)?"checked":""} onchange="toggleAltBranch(${+id},this.checked)" style="width:auto"> ${esc(nm[id]||("филиал "+id))} <span style="color:var(--muted)">#${esc(id)}</span></label>`).join("")}
@@ -6752,18 +6806,25 @@ function renderClients(){
     return _cs==="name"?r*_cd:r;   // при равных числах — всегда по алфавиту
   });
   const _firstLetter=nm=>((String(nm).trim().split(/\s+/)[0]||"")[0]||"").toUpperCase();
-  // буквы — из того, что реально видно (скрытые каникулы не должны давать пустых букв)
-  const letters=[...new Set(clients.filter(c=>!(_cliHideAlt&&c.altOnly)).map(c=>_firstLetter(c.name)).filter(Boolean))].sort((a,b)=>a.localeCompare(b,"ru"));
+  // буквы — из того, что реально видно после фильтров филиала/скрытия (без пустых букв)
+  const _brPass=c=>_cliBrFilter==="none"?!c.br.length
+    :_cliBrFilter?(c.br.includes(+_cliBrFilter)&&(!_cliBrOnly||c.br.every(x=>x===+_cliBrFilter)))
+    :!(_cliHideAlt&&c.altOnly);
+  const letters=[...new Set(clients.filter(_brPass).map(c=>_firstLetter(c.name)).filter(Boolean))].sort((a,b)=>a.localeCompare(b,"ru"));
   if(_clientsLetter && !letters.includes(_clientsLetter)) _clientsLetter="";   // буквы не осталось — сброс
   const q=_ksNorm(_clientsQuery);
   let shown=clients;
   const altAll=clients.filter(c=>c.altOnly).length;                       // сколько «только каникулы/интенсивы»
-  if(_cliHideAlt) shown=shown.filter(c=>!c.altOnly);
+  // фильтр по филиалу: «есть такой филиал» или (с галочкой) «ТОЛЬКО этот филиал».
+  // Выбранный филиал важнее «скрыть каникулы» — иначе, выбрав «Каникулы», увидишь пустой список.
+  if(_cliBrFilter==="none") shown=shown.filter(c=>!c.br.length);
+  else if(_cliBrFilter) shown=shown.filter(c=>c.br.includes(+_cliBrFilter) && (!_cliBrOnly || c.br.every(x=>x===+_cliBrFilter)));
+  else if(_cliHideAlt) shown=shown.filter(c=>!c.altOnly);
   if(_clientsLetter) shown=shown.filter(c=>_firstLetter(c.name)===_clientsLetter);
   if(q.length>=2) shown=shown.filter(c=>_ksNorm(c.name).includes(q));
   const lbtn=(lab,val)=>`<button class="cli-lbtn${(_clientsLetter===val)?' on':''}" onclick="_clientsLetter=${val?`'${val}'`:"''"};renderClients()">${lab}</button>`;
   let html=`<div class="callout" style="margin-bottom:10px">Детей в системе: <b>${clients.length}</b>${(q.length>=2||_clientsLetter||_cliHideAlt)?` · показано: <b>${shown.length}</b>`:''}${altAll?` · <span title="Дети, которые в Альфе числятся только в филиалах каникул/интенсивов — на образовательные программы не ходили">🏕 только каникулы/интенсивы: <b>${altAll}</b></span>`:''}</div>
-    ${_altFilterHTML(altAll)}
+    ${_cliBranchBarHTML(clients)}${_altFilterHTML(altAll)}
     <div class="cli-letters">${lbtn('Все','')}${letters.map(L=>lbtn(L,L)).join("")}</div>
     <div class="kidsearch" style="margin:8px 0 10px">
       <input id="clientsQ" type="search" class="kidsearch-in" placeholder="🔍 Поиск ребёнка по ФИО" value="${esc(_clientsQuery)}" oninput="_clientsQuery=this.value;clientsRerenderKeepFocus()" autocomplete="off">
@@ -6778,11 +6839,10 @@ function renderClients(){
   if(!shown.length){ box.innerHTML=html+`<div style="color:var(--muted);padding:10px 2px">${clients.length?'Никого не найдено.':'В расписании пока нет детей.'}</div>`; return; }
   html+=`<div class="cli-head">${_cliTh("name","Ребёнок","cli-thname")}<span class="cli-cols">${_cliTh("courses","Курсы","cc cc-cr","Сортировать по числу курсов")}${_cliTh("paid","💰","cc cc-paid","Сортировать по купленным майским")}${_cliTh("bal","Баланс","cc cc-bal","Сортировать по балансу в Альфе")}</span></div>`;
   shown.forEach(c=>{
-    let altTag='';
-    if(c.altOnly){
-      const full=c.br.map(_brName).join(", ");
-      altTag=` <span class="cli-alt" title="В Альфе числится только в: ${esc(full)} — на образовательные программы не ходил(а)">🏕 ${esc(full.length>26?"каникулы/интенсивы":full)}</span>`;
-    }
+    // значки филиалов (цифра = филиал, цвет постоянный) + 🏕, если ребёнок ТОЛЬКО из неучебных
+    const altTag=c.br.length
+      ? ` <span class="cli-brs" title="Филиалы в Альфе: ${esc(c.br.map(_brName).join(", "))}">${c.altOnly?'<span class="cli-altmark" title="Только каникулы/интенсивы — на образовательные программы не ходил(а)">🏕</span>':''}${_brChips(c.br)}</span>`
+      : '';
     const nameEl=`<b class="cli-name" style="cursor:pointer;text-decoration:underline dotted" title="Открыть карточку ребёнка" onclick="event.stopPropagation();event.preventDefault();openKidCardByName('${_jsStr(c.name)}')">${esc(c.name)}</b>${c.dob?` <span style="font-size:11px;color:var(--blue)">· ${esc(_ageStr(c.dob))}</span>`:''}${altTag}`;
     if(c.waiting){   // ребёнок без группы — список ожидания
       const w=c.wl||{};
