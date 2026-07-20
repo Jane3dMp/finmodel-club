@@ -602,6 +602,14 @@ details.client .cli-altmark{font-size:11px;margin-right:2px}
 .cli-brchip:hover{border-color:var(--graphite)}
 .cli-brchip.on{background:var(--graphite);color:#fff;border-color:var(--graphite)}
 .cli-altchk.off{opacity:.45;cursor:default}
+/* модалка «Новые из amoCRM» */
+.amo-stages{display:flex;flex-direction:column;gap:2px;max-height:30vh;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:6px 10px;margin:4px 0}
+.amo-stage{display:flex;align-items:center;gap:7px;padding:3px 0;cursor:pointer;font-size:13px}
+.amo-dot{width:10px;height:10px;border-radius:50%;flex:none;box-shadow:inset 0 0 0 1px rgba(0,0,0,.12)}
+.amo-srcbar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;font-size:12px;margin-bottom:8px}
+.amo-src{display:flex;align-items:center;gap:5px;cursor:pointer}
+.amo-list{max-height:40vh;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:4px 10px}
+.amo-row{display:flex;align-items:flex-start;gap:8px;padding:5px 0;border-bottom:1px solid #f0ebe4;cursor:pointer;font-size:12px}
 .cli-altbar{display:flex;align-items:center;gap:14px;flex-wrap:wrap;font-size:12px;margin:6px 0 2px}
 .cli-altchk{display:flex;align-items:center;gap:6px;cursor:pointer;user-select:none}
 .cli-brset summary{cursor:pointer;color:var(--muted)}
@@ -1146,6 +1154,21 @@ details.client .cli-cols .cc-bal{width:74px;font-weight:600}
   </div>
   <p style="font-size:12px;color:var(--muted);margin:0 0 8px;line-height:1.4">Дети, которые есть в Альфе, но которых ещё нет в админке. Отметьте, кого добавить в «Список ожидания» (без группы) — с телефоном и связью с Альфой. Свежие (за 30 дней) отмечены автоматически.</p>
   <div id="alfaNewBody" style="font-size:13px">Загрузка…</div>
+ </div>
+</div>
+
+<!-- Новые заявки из amoCRM: выбор воронки/этапа → в список ожидания (админ) -->
+<div class="modal-bg" id="amoNewModal">
+ <div class="modal" style="max-width:640px">
+  <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
+   <h3 style="margin:0">📥 Новые из amoCRM</h3>
+   <button class="btn ghost sm" style="margin-left:auto" onclick="closeAmoNew()">Закрыть</button>
+  </div>
+  <p style="font-size:12px;color:var(--muted);margin:0 0 8px;line-height:1.45">
+   Заявки из amoCRM. Выберите воронку и этапы — покажем сделки, которых ещё нет у вас,
+   и добавим отмеченных в «Список ожидания» с телефоном. В amoCRM ничего не меняется, только читаем.
+  </p>
+  <div id="amoNewBody" style="font-size:13px">Загрузка…</div>
  </div>
 </div>
 
@@ -6833,6 +6856,7 @@ function renderClients(){
     ${_fbIsAdmin?`<div style="margin:-4px 0 10px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
       <button class="btn ghost sm" onclick="openAlfaNew()" title="Найти в Альфе детей, которых ещё нет у вас, и добавить в список ожидания">🔽 Новые дети из Альфы</button>
       <button class="btn ghost sm" id="balBtn" onclick="pullBalances()" title="Обновить активный баланс из Альфы у всех детей — и в группах, и в списке ожидания">💰 Обновить балансы</button>
+      <button class="btn ghost sm" onclick="openAmoNew()" title="Заявки из amoCRM: выбрать этап воронки и добавить новых в список ожидания">📥 Новые из amoCRM</button>
       <button class="btn ghost sm" onclick="openArchProbe()" title="Сверить на боевой Альфе, каким полем помечается архив">🔍 Поля архива</button>
       ${S.balancesAt?`<span style="font-size:11px;color:var(--muted)">балансы от ${esc(new Date(S.balancesAt).toLocaleString("ru-RU",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"}))}</span>`:''}
     </div>`:''}`;
@@ -7028,6 +7052,147 @@ async function pullBalances(){
       +(ambig?(" · тёзки (пропущены) "+ambig):"")+(miss?(" · нет в Альфе "+miss):""));
   }catch(e){ toast("Не удалось обновить балансы: "+((e&&e.message)||e)); }
   if(btn){ btn.disabled=false; btn.textContent="💰 Обновить балансы"; }
+}
+/* ===== 📥 НОВЫЕ ИЗ amoCRM — сделки выбранного этапа воронки → список ожидания =====
+   Отдельная CRM: заявки живут там, а обучение — в Альфе. Тянем ТОЛЬКО чтение.
+   Имя ребёнка в amo у всех лежит по-разному (название сделки / контакт / своё поле),
+   поэтому источник имени выбирается на живых данных прямо в модалке. */
+const AMO_PROXY="https://app.proznanie.club/finmodel/api/amo/";
+let _amoPipes=[], _amoLeads=[], _amoContacts={}, _amoCands=[];
+let _amoPipeId=0, _amoStatusIds=[], _amoNameSrc="lead", _amoNameField="";
+function closeAmoNew(){ document.getElementById("amoNewModal").classList.remove("show"); }
+async function openAmoNew(){
+  if(!_fbIsAdmin){ toast("Только для админа"); return; }
+  document.getElementById("amoNewModal").classList.add("show");
+  const body=document.getElementById("amoNewBody");
+  body.innerHTML='<div style="color:var(--muted)">Загружаю воронки из amoCRM…</div>';
+  try{
+    const j=await _amoCall("pipelines",{});
+    _amoPipes=j.pipelines||[];
+    if(!_amoPipes.length){ body.innerHTML='<div class="callout">В amoCRM не нашлось ни одной воронки.</div>'; return; }
+    const main=_amoPipes.find(p=>p.is_main)||_amoPipes[0];
+    _amoPipeId=main.id; _amoStatusIds=[]; _amoLeads=[]; _amoCands=[];
+    _amoRenderPicker();
+  }catch(e){ body.innerHTML=`<div class="callout" style="border-color:var(--red)">Не получилось: ${esc((e&&e.message)||e)}</div>
+    <p style="font-size:12px;color:var(--muted)">Если написано про config.php или токен — заполните <code>api/amo/config.php</code> на сервере (см. <code>api/amo/README.md</code>).</p>`; }
+}
+async function _amoCall(action,payload){
+  const token=await _alfaIdToken();
+  const r=await fetch(AMO_PROXY+"?action="+action,{method:"POST",
+    headers:{"Content-Type":"application/json","Authorization":"Bearer "+token},body:JSON.stringify(payload||{})});
+  const j=await r.json().catch(()=>({ok:false,error:"ответ не JSON ("+r.status+")"}));
+  if(!r.ok||!j.ok) throw new Error(j.error||("ошибка "+r.status));
+  return j;
+}
+function amoSetPipe(id){ _amoPipeId=+id; _amoStatusIds=[]; _amoLeads=[]; _amoCands=[]; _amoRenderPicker(); }
+function amoToggleStatus(id,on){ id=+id; _amoStatusIds=_amoStatusIds.filter(x=>x!==id); if(on) _amoStatusIds.push(id); _amoRenderPicker(); }
+/* шаг 1 — выбор воронки и этапов */
+function _amoRenderPicker(){
+  const p=_amoPipes.find(x=>+x.id===+_amoPipeId)||_amoPipes[0];
+  const body=document.getElementById("amoNewBody");
+  body.innerHTML=`
+    <label style="font-size:12px;color:var(--muted)">Воронка</label>
+    <select class="cell" style="margin:4px 0 10px" onchange="amoSetPipe(this.value)">
+      ${_amoPipes.map(x=>`<option value="${x.id}"${+x.id===+_amoPipeId?" selected":""}>${esc(x.name)}</option>`).join("")}
+    </select>
+    <label style="font-size:12px;color:var(--muted)">Этапы — отметьте, откуда тянуть</label>
+    <div class="amo-stages">${(p.statuses||[]).map(s=>
+      `<label class="amo-stage"><input type="checkbox" ${_amoStatusIds.includes(+s.id)?"checked":""}
+        onchange="amoToggleStatus(${s.id},this.checked)" style="width:auto">
+        <span class="amo-dot" style="background:${esc(s.color||"#ccc")}"></span>${esc(s.name)}</label>`).join("")}</div>
+    <div class="hd-actions les-foot" style="margin-top:10px">
+      <span style="font-size:12px;color:var(--muted)">Выбрано этапов: <b>${_amoStatusIds.length}</b></span>
+      <button class="btn sm" style="margin-left:auto" ${_amoStatusIds.length?"":"disabled"} onclick="amoLoadLeads()">Показать сделки</button>
+    </div>
+    <div id="amoOut" style="margin-top:10px"></div>`;
+}
+/* шаг 2 — тянем сделки выбранных этапов и собираем кандидатов */
+async function amoLoadLeads(){
+  const out=document.getElementById("amoOut");
+  out.innerHTML='<div style="color:var(--muted)">Тяну сделки из amoCRM…</div>';
+  try{
+    const j=await _amoCall("leads",{pipelineId:_amoPipeId,statusIds:_amoStatusIds});
+    _amoLeads=j.leads||[]; _amoContacts=j.contacts||{};
+    try{ console.log("📥 amo · образец сделки:", j.debug&&j.debug.sampleLead, "· образец контакта:", j.debug&&j.debug.sampleContact); }catch(e){}
+    _amoBuildCands(); _amoRenderCands();
+  }catch(e){ out.innerHTML=`<div class="callout" style="border-color:var(--red)">Не получилось: ${esc((e&&e.message)||e)}</div>`; }
+}
+function amoSetNameSrc(v){ _amoNameSrc=v; _amoBuildCands(); _amoRenderCands(); }
+function amoSetNameField(v){ _amoNameField=v||""; _amoNameSrc="field"; _amoBuildCands(); _amoRenderCands(); }
+/* имя ребёнка: из названия сделки / из контакта / из выбранного поля сделки */
+function _amoKidName(l){
+  if(_amoNameSrc==="field" && _amoNameField){ const v=(l.fields||{})[_amoNameField]; if(v&&v[0]) return String(v[0]).trim(); }
+  if(_amoNameSrc==="contact"){ const c=_amoContacts[String((l.contactIds||[])[0])]; if(c&&c.name) return c.name.trim(); }
+  return String(l.name||"").trim();
+}
+function _amoPhone(l){
+  for(const id of (l.contactIds||[])){ const c=_amoContacts[String(id)]; if(c&&c.phones&&c.phones[0]) return c.phones[0]; }
+  return "";
+}
+function _amoBuildCands(){
+  // кто уже есть у нас — в расписании или в ожидании (тёзок не сливаем: сравниваем полное ФИО)
+  const have=new Set();
+  (S.grid||[]).forEach(l=>kidsOf(l).forEach(k=>{ const n=_nameKey(k.n); if(n) have.add(n); }));
+  (S.waitlist||[]).forEach(w=>{ const n=_nameKey(w.n); if(n) have.add(n); });
+  const haveAmo=new Set((S.waitlist||[]).map(w=>w&&w.amoLeadId).filter(x=>x!=null).map(String));
+  _amoCands=_amoLeads.map(l=>{
+    const nm=_amoKidName(l);
+    return {lead:l, name:nm, phone:_amoPhone(l), stage:_amoStageName(l.status_id),
+            dup: !nm || have.has(_nameKey(nm)) || haveAmo.has(String(l.id))};
+  });
+}
+function _amoStageName(sid){
+  for(const p of _amoPipes){ const s=(p.statuses||[]).find(x=>+x.id===+sid); if(s) return s.name; }
+  return "";
+}
+function _amoRenderCands(){
+  const out=document.getElementById("amoOut");
+  const fresh=_amoCands.filter(c=>!c.dup), dups=_amoCands.length-fresh.length;
+  // какие поля сделок вообще есть — чтобы выбрать, где лежит имя ребёнка
+  const fieldNames=[...new Set(_amoLeads.flatMap(l=>Object.keys(l.fields||{})))];
+  const src=(v,lab)=>`<label class="amo-src"><input type="radio" name="amoSrc" ${_amoNameSrc===v?"checked":""} onchange="amoSetNameSrc('${v}')" style="width:auto"> ${lab}</label>`;
+  out.innerHTML=`
+    <div class="callout" style="margin-bottom:8px">Сделок на выбранных этапах: <b>${_amoLeads.length}</b> · новых для нас: <b>${fresh.length}</b>${dups?` · уже есть: ${dups}`:''}</div>
+    <div class="amo-srcbar">
+      <span style="color:var(--muted)">Имя ребёнка брать из:</span>
+      ${src("lead","названия сделки")}${src("contact","имени контакта")}
+      ${fieldNames.length?`<label class="amo-src">поля сделки:
+        <select onchange="amoSetNameField(this.value)"><option value="">—</option>
+        ${fieldNames.map(f=>`<option value="${esc(f)}"${_amoNameField===f?" selected":""}>${esc(f)}</option>`).join("")}</select></label>`:''}
+    </div>
+    ${fresh.length?`<div class="amo-list">${fresh.map((c,i)=>`
+      <label class="amo-row"><input type="checkbox" class="amo-chk" data-i="${i}" checked style="width:auto">
+        <span style="flex:1"><b>${esc(c.name||"без имени")}</b>
+          <span style="color:var(--muted);font-size:11px"> · ${esc(c.stage)}${c.phone?" · 📞 "+esc(c.phone):" · без телефона"}</span>
+          <span style="color:var(--muted);font-size:11px;display:block">сделка: ${esc(c.lead.name||("#"+c.lead.id))}</span></span>
+      </label>`).join("")}</div>
+      <div class="hd-actions les-foot" style="margin-top:10px">
+        <button class="btn ghost sm" onclick="amoToggleAll(true)">Отметить все</button>
+        <button class="btn ghost sm" onclick="amoToggleAll(false)">Снять все</button>
+        <button class="btn sm" style="margin-left:auto" onclick="amoApply()">Добавить в список ожидания</button>
+      </div>`
+    :`<div class="callout" style="border-color:var(--green)">Новых нет — все сделки этих этапов уже есть в системе.</div>`}`;
+  _amoFresh=fresh;
+}
+let _amoFresh=[];
+function amoToggleAll(on){ document.querySelectorAll(".amo-chk").forEach(c=>c.checked=on); }
+function amoApply(){
+  const picked=[...document.querySelectorAll(".amo-chk")].filter(c=>c.checked).map(c=>_amoFresh[+c.dataset.i]).filter(Boolean);
+  if(!picked.length){ toast("Никто не отмечен"); return; }
+  if(!Array.isArray(S.waitlist)) S.waitlist=[];
+  const now=new Date().toISOString();
+  let added=0;
+  picked.forEach(c=>{
+    if(!c.name) return;
+    if((S.waitlist||[]).some(w=>_sameKid(w.n,c.name))) return;
+    S.waitlist.push({n:c.name, phone:c.phone||"", wlAt:now,
+      amoLeadId:c.lead.id, amoContactId:(c.lead.contactIds||[])[0]||null, amoStage:c.stage});
+    added++;
+  });
+  persistLocal(); if(typeof fbSchedulePush==="function") fbSchedulePush();
+  renderClients();
+  toast("Добавлено в список ожидания из amoCRM: "+added);
+  _amoBuildCands(); _amoRenderCands();
 }
 /* ===== ПОДТЯНУТЬ НОВЫХ ДЕТЕЙ ИЗ АЛЬФЫ (в список ожидания) ===== */
 let _alfaNewCands=[], _alfaNewCleaned=0;
