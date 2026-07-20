@@ -1236,6 +1236,7 @@ details.client .cli-cols .cc-bal{width:74px;font-weight:600}
    <select id="mgrStatPeriod" class="cell" style="width:auto" onchange="renderMgrStat()"><option value="day">За день</option><option value="all">Все дни</option></select>
    <input type="date" id="mgrStatDate" class="cell" style="width:auto" onchange="renderMgrStat()">
    <button class="btn ghost sm" onclick="openMgrStat()" title="Перечитать журнал из облака">↻ Обновить</button>
+   <span id="mgrStatDepth" style="font-size:12px;color:var(--muted);display:flex;align-items:center;gap:6px"></span>
    <button class="btn ghost sm" style="margin-left:auto" onclick="closeMgrStat()">Закрыть</button>
   </div>
   <p style="font-size:12px;color:var(--muted);margin-bottom:8px">Кто сколько сделал за выбранный день — по журналу действий. Записал детей, отправил Viber, ответы родителей, 💰-отметки, переносы и т.д.</p>
@@ -1674,13 +1675,35 @@ function _pushLog(parts){
 }
 /* --- просмотр журнала (только админ) --- */
 let _logData=[], _logQuery="";
+/* Глубина чтения журнала: сколько последних записей тянем из облака. Чем больше — тем дальше
+   видно назад, но и грузится дольше, поэтому выбор оставляем за человеком (помним в браузере). */
+const LOG_DEPTHS=[["400","400 последних"],["2000","2 000"],["10000","10 000"],["50000","50 000"],["all","всё, что есть"]];
+let _logDepth=(()=>{ try{ return localStorage.getItem("log_depth")||"2000"; }catch(e){ return "2000"; } })();
+let _statDepth=(()=>{ try{ return localStorage.getItem("stat_depth")||"10000"; }catch(e){ return "10000"; } })();
+function _depthRef(depth){ const r=_fbDb.ref("logs"); return depth==="all"?r:r.limitToLast(Math.max(1,parseInt(depth,10)||2000)); }
+function _depthSel(id,cur,fn){
+  return `<select id="${id}" class="cell" style="width:auto;font-size:12px" onchange="${fn}(this.value)" title="Сколько последних записей журнала читать из облака">
+    ${LOG_DEPTHS.map(d=>`<option value="${d[0]}"${cur===d[0]?" selected":""}>${d[1]}</option>`).join("")}</select>`;
+}
+/* охват загруженного: «за 12.07–20.07 · 9 дней» — чтобы было видно, докуда хватило глубины */
+function _logSpan(list){
+  if(!list.length) return "";
+  const ats=list.map(e=>+e.at||0).filter(Boolean); if(!ats.length) return "";
+  const d=ts=>{ const x=new Date(ts),p=n=>String(n).padStart(2,"0"); return p(x.getDate())+"."+p(x.getMonth()+1); };
+  const dk=ts=>{ const x=new Date(ts),p=n=>String(n).padStart(2,"0"); return x.getFullYear()+"-"+p(x.getMonth()+1)+"-"+p(x.getDate()); };
+  const days=new Set(ats.map(dk)).size;
+  const a=Math.min(...ats), b=Math.max(...ats);
+  return " · за "+d(a)+"–"+d(b)+" ("+days+" дн.)";
+}
+function setLogDepth(v){ _logDepth=v||"2000"; try{ localStorage.setItem("log_depth",_logDepth); }catch(e){} openLog(); }
+function setStatDepth(v){ _statDepth=v||"10000"; try{ localStorage.setItem("stat_depth",_statDepth); }catch(e){} openMgrStat(); }
 function openLog(){
   const m=document.getElementById("logModal"); if(!m) return;
   m.classList.add("show"); closeAllMore();
   const body=document.getElementById("logBody");
   if(!_fbDb){ if(body) body.innerHTML='<div style="color:var(--muted);font-size:13px;padding:10px 0">Журнал доступен только при подключении к облаку (вход в аккаунт).</div>'; return; }
   if(body) body.innerHTML='<div style="color:var(--muted);font-size:13px;padding:10px 0">Загружаю журнал…</div>';
-  _fbDb.ref("logs").limitToLast(400).once("value").then(function(s){
+  _depthRef(_logDepth).once("value").then(function(s){
     const v=s.val()||{};
     _logData=Object.keys(v).map(k=>v[k]).sort((a,b)=>(b.at||0)-(a.at||0));
     renderLog();
@@ -1701,7 +1724,8 @@ function renderLog(){
   let h=`<div class="hd-actions" style="margin-bottom:8px">
     <input type="search" id="logQ" class="cell" style="width:280px" placeholder="🔍 Поиск: кто / что / курс / ребёнок" value="${esc(_logQuery)}" oninput="_logQuery=this.value;renderLog();const el=document.getElementById('logQ');if(el){const v=el.value;el.focus();el.value='';el.value=v;}">
     <button class="btn ghost sm" onclick="openLog()" title="Перечитать из облака">↻ Обновить</button>
-    <span class="muted" style="font-size:12px">Записей: ${list.length}${people?(" · людей: "+people):""}</span>
+    <span class="muted" style="font-size:12px;display:flex;align-items:center;gap:6px">Глубина: ${_depthSel("logDepth",_logDepth,"setLogDepth")}</span>
+    <span class="muted" style="font-size:12px">Записей: ${list.length}${people?(" · людей: "+people):""}${_logSpan(_logData)}</span>
   </div>`;
   if(!list.length){
     h+='<div style="color:var(--muted);font-size:13px;padding:10px 2px">'+(_logData.length?'Ничего не найдено по запросу.':'Журнал пока пуст — записи появятся после первых правок в модели.')+'</div>';
@@ -1750,7 +1774,7 @@ function openMgrStat(){
   const body=document.getElementById("mgrStatBody");
   if(!_fbDb){ if(body) body.innerHTML='<div style="color:var(--muted);padding:10px 0">Статистика доступна только при подключении к облаку (вход в аккаунт).</div>'; return; }
   if(body) body.innerHTML='<div style="color:var(--muted);padding:10px 0">Загружаю журнал…</div>';
-  _fbDb.ref("logs").limitToLast(6000).once("value").then(function(s){
+  _depthRef(_statDepth).once("value").then(function(s){
     const v=s.val()||{}; _mgrLogData=Object.keys(v).map(k=>v[k]).filter(e=>e&&e.at);
     _fbDb.ref("peeks").once("value").then(function(ps){ _peeksData=ps.val()||{}; renderMgrStat(); })
       .catch(function(){ _peeksData={}; renderMgrStat(); });   // подсмотры — не критично, если нет
@@ -1759,6 +1783,9 @@ function openMgrStat(){
 function closeMgrStat(){ const m=document.getElementById("mgrStatModal"); if(m) m.classList.remove("show"); }
 function renderMgrStat(){
   const body=document.getElementById("mgrStatBody"); if(!body) return;
+  const dsel=document.getElementById("mgrStatDepth");
+  if(dsel) dsel.innerHTML="Глубина: "+_depthSel("statDepth",_statDepth,"setStatDepth")
+    +`<span title="Сколько записей журнала реально загружено и за какой период">${_mgrLogData.length}${_logSpan(_mgrLogData)}</span>`;
   const allMode=(document.getElementById("mgrStatPeriod")||{}).value==="all";
   const di=document.getElementById("mgrStatDate"); if(di) di.style.display=allMode?"none":"";
   const day=(!allMode && di)?di.value:"";
