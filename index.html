@@ -602,6 +602,8 @@ details.client .cli-altmark{font-size:11px;margin-right:2px}
 .cli-brchip:hover{border-color:var(--graphite)}
 .cli-brchip.on{background:var(--graphite);color:#fff;border-color:var(--graphite)}
 .cli-altchk.off{opacity:.45;cursor:default}
+/* строка «вписать в ещё одну группу» под записями ребёнка */
+.cli-place{display:flex;gap:8px;flex-wrap:wrap;align-items:center;padding:8px 10px;border-top:1px solid var(--line)}
 /* модалка «Новые из amoCRM» */
 .amo-stages{display:flex;flex-direction:column;gap:2px;max-height:30vh;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:6px 10px;margin:4px 0}
 .amo-stage{display:flex;align-items:center;gap:7px;padding:3px 0;cursor:pointer;font-size:13px}
@@ -6949,6 +6951,10 @@ function renderClients(){
           <span class="cc cc-bal" title="Активный баланс из Альфы">${_cliBalCol(c.balance)}</span>
         </span></summary>
       <div class="cli-list">${rows}</div>
+      <div class="cli-place" title="Вписать этого ребёнка ещё в одну группу — второй курс, параллель, добор">
+        <select class="cell wl-sel" style="max-width:280px">${_gridGroupOptsHtml()}</select>
+        <button class="btn sm" onclick="cliPlace('${_jsStr(c.name)}', this.previousElementSibling.value)">Вписать в группу</button>
+      </div>
     </details>`;
   });
   box.innerHTML=html;
@@ -6971,6 +6977,38 @@ function wlPlace(name, key){
   if(typeof renderMay==="function") renderMay(); if(typeof renderGoals==="function") renderGoals();
   renderClients();
   toast("Вписан(а) из ожидания: "+w.n+" → "+(g.label||g.course||"группа"));
+}
+/* Вписать в группу ЛЮБОГО ребёнка из «Клиентов» (не только из списка ожидания) — второй курс,
+   вторая группа, добор в параллель. Контакты (телефон/Альфа/ДР/баланс) переносим из уже
+   существующей записи, а статусы по группе (💰 майский, ответ родителя, «не придёт») НЕ копируем —
+   они относятся к конкретной группе, иначе ребёнок «уже подтвердил» там, где его только что вписали. */
+function _kidProtoByName(name){
+  const nk=_nameKey(name); let proto=null;
+  (S.grid||[]).forEach(l=>kidsOf(l).forEach(k=>{ if(!proto && _nameKey(k.n)===nk) proto=k; }));
+  if(!proto) (S.waitlist||[]).forEach(w=>{ if(!proto && _nameKey(w.n)===nk) proto=w; });
+  if(!proto) return null;
+  const out=_blankKid(proto.n);
+  ["phone","alfaId","dob","alfaBalance","alfaBr"].forEach(f=>{ if(proto[f]!=null && proto[f]!=="") out[f]=JSON.parse(JSON.stringify(proto[f])); });
+  return out;
+}
+function cliPlace(name, key){
+  if(!key){ toast("Выберите группу"); return; }
+  const g=_gridGroupList().find(x=>x.key===key); if(!g){ toast("Группа не найдена"); return; }
+  const kid=_kidProtoByName(name); if(!kid){ toast("Ребёнок не найден"); return; }
+  let added=0, already=0;
+  g.idxs.forEach(idx=>{ const l=S.grid[idx]; if(!Array.isArray(l.kids)) l.kids=[];
+    if(l.kids.some(x=>_sameKid(x.n, kid.n))) already++;
+    else { l.kids.push(JSON.parse(JSON.stringify(kid))); added++; } });
+  if(!added){ toast("Уже вписан(а) в «"+(g.label||g.course||"группа")+"»"); return; }
+  // если был в ожидании — он больше не «без группы»
+  const nk=_nameKey(name);
+  const wi=(S.waitlist||[]).findIndex(w=>_nameKey(w.n)===nk);
+  if(wi>=0) S.waitlist.splice(wi,1);
+  persistLocal(); if(typeof fbSchedulePush==="function") fbSchedulePush();
+  if(typeof renderGrid==="function") renderGrid(); if(typeof renderGroups==="function") renderGroups();
+  if(typeof renderMay==="function") renderMay(); if(typeof renderGoals==="function") renderGoals();
+  renderClients();
+  toast("Вписан(а): "+shortName(kid.n)+" → "+(g.label||g.course||"группа")+(already?(" · занятий пропущено (уже был): "+already):""));
 }
 /* убрать ребёнка из списка ожидания (совсем). Если он связан с Альфой — спросить про архив там,
    чтобы не осталось так: у нас удалён, а в Альфе активен. */
