@@ -368,6 +368,17 @@ details.cwarn .cwarn-body{padding:0 14px 12px}
 :is(#goals,#report) .donut-c .dn{font-size:40px;font-weight:800;line-height:1;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
 :is(#goals,#report) .donut-c .dd{font-size:12px;color:var(--muted);margin-top:3px;display:flex;align-items:center;gap:4px}
 :is(#goals,#report) .donut-c .dd input{width:56px;padding:2px 4px;font-size:12px}
+/* блок «Возврат и новый набор» */
+:is(#goals,#report) .oldnew{margin:6px 0 22px}
+:is(#goals,#report) .on-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px}
+:is(#goals,#report) .on-card{background:#fff;border:1px solid var(--line);border-radius:16px;padding:16px 18px;display:flex;flex-direction:column;align-items:center;text-align:center;gap:6px}
+:is(#goals,#report) .on-t{font-size:15px;font-weight:700;letter-spacing:-.01em}
+:is(#goals,#report) .on-s{font-size:11.5px;color:var(--muted);line-height:1.45}
+:is(#goals,#report) .on-ctl{display:flex;flex-wrap:wrap;align-items:center;gap:10px 16px;margin-top:12px;font-size:12px;color:var(--muted)}
+:is(#goals,#report) .on-ctl label{display:flex;align-items:center;gap:5px}
+:is(#goals,#report) .on-ctl select,:is(#goals,#report) .on-ctl input{padding:3px 5px;font-size:12px}
+:is(#goals,#report) .on-note{font-size:11.5px;color:var(--muted);margin-top:8px;line-height:1.45}
+:is(#goals,#report) .on-note.warn{color:#8A6412;background:#FBF2CE;border-radius:8px;padding:7px 10px}
 :is(#goals,#report) .goal-title{font-size:17px;font-weight:700;letter-spacing:-.01em}
 :is(#goals,#report) .goal-pct{font-size:34px;font-weight:800;letter-spacing:-.02em;margin-top:2px;line-height:1}
 :is(#goals,#report) .goal-left{font-size:13px;color:var(--muted);margin-top:4px}
@@ -1113,6 +1124,29 @@ details.client .cli-cols .cc-bal{width:74px;font-weight:600}
  </div>
 </div>
 
+<!-- Сверка «какое поле в Альфе означает архив» (админ) -->
+<div class="modal-bg" id="archProbeModal">
+ <div class="modal" style="max-width:720px">
+  <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
+   <h3 style="margin:0">🔍 Поля архива в AlfaCRM</h3>
+   <button class="btn ghost sm" style="margin-left:auto" onclick="closeArchProbe()">Закрыть</button>
+  </div>
+  <p style="font-size:12px;color:var(--muted);margin:0 0 8px;line-height:1.45">
+   Alfa не говорит прямо, каким полем помечен «архив». Проверяем на боевых данных:
+   <b>1)</b> заархивируйте руками в Альфе одного клиента; <b>2)</b> впишите сюда его ID и ID любого активного;
+   <b>3)</b> «Сравнить» покажет, какие поля различаются — это и есть архив. Дальше выберите его ниже:
+   этим полем мы будем архивировать детей из списка ожидания.
+  </p>
+  <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:8px">
+   <input id="archProbeA" type="text" inputmode="numeric" placeholder="ID архивного" style="width:150px">
+   <input id="archProbeB" type="text" inputmode="numeric" placeholder="ID активного" style="width:150px">
+   <button class="btn sm" onclick="archProbeRun()">Сравнить</button>
+   <span id="archProbeCtl" style="margin-left:auto"></span>
+  </div>
+  <div id="archProbeOut" style="font-size:13px"></div>
+ </div>
+</div>
+
 <div class="modal-bg" id="achieveModal" style="z-index:96">
  <div class="modal"><div id="achieveBody"></div></div>
 </div>
@@ -1332,8 +1366,11 @@ const DEFAULT_STATE = {
   children: {},   // наши поля ребёнка по alfaId: {alfaId:{name,parentName,phone,dob,evzz}} — один на ребёнка, а не на группу
   goalReturn: 500,   // цель: вернуть прошлогодних
   goalNew: 350,      // цель: набрать новых
-  oldRoster: {},     // alfaId → число посещений за прошлый год (из Альфы); ≥3 = «старый»
+  oldRoster: {},     // alfaId → {t,d,a} посещений за прошлый год (t=всего уроков, d=проведено, a=был) — из Альфы
   oldRosterAt: "",   // дата последней выгрузки
+  oldRosterRule: "a",// какое из трёх чисел считаем посещением: a | d | t (меняется без новой выгрузки)
+  oldTh: 3,          // порог «старого»: столько посещений за прошлый год
+  alfaArchiveMode: "is_study",  // чем архивируем в Альфе: is_study | removed | both (сверяется кнопкой «Поля архива»)
   gasUrl: "https://script.google.com/macros/s/AKfycbxJajbntVctGjXImc1hVhWimvOkXHcNCkuVFpszEbA8ad-B40Lj2Q8gdMMTBar4YLnsew/exec"
 };
 const LS_KEY = "proznanie_finmodel_v1";
@@ -6132,6 +6169,21 @@ function printReport(){
 /* «старый» = ходил в прошлом году (01.09.2025–31.05.2026) ≥3 проведённых занятий (из Альфы).
    «новый» = все остальные (вписан руками впервые, без прошлогодней истории). */
 const OLD_VISIT_TH=3, LY_FROM="2025-09-01", LY_TO="2026-05-31";
+/* Правило подсчёта посещения. Alfa отдаёт по каждому уроку статус и участников; какие именно поля
+   означают «проведён/присутствовал» — зависит от настроек клуба, поэтому прокси считает ВСЕ ТРИ
+   варианта сразу, а здесь можно переключить правило БЕЗ повторной выгрузки из Альфы. */
+const ROSTER_RULES={a:"был на занятии",d:"занятие проведено",t:"любое занятие в расписании"};
+function _rosterRule(){ return ROSTER_RULES[S.oldRosterRule]?S.oldRosterRule:"a"; }
+function _oldTh(){ const v=parseInt(S.oldTh,10); return v>0?v:OLD_VISIT_TH; }
+/* число посещений ребёнка по текущему правилу. Понимает и старый формат (просто число). */
+function _rosterCount(alfaId){
+  const v=(S.oldRoster||{})[String(alfaId)];
+  if(v==null) return 0;
+  if(typeof v==="number") return v;
+  return +(v[_rosterRule()]||0);
+}
+function setRosterRule(r){ S.oldRosterRule=ROSTER_RULES[r]?r:"a"; persistLocal(); if(typeof fbSchedulePush==="function") fbSchedulePush(); _renderGoalsAll(); }
+function setOldTh(v){ const n=Math.max(1,parseInt(v,10)||OLD_VISIT_TH); S.oldTh=n; persistLocal(); if(typeof fbSchedulePush==="function") fbSchedulePush(); _renderGoalsAll(); }
 function _scheduleAlfaIds(){
   const set=new Set();
   (S.grid||[]).forEach(l=>kidsOf(l).forEach(k=>{ if(k.alfaId!=null&&k.alfaId!=="") set.add(String(k.alfaId)); }));
@@ -6141,8 +6193,9 @@ function _scheduleAlfaIds(){
 async function pullOldRoster(){
   const ids=_scheduleAlfaIds();
   if(!ids.length){ toast("Нет детей со связью с Альфой (сначала «Контакты из Альфы»)"); return; }
+  if(!confirm("Выгрузить посещаемость прошлого года из Альфы?\n\nДетей со связью: "+ids.length+". Это "+ids.length+" запросов к Альфе, займёт несколько минут — не закрывайте вкладку.")) return;
   const btn=document.getElementById("oldRosterBtn"); if(btn){ btn.disabled=true; }
-  const roster={}; const BATCH=15; let sampleLogged=false;
+  const roster={}; const BATCH=10; let dbg=null;
   try{
     const token=await _alfaIdToken();
     for(let i=0;i<ids.length;i+=BATCH){
@@ -6152,14 +6205,26 @@ async function pullOldRoster(){
       const j=await r.json().catch(()=>({ok:false,error:"ответ не JSON ("+r.status+")"}));
       if(!r.ok||!j.ok) throw new Error(j.error||("ошибка "+r.status));
       Object.assign(roster, j.counts||{});
-      if(!sampleLogged){ try{ console.log("🔄 visitcounts debug:", j.debug); }catch(e){} sampleLogged=true; }
+      if(!dbg && j.debug && j.debug.sampleLesson){ dbg=j.debug; try{ console.log("🔄 visitcounts — образец урока из Альфы:", dbg); }catch(e){} }
     }
     S.oldRoster=roster; S.oldRosterAt=new Date().toISOString().slice(0,10);
-    persistLocal(); if(typeof fbSchedulePush==="function") fbSchedulePush(); renderGoals();
-    const oldN=Object.values(roster).filter(c=>c>=OLD_VISIT_TH).length;
-    toast("Готово. Старых (≥"+OLD_VISIT_TH+" посещ.): "+oldN+" из "+ids.length);
+    // компактная сводка для UI: сколько уроков вообще нашлось и как распределились статусы
+    if(dbg) S.oldRosterDbg={statusHist:dbg.statusHist||{},withDetails:dbg.withDetails||0,noDetails:dbg.noDetails||0,
+                            keys:(dbg.sampleKeys||[]).slice(0,40),detailKeys:(dbg.detailKeys||[]).slice(0,40)};
+    persistLocal(); if(typeof fbSchedulePush==="function") fbSchedulePush(); _renderGoalsAll();
+    const th=_oldTh();
+    const oldN=ids.filter(id=>_rosterCount(id)>=th).length;
+    const empty=ids.filter(id=>{ const v=roster[String(id)]; return !v||!(v.t||0); }).length;
+    toast("Готово. Старых (≥"+th+"): "+oldN+" из "+ids.length+(empty?(" · без единого урока в Альфе: "+empty):""));
   }catch(e){ toast("Не удалось: "+((e&&e.message)||e)); }
-  if(btn){ btn.disabled=false; btn.textContent=""; renderGoals(); }
+  if(btn){ btn.disabled=false; btn.textContent=""; _renderGoalsAll(); }
+}
+/* сводка по выгрузке — сколько «старых» при текущем правиле/пороге (для подписи под донатами) */
+function _rosterStats(){
+  const ids=_scheduleAlfaIds(), th=_oldTh();
+  let old=0, none=0;
+  ids.forEach(id=>{ const c=_rosterCount(id); if(c>=th) old++; const v=(S.oldRoster||{})[String(id)]; if(!v||(typeof v==="object"&&!(v.t||0))) none++; });
+  return {linked:ids.length, old, none, has:Object.keys(S.oldRoster||{}).length>0};
 }
 function _goalsData(){
   const map={};
@@ -6174,9 +6239,9 @@ function _goalsData(){
   });
   const arr=Object.values(map);
   const unplaced=(typeof _mayUnplacedByCourse==='function')?Object.values(_mayUnplacedByCourse()).reduce((a,b)=>a+b,0):0;
-  const roster=S.oldRoster||{}; const hasRoster=Object.keys(roster).length>0;
-  // старый = есть в реестре с ≥3 посещений; фолбэк (до выгрузки) — просто наличие связи с Альфой
-  const isOld=o=> hasRoster ? (o.alfaId!=null && (+roster[String(o.alfaId)]||0)>=OLD_VISIT_TH) : (o.alfaId!=null);
+  const hasRoster=Object.keys(S.oldRoster||{}).length>0, th=_oldTh();
+  // старый = есть в реестре с ≥порога посещений; фолбэк (до выгрузки) — просто наличие связи с Альфой
+  const isOld=o=> hasRoster ? (o.alfaId!=null && _rosterCount(o.alfaId)>=th) : (o.alfaId!=null);
   const oldAll=arr.filter(isOld), newAll=arr.filter(k=>!isOld(k));
   const old=oldAll.filter(k=>!k.no), nw=newAll.filter(k=>!k.no);
   const retMay=old.filter(k=>k.may).length + unplaced;                  // майские (оплатили продолжение)
@@ -6256,6 +6321,44 @@ function _gauge(val,max,color,label,sub){
     <div class="gauge-lab">${label}</div>${sub?`<div class="gauge-sub">${sub}</div>`:''}
   </div>`;
 }
+/* ===== ВОЗВРАТ vs НОВЫЙ НАБОР =====
+   «Старый» = ходил в прошлом году (окно 01.09.2025–31.05.2026) не меньше порога занятий — по выгрузке
+   из Альфы (`?action=visitcounts`). Пока выгрузки нет, показываем приблизительную оценку по наличию
+   связи с Альфой и честно об этом пишем. Правило подсчёта и порог переключаются без новой выгрузки. */
+function _oldNewHTML(){
+  const G=_goalsData(), st=_rosterStats();
+  const goalR=Math.max(0,+S.goalReturn||0), goalN=Math.max(0,+S.goalNew||0);
+  const dn=(val,goal,color,title,sub)=>{
+    const pct=goal>0?val/goal:0;
+    return `<div class="on-card">
+      <div class="donut">${_donut(pct,color)}<div class="donut-c"><div class="dn" style="color:${color}">${val}</div><div class="dd">из ${goal||"—"}</div></div></div>
+      <div class="on-t">${title}</div><div class="on-s">${sub}</div></div>`;
+  };
+  const ruleSel=Object.keys(ROSTER_RULES).map(r=>`<option value="${r}"${_rosterRule()===r?" selected":""}>${ROSTER_RULES[r]}</option>`).join("");
+  let ctl="";
+  if(_fbIsAdmin){
+    ctl=`<div class="on-ctl">
+      <button class="btn ghost sm" id="oldRosterBtn" onclick="pullOldRoster()" title="Посчитать по каждому ребёнку занятия за прошлый год (01.09.2025–31.05.2026)">Определить старых из Альфы</button>
+      <label>Считать посещением: <select onchange="setRosterRule(this.value)">${ruleSel}</select></label>
+      <label>Порог: <input type="number" min="1" step="1" value="${_oldTh()}" onchange="setOldTh(this.value)" style="width:56px"> занятий</label>
+      <label>Цель возврата: <input type="number" min="0" step="10" value="${goalR}" onchange="saveGoal('ret',this.value)" style="width:70px"></label>
+      <label>Цель новых: <input type="number" min="0" step="10" value="${goalN}" onchange="saveGoal('new',this.value)" style="width:70px"></label>
+    </div>`;
+  }
+  const note = st.has
+    ? `Выгрузка из Альфы от ${esc(S.oldRosterAt||"—")} · со связью ${st.linked} детей · «старых» ${st.old}`
+      +(st.none?` · <span title="Ребёнок связан с Альфой, но уроков за прошлый год там нет">без уроков в Альфе: ${st.none}</span>`:"")
+    : `⚠ Посещаемость из Альфы ещё не выгружена — «старый/новый» показан ПРИБЛИЗИТЕЛЬНО (по наличию связи с Альфой). ${_fbIsAdmin?"Нажмите «Определить старых из Альфы».":"Попросите администратора выгрузить."}`;
+  return `<div class="oldnew">
+      <h3 style="font-size:15px;margin:0 0 10px;display:flex;align-items:center;gap:8px"><span data-ic="target"></span>Возврат и новый набор</h3>
+      <div class="on-row">
+        ${dn(G.retSecured,goalR,"#4F9E63","Возврат прошлогодних",`оплатили майский ${G.retMay} · «да» ${G.retYes} · в работе ${G.retWork} · отказ ${G.retNo}`)}
+        ${dn(G.newTotal,goalN,"#1F5BC0","Новый набор",`вписано ${G.newTotal} · из них подтвердили ${G.newYes}`)}
+      </div>
+      ${ctl}
+      <div class="on-note${st.has?"":" warn"}">${note}</div>
+    </div>`;
+}
 let _goalsEco="";   // фильтр «Движения по группам» по бренду
 function setGoalsEco(v){ _goalsEco=v||""; _renderGoalsAll(); }
 let _goalsSort={col:"",dir:1};   // сортировка таблицы «Движение по группам»
@@ -6292,6 +6395,7 @@ function _goalsDashHTML(opts){
       <div class="gs"><span class="gs-lab">Записей в группы</span><span class="gs-val">${F.records}</span><span class="gs-sub">мест занято (ребёнок на 2 курсах = 2)</span></div>
       <div class="gs"><span class="gs-lab">Мест на ребёнка</span><span class="gs-val">${fmt1(F.perChild)}</span><span class="gs-sub">записей ÷ уникальных детей</span></div>
     </div>`;
+  h+=_oldNewHTML();
   // финансовые показатели — только в «Отчёте» (в «Работе»/«Наборе» их нет)
   if(opts.finance){
     const wpm=T.wpm||4;
@@ -6553,7 +6657,7 @@ function renderClients(){
       <input id="clientsQ" type="search" class="kidsearch-in" placeholder="🔍 Поиск ребёнка по ФИО" value="${esc(_clientsQuery)}" oninput="_clientsQuery=this.value;clientsRerenderKeepFocus()" autocomplete="off">
     </div>
     <div class="cli-addrow" title="Создать нового ребёнка и вписать в группу" onclick="openAddKid()"><span class="plus">+</span> Новый ребёнок</div>
-    ${_fbIsAdmin?`<div style="margin:-4px 0 10px"><button class="btn ghost sm" onclick="openAlfaNew()" title="Найти в Альфе детей, которых ещё нет у вас, и добавить в список ожидания">🔽 Новые дети из Альфы</button></div>`:''}`;
+    ${_fbIsAdmin?`<div style="margin:-4px 0 10px;display:flex;gap:8px;flex-wrap:wrap"><button class="btn ghost sm" onclick="openAlfaNew()" title="Найти в Альфе детей, которых ещё нет у вас, и добавить в список ожидания">🔽 Новые дети из Альфы</button><button class="btn ghost sm" onclick="openArchProbe()" title="Сверить на боевой Альфе, каким полем помечается архив">🔍 Поля архива</button></div>`:''}`;
   if(!shown.length){ box.innerHTML=html+`<div style="color:var(--muted);padding:10px 2px">${clients.length?'Никого не найдено.':'В расписании пока нет детей.'}</div>`; return; }
   html+=`<div class="cli-head"><span class="cli-cols"><span class="cc cc-cr">Курсы</span><span class="cc cc-paid">💰 май</span><span class="cc cc-bal">Баланс</span></span></div>`;
   shown.forEach(c=>{
@@ -6630,18 +6734,71 @@ async function wlDelete(name){
   renderClients();
   toast("Убран из системы: "+w.n);
 }
+/* Архивация в Альфе. Какое поле означает «архив» — зависит от настроек клуба (S.alfaArchiveMode,
+   сверяется кнопкой «🔍 Поля архива»). Прокси после записи ПЕРЕЧИТЫВАЕТ карточку, поэтому мы честно
+   знаем, изменилось поле или Alfa молча проглотила запрос. */
 async function _archiveInAlfa(alfaId, name){
   toast("Архивирую в Альфе: "+shortName(name)+"…");
   try{
     const token=await _alfaIdToken();
     const r=await fetch(ALFA_PROXY+"?action=archiveCustomer",{method:"POST",
       headers:{"Content-Type":"application/json","Authorization":"Bearer "+token},
-      body:JSON.stringify({customerId:alfaId, dryRun:false})});
+      body:JSON.stringify({customerId:alfaId, mode:(S.alfaArchiveMode||"is_study"), dryRun:false})});
     const j=await r.json().catch(()=>({ok:false,error:"ответ не JSON ("+r.status+")"}));
     try{ console.log("🗄 archiveCustomer — ответ Альфы:", j); }catch(e){}
     if(!r.ok||!j.ok){ const raw=j.raw?(" · Альфа: "+JSON.stringify(j.raw).slice(0,300)):""; throw new Error((j.error||("ошибка "+r.status))+raw); }
-    toast("Архивирован в Альфе ✅: "+shortName(name));
+    if(j.archived){ toast("Архивирован в Альфе ✅: "+shortName(name)); return; }
+    const det=Object.keys(j.changed||{}).map(k=>k+": хотели "+j.changed[k].want+", стало "+j.changed[k].now).join("; ");
+    toast("⚠ Альфа запрос приняла, но поле не изменилось ("+(det||"нет данных")+"). Проверьте «🔍 Поля архива» — какое поле у вас означает архив.");
   }catch(e){ toast("В Альфе НЕ архивирован: "+((e&&e.message)||e)+" — проверьте вручную"); }
+}
+
+/* ===== 🔍 ПОЛЯ АРХИВА — сверка на боевой Альфе (админ) =====
+   Alfa нигде не документирует, каким полем помечен «архив». Способ узнать точно:
+   Жанна архивирует ОДНОГО клиента руками в Alfa → сюда два id (архивный и активный) →
+   сравниваем сырые карточки и видим, какое поле различается. */
+function openArchProbe(){ document.getElementById("archProbeModal").classList.add("show"); _archProbeCtl(); }
+function closeArchProbe(){ document.getElementById("archProbeModal").classList.remove("show"); }
+function setArchMode(v){ S.alfaArchiveMode=v||"is_study"; persistLocal(); if(typeof fbSchedulePush==="function") fbSchedulePush(); toast("Архивировать будем полем: "+v); }
+function _archProbeCtl(){
+  const m=S.alfaArchiveMode||"is_study";
+  const opt=(v,l)=>`<option value="${v}"${m===v?" selected":""}>${l}</option>`;
+  document.getElementById("archProbeCtl").innerHTML=
+    `<label style="display:flex;align-items:center;gap:6px;font-size:12px">Чем архивируем:
+      <select onchange="setArchMode(this.value)">${opt("is_study","is_study = 0 (снять «учащийся»)")}${opt("removed","removed = 1")}${opt("both","оба поля сразу")}</select></label>`;
+}
+async function archProbeRun(){
+  const a=(document.getElementById("archProbeA").value||"").trim();
+  const b=(document.getElementById("archProbeB").value||"").trim();
+  const out=document.getElementById("archProbeOut");
+  const ids=[a,b].filter(x=>/^\d+$/.test(x)).map(Number);
+  if(!ids.length){ out.innerHTML='<span style="color:var(--red)">Укажите хотя бы один числовой ID клиента из Альфы.</span>'; return; }
+  out.innerHTML="Тяну карточки из Альфы…";
+  try{
+    const token=await _alfaIdToken();
+    const r=await fetch(ALFA_PROXY+"?action=customerRaw",{method:"POST",
+      headers:{"Content-Type":"application/json","Authorization":"Bearer "+token},body:JSON.stringify({ids})});
+    const j=await r.json().catch(()=>({ok:false,error:"ответ не JSON ("+r.status+")"}));
+    if(!r.ok||!j.ok) throw new Error(j.error||("ошибка "+r.status));
+    try{ console.log("🔍 customerRaw — сырые карточки:", j.customers); }catch(e){}
+    const A=(j.customers||{})[String(ids[0])], B=ids[1]!=null?(j.customers||{})[String(ids[1])]:null;
+    if(!A&&!B){ out.innerHTML='<span style="color:var(--red)">Ни один клиент не найден в Альфе.</span>'; return; }
+    const ca=A?A.customer:null, cb=B?B.customer:null;
+    const keys=[...new Set([...Object.keys(ca||{}),...Object.keys(cb||{})])].sort();
+    const val=v=>v==null?"—":(typeof v==="object"?JSON.stringify(v):String(v));
+    const diff=cb?keys.filter(k=>val(ca&&ca[k])!==val(cb&&cb[k])):keys;
+    const row=k=>`<tr><td style="padding:3px 8px;border-bottom:1px solid var(--line)"><code>${esc(k)}</code></td>
+      <td style="padding:3px 8px;border-bottom:1px solid var(--line)">${esc(val(ca&&ca[k]).slice(0,80))}</td>
+      <td style="padding:3px 8px;border-bottom:1px solid var(--line)">${cb?esc(val(cb[k]).slice(0,80)):"—"}</td></tr>`;
+    out.innerHTML=`<div style="font-size:12px;color:var(--muted);margin-bottom:6px">
+        ${cb?("Различий: <b>"+diff.length+"</b> — среди них и есть поле «архив». Полные карточки — в консоли (F12)."):
+             "Второй ID не указан — показаны все поля одной карточки (в консоли F12 полная копия)."}</div>
+      <div class="tscroll" style="max-height:340px;overflow:auto"><table style="width:100%;border-collapse:collapse;font-size:12px">
+      <thead><tr><th style="text-align:left;padding:4px 8px;background:var(--graphite);color:#fff">Поле</th>
+        <th style="text-align:left;padding:4px 8px;background:var(--graphite);color:#fff">ID ${esc(String(ids[0]))} (архивный)</th>
+        <th style="text-align:left;padding:4px 8px;background:var(--graphite);color:#fff">${ids[1]!=null?"ID "+esc(String(ids[1]))+" (активный)":"—"}</th></tr></thead>
+      <tbody>${diff.map(row).join("")}</tbody></table></div>`;
+  }catch(e){ out.innerHTML='<span style="color:var(--red)">Не удалось: '+esc((e&&e.message)||String(e))+'</span>'; }
 }
 /* ===== ПОДТЯНУТЬ НОВЫХ ДЕТЕЙ ИЗ АЛЬФЫ (в список ожидания) ===== */
 let _alfaNewCands=[], _alfaNewCleaned=0;

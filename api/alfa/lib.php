@@ -265,6 +265,35 @@ function alfa_ref(string $entity, array $fields, bool $global = false): array {
     return $out;
 }
 
+// Найти клиента по id. Клиент может лежать НЕ в дефолтном филиале — обходим все.
+// $branchOut — филиал, в котором нашли (для последующего update в том же контексте).
+function alfa_customer_get(int $id, ?int &$branchOut = null): ?array {
+    $token = alfa_token();
+    $host  = 'https://' . alfa_host();
+    foreach (alfa_all_branch_ids() as $bid) {
+        // 1) фильтр по id в теле; 2) запасной вариант — id в URL (Alfa местами игнорит тело)
+        foreach ([['url' => '', 'body' => ['id' => $id, 'page' => 0, 'count' => 5]],
+                  ['url' => '?id=' . $id, 'body' => ['page' => 0, 'count' => 5]]] as $v) {
+            $r = alfa_http('POST', "$host/v2api/$bid/customer/index" . $v['url'], $v['body'], $token, true, 8);
+            if (isset($r['__err'])) continue;
+            foreach (($r['items'] ?? []) as $c) {
+                if ((int)($c['id'] ?? 0) === $id) { $branchOut = (int)$bid; return $c; }
+            }
+        }
+    }
+    return null;
+}
+
+// Поля-кандидаты на «архив» — короткая сводка карточки для сверки в консоли/UI.
+function alfa_flags(array $c): array {
+    $out = [];
+    foreach (['id','name','is_study','removed','is_archive','archived','is_active','active',
+              'study_status_id','lead_status_id','lead_reject_id','custom_status','branch_ids','dt_update'] as $f) {
+        if (array_key_exists($f, $c)) $out[$f] = $c[$f];
+    }
+    return $out;
+}
+
 // Список id всех активных филиалов (клиенты в Alfa привязаны к филиалам).
 function alfa_all_branch_ids(): array {
     $r = alfa_http('POST', 'https://' . alfa_host() . '/v2api/branch/index',

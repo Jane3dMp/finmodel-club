@@ -353,57 +353,138 @@ switch ($action) {
         json_out(['ok' => true, 'created' => true, 'id' => $newId, 'branch' => $branch, 'payload' => $payload]);
         break;
 
+    // --- СЫРАЯ КАРТОЧКА КЛИЕНТА (READ) — для сверки «какое поле означает архив» ---
+    //     На вход id (или список ids). Отдаём запись КАК ЕСТЬ, со всеми полями Alfa.
+    //     Приём: Жанна архивирует одного клиента руками в Alfa → сравниваем его с активным.
+    case 'customerRaw':
+        @set_time_limit(60);
+        $ids = is_array($in['ids'] ?? null) ? $in['ids'] : [$in['customerId'] ?? 0];
+        $ids = array_values(array_unique(array_filter(array_map('intval', $ids))));
+        if (!$ids) json_out(['ok' => false, 'error' => 'Не передан id клиента']);
+        $out = [];
+        foreach (array_slice($ids, 0, 10) as $id) {
+            $br = null;
+            $c  = alfa_customer_get((int)$id, $br);
+            $out[(string)$id] = $c === null ? null : ['branch' => $br, 'customer' => $c];
+        }
+        json_out(['ok' => true, 'customers' => $out]);
+        break;
+
     // --- АРХИВИРОВАТЬ КЛИЕНТА в Alfa (WRITE) — когда убираем ребёнка из нашей системы ---
-    //     «Архив» = снять статус учащегося (is_study=0). dryRun по умолчанию; сырой ответ в raw для сверки.
+    //     «Архив» в Alfa точно не подтверждён, поэтому:
+    //       • какие поля ставить — задаёт клиент (mode=is_study|removed|both или готовый set{}),
+    //       • update шлём ВМЕСТЕ с обязательными полями карточки (Alfa перезаписывает запись),
+    //       • после записи ПЕРЕЧИТЫВАЕМ карточку и возвращаем before/after → видно, сработало ли.
+    //     dryRun по умолчанию.
     case 'archiveCustomer':
-        @set_time_limit(20);
+        @set_time_limit(40);
         $cid = (int)($in['customerId'] ?? 0);
         if (!$cid) json_out(['ok' => false, 'error' => 'Не передан id клиента']);
-        $live = array_key_exists('dryRun', $in) && $in['dryRun'] === false;
-        $payload = ['is_study' => 0];
-        if (!$live) json_out(['ok' => true, 'dryRun' => true, 'customerId' => $cid, 'payload' => $payload]);
-        $res  = alfa_call('customer', 'update?id=' . $cid, $payload);   // POST /v2api/{branch}/customer/update?id=X
-        $okId = $res['id'] ?? ($res['model']['id'] ?? null);
-        if ($okId === null) {
-            json_out(['ok' => false, 'error' => 'Alfa не подтвердила архивацию (проверьте поля).', 'customerId' => $cid, 'payload' => $payload, 'raw' => $res]);
+
+        $branch = null;
+        $before = alfa_customer_get($cid, $branch);
+        if ($before === null) json_out(['ok' => false, 'error' => 'Клиент не найден в Alfa (id ' . $cid . ')']);
+
+        $set = is_array($in['set'] ?? null) ? $in['set'] : [];
+        if (!$set) {
+            $mode = (string)($in['mode'] ?? 'is_study');
+            if ($mode === 'removed')   $set = ['removed'  => 1];
+            elseif ($mode === 'both')  $set = ['is_study' => 0, 'removed' => 1];
+            else                       $set = ['is_study' => 0];
         }
-        json_out(['ok' => true, 'archived' => true, 'id' => $okId, 'raw' => $res]);
+        // Alfa update перезаписывает карточку целиком → переносим обязательные/значимые поля
+        $keep = [];
+        foreach (['name','legal_type','branch_ids','phone','dob','legal_name','note','assigned_id',
+                  'lead_status_id','lead_source_id','study_status_id','color','is_study'] as $f) {
+            if (isset($before[$f]) && $before[$f] !== '' && $before[$f] !== null) $keep[$f] = $before[$f];
+        }
+        if (empty($keep['branch_ids'])) $keep['branch_ids'] = [$branch ?: alfa_branch()];
+        $payload = array_merge($keep, $set);
+
+        $live = array_key_exists('dryRun', $in) && $in['dryRun'] === false;
+        if (!$live) {
+            json_out(['ok' => true, 'dryRun' => true, 'customerId' => $cid, 'branch' => $branch,
+                      'set' => $set, 'payload' => $payload, 'before' => alfa_flags($before)]);
+        }
+        $res = alfa_http('POST', 'https://' . alfa_host() . '/v2api/' . ($branch ?: alfa_branch()) . '/customer/update?id=' . $cid,
+                         $payload, alfa_token(), true, 15);
+        // сверка по факту: перечитываем карточку и смотрим, встали ли нужные значения
+        $after   = alfa_customer_get($cid);
+        $changed = []; $okAll = $after !== null;
+        foreach ($set as $k => $v) {
+            $now = $after[$k] ?? null;
+            $hit = $after !== null && (string)$now === (string)$v;
+            if (!$hit) $okAll = false;
+            $changed[$k] = ['want' => $v, 'now' => $now, 'ok' => $hit];
+        }
+        json_out(['ok' => true, 'archived' => $okAll, 'verified' => $after !== null, 'customerId' => $cid,
+                  'branch' => $branch, 'set' => $set, 'changed' => $changed,
+                  'before' => alfa_flags($before), 'after' => $after ? alfa_flags($after) : null,
+                  'raw' => $res]);
         break;
 
     // --- ПОСЕЩЕНИЯ ЗА ПРОШЛЫЙ ГОД по клиентам (для «старый/новый») ---
-    //     На вход список id (батч). Для каждого считаем ПРОВЕДЁННЫЕ уроки в окне, где ребёнок присутствовал.
+    //     На вход список id (батч). Отдаём ТРИ счётчика на ребёнка, а правило выбирает клиент:
+    //       t — все уроки в окне, d — со статусом «проведён», a — проведён И ребёнок присутствовал.
+    //     Почему так: точные названия полей статуса/присутствия в этой Alfa не подтверждены,
+    //     поэтому вместо одной догадки считаем все варианты + отдаём сырой образец урока в debug.
+    //     Присутствие берём из lesson.details[] (участники урока) по customer_id — там оно и лежит.
     case 'visitcounts':
-        @set_time_limit(120);
+        @set_time_limit(180);
         $ids  = is_array($in['ids'] ?? null) ? array_values(array_unique(array_filter(array_map('intval', $in['ids'])))) : [];
         $from = (string)($in['from'] ?? '2025-09-01');
         $to   = (string)($in['to']   ?? '2026-05-31');
         $host = 'https://' . alfa_host() . '/v2api/' . alfa_branch();
         $token = alfa_token();
-        $counts = []; $sampleKeys = null; $sampleStatus = null;
+        $PER = 50; $MAX_PAGES = 6;      // Alfa отдаёт ≤50 на страницу; 300 уроков на ребёнка хватает
+
+        $counts = [];                    // id => ['t'=>..,'d'=>..,'a'=>..]
+        $dbg = ['ids' => count($ids), 'statusHist' => [], 'withDetails' => 0, 'noDetails' => 0,
+                'sampleLesson' => null, 'sampleDetail' => null, 'sampleKeys' => null, 'detailKeys' => null];
+
         foreach ($ids as $cid) {
-            // status=3 = проведён (если фильтр не поддержан — перепроверим в коде)
-            $r = alfa_http('POST', "$host/lesson/index",
-                ['customer_id' => $cid, 'date_from' => $from, 'date_to' => $to, 'b_date' => $from, 'e_date' => $to, 'status' => 3, 'page' => 0, 'count' => 300],
-                $token, true, 7);
-            $items = isset($r['__err']) ? [] : ($r['items'] ?? []);
-            $n = 0;
-            foreach ($items as $ls) {
-                if (!is_array($ls)) continue;
-                if ($sampleKeys === null) { $sampleKeys = array_keys($ls); $sampleStatus = $ls['status'] ?? '—'; }
-                $d = $ls['date'] ?? ($ls['lesson_date'] ?? null);
-                $dd = $d ? substr((string)$d, 0, 10) : null;
-                if ($dd && ($dd < $from || $dd > $to)) continue;                 // в окне
-                if (isset($ls['status']) && (int)$ls['status'] !== 3) continue;  // только проведённые
-                $absent = (isset($ls['is_attend'])  && !$ls['is_attend'])        // явно отсутствовал — не считаем
-                       || (isset($ls['is_present']) && !$ls['is_present'])
-                       || (isset($ls['is_missed'])  && $ls['is_missed']);
-                if ($absent) continue;
-                $n++;
+            $t = 0; $d = 0; $a = 0;
+            for ($page = 0; $page < $MAX_PAGES; $page++) {
+                $r = alfa_http('POST', "$host/lesson/index",
+                    ['customer_id' => $cid, 'date_from' => $from, 'date_to' => $to,
+                     'b_date' => $from, 'e_date' => $to, 'page' => $page, 'count' => $PER],
+                    $token, true, 7);
+                $items = isset($r['__err']) ? [] : ($r['items'] ?? []);
+                foreach ($items as $ls) {
+                    if (!is_array($ls)) continue;
+                    if ($dbg['sampleLesson'] === null) { $dbg['sampleLesson'] = $ls; $dbg['sampleKeys'] = array_keys($ls); }
+
+                    $dd = substr((string)($ls['date'] ?? ($ls['lesson_date'] ?? '')), 0, 10);
+                    if ($dd !== '' && ($dd < $from || $dd > $to)) continue;      // строго в окне
+                    $t++;
+
+                    $st = isset($ls['status']) ? (int)$ls['status'] : -1;
+                    $dbg['statusHist'][(string)$st] = ($dbg['statusHist'][(string)$st] ?? 0) + 1;
+                    $done = ($st === -1) || ($st === 3);                          // 3 = «проведён» (если поля нет — считаем проведённым)
+                    if (!$done) continue;
+                    $d++;
+
+                    // присутствие ИМЕННО этого ребёнка — из участников урока
+                    $det = null;
+                    foreach ((array)($ls['details'] ?? $ls['participants'] ?? []) as $p) {
+                        if (is_array($p) && (int)($p['customer_id'] ?? 0) === $cid) { $det = $p; break; }
+                    }
+                    if ($det !== null) {
+                        $dbg['withDetails']++;
+                        if ($dbg['sampleDetail'] === null) { $dbg['sampleDetail'] = $det; $dbg['detailKeys'] = array_keys($det); }
+                    } else { $dbg['noDetails']++; }
+
+                    $src = $det ?? $ls;
+                    $absent = (isset($src['is_attend'])  && !$src['is_attend'])
+                           || (isset($src['is_present']) && !$src['is_present'])
+                           || (isset($src['is_missed'])  &&  $src['is_missed']);
+                    if (!$absent) $a++;
+                }
+                if (count($items) < $PER) break;
             }
-            $counts[(string)$cid] = $n;
+            $counts[(string)$cid] = ['t' => $t, 'd' => $d, 'a' => $a];
         }
-        json_out(['ok' => true, 'from' => $from, 'to' => $to, 'counts' => $counts,
-                  'debug' => ['sampleKeys' => $sampleKeys, 'sampleStatus' => $sampleStatus, 'ids' => count($ids)]]);
+        json_out(['ok' => true, 'from' => $from, 'to' => $to, 'counts' => $counts, 'debug' => $dbg]);
         break;
 
     // --- справочники для маппинга модель→Alfa (READ) ---
