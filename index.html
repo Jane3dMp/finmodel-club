@@ -589,13 +589,17 @@ details.client .cli-badges{margin-left:auto;font-size:12px;color:var(--muted)}
 details.client .cli-cols{margin-left:auto;display:flex;align-items:center;font-size:12px;color:var(--muted)}
 details.client .cli-cols .cc{text-align:right;white-space:nowrap;padding-left:12px}
 details.client .cli-cols .cc-cr{width:82px}
-details.client .cli-cols .cc-paid{width:50px}
+details.client .cli-cols .cc-paid{width:62px}
 details.client .cli-cols .cc-bal{width:74px;font-weight:600}
 @media(max-width:560px){details.client .cli-cols .cc-cr,details.client .cli-cols .cc-paid,details.client .cli-cols .cc-bal{width:auto;padding-left:8px}}
 .cli-head{display:flex;padding:2px 13px 5px;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
 .cli-head .cli-cols{margin-left:auto;display:flex}
 .cli-head .cc{text-align:right;white-space:nowrap;padding-left:12px}
-.cli-head .cc-cr{width:82px}.cli-head .cc-paid{width:50px}.cli-head .cc-bal{width:74px}
+.cli-head .cc-cr{width:82px}.cli-head .cc-paid{width:62px}.cli-head .cc-bal{width:74px}
+.cli-head .cli-thname{padding-left:2px}
+.cli-head .cli-th{cursor:pointer;user-select:none;border-radius:5px}
+.cli-head .cli-th:hover{color:var(--coal)}
+.cli-head .cli-th.on{color:var(--coal);font-weight:700}
 @media(max-width:560px){.cli-head{display:none}}
 .cli-list{padding:4px 8px 8px}
 .cli-enr{display:grid;grid-template-columns:130px minmax(160px,1fr) 150px minmax(120px,1fr);gap:8px;align-items:baseline;padding:6px;border-bottom:1px solid #f0ebe4;font-size:12px;cursor:pointer}
@@ -6585,7 +6589,14 @@ function renderGroups(){
 }
 
 /* ===== ВКЛАДКА «КЛИЕНТЫ» — все дети + на какие курсы/группы вписаны и статус ===== */
-let _clientsQuery="", _clientsLetter="";
+let _clientsQuery="", _clientsLetter="", _clientsSort={col:"name",dir:1};
+/* сортировка списка «Клиенты» по клику на шапку (имя · курсы · 💰 май · баланс) */
+function cliSort(col){ if(_clientsSort.col===col) _clientsSort.dir*=-1; else _clientsSort={col,dir:(col==="name"?1:-1)}; renderClients(); }
+function _cliTh(col,lab,cls,tip){
+  const a=_clientsSort.col===col?(_clientsSort.dir>0?" ▲":" ▼"):"";
+  return `<span class="${cls} cli-th${_clientsSort.col===col?" on":""}" onclick="cliSort('${col}')" title="${esc(tip||"Сортировать")}">${lab}${a}</span>`;
+}
+function _cliNum(v){ if(v==null||v==="") return null; const n=parseFloat(String(v).replace(",",".")); return isFinite(n)?n:null; }
 /* бейдж активного баланса (из Альфы, последний известный при подтяжке контактов/новых) */
 function _cliBal(b){ if(b==null||b==="") return ""; const n=Math.round(+b||0);
   return ` · <span style="color:${n<0?'var(--red)':'var(--green)'}" title="Активный баланс — из Альфы (последняя подтяжка)">${fmt(n)} р</span>`; }
@@ -6642,7 +6653,25 @@ function renderClients(){
   // дети из списка ожидания (без группы) — тоже показываем в «Клиентах»
   (Array.isArray(S.waitlist)?S.waitlist:[]).forEach(w=>{ if(!w||!w.n) return; const key=_nameKey(w.n); if(!key||map[key]) return;
     map[key]={name:w.n, dob:w.dob||"", enroll:[], waiting:true, wl:w, balance:(w.alfaBalance!=null?w.alfaBalance:null)}; });
-  const clients=Object.values(map).sort((a,b)=>a.name.localeCompare(b.name,"ru"));
+  // метрики строки (нужны и для показа, и для сортировки)
+  Object.values(map).forEach(c=>{
+    c.nCourses=new Set((c.enroll||[]).map(e=>e.course).filter(Boolean)).size;
+    c.nPaid=(c.enroll||[]).filter(e=>e.may).length;
+    c.nBal=_cliNum(c.balance);
+  });
+  // сортировка: по имени — по алфавиту; по числовым столбцам — пустые ВСЕГДА внизу
+  const _cs=_clientsSort.col, _cd=_clientsSort.dir;
+  const clients=Object.values(map).sort((a,b)=>{
+    if(_cs!=="name"){
+      const va=(_cs==="courses"?a.nCourses:_cs==="paid"?a.nPaid:a.nBal);
+      const vb=(_cs==="courses"?b.nCourses:_cs==="paid"?b.nPaid:b.nBal);
+      if(va==null&&vb!=null) return 1;
+      if(vb==null&&va!=null) return -1;
+      if(va!=null&&vb!=null&&va!==vb) return (va-vb)*_cd;
+    }
+    const r=a.name.localeCompare(b.name,"ru");
+    return _cs==="name"?r*_cd:r;   // при равных числах — всегда по алфавиту
+  });
   const _firstLetter=nm=>((String(nm).trim().split(/\s+/)[0]||"")[0]||"").toUpperCase();
   const letters=[...new Set(clients.map(c=>_firstLetter(c.name)).filter(Boolean))].sort((a,b)=>a.localeCompare(b,"ru"));
   if(_clientsLetter && !letters.includes(_clientsLetter)) _clientsLetter="";   // буквы не осталось — сброс
@@ -6659,7 +6688,7 @@ function renderClients(){
     <div class="cli-addrow" title="Создать нового ребёнка и вписать в группу" onclick="openAddKid()"><span class="plus">+</span> Новый ребёнок</div>
     ${_fbIsAdmin?`<div style="margin:-4px 0 10px;display:flex;gap:8px;flex-wrap:wrap"><button class="btn ghost sm" onclick="openAlfaNew()" title="Найти в Альфе детей, которых ещё нет у вас, и добавить в список ожидания">🔽 Новые дети из Альфы</button><button class="btn ghost sm" onclick="openArchProbe()" title="Сверить на боевой Альфе, каким полем помечается архив">🔍 Поля архива</button></div>`:''}`;
   if(!shown.length){ box.innerHTML=html+`<div style="color:var(--muted);padding:10px 2px">${clients.length?'Никого не найдено.':'В расписании пока нет детей.'}</div>`; return; }
-  html+=`<div class="cli-head"><span class="cli-cols"><span class="cc cc-cr">Курсы</span><span class="cc cc-paid">💰 май</span><span class="cc cc-bal">Баланс</span></span></div>`;
+  html+=`<div class="cli-head">${_cliTh("name","Ребёнок","cli-thname")}<span class="cli-cols">${_cliTh("courses","Курсы","cc cc-cr","Сортировать по числу курсов")}${_cliTh("paid","💰","cc cc-paid","Сортировать по купленным майским")}${_cliTh("bal","Баланс","cc cc-bal","Сортировать по балансу в Альфе")}</span></div>`;
   shown.forEach(c=>{
     const nameEl=`<b class="cli-name" style="cursor:pointer;text-decoration:underline dotted" title="Открыть карточку ребёнка" onclick="event.stopPropagation();event.preventDefault();openKidCardByName('${_jsStr(c.name)}')">${esc(c.name)}</b>${c.dob?` <span style="font-size:11px;color:var(--blue)">· ${esc(_ageStr(c.dob))}</span>`:''}`;
     if(c.waiting){   // ребёнок без группы — список ожидания
@@ -6677,8 +6706,7 @@ function renderClients(){
       </details>`;
       return;
     }
-    const courses=[...new Set(c.enroll.map(e=>e.course).filter(Boolean))];
-    const paid=c.enroll.filter(e=>e.may).length;
+    const paid=c.nPaid;
     const rows=c.enroll.slice().sort((a,b)=>(a.day-b.day)||String(a.start).localeCompare(String(b.start))).map(e=>
       `<div class="cli-enr" title="Открыть это занятие" onclick="editLes(_lesIdx('${esc(e.id)}'))">
         <span class="cli-when">${DAY_NAMES[e.day]||'?'} ${esc(e.start)}${e.end?'–'+esc(e.end):''}</span>
@@ -6689,7 +6717,7 @@ function renderClients(){
     html+=`<details class="client">
       <summary>${nameEl}
         <span class="cli-cols">
-          <span class="cc cc-cr" title="Курсов/групп">${courses.length} курс(ов)</span>
+          <span class="cc cc-cr" title="Курсов/групп">${c.nCourses} курс(ов)</span>
           <span class="cc cc-paid" title="Купленных майских (💰)">${paid?`<b style="color:var(--green)">💰 ${paid}</b>`:''}</span>
           <span class="cc cc-bal" title="Активный баланс из Альфы">${_cliBalCol(c.balance)}</span>
         </span></summary>
