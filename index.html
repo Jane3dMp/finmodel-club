@@ -1646,7 +1646,7 @@ function _logDescribe(oldG,newG,oldRest,newRest){
 function _fbUserEmail(){ try{ const au=_fbAuth(); return (au&&au.currentUser&&au.currentUser.email)||"—"; }catch(e){ return "—"; } }
 function _fbUid(){ try{ const au=_fbAuth(); return (au&&au.currentUser&&au.currentUser.uid)||""; }catch(e){ return ""; } }
 function _dayKeyOf(ts){ const d=ts?new Date(ts):new Date(), p=n=>String(n).padStart(2,"0"); return d.getFullYear()+"-"+p(d.getMonth()+1)+"-"+p(d.getDate()); }
-const STAT_KEYS=["enrolled","sent","replies","paid","refusal","moved","removed","lesAdd","lesDel","edits"];
+const STAT_KEYS=["enrolled","sent","replies","paid","refusal","confirms","maybes","moved","removed","lesAdd","lesDel","edits"];
 function _pushLog(parts){
   if(!_fbDb || !FB_ON || _fbSeeding) return;
   if(!parts || !parts.length) return;
@@ -1724,9 +1724,22 @@ let _mgrLogData=[], _peeksData={};
 function _mgrCount(t){
   t=String(t||""); const c=re=>{ const m=t.match(re); return m?m.length:0; };
   const paidMarks=c(/💰/g), paidRm=c(/снята 💰/g);
-  return { enrolled:c(/вписан\(а\)/g), removed:c(/убран\(а\)/g), sent:c(/✅ Viber отправлен/g),
-    replies:c(/ответ \(/g), paid:Math.max(0,paidMarks-paidRm), refusal:c(/❌ не придёт/g),
-    moved:c(/время →/g), lesAdd:c(/➕ занятие/g), lesDel:c(/🗑 удалено занятие/g),
+  // ОТКАЗ менеджер ставит двумя способами: галочкой «❌ не придёт» И ответом родителя «🔴 нет».
+  // Считаем оба, иначе у того, кто работает ответами, «Отказов» всегда 0 (так и было).
+  const refusal=c(/❌ не придёт/g)+c(/ответ \([^)]*\): 🔴 нет/g);
+  const confirms=c(/ответ \([^)]*\): 🟢 да/g), maybes=c(/ответ \([^)]*\): 🟡 думает/g);
+  // ПЕРЕВОД ребёнка в другую группу выглядит в журнале как «убран(а) X» + «вписан(а) X» в одной
+  // записи. Раньше это считалось как «записал» + «убрал», а «Переносов» оставалось 0.
+  const nm=re=>[...t.matchAll(re)].map(m=>m[1].trim().replace(/[;·]+$/,""));
+  const inN=nm(/вписан\(а\) ([^;·\n]+)/g), outN=nm(/убран\(а\) ([^;·\n]+)/g);
+  const outSet=new Set(outN);
+  const movedKids=inN.filter(n=>outSet.has(n)).length;
+  return { enrolled:Math.max(0,inN.length-movedKids), removed:Math.max(0,outN.length-movedKids),
+    sent:c(/✅ Viber отправлен/g),
+    replies:c(/ответ \(/g), paid:Math.max(0,paidMarks-paidRm), refusal:refusal,
+    confirms:confirms, maybes:maybes,
+    moved:c(/время →/g)+movedKids,     // перенос занятия ИЛИ перевод ребёнка между группами
+    lesAdd:c(/➕ занятие/g), lesDel:c(/🗑 удалено занятие/g),
     edits:c(/курс →|каб\. →|педагог →/g), comments:c(/коммент/g) };
 }
 function openMgrStat(){
@@ -1777,6 +1790,8 @@ function renderMgrStat(){
   const heroFor=(c,pc)=>`<div class="ms-hero">${hcard("Отправил Viber",c.sent,pc?pc.sent:null,"#1F5BC0")}${hcard("Записал детей",c.enrolled,pc?pc.enrolled:null,"#3B7A57")}</div>`;
   const gridFor=(c,pc)=>{ const p=k=>pc?pc[k]:null; return `<div class="ms-grid">`
     +t("Ответов",c.replies,p("replies"))
+    +t("🟢 Согласий",c.confirms||0,p("confirms"),(c.confirms?"#3B7A57":""))
+    +t("🟡 Думают",c.maybes||0,p("maybes"))
     +t("💰 отметок",c.paid,p("paid"),c.paid?"#3B7A57":"")
     +t("Отказов ❌",c.refusal,p("refusal"),c.refusal?"#B0493D":"")
     +t("Переносов",c.moved,p("moved"))
@@ -1814,7 +1829,9 @@ const ACH_METR=[
   {k:"sent",lab:"Отправил Viber",col:"#1F5BC0"},
   {k:"replies",lab:"Ответов родителей",col:"#8C6D1F"},
   {k:"paid",lab:"Отметок 💰",col:"#4F9E63"},
-  {k:"moved",lab:"Переносов",col:"#6B7078"},
+  {k:"confirms",lab:"🟢 Согласий",col:"#4F9E63"},
+  {k:"refusal",lab:"Отказов ❌",col:"#B0493D"},
+  {k:"moved",lab:"Переводов",col:"#6B7078"},
   {k:"removed",lab:"Убрал детей",col:"#6B7078"}
 ];
 function closeAchieve(){ const m=document.getElementById("achieveModal"); if(m) m.classList.remove("show"); }
@@ -1923,6 +1940,8 @@ function showPeek(v){
     <div class="pk-body">
       <div class="pk-grid">
         <div class="pk-t"><div class="l">Ответов</div><div class="v">${g("replies")}</div></div>
+        <div class="pk-t"><div class="l">🟢 согласий</div><div class="v" style="color:#3B7A57">${g("confirms")}</div></div>
+        <div class="pk-t"><div class="l">Отказов ❌</div><div class="v" style="color:${g("refusal")?"#B0493D":"#20201D"}">${g("refusal")}</div></div>
         <div class="pk-t"><div class="l">💰 отметок</div><div class="v" style="color:#3B7A57">${g("paid")}</div></div>
         <div class="pk-t"><div class="l">Действий</div><div class="v">${g("actions")}</div></div>
       </div>
