@@ -1449,6 +1449,7 @@ const DEFAULT_STATE = {
   alfaArchiveMode: "is_study",  // чем архивируем в Альфе: is_study | removed | both (сверяется кнопкой «Поля архива»)
   // отслеживаемый этап воронки amoCRM: дети оттуда ждут распределения в группу
   amoWatch: { pipelineId:0, statusIds:[], seen:{}, nameSrc:"lead", nameField:"" },
+  amoAutoFix: false,   // самим править имена клиентов в Альфе (вебхук заводит их по названию сделки)
   gasUrl: "https://script.google.com/macros/s/AKfycbxJajbntVctGjXImc1hVhWimvOkXHcNCkuVFpszEbA8ad-B40Lj2Q8gdMMTBar4YLnsew/exec"
 };
 const LS_KEY = "proznanie_finmodel_v1";
@@ -7580,7 +7581,9 @@ function _amoRenderCands(){
     :`<div class="callout" style="border-color:var(--green)">Все разобраны — новых детей с этого этапа нет.</div>`}
     <div class="hd-actions les-foot" style="margin-top:10px">
       <button class="btn ghost sm" onclick="amoLoadLeads()">↻ Проверить amo</button>
-      ${_fbIsAdmin?`<button class="btn ghost sm" onclick="amoFixNames()" title="Интеграция amo→Альфа заводит клиента по названию сделки — заменим на ФИО ребёнка">✍️ Починить имена в Альфе</button>
+      ${_fbIsAdmin?`<button class="btn ghost sm" onclick="amoFixNames()" title="Интеграция amo→Альфа заводит клиента по названию сделки — заменим на ФИО ребёнка. Название сделки в amo не трогаем">✍️ Починить имена в Альфе</button>
+      <label class="amo-src" title="Сверять и править имена в Альфе самим, при каждой фоновой проверке (раз в 10 минут)">
+        <input type="checkbox" ${S.amoAutoFix?"checked":""} onchange="amoSetAutoFix(this.checked)" style="width:auto"> автоматически</label>
       <button class="btn ghost sm" onclick="amoResetWatch()" title="Выбрать другую воронку или этап">⚙ Сменить этап</button>`:''}
     </div>`;
 }
@@ -7655,30 +7658,41 @@ function amoSkip(i){
    список «было → станет» и ждём подтверждения. */
 let _amoFixList=[];
 function _phoneKey(p){ const d=String(p||"").replace(/\D/g,""); return d.length>=9?d.slice(-9):""; }
+/* Собрать расхождения: имя в Альфе (пришло из названия сделки) vs ФИО ребёнка из amo.
+   Смотрим ВСЮ воронку, а не только отслеживаемый этап: клиент в Альфе заводится раньше
+   (на «Записан на пробное»), а распределяем мы позже — иначе половину бы не поймали. */
+async function _amoCollectFixes(){
+  const w=_amoWatch(); if(!w.pipelineId) return [];
+  const token=await _alfaIdToken();
+  const jl=await _amoCall("leads",{pipelineId:w.pipelineId});           // без statusIds = все этапы воронки
+  const leads=jl.leads||[], contacts=jl.contacts||{};
+  const savedL=_amoLeads, savedC=_amoContacts;
+  _amoLeads=leads; _amoContacts=contacts;                               // чтобы _amoKidName видел контакты
+  const cands=leads.map(l=>({name:_amoKidName(l), phone:_amoPhone(l)})).filter(c=>c.name&&c.phone);
+  _amoLeads=savedL; _amoContacts=savedC;
+  const r=await fetch(ALFA_PROXY+"?action=customers",{method:"POST",
+    headers:{"Content-Type":"application/json","Authorization":"Bearer "+token},body:JSON.stringify({})});
+  const j=await r.json().catch(()=>({ok:false,error:"ответ не JSON ("+r.status+")"}));
+  if(!r.ok||!j.ok) throw new Error(j.error||("ошибка "+r.status));
+  const byPhone={};
+  (j.customers||[]).forEach(c=>{ (c.phones||[]).forEach(p=>{ const k=_phoneKey(p); if(k && !byPhone[k]) byPhone[k]=c; }); });
+  const fixes=[];
+  cands.forEach(c=>{
+    const a=byPhone[_phoneKey(c.phone)]; if(!a) return;
+    const was=String(a.name||"").trim();
+    if(!was || _sameKid(was, c.name)) return;                           // имя уже нормальное
+    if(fixes.some(x=>x.id===a.id)) return;
+    fixes.push({id:a.id, was:was, will:c.name, phone:c.phone});
+  });
+  return fixes;
+}
 async function amoFixNames(){
   if(!_fbIsAdmin){ toast("Только для админа"); return; }
   const out=document.getElementById("amoOut"); if(!out) return;
-  const cands=_amoCands.filter(c=>c.name && c.phone);
-  if(!cands.length){ toast("Нет сделок с телефоном — сверять не с чем"); return; }
   const box=document.createElement("div"); box.id="amoFixBox"; box.className="callout";
-  box.style.margin="8px 0"; box.innerHTML="Сверяю с Альфой…"; out.prepend(box);
+  box.style.margin="8px 0"; box.innerHTML="Сверяю всю воронку с Альфой…"; out.prepend(box);
   try{
-    const token=await _alfaIdToken();
-    const r=await fetch(ALFA_PROXY+"?action=customers",{method:"POST",
-      headers:{"Content-Type":"application/json","Authorization":"Bearer "+token},body:JSON.stringify({})});
-    const j=await r.json().catch(()=>({ok:false,error:"ответ не JSON ("+r.status+")"}));
-    if(!r.ok||!j.ok) throw new Error(j.error||("ошибка "+r.status));
-    // индекс клиентов Альфы по телефону (последние 9 цифр — форматы записи разные)
-    const byPhone={};
-    (j.customers||[]).forEach(c=>{ (c.phones||[]).forEach(p=>{ const k=_phoneKey(p); if(k && !byPhone[k]) byPhone[k]=c; }); });
-    _amoFixList=[];
-    cands.forEach(c=>{
-      const a=byPhone[_phoneKey(c.phone)];
-      if(!a) return;
-      const was=String(a.name||"").trim();
-      if(!was || _sameKid(was, c.name)) return;         // уже нормальное имя — не трогаем
-      _amoFixList.push({id:a.id, was:was, will:c.name, phone:c.phone});
-    });
+    _amoFixList=await _amoCollectFixes();
     if(!_amoFixList.length){ box.innerHTML='<b style="color:var(--green)">Имена в Альфе в порядке</b> — расхождений не нашли.'; return; }
     box.innerHTML=`<b>Имена в Альфе отличаются: ${_amoFixList.length}</b>
       <div style="max-height:30vh;overflow:auto;margin:6px 0;font-size:12px">
@@ -7713,6 +7727,38 @@ async function amoApplyFixNames(){
   _amoFixList=[];
   toast("Имена в Альфе обновлены: "+ok);
 }
+/* Автопочинка: раз в фоновую проверку сверяем имена и правим молча. Нужна, потому что клиент
+   в Альфе создаётся вебхуком в момент перехода по этапу — ловить это руками неудобно.
+   Название сделки в amo при этом НЕ трогаем: там курс+ФИО, и он нужен менеджерам. */
+function amoSetAutoFix(on){
+  S.amoAutoFix=!!on; persistLocal(); if(typeof fbSchedulePush==="function") fbSchedulePush();
+  toast(on?"Имена в Альфе будут исправляться автоматически":"Автоисправление имён выключено");
+  if(on) _amoAutoFixRun();
+}
+let _amoAutoFixBusy=false;
+async function _amoAutoFixRun(){
+  if(!S.amoAutoFix || !_fbIsAdmin || _amoAutoFixBusy) return;
+  _amoAutoFixBusy=true;
+  try{
+    const fixes=await _amoCollectFixes();
+    let ok=0;
+    if(fixes.length){
+      const token=await _alfaIdToken();
+      for(const x of fixes){
+        try{
+          const r=await fetch(ALFA_PROXY+"?action=renameCustomer",{method:"POST",
+            headers:{"Content-Type":"application/json","Authorization":"Bearer "+token},
+            body:JSON.stringify({customerId:x.id, name:x.will, dryRun:false})});
+          const j=await r.json().catch(()=>({ok:false}));
+          if(r.ok&&j.ok&&(j.renamed||j.skipped)) ok++;
+        }catch(e){}
+      }
+      try{ console.log("✍️ автоисправление имён в Альфе:", ok+"/"+fixes.length, fixes); }catch(e){}
+      if(ok) toast("Имена в Альфе поправлены автоматически: "+ok);
+    }
+  }catch(e){}
+  _amoAutoFixBusy=false;
+}
 /* ===== БЕЙДЖ «новые из amo» — тихая фоновая проверка отслеживаемого этапа ===== */
 let _amoBadgeN=0;
 function _amoUpdateBadge(){
@@ -7734,6 +7780,7 @@ async function _amoCheck(silent){
     _amoBadgeN=_amoCands.filter(c=>!c.dup && !w.seen[String(c.lead.id)]).length;
     _amoUpdateBadge();
     if(!silent) _amoRenderCands();
+    if(S.amoAutoFix) _amoAutoFixRun();          // заодно тихо чиним имена в Альфе
   }catch(e){ if(!silent) throw e; }
 }
 /* ===== ПОДТЯНУТЬ НОВЫХ ДЕТЕЙ ИЗ АЛЬФЫ (в список ожидания) ===== */
