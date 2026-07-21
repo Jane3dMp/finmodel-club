@@ -1673,6 +1673,17 @@ function _fbUserEmail(){ try{ const au=_fbAuth(); return (au&&au.currentUser&&au
 function _fbUid(){ try{ const au=_fbAuth(); return (au&&au.currentUser&&au.currentUser.uid)||""; }catch(e){ return ""; } }
 function _dayKeyOf(ts){ const d=ts?new Date(ts):new Date(), p=n=>String(n).padStart(2,"0"); return d.getFullYear()+"-"+p(d.getMonth()+1)+"-"+p(d.getDate()); }
 const STAT_KEYS=["enrolled","sent","replies","paid","refusal","confirms","maybes","moved","removed","lesAdd","lesDel","edits"];
+/* Сбой записи журнала виден сразу: иначе человек работает, а его действий в статистике нет,
+   и понять это можно только сравнив «на глаз» (так и всплыло — «действий: 8» за полдня). */
+let _logFailN=0, _logFailMsg="", _logFailShown=false;
+function _logWriteFailed(e){
+  _logFailN++; _logFailMsg=(e&&e.message)||String(e||"неизвестная ошибка");
+  try{ console.warn("📜 запись журнала не прошла:", _logFailMsg); }catch(x){}
+  if(!_logFailShown){
+    _logFailShown=true;
+    toast("⚠ Журнал действий не пишется ("+_logFailMsg+"). Работа сохраняется, но статистика будет неполной — скажите администратору.");
+  }
+}
 function _pushLog(parts){
   if(!_fbDb || !FB_ON || _fbSeeding) return;
   if(!parts || !parts.length) return;
@@ -1682,7 +1693,9 @@ function _pushLog(parts){
   const email=_fbUserEmail();
   const entry={ at: firebase.database.ServerValue.TIMESTAMP, email:email,
     scenario: currentScenarioName(), text:text, n:parts.length };
-  try{ _fbDb.ref("logs").push(entry); }catch(e){}
+  // Раньше ошибка записи глоталась молча: у менеджера правки шли, а в журнале их не было,
+  // и статистика показывала «действий: 8» вместо реальной работы. Теперь об этом видно.
+  try{ _fbDb.ref("logs").push(entry).catch(_logWriteFailed); }catch(e){ _logWriteFailed(e); }
   // агрегат по менеджеру за день → stats/{uid}/{дата} (для «Моей статистики» и итогов 18:00; изоляция правилами)
   try{
     const uid=_fbUid();
@@ -1694,9 +1707,9 @@ function _pushLog(parts){
       upd[mb+"actions"]=inc(1); upd[mb+"name"]=(email||"").split("@")[0];   // и разбивка по менеджеру (мини-лидерборд)
       STAT_KEYS.forEach(k=>{ if(cnt[k]){ upd[base+k]=inc(cnt[k]); upd[tb+k]=inc(cnt[k]); upd[mb+k]=inc(cnt[k]); } });
       upd["stats/"+uid+"/email"]=email;
-      _fbDb.ref().update(upd);
+      _fbDb.ref().update(upd).catch(_logWriteFailed);
     }
-  }catch(e){}
+  }catch(e){ _logWriteFailed(e); }
 }
 /* --- просмотр журнала (только админ) --- */
 let _logData=[], _logQuery="";
@@ -1810,7 +1823,8 @@ function renderMgrStat(){
   const body=document.getElementById("mgrStatBody"); if(!body) return;
   const dsel=document.getElementById("mgrStatDepth");
   if(dsel) dsel.innerHTML="Глубина: "+_depthSel("statDepth",_statDepth,"setStatDepth")
-    +`<span title="Сколько записей журнала реально загружено и за какой период">${_mgrLogData.length}${_logSpan(_mgrLogData)}</span>`;
+    +`<span title="Сколько записей журнала реально загружено и за какой период">${_mgrLogData.length}${_logSpan(_mgrLogData)}</span>`
+    +(_logFailN?`<span style="color:var(--red)" title="${esc(_logFailMsg)}"> · ⚠ у вас ${_logFailN} записей журнала не сохранилось</span>`:"");
   const allMode=(document.getElementById("mgrStatPeriod")||{}).value==="all";
   const di=document.getElementById("mgrStatDate"); if(di) di.style.display=allMode?"none":"";
   const day=(!allMode && di)?di.value:"";
@@ -1860,7 +1874,10 @@ function renderMgrStat(){
     </div>`;
   // по каждому менеджеру
   mgrs.forEach(g=>{ const who=(g.email||"—").split("@")[0]; const pc=prevOf(g.email);
-    const meta=allMode?`📅 ${ds(g.first)}–${ds(g.last)} · дней: ${g.days.size} · действий: ${g.actions}`:`🕒 ${tm(g.first)}–${tm(g.last)} · действий: ${g.actions}`;
+    // «действий» — это записи журнала (правки схлопываются пачками), «событий» — что в них внутри.
+    // Без этой пары непонятно, почему за полдня работы «действий: 8».
+    const ev=g.parts>g.actions?` · событий: ${g.parts}`:"";
+    const meta=allMode?`📅 ${ds(g.first)}–${ds(g.last)} · дней: ${g.days.size} · записей: ${g.actions}${ev}`:`🕒 ${tm(g.first)}–${tm(g.last)} · записей: ${g.actions}${ev}`;
     h+=`<div class="ms-card">
       <div class="ms-top"><span class="nm">${esc(who)}</span><span class="em">${esc(g.email||"")}</span><span class="mt">${meta}</span></div>
       <div class="ms-b">${heroFor(g.cnt,pc)}${gridFor(g.cnt,pc)}</div>
