@@ -1,18 +1,18 @@
 {
   "rules": {
     "scenarios": {
-      ".read": "auth != null && auth.token.email != null && (auth.token.email === 'proznanie.mogilev@gmail.com' || auth.token.email === 'smalprince@gmail.com' || auth.token.email === 'oks.kovaliova@gmail.com' || root.child('access').child(auth.token.email.lower().replace('.', ',')).exists() || root.child('approved').child(auth.uid).exists())",
-      ".write": "auth != null && auth.token.email != null && (auth.token.email === 'proznanie.mogilev@gmail.com' || auth.token.email === 'smalprince@gmail.com' || auth.token.email === 'oks.kovaliova@gmail.com' || root.child('access').child(auth.token.email.lower().replace('.', ',')).exists() || root.child('approved').child(auth.uid).exists())"
+      ".read": "auth != null && auth.token.email != null && (auth.token.email === 'proznanie.mogilev@gmail.com' || auth.token.email === 'smalprince@gmail.com' || auth.token.email === 'oks.kovaliova@gmail.com' || root.child('access').child(auth.token.email.toLowerCase().replace('.', ',')).exists() || root.child('approved').child(auth.uid).exists())",
+      ".write": "auth != null && auth.token.email != null && (auth.token.email === 'proznanie.mogilev@gmail.com' || auth.token.email === 'smalprince@gmail.com' || auth.token.email === 'oks.kovaliova@gmail.com' || root.child('access').child(auth.token.email.toLowerCase().replace('.', ',')).exists() || root.child('approved').child(auth.uid).exists())"
     },
 
     "history": {
-      ".read": "auth != null && auth.token.email != null && (auth.token.email === 'proznanie.mogilev@gmail.com' || auth.token.email === 'smalprince@gmail.com' || auth.token.email === 'oks.kovaliova@gmail.com' || root.child('access').child(auth.token.email.lower().replace('.', ',')).exists() || root.child('approved').child(auth.uid).exists())",
-      ".write": "auth != null && auth.token.email != null && (auth.token.email === 'proznanie.mogilev@gmail.com' || auth.token.email === 'smalprince@gmail.com' || auth.token.email === 'oks.kovaliova@gmail.com' || root.child('access').child(auth.token.email.lower().replace('.', ',')).exists() || root.child('approved').child(auth.uid).exists())"
+      ".read": "auth != null && auth.token.email != null && (auth.token.email === 'proznanie.mogilev@gmail.com' || auth.token.email === 'smalprince@gmail.com' || auth.token.email === 'oks.kovaliova@gmail.com' || root.child('access').child(auth.token.email.toLowerCase().replace('.', ',')).exists() || root.child('approved').child(auth.uid).exists())",
+      ".write": "auth != null && auth.token.email != null && (auth.token.email === 'proznanie.mogilev@gmail.com' || auth.token.email === 'smalprince@gmail.com' || auth.token.email === 'oks.kovaliova@gmail.com' || root.child('access').child(auth.token.email.toLowerCase().replace('.', ',')).exists() || root.child('approved').child(auth.uid).exists())"
     },
 
     "logs": {
       ".read": "auth != null && auth.token.email != null && (auth.token.email === 'proznanie.mogilev@gmail.com' || auth.token.email === 'smalprince@gmail.com' || auth.token.email === 'oks.kovaliova@gmail.com')",
-      ".write": "auth != null && auth.token.email != null && (auth.token.email === 'proznanie.mogilev@gmail.com' || auth.token.email === 'smalprince@gmail.com' || auth.token.email === 'oks.kovaliova@gmail.com' || root.child('access').child(auth.token.email.lower().replace('.', ',')).exists() || root.child('approved').child(auth.uid).exists())"
+      ".write": "auth != null && auth.token.email != null && (auth.token.email === 'proznanie.mogilev@gmail.com' || auth.token.email === 'smalprince@gmail.com' || auth.token.email === 'oks.kovaliova@gmail.com' || root.child('access').child(auth.token.email.toLowerCase().replace('.', ',')).exists() || root.child('approved').child(auth.uid).exists())"
     },
 
     "stats": {
@@ -23,8 +23,8 @@
     },
 
     "teamstats": {
-      ".read": "auth != null && auth.token.email != null && (auth.token.email === 'proznanie.mogilev@gmail.com' || auth.token.email === 'smalprince@gmail.com' || auth.token.email === 'oks.kovaliova@gmail.com' || root.child('access').child(auth.token.email.lower().replace('.', ',')).exists() || root.child('approved').child(auth.uid).exists())",
-      ".write": "auth != null && auth.token.email != null && (auth.token.email === 'proznanie.mogilev@gmail.com' || auth.token.email === 'smalprince@gmail.com' || auth.token.email === 'oks.kovaliova@gmail.com' || root.child('access').child(auth.token.email.lower().replace('.', ',')).exists() || root.child('approved').child(auth.uid).exists())"
+      ".read": "auth != null && auth.token.email != null && (auth.token.email === 'proznanie.mogilev@gmail.com' || auth.token.email === 'smalprince@gmail.com' || auth.token.email === 'oks.kovaliova@gmail.com' || root.child('access').child(auth.token.email.toLowerCase().replace('.', ',')).exists() || root.child('approved').child(auth.uid).exists())",
+      ".write": "auth != null && auth.token.email != null && (auth.token.email === 'proznanie.mogilev@gmail.com' || auth.token.email === 'smalprince@gmail.com' || auth.token.email === 'oks.kovaliova@gmail.com' || root.child('access').child(auth.token.email.toLowerCase().replace('.', ',')).exists() || root.child('approved').child(auth.uid).exists())"
     },
 
     "peeks": {
@@ -42,7 +42,7 @@
       ".read": "auth != null && (auth.token.email === 'proznanie.mogilev@gmail.com' || auth.token.email === 'smalprince@gmail.com' || auth.token.email === 'oks.kovaliova@gmail.com')",
       ".write": "auth != null && (auth.token.email === 'proznanie.mogilev@gmail.com' || auth.token.email === 'smalprince@gmail.com' || auth.token.email === 'oks.kovaliova@gmail.com')",
       "$k": {
-        ".read": "auth != null && auth.token.email != null && $k === auth.token.email.lower().replace('.', ',')"
+        ".read": "auth != null && auth.token.email != null && ($k === auth.token.email.toLowerCase().replace('.', ',') || data.child('email').val().toLowerCase() === auth.token.email.toLowerCase())"
       }
     },
 
