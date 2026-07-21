@@ -1383,6 +1383,17 @@ details.client .cli-cols .cc-bal{width:74px;font-weight:600}
     <div style="font-weight:600;font-size:13px;margin:16px 0 2px">Пользователи и их вкладки</div>
     <div style="font-size:11px;color:#8a8178;margin-bottom:6px">Отметьте галочками, какие вкладки видит каждый. Меняется сразу.</div>
     <div id="fbUsersList"></div>
+    <!-- запасной путь: заявки нет (человек не регистрировался заново), но доступ дать надо.
+         ID он видит у себя на экране «Ждите одобрения» — достаточно продиктовать. -->
+    <details style="margin-top:14px">
+      <summary style="cursor:pointer;font-size:13px;font-weight:600">Выдать доступ вручную по ID</summary>
+      <div style="font-size:11px;color:#8a8178;margin:6px 0 8px;line-height:1.45">Если заявки нет в списке: попросите человека продиктовать «Ваш ID для администратора» с его экрана входа.</div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap">
+        <input id="fbManualUid" placeholder="ID пользователя" style="flex:1;min-width:180px;padding:7px 10px;border:1px solid #ccc;border-radius:8px;font-size:12px">
+        <input id="fbManualEmail" type="email" placeholder="почта" style="flex:1;min-width:150px;padding:7px 10px;border:1px solid #ccc;border-radius:8px;font-size:12px">
+        <button onclick="fbGrantByUid()" style="padding:7px 12px;border:none;border-radius:8px;background:#2e7d32;color:#fff;font-size:12px;cursor:pointer">Открыть доступ</button>
+      </div>
+    </details>
     <div style="margin-top:14px;display:flex;gap:8px"><button onclick="fbLoadAccess()" style="padding:8px 12px;border:1px solid #ccc;border-radius:8px;background:#fff;cursor:pointer;font-size:13px">↻ Обновить</button></div>
   </div>
 </div>
@@ -2137,13 +2148,21 @@ document.addEventListener("keydown", function(e){ if(e.key==="Escape") closeAllM
    выглядели одинаково («Ждите одобрения»), и было не понять, почему человек не входит,
    хотя админ видит его в списке. Теперь причину показываем прямо на экране. */
 let _fbApprErr="";
+/* Заявка в pending раньше создавалась ТОЛЬКО при регистрации. Если у человека сменился ID
+   (перерегистрация) или заявку уже удалили одобрением старого ID — он входит, доступа нет,
+   а у админа в списке заявок пусто: одобрять нечего. Поэтому при каждом входе без доступа
+   заявку подаём заново. */
+function _fbEnsurePending(user){
+  if(!_fbDb||!user||!user.uid) return;
+  try{ _fbDb.ref("pending/"+user.uid).set({email:user.email||"", at: firebase.database.ServerValue.TIMESTAMP}); }catch(e){}
+}
 function _fbWatchApproval(user){
   _fbApprRef=_fbDb.ref("approved/"+user.uid);
   _fbApprRef.on("value", function(s){
     _fbApprErr="";
     const v=s.val();
     if(v){ _fbGrant(false, (v&&v.tabs)||_defaultTabsMap()); }
-    else if(!_fbGranted){ _fbShowPending(); }
+    else if(!_fbGranted){ _fbEnsurePending(user); _fbShowPending(); }
   }, function(e){ _fbApprErr=(e&&e.message)||"нет доступа к проверке"; if(!_fbGranted) _fbShowPending(); });
 }
 /* перечитать доступ вручную (после того как админ одобрил) — без перезагрузки страницы */
@@ -2154,7 +2173,7 @@ function fbRecheckAccess(){
   _fbDb.ref("approved/"+au.currentUser.uid).once("value").then(function(s){
     const v=s.val();
     if(v){ _fbApprErr=""; _fbGrant(false,(v&&v.tabs)||_defaultTabsMap()); toast("Доступ открыт"); }
-    else { _fbApprErr=""; _fbShowPending(); toast("Администратор пока не одобрил заявку"); }
+    else { _fbApprErr=""; _fbEnsurePending(au.currentUser); _fbShowPending(); toast("Администратор пока не одобрил заявку"); }
   }).catch(function(e){ _fbApprErr=(e&&e.message)||"нет доступа к проверке"; _fbShowPending(); });
 }
 function _fbGrant(isAdmin, tabs){
@@ -2327,6 +2346,20 @@ function fbApprove(uid){
   const em=(_fbPendingData[uid]&&_fbPendingData[uid].email)||"";
   _fbDb.ref("approved/"+uid).set({email:em, tabs:_defaultTabsMap()}).then(function(){ return _fbDb.ref("pending/"+uid).remove(); })
     .then(function(){ toast("Доступ открыт (базовые вкладки)"); fbLoadAccess(); })
+    .catch(function(e){ toast("Ошибка: "+((e&&e.message)||"")); });
+}
+/* выдать доступ по ID напрямую — когда заявки в списке нет */
+function fbGrantByUid(){
+  if(!_fbDb) return;
+  const uid=(document.getElementById("fbManualUid").value||"").trim();
+  const em=(document.getElementById("fbManualEmail").value||"").trim();
+  if(uid.length<10){ toast("Вставьте ID пользователя с его экрана входа"); return; }
+  _fbDb.ref("approved/"+uid).set({email:em, tabs:_defaultTabsMap()})
+    .then(function(){ return _fbDb.ref("pending/"+uid).remove().catch(function(){}); })
+    .then(function(){
+      document.getElementById("fbManualUid").value=""; document.getElementById("fbManualEmail").value="";
+      toast("Доступ открыт — пусть нажмёт «Проверить ещё раз»"); fbLoadAccess();
+    })
     .catch(function(e){ toast("Ошибка: "+((e&&e.message)||"")); });
 }
 function fbReject(uid){
