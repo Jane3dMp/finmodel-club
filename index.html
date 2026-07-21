@@ -6700,10 +6700,14 @@ function _goalsDashHTML(opts){
     +_gauge(F.silent, F.records, "#B4AC9C", "Молчат", "из "+F.records+" — без ответа")
     +_gauge(F.sent, F.records, "#E3B23C", "Отправлено", "из "+F.records+" записей")
     +`</div>`;
+  // «Подтвердили» и «Отказ» меряем ДРУГ ОТ ДРУГА: 100% = те, кто уже ответил да/нет.
+  // От общего числа записей эти доли ничего не говорят, пока половина ещё молчит.
+  const answered=F.nmYes+F.nmNo;
+  const pcOf=v=>answered?Math.round(v/answered*100):0;
   h+=`<div class="gaugerow gr-3">`
-    +_gauge(F.nmYes, F.nonMay, "#4F9E63", "Подтвердили", "без майского · из "+F.nonMay)
-    +_gauge(F.nmNo, F.nonMay, "#C6553F", "Отказ", "без майского · из "+F.nonMay)
-    +_gauge(F.nmMaybe, F.nonMay, "#E0A02E", "Думают", "без майского · из "+F.nonMay)
+    +_gauge(F.nmYes, answered, "#4F9E63", "Подтвердили", `<b>${pcOf(F.nmYes)}%</b> ответивших · из ${answered}`)
+    +_gauge(F.nmNo, answered, "#C6553F", "Отказ", `<b>${pcOf(F.nmNo)}%</b> ответивших · из ${answered}`)
+    +_gauge(F.nmMaybe, F.nonMay, "#E0A02E", "Думают", "ещё думают · из "+F.nonMay+" без майского")
     +`</div>`;
   // отдельные показатели: уникальные дети («количество рук»), записи, мест на ребёнка
   h+=`<div class="goalstats">
