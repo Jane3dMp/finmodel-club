@@ -7580,7 +7580,8 @@ function _amoRenderCands(){
     :`<div class="callout" style="border-color:var(--green)">Все разобраны — новых детей с этого этапа нет.</div>`}
     <div class="hd-actions les-foot" style="margin-top:10px">
       <button class="btn ghost sm" onclick="amoLoadLeads()">↻ Проверить amo</button>
-      ${_fbIsAdmin?`<button class="btn ghost sm" onclick="amoResetWatch()" title="Выбрать другую воронку или этап">⚙ Сменить этап</button>`:''}
+      ${_fbIsAdmin?`<button class="btn ghost sm" onclick="amoFixNames()" title="Интеграция amo→Альфа заводит клиента по названию сделки — заменим на ФИО ребёнка">✍️ Починить имена в Альфе</button>
+      <button class="btn ghost sm" onclick="amoResetWatch()" title="Выбрать другую воронку или этап">⚙ Сменить этап</button>`:''}
     </div>`;
 }
 let _amoFresh=[];
@@ -7646,6 +7647,71 @@ function amoSkip(i){
   const c=_amoFresh[i]; if(!c) return;
   _amoMarkSeen(c.lead,"skip");
   _amoBuildCands(); _amoRenderCands();
+}
+/* ===== ✍️ ПОЧИНИТЬ ИМЕНА В АЛЬФЕ =====
+   Интеграция amo→Alfa заводит клиента по НАЗВАНИЮ СДЕЛКИ («Арт-студия Половикова Арина»),
+   а нам нужно чистое ФИО ребёнка — то же, что попадает в расписание. Ищем таких клиентов
+   по телефону родителя и предлагаем переименовать. Живая запись в CRM, поэтому показываем
+   список «было → станет» и ждём подтверждения. */
+let _amoFixList=[];
+function _phoneKey(p){ const d=String(p||"").replace(/\D/g,""); return d.length>=9?d.slice(-9):""; }
+async function amoFixNames(){
+  if(!_fbIsAdmin){ toast("Только для админа"); return; }
+  const out=document.getElementById("amoOut"); if(!out) return;
+  const cands=_amoCands.filter(c=>c.name && c.phone);
+  if(!cands.length){ toast("Нет сделок с телефоном — сверять не с чем"); return; }
+  const box=document.createElement("div"); box.id="amoFixBox"; box.className="callout";
+  box.style.margin="8px 0"; box.innerHTML="Сверяю с Альфой…"; out.prepend(box);
+  try{
+    const token=await _alfaIdToken();
+    const r=await fetch(ALFA_PROXY+"?action=customers",{method:"POST",
+      headers:{"Content-Type":"application/json","Authorization":"Bearer "+token},body:JSON.stringify({})});
+    const j=await r.json().catch(()=>({ok:false,error:"ответ не JSON ("+r.status+")"}));
+    if(!r.ok||!j.ok) throw new Error(j.error||("ошибка "+r.status));
+    // индекс клиентов Альфы по телефону (последние 9 цифр — форматы записи разные)
+    const byPhone={};
+    (j.customers||[]).forEach(c=>{ (c.phones||[]).forEach(p=>{ const k=_phoneKey(p); if(k && !byPhone[k]) byPhone[k]=c; }); });
+    _amoFixList=[];
+    cands.forEach(c=>{
+      const a=byPhone[_phoneKey(c.phone)];
+      if(!a) return;
+      const was=String(a.name||"").trim();
+      if(!was || _sameKid(was, c.name)) return;         // уже нормальное имя — не трогаем
+      _amoFixList.push({id:a.id, was:was, will:c.name, phone:c.phone});
+    });
+    if(!_amoFixList.length){ box.innerHTML='<b style="color:var(--green)">Имена в Альфе в порядке</b> — расхождений не нашли.'; return; }
+    box.innerHTML=`<b>Имена в Альфе отличаются: ${_amoFixList.length}</b>
+      <div style="max-height:30vh;overflow:auto;margin:6px 0;font-size:12px">
+        ${_amoFixList.map(x=>`<div style="padding:3px 0;border-bottom:1px solid #f0ebe4">
+          <span style="color:var(--muted)">${esc(x.was)}</span> → <b>${esc(x.will)}</b></div>`).join("")}
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn sm" onclick="amoApplyFixNames()">Переименовать в Альфе (${_amoFixList.length})</button>
+        <button class="btn ghost sm" onclick="document.getElementById('amoFixBox').remove()">Отмена</button>
+      </div>
+      <div style="font-size:11px;color:var(--muted);margin-top:6px">Меняем только имя. Телефон, дата рождения, абонементы и группы остаются как есть.</div>`;
+  }catch(e){ box.innerHTML=`<span style="color:var(--red)">Не получилось: ${esc((e&&e.message)||e)}</span>`; }
+}
+async function amoApplyFixNames(){
+  const box=document.getElementById("amoFixBox"); if(!_amoFixList.length) return;
+  const total=_amoFixList.length; let ok=0, fail=0;
+  try{
+    const token=await _alfaIdToken();
+    for(let i=0;i<_amoFixList.length;i++){
+      const x=_amoFixList[i];
+      if(box) box.innerHTML="Переименовываю… "+(i+1)+"/"+total;
+      try{
+        const r=await fetch(ALFA_PROXY+"?action=renameCustomer",{method:"POST",
+          headers:{"Content-Type":"application/json","Authorization":"Bearer "+token},
+          body:JSON.stringify({customerId:x.id, name:x.will, dryRun:false})});
+        const j=await r.json().catch(()=>({ok:false}));
+        if(r.ok&&j.ok&&(j.renamed||j.skipped)) ok++; else { fail++; try{ console.log("✍️ не переименован:",x,j); }catch(e){} }
+      }catch(e){ fail++; }
+    }
+  }catch(e){ if(box) box.innerHTML='<span style="color:var(--red)">Нет связи с Альфой</span>'; return; }
+  if(box) box.innerHTML=`<b style="color:var(--green)">Переименовано: ${ok}</b>${fail?` · не удалось: ${fail} (подробности в консоли)`:""}`;
+  _amoFixList=[];
+  toast("Имена в Альфе обновлены: "+ok);
 }
 /* ===== БЕЙДЖ «новые из amo» — тихая фоновая проверка отслеживаемого этапа ===== */
 let _amoBadgeN=0;

@@ -423,6 +423,44 @@ switch ($action) {
                   'raw' => $res]);
         break;
 
+    // --- ПЕРЕИМЕНОВАТЬ КЛИЕНТА в Alfa (WRITE) ---
+    //     Интеграция amo→Alfa заводит клиента по НАЗВАНИЮ СДЕЛКИ («Арт-студия Половикова Арина»),
+    //     а нужно чистое ФИО ребёнка. Меняем только поле name, остальные поля карточки переносим
+    //     как есть (customer/update перезаписывает запись целиком) и перечитываем результат.
+    case 'renameCustomer':
+        @set_time_limit(40);
+        $cid  = (int)($in['customerId'] ?? 0);
+        $name = trim((string)($in['name'] ?? ''));
+        if (!$cid)          json_out(['ok' => false, 'error' => 'Не передан id клиента']);
+        if ($name === '')   json_out(['ok' => false, 'error' => 'Не передано новое имя']);
+
+        $branch = null;
+        $before = alfa_customer_get($cid, $branch);
+        if ($before === null) json_out(['ok' => false, 'error' => 'Клиент не найден в Alfa (id ' . $cid . ')']);
+        if (trim((string)($before['name'] ?? '')) === $name) {
+            json_out(['ok' => true, 'skipped' => true, 'reason' => 'имя уже такое', 'id' => $cid, 'name' => $name]);
+        }
+
+        $keep = [];
+        foreach (['legal_type','branch_ids','phone','dob','legal_name','note','assigned_id',
+                  'lead_status_id','lead_source_id','study_status_id','color','is_study'] as $f) {
+            if (isset($before[$f]) && $before[$f] !== '' && $before[$f] !== null) $keep[$f] = $before[$f];
+        }
+        if (empty($keep['branch_ids'])) $keep['branch_ids'] = [$branch ?: alfa_branch()];
+        $payload = array_merge($keep, ['name' => $name]);
+
+        $live = array_key_exists('dryRun', $in) && $in['dryRun'] === false;
+        if (!$live) {
+            json_out(['ok' => true, 'dryRun' => true, 'id' => $cid, 'was' => $before['name'] ?? '', 'will' => $name, 'payload' => $payload]);
+        }
+        $res   = alfa_http('POST', 'https://' . alfa_host() . '/v2api/' . ($branch ?: alfa_branch()) . '/customer/update?id=' . $cid,
+                           $payload, alfa_token(), true, 15);
+        $after = alfa_customer_get($cid);
+        $now   = $after ? trim((string)($after['name'] ?? '')) : null;
+        json_out(['ok' => true, 'renamed' => ($now === $name), 'id' => $cid,
+                  'was' => $before['name'] ?? '', 'now' => $now, 'raw' => $res]);
+        break;
+
     // --- ПОСЕЩЕНИЯ ЗА ПРОШЛЫЙ ГОД по клиентам (для «старый/новый») ---
     //     На вход список id (батч). Отдаём ТРИ счётчика на ребёнка, а правило выбирает клиент:
     //       t — все уроки в окне, d — со статусом «проведён», a — проведён И ребёнок присутствовал.
