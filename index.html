@@ -1782,7 +1782,7 @@ function renderLog(){
   body.innerHTML=h;
 }
 /* ===== СТАТИСТИКА МЕНЕДЖЕРОВ за день (по журналу действий) — только админ ===== */
-let _mgrLogData=[], _peeksData={};
+let _mgrLogData=[], _peeksData={}, _teamStatsData={};
 function _mgrCount(t){
   t=String(t||""); const c=re=>{ const m=t.match(re); return m?m.length:0; };
   const paidMarks=c(/💰/g), paidRm=c(/снята 💰/g);
@@ -1814,7 +1814,12 @@ function openMgrStat(){
   if(body) body.innerHTML='<div style="color:var(--muted);padding:10px 0">Загружаю журнал…</div>';
   _depthRef(_statDepth).once("value").then(function(s){
     const v=s.val()||{}; _mgrLogData=Object.keys(v).map(k=>v[k]).filter(e=>e&&e.at);
-    _fbDb.ref("peeks").once("value").then(function(ps){ _peeksData=ps.val()||{}; renderMgrStat(); })
+    // teamstats — независимые счётчики, их пишет тот же код, но в другой узел с другими правилами.
+    // Расхождение с журналом = часть записей не сохранилась (у человека нет прав на logs).
+    _fbDb.ref("teamstats").once("value").then(function(ts){ _teamStatsData=ts.val()||{}; })
+      .catch(function(){ _teamStatsData={}; })
+      .then(function(){ return _fbDb.ref("peeks").once("value"); })
+      .then(function(ps){ _peeksData=ps.val()||{}; renderMgrStat(); })
       .catch(function(){ _peeksData={}; renderMgrStat(); });   // подсмотры — не критично, если нет
   }).catch(function(e){ if(body) body.innerHTML='<div style="color:var(--red);padding:10px 0">Не удалось загрузить журнал: '+esc((e&&e.message)||"")+'</div>'; });
 }
@@ -1883,6 +1888,7 @@ function renderMgrStat(){
       <div class="ms-b">${heroFor(g.cnt,pc)}${gridFor(g.cnt,pc)}</div>
     </div>`;
   });
+  h+=_statVerifyHTML(day, allMode, byM);
   // «подсматривали итоги отдела» — только тебе (кто сколько раз нажал 👀)
   const peeks=Object.values(_peeksData||{}).filter(x=>x&&(+x.count>0)).sort((a,b)=>(+b.count)-(+a.count));
   if(peeks.length){
@@ -1891,6 +1897,49 @@ function renderMgrStat(){
       <div style="display:flex;flex-direction:column;gap:6px">${peeks.map(x=>`<div style="display:flex;align-items:center;gap:10px;font-size:13px"><b style="min-width:120px">${esc(x.name||(x.email||"—").split("@")[0])}</b><span style="font-weight:800;font-size:16px">${+x.count||0}</span><span style="color:#8C8677;font-size:11px">раз${x.at?(" · последний "+pd(x.at)):""}</span></div>`).join("")}</div></div>`;
   }
   body.innerHTML=h;
+}
+/* Сверка «журнал vs счётчики». teamstats пишет тот же код, что и журнал, но в другой узел
+   с другими правилами доступа. Если у человека счётчик показывает 40 действий, а в журнале
+   их 8 — значит записи журнала не сохранялись (обычно нет прав на узел logs). Это единственный
+   способ увидеть потерю задним числом, не имея доступа к его компьютеру. */
+function _statVerifyHTML(day, allMode, byM){
+  const days=allMode?Object.keys(_teamStatsData||{}):(day?[day]:[]);
+  if(!days.length) return "";
+  // счётчики по менеджерам за выбранный период: ключ — имя до @ (так их пишет _pushLog)
+  const cnt={};
+  days.forEach(function(dk){
+    const mgr=((_teamStatsData||{})[dk]||{}).mgr||{};
+    Object.keys(mgr).forEach(function(uid){
+      const m=mgr[uid]||{}, nm=(m.name||uid);
+      cnt[nm]=(cnt[nm]||0)+(+m.actions||0);
+    });
+  });
+  if(!Object.keys(cnt).length) return "";
+  const logN={};
+  Object.keys(byM||{}).forEach(function(em){ logN[(em||"").split("@")[0]]=byM[em].actions; });
+  const rows=Object.keys(cnt).map(function(nm){
+    const c=cnt[nm], l=logN[nm]||0;
+    const lost=c-l;
+    return {nm:nm, counter:c, log:l, lost:lost>1?lost:0};
+  }).sort(function(a,b){ return b.lost-a.lost || b.counter-a.counter; });
+  const bad=rows.filter(function(r){ return r.lost; });
+  if(!bad.length) return `<div class="ms-sum" style="margin-top:6px"><div class="h">✓ Журнал полон
+      <span style="font-weight:400;color:#8C8677;font-size:12px">· записи журнала сходятся со счётчиками действий</span></div></div>`;
+  return `<div class="ms-sum" style="margin-top:6px">
+    <div class="h" style="color:#B0493D">⚠ Часть действий не попала в журнал
+      <span style="font-weight:400;color:#8C8677;font-size:12px">· счётчики говорят о большей работе, чем видно в журнале</span></div>
+    <div style="display:flex;flex-direction:column;gap:6px;font-size:13px">
+      ${rows.map(function(r){ return `<div style="display:flex;align-items:center;gap:10px">
+        <b style="min-width:130px">${esc(r.nm)}</b>
+        <span>счётчик: <b>${r.counter}</b></span>
+        <span style="color:#8C8677">журнал: ${r.log}</span>
+        ${r.lost?`<span style="color:#B0493D">потеряно ~${r.lost}</span>`:'<span style="color:#3B7A57">сходится</span>'}
+      </div>`; }).join("")}
+    </div>
+    <div style="font-size:11px;color:#8C8677;margin-top:8px;line-height:1.45">
+      Обычная причина — у человека нет прав на запись в журнал (узел <code>logs</code> в правилах базы).
+      Его работа при этом сохраняется, теряется только запись в журнал и детализация статистики.
+    </div></div>`;
 }
 /* ===== ИНФОГРАФИКА «Итоги дня» (менеджеру — только свои; авто в 18:00 или по кнопке) ===== */
 const ACH_METR=[
