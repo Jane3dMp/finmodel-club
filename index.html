@@ -7107,13 +7107,15 @@ function renderClients(){
       <input id="clientsQ" type="search" class="kidsearch-in" placeholder="🔍 Поиск ребёнка по ФИО" value="${esc(_clientsQuery)}" oninput="_clientsQuery=this.value;clientsRerenderKeepFocus()" autocomplete="off">
     </div>
     <div class="cli-addrow" title="Создать нового ребёнка и вписать в группу" onclick="openAddKid()"><span class="plus">+</span> Новый ребёнок</div>
-    ${_fbIsAdmin?`<div style="margin:-4px 0 10px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+    <div style="margin:-4px 0 10px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+      <!-- распределение детей из amo — ежедневная работа, доступна всем менеджерам -->
+      <button class="btn ghost sm" onclick="openAmoNew()" title="Дети с оплаченного этапа amoCRM — распределить в группы">📥 Новые из amoCRM${_amoBadgeN?` <b style="color:var(--red)">${_amoBadgeN}</b>`:''}</button>
+      ${_fbIsAdmin?`
       <button class="btn ghost sm" onclick="openAlfaNew()" title="Найти в Альфе детей, которых ещё нет у вас, и добавить в список ожидания">🔽 Новые дети из Альфы</button>
       <button class="btn ghost sm" id="balBtn" onclick="pullBalances()" title="Обновить активный баланс из Альфы у всех детей — и в группах, и в списке ожидания">💰 Обновить балансы</button>
-      <button class="btn ghost sm" onclick="openAmoNew()" title="Заявки из amoCRM: выбрать этап воронки и добавить новых в список ожидания">📥 Новые из amoCRM</button>
       <button class="btn ghost sm" onclick="openArchProbe()" title="Сверить на боевой Альфе, каким полем помечается архив">🔍 Поля архива</button>
-      ${S.balancesAt?`<span style="font-size:11px;color:var(--muted)">балансы от ${esc(new Date(S.balancesAt).toLocaleString("ru-RU",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"}))}</span>`:''}
-    </div>`:''}`;
+      ${S.balancesAt?`<span style="font-size:11px;color:var(--muted)">балансы от ${esc(new Date(S.balancesAt).toLocaleString("ru-RU",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"}))}</span>`:''}`:''}
+    </div>`;
   if(!shown.length){ box.innerHTML=html+`<div style="color:var(--muted);padding:10px 2px">${clients.length?'Никого не найдено.':'В расписании пока нет детей.'}</div>`; return; }
   html+=`<div class="cli-head">${_cliTh("name","Ребёнок","cli-thname")}<span class="cli-cols">${_cliTh("courses","Курсы","cc cc-cr","Сортировать по числу курсов")}${_cliTh("paid","💰","cc cc-paid","Сортировать по купленным майским")}${_cliTh("bal","Баланс","cc cc-bal","Сортировать по балансу в Альфе")}</span></div>`;
   shown.forEach(c=>{
@@ -7352,7 +7354,7 @@ let _amoPipes=[], _amoLeads=[], _amoContacts={}, _amoCands=[];
 let _amoPipeId=0, _amoStatusIds=[], _amoNameSrc="lead", _amoNameField="";
 function closeAmoNew(){ document.getElementById("amoNewModal").classList.remove("show"); }
 async function openAmoNew(){
-  if(!_fbIsAdmin){ toast("Только для админа"); return; }
+  // распределять детей из amo может любой менеджер — это ежедневная работа, а не настройка
   document.getElementById("amoNewModal").classList.add("show");
   const body=document.getElementById("amoNewBody");
   const w=_amoWatch();
@@ -7362,6 +7364,11 @@ async function openAmoNew(){
     _amoPipeId=w.pipelineId; _amoStatusIds=w.statusIds.slice(); _amoNameSrc=w.nameSrc; _amoNameField=w.nameField;
     if(!_amoPipes.length){ try{ const p=await _amoCall("pipelines",{}); _amoPipes=p.pipelines||[]; }catch(e){} }
     amoLoadLeads();
+    return;
+  }
+  // выбор отслеживаемого этапа — настройка, её делает админ; менеджеру просто скажем об этом
+  if(!_fbIsAdmin){
+    body.innerHTML='<div class="callout">Этап воронки ещё не настроен — попросите администратора выбрать его один раз (кнопка «📥 Новые из amoCRM» у неё же).</div>';
     return;
   }
   body.innerHTML='<div style="color:var(--muted)">Загружаю воронки из amoCRM…</div>';
@@ -7475,6 +7482,7 @@ function _amoStageName(sid){
 function _amoWatch(){ const w=S.amoWatch||{}; return {pipelineId:+w.pipelineId||0, statusIds:Array.isArray(w.statusIds)?w.statusIds:[],
   seen:w.seen||{}, nameSrc:w.nameSrc||"lead", nameField:w.nameField||""}; }
 function amoSaveWatch(){
+  if(!_fbIsAdmin){ toast("Настройку этапа меняет администратор"); return; }
   if(!_amoStatusIds.length){ toast("Отметьте этап"); return; }
   const w=_amoWatch();
   S.amoWatch={pipelineId:_amoPipeId, statusIds:_amoStatusIds.slice(), seen:w.seen, nameSrc:_amoNameSrc, nameField:_amoNameField};
@@ -7482,7 +7490,11 @@ function amoSaveWatch(){
   toast("Этап отслеживается — новые дети будут появляться здесь");
   amoLoadLeads();
 }
-function amoResetWatch(){ const w=_amoWatch(); S.amoWatch={pipelineId:0,statusIds:[],seen:w.seen,nameSrc:w.nameSrc,nameField:w.nameField}; persistLocal(); openAmoNew(); }
+function amoResetWatch(){
+  if(!_fbIsAdmin){ toast("Настройку этапа меняет администратор"); return; }
+  const w=_amoWatch(); S.amoWatch={pipelineId:0,statusIds:[],seen:w.seen,nameSrc:w.nameSrc,nameField:w.nameField};
+  persistLocal(); openAmoNew();
+}
 /* подсказать курс по названию сделки: «Minecraft-Юрков Кирилл» → группа курса Minecraft */
 function _amoGuessGroup(leadName){
   const t=_normCourse(String(leadName||""));
@@ -7528,7 +7540,7 @@ function _amoRenderCands(){
     :`<div class="callout" style="border-color:var(--green)">Все разобраны — новых детей с этого этапа нет.</div>`}
     <div class="hd-actions les-foot" style="margin-top:10px">
       <button class="btn ghost sm" onclick="amoLoadLeads()">↻ Проверить amo</button>
-      <button class="btn ghost sm" onclick="amoResetWatch()" title="Выбрать другую воронку или этап">⚙ Сменить этап</button>
+      ${_fbIsAdmin?`<button class="btn ghost sm" onclick="amoResetWatch()" title="Выбрать другую воронку или этап">⚙ Сменить этап</button>`:''}
     </div>`;
 }
 let _amoFresh=[];
@@ -7604,7 +7616,7 @@ function _amoUpdateBadge(){
 }
 async function _amoCheck(silent){
   const w=_amoWatch();
-  if(!_fbIsAdmin || !w.statusIds.length) return;
+  if(!w.statusIds.length) return;   // проверяют все — значок нужен и менеджерам
   try{
     const j=await _amoCall("leads",{pipelineId:w.pipelineId, statusIds:w.statusIds});
     _amoLeads=j.leads||[]; _amoContacts=j.contacts||{};
