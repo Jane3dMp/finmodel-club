@@ -7421,6 +7421,7 @@ async function amoLoadLeads(){
   try{
     const j=await _amoCall("leads",{pipelineId:_amoPipeId,statusIds:_amoStatusIds});
     _amoLeads=j.leads||[]; _amoContacts=j.contacts||{};
+    _amoAutoNameSrc();   // сами находим поле «1) Ребёнок», если менеджер ничего не выбирал
     try{ console.log("📥 amo · образец сделки:", j.debug&&j.debug.sampleLead, "· образец контакта:", j.debug&&j.debug.sampleContact); }catch(e){}
     _amoBuildCands(); _amoRenderCands();
   }catch(e){ out.innerHTML=`<div class="callout" style="border-color:var(--red)">Не получилось: ${esc((e&&e.message)||e)}</div>`; }
@@ -7448,11 +7449,48 @@ function _amoCleanName(raw){
   const fio=rest.find(looksFio) || rest.find(p=>p.split(/\s+/).length>=2);
   return (fio||rest[rest.length-1]).replace(/\s{2,}/g," ").trim();
 }
-/* имя ребёнка: из названия сделки / из контакта / из выбранного поля сделки */
+/* контакт сделки (первый) и его поля */
+function _amoContactOf(l){ return _amoContacts[String((l.contactIds||[])[0])]||null; }
+/* Откуда берём ФИО ребёнка. У Жанны оно лежит в поле КОНТАКТА «1) Ребёнок» — там уже чистое
+   «Половикова Арина», без курса и года, поэтому правки руками не нужны. Варианты:
+   lead — название сделки, contact — имя контакта (это обычно родитель),
+   lf:Поле — поле сделки, cf:Поле — поле контакта. */
 function _amoKidName(l){
-  if(_amoNameSrc==="field" && _amoNameField){ const v=(l.fields||{})[_amoNameField]; if(v&&v[0]) return String(v[0]).trim(); }
-  if(_amoNameSrc==="contact"){ const c=_amoContacts[String((l.contactIds||[])[0])]; if(c&&c.name) return c.name.trim(); }
+  const src=String(_amoNameSrc||"lead");
+  if(src.indexOf("cf:")===0){ const c=_amoContactOf(l); const v=c&&(c.fields||{})[src.slice(3)]; if(v&&v[0]) return String(v[0]).trim(); }
+  if(src.indexOf("lf:")===0){ const v=(l.fields||{})[src.slice(3)]; if(v&&v[0]) return String(v[0]).trim(); }
+  if(src==="field" && _amoNameField){ const v=(l.fields||{})[_amoNameField]; if(v&&v[0]) return String(v[0]).trim(); }   // старый формат выбора
+  if(src==="contact"){ const c=_amoContactOf(l); if(c&&c.name) return c.name.trim(); }
   return _amoCleanName(l.name);
+}
+/* дата рождения ребёнка — тоже из полей контакта («Дата рождения»); amo отдаёт её
+   либо строкой, либо unix-временем, поэтому принимаем оба вида */
+function _amoDob(l){
+  const c=_amoContactOf(l); if(!c) return "";
+  const f=c.fields||{};
+  const key=Object.keys(f).find(k=>/рожд|birth|день\s*рожд|\bдр\b/i.test(k));
+  if(!key) return "";
+  const raw=String((f[key]||[])[0]||"").trim(); if(!raw) return "";
+  let m=raw.match(/^(\d{2})\.(\d{2})\.(\d{4})/); if(m) return m[3]+"-"+m[2]+"-"+m[1];
+  m=raw.match(/^(\d{4})-(\d{2})-(\d{2})/);       if(m) return m[1]+"-"+m[2]+"-"+m[3];
+  if(/^\d{9,11}$/.test(raw)){                       // unix-время в секундах
+    const d=new Date(+raw*1000), p=n=>String(n).padStart(2,"0");
+    if(!isNaN(d)) return d.getFullYear()+"-"+p(d.getMonth()+1)+"-"+p(d.getDate());
+  }
+  return "";
+}
+/* все поля, из которых можно взять ФИО: сделки и контактов */
+function _amoFieldOpts(){
+  const lf=[...new Set(_amoLeads.flatMap(l=>Object.keys(l.fields||{})))];
+  const cf=[...new Set(Object.values(_amoContacts||{}).flatMap(c=>Object.keys((c&&c.fields)||{})))];
+  return {lf:lf, cf:cf};
+}
+/* если менеджер ничего не выбирал — сами находим поле с ФИО ребёнка («1) Ребёнок») */
+function _amoAutoNameSrc(){
+  if(_amoNameSrc && _amoNameSrc!=="lead") return;                  // выбор уже сделан — не трогаем
+  const cf=_amoFieldOpts().cf;
+  const hit=cf.find(k=>/ребён|ребен/i.test(k)) || cf.find(k=>/фамилия.*имя|фио/i.test(k));
+  if(hit){ _amoNameSrc="cf:"+hit; _amoSaveNameRule(); }
 }
 function _amoPhone(l){
   for(const id of (l.contactIds||[])){ const c=_amoContacts[String(id)]; if(c&&c.phones&&c.phones[0]) return c.phones[0]; }
@@ -7466,7 +7504,7 @@ function _amoBuildCands(){
   const haveAmo=new Set((S.waitlist||[]).map(w=>w&&w.amoLeadId).filter(x=>x!=null).map(String));
   _amoCands=_amoLeads.map(l=>{
     const nm=_amoKidName(l);
-    return {lead:l, name:nm, phone:_amoPhone(l), stage:_amoStageName(l.status_id),
+    return {lead:l, name:nm, phone:_amoPhone(l), dob:_amoDob(l), stage:_amoStageName(l.status_id),
             dup: !nm || have.has(_nameKey(nm)) || haveAmo.has(String(l.id))};
   });
 }
@@ -7510,17 +7548,19 @@ function _amoRenderCands(){
   const out=document.getElementById("amoOut"); if(!out) return;
   const w=_amoWatch();
   const fresh=_amoCands.filter(c=>!c.dup && !w.seen[String(c.lead.id)]), done=_amoCands.length-fresh.length;
-  const fieldNames=[...new Set(_amoLeads.flatMap(l=>Object.keys(l.fields||{})))];
-  const src=(v,lab)=>`<label class="amo-src"><input type="radio" name="amoSrc" ${_amoNameSrc===v?"checked":""} onchange="amoSetNameSrc('${v}')" style="width:auto"> ${lab}</label>`;
+  const fo=_amoFieldOpts();
+  const opt=(v,lab)=>`<option value="${esc(v)}"${String(_amoNameSrc)===v?" selected":""}>${esc(lab)}</option>`;
+  const srcSel=`<select class="cell" style="width:auto;font-size:12px" onchange="amoSetNameSrc(this.value)" title="Где в amo лежит ФИО ребёнка">
+      ${opt("lead","название сделки")}${opt("contact","имя контакта (родитель)")}
+      ${fo.cf.length?`<optgroup label="поля контакта">${fo.cf.map(f=>opt("cf:"+f,f)).join("")}</optgroup>`:""}
+      ${fo.lf.length?`<optgroup label="поля сделки">${fo.lf.map(f=>opt("lf:"+f,f)).join("")}</optgroup>`:""}
+    </select>`;
   _amoFresh=fresh;
   out.innerHTML=`
     <div class="callout" style="margin-bottom:8px">На этапе: <b>${_amoLeads.length}</b> · нужно распределить: <b style="color:${fresh.length?'var(--red)':'var(--green)'}">${fresh.length}</b>${done?` · уже разобрано: ${done}`:''}</div>
     <div class="amo-srcbar">
-      <span style="color:var(--muted)">Имя ребёнка брать из:</span>
-      ${src("lead","названия сделки")}${src("contact","имени контакта")}
-      ${fieldNames.length?`<label class="amo-src">поля сделки:
-        <select onchange="amoSetNameField(this.value)"><option value="">—</option>
-        ${fieldNames.map(f=>`<option value="${esc(f)}"${_amoNameField===f?" selected":""}>${esc(f)}</option>`).join("")}</select></label>`:''}
+      <span style="color:var(--muted)">ФИО ребёнка брать из:</span>${srcSel}
+      <span style="color:var(--muted);font-size:11px">выбор запоминается</span>
     </div>
     ${fresh.length?`<div class="amo-list">${fresh.map((c,i)=>{
       const guess=_amoGuessGroup(c.lead.name);
@@ -7528,7 +7568,7 @@ function _amoRenderCands(){
         <div class="amo-h">
           <input class="cell amo-name" data-i="${i}" value="${esc(c.name||"")}" placeholder="Фамилия Имя"
                  title="ФИО ребёнка — можно поправить перед вписыванием" style="flex:1;min-width:200px;font-weight:600">
-          <span class="amo-m">${c.phone?"📞 "+esc(c.phone):"без телефона"} · ${esc(c.stage)}</span></div>
+          <span class="amo-m">${c.phone?"📞 "+esc(c.phone):"без телефона"}${c.dob?" · 🎂 "+esc(_ageStr(c.dob)||c.dob):""} · ${esc(c.stage)}</span></div>
         <div class="amo-m">сделка: ${esc(c.lead.name||("#"+c.lead.id))}</div>
         <div class="amo-act">
           <select class="cell amo-grp" data-i="${i}" style="max-width:260px">${_gridGroupOptsHtml(guess)}</select>
@@ -7559,6 +7599,7 @@ function _amoNameAt(i,c){
 function _amoKidFrom(c,name){
   const kid=_blankKid(name||c.name);
   if(c.phone) kid.phone=c.phone;
+  if(c.dob) kid.dob=c.dob;          // дата рождения из карточки контакта — сразу виден возраст
   kid.amoLeadId=c.lead.id;
   return kid;
 }
@@ -7620,6 +7661,7 @@ async function _amoCheck(silent){
   try{
     const j=await _amoCall("leads",{pipelineId:w.pipelineId, statusIds:w.statusIds});
     _amoLeads=j.leads||[]; _amoContacts=j.contacts||{};
+    _amoAutoNameSrc();   // сами находим поле «1) Ребёнок», если менеджер ничего не выбирал
     _amoPipeId=w.pipelineId; _amoStatusIds=w.statusIds.slice();
     _amoNameSrc=w.nameSrc; _amoNameField=w.nameField;
     _amoBuildCands();
