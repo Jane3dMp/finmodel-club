@@ -1361,7 +1361,9 @@ details.client .cli-cols .cc-bal{width:74px;font-weight:600}
       <div style="text-align:center;margin-top:6px"><a id="fbAuthToggle" href="#" onclick="fbToggleMode();return false" style="font-size:12px;color:#b5532a;text-decoration:none">Нет аккаунта? Зарегистрироваться</a></div>
     </div>
     <div id="fbPendingBox" style="display:none">
-      <div style="font-size:13px;color:#5a5049;line-height:1.5;margin-bottom:14px">Заявка на доступ отправлена. Доступ откроет администратор — как только одобрит, вы войдёте автоматически.</div>
+      <div id="fbPendingMsg" style="font-size:13px;color:#5a5049;line-height:1.5;margin-bottom:10px">Заявка на доступ отправлена. Доступ откроет администратор — как только одобрит, вы войдёте автоматически.</div>
+      <div id="fbPendingId" style="font-size:11px;color:#8a8178;line-height:1.5;margin-bottom:12px"></div>
+      <button onclick="fbRecheckAccess()" style="width:100%;padding:9px;border:1px solid #ccc;border-radius:8px;background:#fff;font-size:13px;cursor:pointer;margin-bottom:6px">Проверить ещё раз</button>
       <button onclick="fbLogout()" style="width:100%;padding:9px;border:1px solid #ccc;border-radius:8px;background:#fff;font-size:13px;cursor:pointer">Выйти / войти другим аккаунтом</button>
     </div>
   </div>
@@ -2127,13 +2129,29 @@ document.addEventListener("click", function(e){
   closeAllMore();
 });
 document.addEventListener("keydown", function(e){ if(e.key==="Escape") closeAllMore(); });
+/* Доступ проверяется по approved/{uid}. Раньше «нет записи» и «правила не дали прочитать»
+   выглядели одинаково («Ждите одобрения»), и было не понять, почему человек не входит,
+   хотя админ видит его в списке. Теперь причину показываем прямо на экране. */
+let _fbApprErr="";
 function _fbWatchApproval(user){
   _fbApprRef=_fbDb.ref("approved/"+user.uid);
   _fbApprRef.on("value", function(s){
+    _fbApprErr="";
     const v=s.val();
     if(v){ _fbGrant(false, (v&&v.tabs)||_defaultTabsMap()); }
     else if(!_fbGranted){ _fbShowPending(); }
-  }, function(){ if(!_fbGranted) _fbShowPending(); });
+  }, function(e){ _fbApprErr=(e&&e.message)||"нет доступа к проверке"; if(!_fbGranted) _fbShowPending(); });
+}
+/* перечитать доступ вручную (после того как админ одобрил) — без перезагрузки страницы */
+function fbRecheckAccess(){
+  const au=_fbAuth();
+  if(!au||!au.currentUser||!_fbDb){ toast("Нужно войти заново"); return; }
+  toast("Проверяю доступ…");
+  _fbDb.ref("approved/"+au.currentUser.uid).once("value").then(function(s){
+    const v=s.val();
+    if(v){ _fbApprErr=""; _fbGrant(false,(v&&v.tabs)||_defaultTabsMap()); toast("Доступ открыт"); }
+    else { _fbApprErr=""; _fbShowPending(); toast("Администратор пока не одобрил заявку"); }
+  }).catch(function(e){ _fbApprErr=(e&&e.message)||"нет доступа к проверке"; _fbShowPending(); });
 }
 function _fbGrant(isAdmin, tabs){
   _fbIsAdmin=isAdmin;
@@ -2163,8 +2181,20 @@ function _fbShowPending(){
   o.style.display="flex";
   document.getElementById("fbAuthForm").style.display="none";
   document.getElementById("fbPendingBox").style.display="block";
-  document.getElementById("fbAuthTitle").textContent="Ждите одобрения";
-  const au=_fbAuth(); document.getElementById("fbAuthSub").textContent=(au&&au.currentUser&&au.currentUser.email)||"";
+  const au=_fbAuth(), cu=au&&au.currentUser;
+  document.getElementById("fbAuthSub").textContent=(cu&&cu.email)||"";
+  const msg=document.getElementById("fbPendingMsg"), idb=document.getElementById("fbPendingId");
+  if(_fbApprErr){
+    document.getElementById("fbAuthTitle").textContent="Не удалось проверить доступ";
+    if(msg) msg.innerHTML='База не дала прочитать ваши права: <b>'+esc(_fbApprErr)+'</b>.<br>'
+      +'Это не «не одобрили» — скорее правила базы. Покажите этот экран администратору.';
+  } else {
+    document.getElementById("fbAuthTitle").textContent="Ждите одобрения";
+    if(msg) msg.textContent="Заявка на доступ отправлена. Доступ откроет администратор — как только одобрит, нажмите «Проверить ещё раз».";
+  }
+  // ID нужен админу: доступ выдаётся именно по нему, а в списке видно только почту.
+  // Если человек перерегистрировался, ID новый — и старая запись доступа уже не подходит.
+  if(idb) idb.innerHTML=cu?("Ваш ID для администратора: <b style='user-select:all'>"+esc(cu.uid)+"</b>"):"";
   setSync("warn","Ждёт одобрения");
 }
 function _fbHideLogin(){ const o=document.getElementById("fbLogin"); if(o) o.style.display="none"; }
@@ -2234,8 +2264,13 @@ function openAdminPanel(){ document.getElementById("fbAdminModal").style.display
 function closeAdminPanel(){ document.getElementById("fbAdminModal").style.display="none"; }
 function fbLoadAccess(){
   if(!_fbDb) return;
-  _fbDb.ref("pending").once("value").then(function(s){ _renderPending(s.val()||{}); }).catch(function(){});
-  _fbDb.ref("approved").once("value").then(function(s){ _renderUsers(s.val()||{}); }).catch(function(){});
+  // approved читаем ПЕРВЫМ: список заявок сверяется с ним (тот же email под другим ID)
+  _fbDb.ref("approved").once("value").then(function(s){
+    _renderUsers(s.val()||{});
+    return _fbDb.ref("pending").once("value");
+  }).then(function(s){ _renderPending(s.val()||{}); }).catch(function(){
+    _fbDb.ref("pending").once("value").then(function(s){ _renderPending(s.val()||{}); }).catch(function(){});
+  });
 }
 function _renderPending(v){
   _fbPendingData=v||{};
@@ -2244,8 +2279,13 @@ function _renderPending(v){
   if(!ids.length){ box.innerHTML='<div style="color:#8a8178;font-size:13px;padding:6px 0">Новых заявок нет.</div>'; return; }
   box.innerHTML=ids.map(function(uid){
     const em=(_fbPendingData[uid]&&_fbPendingData[uid].email)||uid;
-    return '<div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid #eee">'
-      +'<span style="flex:1;font-size:13px">'+esc(em)+'</span>'
+    // тот же email уже есть в доступах, но под ДРУГИМ ID — человек перерегистрировался,
+    // и старая запись ему больше не подходит: надо одобрить эту заявку, а старую убрать
+    const old=Object.keys(_fbUsersData||{}).filter(function(u){
+      return u!==uid && ((_fbUsersData[u]||{}).email||"").toLowerCase()===String(em).toLowerCase(); });
+    const warn=old.length?'<div style="font-size:11px;color:#B0493D;line-height:1.4;margin-top:2px">⚠ У этой почты уже есть доступ под другим ID — вход по нему не сработает. Одобрите заявку, затем уберите старую запись ниже.</div>':'';
+    return '<div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid #eee;flex-wrap:wrap">'
+      +'<span style="flex:1;font-size:13px">'+esc(em)+'<span style="display:block;font-size:10px;color:#8a8178">ID '+esc(uid)+'</span>'+warn+'</span>'
       +'<button onclick="fbApprove(\''+uid+'\')" style="padding:6px 10px;border:none;border-radius:6px;background:#2e7d32;color:#fff;font-size:12px;cursor:pointer">Одобрить</button>'
       +'<button onclick="fbReject(\''+uid+'\')" style="padding:6px 10px;border:1px solid #ccc;border-radius:6px;background:#fff;font-size:12px;cursor:pointer">Отклонить</button>'
       +'</div>';
@@ -2262,9 +2302,13 @@ function _renderUsers(v){
       return '<label style="display:inline-flex;align-items:center;gap:3px;font-size:11px;margin:2px 8px 2px 0;white-space:nowrap;cursor:pointer">'
         +'<input type="checkbox" '+(tabs[t[0]]===true?"checked":"")+' onchange="fbSetUserTab(\''+uid+'\',\''+t[0]+'\',this.checked)"> '+esc(t[1])+'</label>';
     }).join("");
+    // дубль почты с разными ID: рабочий только тот, под которым человек реально входит
+    const twin=ids.filter(function(u){ return u!==uid && ((_fbUsersData[u]||{}).email||"").toLowerCase()===String(em).toLowerCase(); }).length;
     return '<div style="padding:10px 0;border-bottom:1px solid #eee">'
-      +'<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><b style="flex:1;font-size:13px">'+esc(em)+'</b>'
+      +'<div style="display:flex;align-items:center;gap:8px;margin-bottom:2px"><b style="flex:1;font-size:13px">'+esc(em)
+      +(twin?' <span style="color:#B0493D;font-size:11px;font-weight:400">⚠ дубль: та же почта под '+(twin+1)+' ID — лишние убрать</span>':'')+'</b>'
       +'<button onclick="fbRemoveAccess(\''+uid+'\')" style="padding:5px 9px;border:1px solid #ddd;border-radius:6px;background:#fff;font-size:11px;cursor:pointer;color:#c0392b">Убрать доступ</button></div>'
+      +'<div style="font-size:10px;color:#8a8178;margin-bottom:6px">ID '+esc(uid)+'</div>'
       +'<div>'+checks+'</div></div>';
   }).join("");
 }
