@@ -612,6 +612,12 @@ details.client .cli-altmark{font-size:11px;margin-right:2px}
 .amo-src{display:flex;align-items:center;gap:5px;cursor:pointer}
 .amo-list{max-height:40vh;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:4px 10px}
 .amo-row{display:flex;align-items:flex-start;gap:8px;padding:5px 0;border-bottom:1px solid #f0ebe4;cursor:pointer;font-size:12px}
+/* карточка ребёнка, которого надо распределить в группу */
+.amo-card{padding:9px 2px;border-bottom:1px solid #f0ebe4}
+.amo-card:last-child{border-bottom:none}
+.amo-h{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;font-size:13px}
+.amo-m{font-size:11px;color:var(--muted);line-height:1.4}
+.amo-act{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:6px}
 .cli-altbar{display:flex;align-items:center;gap:14px;flex-wrap:wrap;font-size:12px;margin:6px 0 2px}
 .cli-altchk{display:flex;align-items:center;gap:6px;cursor:pointer;user-select:none}
 .cli-brset summary{cursor:pointer;color:var(--muted)}
@@ -653,6 +659,8 @@ details.client .cli-cols .cc-bal{width:74px;font-weight:600}
    <span class="dot local" id="syncDot"></span>
    <span id="syncTxt">Локальный режим</span>
    <button class="btn ghost sm" id="undoBtn" onclick="undo()" title="Отменить последнее изменение" disabled>↩ Отменить</button>
+   <!-- дети, дошедшие в amo до оплаченного этапа: их надо посадить в группу -->
+   <button class="btn sm" id="amoBadge" onclick="openAmoNew()" title="Новые из amoCRM — распределить в группу" style="display:none;background:#B0493D"></button>
    <div class="more-wrap">
     <button class="btn ghost sm more-toggle" onclick="toggleMore(this)" title="Меню"><i data-ic="menu"></i>Меню<span id="menuBadge"></span></button>
     <div class="more-menu right">
@@ -1439,6 +1447,8 @@ const DEFAULT_STATE = {
   oldRosterRule: "a",// какое из трёх чисел считаем посещением: a | d | t (меняется без новой выгрузки)
   oldTh: 3,          // порог «старого»: столько посещений за прошлый год
   alfaArchiveMode: "is_study",  // чем архивируем в Альфе: is_study | removed | both (сверяется кнопкой «Поля архива»)
+  // отслеживаемый этап воронки amoCRM: дети оттуда ждут распределения в группу
+  amoWatch: { pipelineId:0, statusIds:[], seen:{}, nameSrc:"lead", nameField:"" },
   gasUrl: "https://script.google.com/macros/s/AKfycbxJajbntVctGjXImc1hVhWimvOkXHcNCkuVFpszEbA8ad-B40Lj2Q8gdMMTBar4YLnsew/exec"
 };
 const LS_KEY = "proznanie_finmodel_v1";
@@ -4442,12 +4452,12 @@ function _gridGroupList(){
     g.text=(g.newIntake?"🆕 ":"")+nm+variant+" · "+(DAY_NAMES[g.day]||"")+" "+(g.start||"")+(g.room?(" · каб."+g.room):"");
     return g; });
 }
-function _gridGroupOptsHtml(){
+function _gridGroupOptsHtml(sel){
   const gl=_gridGroupList();
   const byC={}; gl.forEach(g=>{ (byC[g.course]=byC[g.course]||[]).push(g); });
   let h='<option value="">— выбрать группу —</option>';
   Object.keys(byC).sort((a,b)=>a.localeCompare(b,"ru")).forEach(c=>{
-    h+=`<optgroup label="${esc(c||"без курса")}">`+byC[c].map(g=>`<option value="${esc(g.key)}">${esc(g.text)}</option>`).join("")+`</optgroup>`;
+    h+=`<optgroup label="${esc(c||"без курса")}">`+byC[c].map(g=>`<option value="${esc(g.key)}"${sel&&g.key===sel?" selected":""}>${esc(g.text)}</option>`).join("")+`</optgroup>`;
   });
   return h;
 }
@@ -7345,6 +7355,15 @@ async function openAmoNew(){
   if(!_fbIsAdmin){ toast("Только для админа"); return; }
   document.getElementById("amoNewModal").classList.add("show");
   const body=document.getElementById("amoNewBody");
+  const w=_amoWatch();
+  // этап уже выбран — сразу показываем, кого надо распределить; иначе просим выбрать этап
+  if(w.statusIds.length){
+    body.innerHTML='<div id="amoOut"><div style="color:var(--muted)">Проверяю amoCRM…</div></div>';
+    _amoPipeId=w.pipelineId; _amoStatusIds=w.statusIds.slice(); _amoNameSrc=w.nameSrc; _amoNameField=w.nameField;
+    if(!_amoPipes.length){ try{ const p=await _amoCall("pipelines",{}); _amoPipes=p.pipelines||[]; }catch(e){} }
+    amoLoadLeads();
+    return;
+  }
   body.innerHTML='<div style="color:var(--muted)">Загружаю воронки из amoCRM…</div>';
   try{
     const j=await _amoCall("pipelines",{});
@@ -7380,9 +7399,11 @@ function _amoRenderPicker(){
       `<label class="amo-stage"><input type="checkbox" ${_amoStatusIds.includes(+s.id)?"checked":""}
         onchange="amoToggleStatus(${s.id},this.checked)" style="width:auto">
         <span class="amo-dot" style="background:${esc(s.color||"#ccc")}"></span>${esc(s.name)}</label>`).join("")}</div>
+    <div style="font-size:11px;color:var(--muted);margin-top:6px;line-height:1.45">Отметьте этап, на котором ребёнок уже оплачен и его нужно посадить в группу (например «Абонемент 26/27»). Дальше такие дети будут появляться здесь сами.</div>
     <div class="hd-actions les-foot" style="margin-top:10px">
       <span style="font-size:12px;color:var(--muted)">Выбрано этапов: <b>${_amoStatusIds.length}</b></span>
-      <button class="btn sm" style="margin-left:auto" ${_amoStatusIds.length?"":"disabled"} onclick="amoLoadLeads()">Показать сделки</button>
+      <button class="btn ghost sm" style="margin-left:auto" ${_amoStatusIds.length?"":"disabled"} onclick="amoLoadLeads()">Посмотреть</button>
+      <button class="btn sm" ${_amoStatusIds.length?"":"disabled"} onclick="amoSaveWatch()">Отслеживать этот этап</button>
     </div>
     <div id="amoOut" style="margin-top:10px"></div>`;
 }
@@ -7397,13 +7418,34 @@ async function amoLoadLeads(){
     _amoBuildCands(); _amoRenderCands();
   }catch(e){ out.innerHTML=`<div class="callout" style="border-color:var(--red)">Не получилось: ${esc((e&&e.message)||e)}</div>`; }
 }
-function amoSetNameSrc(v){ _amoNameSrc=v; _amoBuildCands(); _amoRenderCands(); }
-function amoSetNameField(v){ _amoNameField=v||""; _amoNameSrc="field"; _amoBuildCands(); _amoRenderCands(); }
+function _amoSaveNameRule(){
+  if(!(S.amoWatch&&S.amoWatch.statusIds&&S.amoWatch.statusIds.length)) return;
+  S.amoWatch=Object.assign({},S.amoWatch,{nameSrc:_amoNameSrc,nameField:_amoNameField});
+  persistLocal(); if(typeof fbSchedulePush==="function") fbSchedulePush();
+}
+function amoSetNameSrc(v){ _amoNameSrc=v; _amoSaveNameRule(); _amoBuildCands(); _amoRenderCands(); }
+function amoSetNameField(v){ _amoNameField=v||""; _amoNameSrc="field"; _amoSaveNameRule(); _amoBuildCands(); _amoRenderCands(); }
+/* Сделки в amo называют «Курс-Фамилия Имя» («Minecraft-Юрков Кирилл», «Unity - Слабко Владимир»).
+   В расписание должно попасть только ФИО, поэтому вырезаем курс и учебный год. */
+function _amoCleanName(raw){
+  let s=String(raw||"").replace(/\b\d{2}\s*[\/\-]\s*\d{2}\b/g,"").trim();   // «26/27»
+  const parts=s.split(/\s*[-–—]\s*/).map(x=>x.trim()).filter(Boolean);
+  if(parts.length<2) return s.replace(/\s{2,}/g," ").trim();
+  const courses=[...new Set((S.grid||[]).map(l=>_normCourse(l.course||"")).filter(c=>c&&c.length>=3))];
+  const isCourse=p=>{ const n=_normCourse(p); return !!n && courses.some(c=>c.includes(n)||n.includes(c)); };
+  const rest=parts.filter(p=>!isCourse(p));
+  if(!rest.length) return parts[parts.length-1];              // всё похоже на курс — берём последнее
+  // предпочитаем то, что выглядит как ФИО: 2+ слова, каждое с заглавной буквы
+  // (иначе «App inventor - Чекунова Светлана» отдаст название курса, а не ребёнка)
+  const looksFio=p=>{ const w=p.split(/\s+/); return w.length>=2 && w.every(x=>/^[A-ZА-ЯЁ]/.test(x)); };
+  const fio=rest.find(looksFio) || rest.find(p=>p.split(/\s+/).length>=2);
+  return (fio||rest[rest.length-1]).replace(/\s{2,}/g," ").trim();
+}
 /* имя ребёнка: из названия сделки / из контакта / из выбранного поля сделки */
 function _amoKidName(l){
   if(_amoNameSrc==="field" && _amoNameField){ const v=(l.fields||{})[_amoNameField]; if(v&&v[0]) return String(v[0]).trim(); }
   if(_amoNameSrc==="contact"){ const c=_amoContacts[String((l.contactIds||[])[0])]; if(c&&c.name) return c.name.trim(); }
-  return String(l.name||"").trim();
+  return _amoCleanName(l.name);
 }
 function _amoPhone(l){
   for(const id of (l.contactIds||[])){ const c=_amoContacts[String(id)]; if(c&&c.phones&&c.phones[0]) return c.phones[0]; }
@@ -7425,14 +7467,42 @@ function _amoStageName(sid){
   for(const p of _amoPipes){ const s=(p.statuses||[]).find(x=>+x.id===+sid); if(s) return s.name; }
   return "";
 }
+/* ===== ВХОДЯЩИЕ ИЗ amo: «распредели в группу» =====
+   Ребёнок дошёл в amo до этапа «Абонемент 26/27» → он уже оплачен и заведён в Альфе,
+   значит его надо посадить в группу. Показываем такие сделки списком, пока менеджер
+   не распределит: вписал в группу / отложил в ожидание / скрыл. Отслеживаемый этап
+   запоминается (S.amoWatch), чтобы проверять его автоматически. */
+function _amoWatch(){ const w=S.amoWatch||{}; return {pipelineId:+w.pipelineId||0, statusIds:Array.isArray(w.statusIds)?w.statusIds:[],
+  seen:w.seen||{}, nameSrc:w.nameSrc||"lead", nameField:w.nameField||""}; }
+function amoSaveWatch(){
+  if(!_amoStatusIds.length){ toast("Отметьте этап"); return; }
+  const w=_amoWatch();
+  S.amoWatch={pipelineId:_amoPipeId, statusIds:_amoStatusIds.slice(), seen:w.seen, nameSrc:_amoNameSrc, nameField:_amoNameField};
+  persistLocal(); if(typeof fbSchedulePush==="function") fbSchedulePush();
+  toast("Этап отслеживается — новые дети будут появляться здесь");
+  amoLoadLeads();
+}
+function amoResetWatch(){ const w=_amoWatch(); S.amoWatch={pipelineId:0,statusIds:[],seen:w.seen,nameSrc:w.nameSrc,nameField:w.nameField}; persistLocal(); openAmoNew(); }
+/* подсказать курс по названию сделки: «Minecraft-Юрков Кирилл» → группа курса Minecraft */
+function _amoGuessGroup(leadName){
+  const t=_normCourse(String(leadName||""));
+  if(!t) return "";
+  let best="", bestLen=0;
+  _gridGroupList().forEach(g=>{
+    const c=_normCourse(g.course||""); if(!c || c.length<4) return;
+    if(t.includes(c) && c.length>bestLen){ best=g.key; bestLen=c.length; }
+  });
+  return best;
+}
 function _amoRenderCands(){
-  const out=document.getElementById("amoOut");
-  const fresh=_amoCands.filter(c=>!c.dup), dups=_amoCands.length-fresh.length;
-  // какие поля сделок вообще есть — чтобы выбрать, где лежит имя ребёнка
+  const out=document.getElementById("amoOut"); if(!out) return;
+  const w=_amoWatch();
+  const fresh=_amoCands.filter(c=>!c.dup && !w.seen[String(c.lead.id)]), done=_amoCands.length-fresh.length;
   const fieldNames=[...new Set(_amoLeads.flatMap(l=>Object.keys(l.fields||{})))];
   const src=(v,lab)=>`<label class="amo-src"><input type="radio" name="amoSrc" ${_amoNameSrc===v?"checked":""} onchange="amoSetNameSrc('${v}')" style="width:auto"> ${lab}</label>`;
+  _amoFresh=fresh;
   out.innerHTML=`
-    <div class="callout" style="margin-bottom:8px">Сделок на выбранных этапах: <b>${_amoLeads.length}</b> · новых для нас: <b>${fresh.length}</b>${dups?` · уже есть: ${dups}`:''}</div>
+    <div class="callout" style="margin-bottom:8px">На этапе: <b>${_amoLeads.length}</b> · нужно распределить: <b style="color:${fresh.length?'var(--red)':'var(--green)'}">${fresh.length}</b>${done?` · уже разобрано: ${done}`:''}</div>
     <div class="amo-srcbar">
       <span style="color:var(--muted)">Имя ребёнка брать из:</span>
       ${src("lead","названия сделки")}${src("contact","имени контакта")}
@@ -7440,39 +7510,111 @@ function _amoRenderCands(){
         <select onchange="amoSetNameField(this.value)"><option value="">—</option>
         ${fieldNames.map(f=>`<option value="${esc(f)}"${_amoNameField===f?" selected":""}>${esc(f)}</option>`).join("")}</select></label>`:''}
     </div>
-    ${fresh.length?`<div class="amo-list">${fresh.map((c,i)=>`
-      <label class="amo-row"><input type="checkbox" class="amo-chk" data-i="${i}" checked style="width:auto">
-        <span style="flex:1"><b>${esc(c.name||"без имени")}</b>
-          <span style="color:var(--muted);font-size:11px"> · ${esc(c.stage)}${c.phone?" · 📞 "+esc(c.phone):" · без телефона"}</span>
-          <span style="color:var(--muted);font-size:11px;display:block">сделка: ${esc(c.lead.name||("#"+c.lead.id))}</span></span>
-      </label>`).join("")}</div>
-      <div class="hd-actions les-foot" style="margin-top:10px">
-        <button class="btn ghost sm" onclick="amoToggleAll(true)">Отметить все</button>
-        <button class="btn ghost sm" onclick="amoToggleAll(false)">Снять все</button>
-        <button class="btn sm" style="margin-left:auto" onclick="amoApply()">Добавить в список ожидания</button>
-      </div>`
-    :`<div class="callout" style="border-color:var(--green)">Новых нет — все сделки этих этапов уже есть в системе.</div>`}`;
-  _amoFresh=fresh;
+    ${fresh.length?`<div class="amo-list">${fresh.map((c,i)=>{
+      const guess=_amoGuessGroup(c.lead.name);
+      return `<div class="amo-card">
+        <div class="amo-h">
+          <input class="cell amo-name" data-i="${i}" value="${esc(c.name||"")}" placeholder="Фамилия Имя"
+                 title="ФИО ребёнка — можно поправить перед вписыванием" style="flex:1;min-width:200px;font-weight:600">
+          <span class="amo-m">${c.phone?"📞 "+esc(c.phone):"без телефона"} · ${esc(c.stage)}</span></div>
+        <div class="amo-m">сделка: ${esc(c.lead.name||("#"+c.lead.id))}</div>
+        <div class="amo-act">
+          <select class="cell amo-grp" data-i="${i}" style="max-width:260px">${_gridGroupOptsHtml(guess)}</select>
+          <button class="btn sm" onclick="amoPlace(${i})">Вписать в группу</button>
+          <button class="btn ghost sm" onclick="amoToWait(${i})" title="Пока без группы — попадёт в «Клиенты» со списком ожидания">В ожидание</button>
+          <button class="btn ghost sm" style="margin-left:auto" onclick="amoSkip(${i})" title="Убрать из этого списка — сделка останется в amo">Скрыть</button>
+        </div>${guess?`<div class="amo-m" style="color:var(--green)">курс определён по названию сделки — проверьте группу</div>`:''}
+      </div>`; }).join("")}</div>`
+    :`<div class="callout" style="border-color:var(--green)">Все разобраны — новых детей с этого этапа нет.</div>`}
+    <div class="hd-actions les-foot" style="margin-top:10px">
+      <button class="btn ghost sm" onclick="amoLoadLeads()">↻ Проверить amo</button>
+      <button class="btn ghost sm" onclick="amoResetWatch()" title="Выбрать другую воронку или этап">⚙ Сменить этап</button>
+    </div>`;
 }
 let _amoFresh=[];
-function amoToggleAll(on){ document.querySelectorAll(".amo-chk").forEach(c=>c.checked=on); }
-function amoApply(){
-  const picked=[...document.querySelectorAll(".amo-chk")].filter(c=>c.checked).map(c=>_amoFresh[+c.dataset.i]).filter(Boolean);
-  if(!picked.length){ toast("Никто не отмечен"); return; }
-  if(!Array.isArray(S.waitlist)) S.waitlist=[];
-  const now=new Date().toISOString();
-  let added=0;
-  picked.forEach(c=>{
-    if(!c.name) return;
-    if((S.waitlist||[]).some(w=>_sameKid(w.n,c.name))) return;
-    S.waitlist.push({n:c.name, phone:c.phone||"", wlAt:now,
-      amoLeadId:c.lead.id, amoContactId:(c.lead.contactIds||[])[0]||null, amoStage:c.stage});
-    added++;
-  });
+function _amoMarkSeen(lead, how){
+  const w=_amoWatch(); w.seen[String(lead.id)]={at:new Date().toISOString(), how:how};
+  S.amoWatch=Object.assign({}, S.amoWatch||{}, {seen:w.seen});
   persistLocal(); if(typeof fbSchedulePush==="function") fbSchedulePush();
-  renderClients();
-  toast("Добавлено в список ожидания из amoCRM: "+added);
+  _amoUpdateBadge();
+}
+/* ФИО берём из поля карточки — менеджер мог поправить то, что мы вытащили из названия сделки */
+function _amoNameAt(i,c){
+  const inp=document.querySelector('.amo-name[data-i="'+i+'"]');
+  const v=inp?String(inp.value||"").trim():"";
+  return v||c.name||"";
+}
+function _amoKidFrom(c,name){
+  const kid=_blankKid(name||c.name);
+  if(c.phone) kid.phone=c.phone;
+  kid.amoLeadId=c.lead.id;
+  return kid;
+}
+/* вписать прямо в группу — ради этого всё и затевалось */
+function amoPlace(i){
+  const c=_amoFresh[i]; if(!c) return;
+  const sel=document.querySelector('.amo-grp[data-i="'+i+'"]');
+  const key=sel&&sel.value;
+  if(!key){ toast("Выберите группу"); return; }
+  const g=_gridGroupList().find(x=>x.key===key); if(!g){ toast("Группа не найдена"); return; }
+  const nm=_amoNameAt(i,c);
+  if(nm.split(/\s+/).length<2){ toast("Впишите ФИО ребёнка (фамилия и имя)"); return; }
+  const kid=_amoKidFrom(c,nm);
+  let added=0;
+  g.idxs.forEach(idx=>{ const l=S.grid[idx]; if(!Array.isArray(l.kids)) l.kids=[];
+    if(!l.kids.some(x=>_sameKid(x.n, kid.n))){ l.kids.push(JSON.parse(JSON.stringify(kid))); added++; } });
+  // если он лежал в ожидании — теперь он в группе
+  const nk=_nameKey(kid.n);
+  const wi=(S.waitlist||[]).findIndex(x=>_nameKey(x.n)===nk); if(wi>=0) S.waitlist.splice(wi,1);
+  persistLocal(); if(typeof fbSchedulePush==="function") fbSchedulePush();
+  _amoMarkSeen(c.lead,"group");
+  if(typeof renderGrid==="function") renderGrid(); if(typeof renderGroups==="function") renderGroups();
+  if(typeof renderClients==="function") renderClients();
+  toast(added?("Вписан(а): "+shortName(kid.n)+" → "+(g.label||g.course||"группа")):"Уже был(а) в этой группе");
   _amoBuildCands(); _amoRenderCands();
+}
+function amoToWait(i){
+  const c=_amoFresh[i]; if(!c) return;
+  const nm=_amoNameAt(i,c);
+  if(nm.split(/\s+/).length<2){ toast("Впишите ФИО ребёнка (фамилия и имя)"); return; }
+  if(!Array.isArray(S.waitlist)) S.waitlist=[];
+  if(!S.waitlist.some(w=>_sameKid(w.n,nm))){
+    const kid=_amoKidFrom(c,nm); kid.wlAt=new Date().toISOString(); kid.amoStage=c.stage;
+    kid.amoContactId=(c.lead.contactIds||[])[0]||null;
+    S.waitlist.push(kid);
+  }
+  persistLocal(); if(typeof fbSchedulePush==="function") fbSchedulePush();
+  _amoMarkSeen(c.lead,"wait");
+  if(typeof renderClients==="function") renderClients();
+  toast("В списке ожидания: "+shortName(nm));
+  _amoBuildCands(); _amoRenderCands();
+}
+function amoSkip(i){
+  const c=_amoFresh[i]; if(!c) return;
+  _amoMarkSeen(c.lead,"skip");
+  _amoBuildCands(); _amoRenderCands();
+}
+/* ===== БЕЙДЖ «новые из amo» — тихая фоновая проверка отслеживаемого этапа ===== */
+let _amoBadgeN=0;
+function _amoUpdateBadge(){
+  const b=document.getElementById("amoBadge"); if(!b) return;
+  b.textContent=_amoBadgeN?("📥 "+_amoBadgeN):"";
+  b.style.display=_amoBadgeN?"":"none";
+  const mb=document.getElementById("menuBadgeAmo"); if(mb) mb.textContent=_amoBadgeN?(" 📥"+_amoBadgeN):"";
+}
+async function _amoCheck(silent){
+  const w=_amoWatch();
+  if(!_fbIsAdmin || !w.statusIds.length) return;
+  try{
+    const j=await _amoCall("leads",{pipelineId:w.pipelineId, statusIds:w.statusIds});
+    _amoLeads=j.leads||[]; _amoContacts=j.contacts||{};
+    _amoPipeId=w.pipelineId; _amoStatusIds=w.statusIds.slice();
+    _amoNameSrc=w.nameSrc; _amoNameField=w.nameField;
+    _amoBuildCands();
+    _amoBadgeN=_amoCands.filter(c=>!c.dup && !w.seen[String(c.lead.id)]).length;
+    _amoUpdateBadge();
+    if(!silent) _amoRenderCands();
+  }catch(e){ if(!silent) throw e; }
 }
 /* ===== ПОДТЯНУТЬ НОВЫХ ДЕТЕЙ ИЗ АЛЬФЫ (в список ожидания) ===== */
 let _alfaNewCands=[], _alfaNewCleaned=0;
@@ -8451,6 +8593,10 @@ function _remCheck(){
 }
 setInterval(_remCheck, 60000);   // проверяем раз в минуту, показываем раз в час
 setTimeout(_remCheck, 6000);     // и вскоре после загрузки (если открыли посреди рабочего часа)
+/* новые из amo (оплаченный этап) — тихо проверяем при загрузке и раз в 10 минут:
+   бейдж в шапке загорается, когда кого-то надо посадить в группу */
+setTimeout(function(){ try{ _amoCheck(true); }catch(e){} }, 12000);
+setInterval(function(){ try{ _amoCheck(true); }catch(e){} }, 600000);
 /* Живая модель: всё автосохраняется в Firebase и localStorage. Перед уходом
    не показываем предупреждений (как в Альфе) — только тихо дожимаем отложенную
    запись, чтобы даже мгновенное обновление страницы ничего не потеряло. */
