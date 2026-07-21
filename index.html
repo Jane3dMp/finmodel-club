@@ -1353,13 +1353,15 @@ details.client .cli-cols .cc-bal{width:74px;font-weight:600}
   <div style="background:#fff;border:1px solid #e0d8cf;border-radius:12px;padding:24px;max-width:360px;width:90%;box-shadow:0 10px 44px rgba(0,0,0,.18)">
     <div id="fbAuthTitle" style="font-weight:700;font-size:18px;margin-bottom:2px">Вход в финмодель</div>
     <div id="fbAuthSub" style="font-size:12px;color:#8a8178;margin-bottom:14px">Команда «Прознание»</div>
-    <div id="fbAuthForm">
-      <input id="fbEmail" type="email" placeholder="email" autocomplete="username" style="width:100%;box-sizing:border-box;padding:9px 12px;border:1px solid #ccc;border-radius:8px;margin-bottom:8px;font-size:14px">
-      <input id="fbPass" type="password" placeholder="пароль" autocomplete="current-password" onkeydown="if(event.key==='Enter')fbAuthSubmit()" style="width:100%;box-sizing:border-box;padding:9px 12px;border:1px solid #ccc;border-radius:8px;margin-bottom:12px;font-size:14px">
-      <button id="fbAuthBtn" onclick="fbAuthSubmit()" style="width:100%;padding:10px;border:none;border-radius:8px;background:#b5532a;color:#fff;font-size:14px;font-weight:600;cursor:pointer">Войти</button>
+    <!-- настоящая <form> с name/autocomplete: без неё браузер не предлагает сохранить пароль
+         и не подставляет его из менеджера паролей (эвристика по одиночным input ненадёжна) -->
+    <form id="fbAuthForm" onsubmit="fbAuthSubmit();return false" autocomplete="on">
+      <input id="fbEmail" name="username" type="email" placeholder="email" autocomplete="username" required style="width:100%;box-sizing:border-box;padding:9px 12px;border:1px solid #ccc;border-radius:8px;margin-bottom:8px;font-size:14px">
+      <input id="fbPass" name="password" type="password" placeholder="пароль" autocomplete="current-password" required style="width:100%;box-sizing:border-box;padding:9px 12px;border:1px solid #ccc;border-radius:8px;margin-bottom:12px;font-size:14px">
+      <button id="fbAuthBtn" type="submit" style="width:100%;padding:10px;border:none;border-radius:8px;background:#b5532a;color:#fff;font-size:14px;font-weight:600;cursor:pointer">Войти</button>
       <div id="fbLoginErr" style="color:#c0392b;font-size:12px;margin-top:8px;min-height:15px"></div>
       <div style="text-align:center;margin-top:6px"><a id="fbAuthToggle" href="#" onclick="fbToggleMode();return false" style="font-size:12px;color:#b5532a;text-decoration:none">Нет аккаунта? Зарегистрироваться</a></div>
-    </div>
+    </form>
     <div id="fbPendingBox" style="display:none">
       <div id="fbPendingMsg" style="font-size:13px;color:#5a5049;line-height:1.5;margin-bottom:10px">Заявка на доступ отправлена. Доступ откроет администратор — как только одобрит, вы войдёте автоматически.</div>
       <div id="fbPendingId" style="font-size:11px;color:#8a8178;line-height:1.5;margin-bottom:12px"></div>
@@ -2047,6 +2049,8 @@ function fbStart(){
   if(!fbInit()){ setSync("err","Firebase не загрузился — локальный режим"); return; }
   const auth=_fbAuth();
   if(!auth){ fbConnect(); return; }   // auth SDK не загрузился — работаем без входа
+  // вход помнится в браузере до явного «Выйти» (иначе после закрытия вкладки просят пароль заново)
+  try{ if(firebase.auth.Auth && firebase.auth.Auth.Persistence) auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL); }catch(e){}
   auth.onAuthStateChanged(function(user){
     _fbGranted=false; _fbIsAdmin=false;
     if(_fbApprRef){ try{_fbApprRef.off();}catch(e){} _fbApprRef=null; }
@@ -2203,12 +2207,16 @@ function _fbRenderAuthMode(){
         btn=document.getElementById("fbAuthBtn"), tg=document.getElementById("fbAuthToggle"),
         err=document.getElementById("fbLoginErr");
   if(err) err.textContent="";
+  // при регистрации браузер должен предложить СГЕНЕРИРОВАТЬ пароль, при входе — подставить сохранённый
+  const ps=document.getElementById("fbPass");
   if(_fbMode==="signup"){
     t.textContent="Регистрация"; sub.textContent="Заявка на доступ для нового сотрудника";
     btn.textContent="Зарегистрироваться"; tg.textContent="Уже есть аккаунт? Войти";
+    if(ps) ps.setAttribute("autocomplete","new-password");
   } else {
     t.textContent="Вход в финмодель"; sub.textContent="Команда «Прознание»";
     btn.textContent="Войти"; tg.textContent="Нет аккаунта? Зарегистрироваться";
+    if(ps) ps.setAttribute("autocomplete","current-password");
   }
 }
 function fbToggleMode(){ _fbMode=(_fbMode==="login")?"signup":"login"; _fbRenderAuthMode(); }
@@ -2221,7 +2229,9 @@ function fbLogin(){
   if(c.err) c.err.textContent="Вход…";
   auth.signInWithEmailAndPassword(c.email,c.pass).then(function(){
     try{ localStorage.setItem("fb_email",c.email); }catch(x){}
-    document.getElementById("fbPass").value="";
+    // поле чистим с задержкой: если стереть пароль сразу, Chrome не успевает предложить
+    // «сохранить пароль» — он решает это уже после отправки формы
+    setTimeout(function(){ const p=document.getElementById("fbPass"); if(p) p.value=""; }, 2500);
   }).catch(function(e){ if(c.err) c.err.textContent="Не удалось войти: "+((e&&e.message)||"проверьте email/пароль"); });
 }
 function fbSignup(){
@@ -2231,7 +2241,7 @@ function fbSignup(){
   if(c.err) c.err.textContent="Регистрация…";
   auth.createUserWithEmailAndPassword(c.email,c.pass).then(function(cred){
     try{ localStorage.setItem("fb_email",c.email); }catch(x){}
-    document.getElementById("fbPass").value="";
+    setTimeout(function(){ const p=document.getElementById("fbPass"); if(p) p.value=""; }, 2500);   // дать браузеру предложить сохранить пароль
     if(_isAdminEmail(c.email)) return;   // админ не оставляет заявку
     return _fbDb.ref("pending/"+cred.user.uid).set({email:c.email, at: firebase.database.ServerValue.TIMESTAMP});
   }).catch(function(e){ if(c.err) c.err.textContent="Не удалось: "+((e&&e.message)||"ошибка"); });
