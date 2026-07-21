@@ -1385,15 +1385,14 @@ details.client .cli-cols .cc-bal{width:74px;font-weight:600}
     <div id="fbUsersList"></div>
     <!-- запасной путь: заявки нет (человек не регистрировался заново), но доступ дать надо.
          ID он видит у себя на экране «Ждите одобрения» — достаточно продиктовать. -->
-    <details style="margin-top:14px">
-      <summary style="cursor:pointer;font-size:13px;font-weight:600">Выдать доступ вручную по ID</summary>
-      <div style="font-size:11px;color:#8a8178;margin:6px 0 8px;line-height:1.45">Если заявки нет в списке: попросите человека продиктовать «Ваш ID для администратора» с его экрана входа.</div>
+    <div style="margin-top:14px;padding-top:12px;border-top:1px solid #eee">
+      <div style="font-weight:600;font-size:13px;margin-bottom:2px">Пригласить сотрудника</div>
+      <div style="font-size:11px;color:#8a8178;margin-bottom:8px;line-height:1.45">Выдайте доступ на почту заранее — человек зарегистрируется с ней и войдёт сразу, без ожидания. Права привязаны к почте, а не к устройству.</div>
       <div style="display:flex;gap:6px;flex-wrap:wrap">
-        <input id="fbManualUid" placeholder="ID пользователя" style="flex:1;min-width:180px;padding:7px 10px;border:1px solid #ccc;border-radius:8px;font-size:12px">
-        <input id="fbManualEmail" type="email" placeholder="почта" style="flex:1;min-width:150px;padding:7px 10px;border:1px solid #ccc;border-radius:8px;font-size:12px">
-        <button onclick="fbGrantByUid()" style="padding:7px 12px;border:none;border-radius:8px;background:#2e7d32;color:#fff;font-size:12px;cursor:pointer">Открыть доступ</button>
+        <input id="fbManualEmail" type="email" placeholder="почта сотрудника" style="flex:1;min-width:200px;padding:7px 10px;border:1px solid #ccc;border-radius:8px;font-size:12px">
+        <button onclick="fbGrantByEmail()" style="padding:7px 12px;border:none;border-radius:8px;background:#2e7d32;color:#fff;font-size:12px;cursor:pointer">Открыть доступ</button>
       </div>
-    </details>
+    </div>
     <div style="margin-top:14px;display:flex;gap:8px"><button onclick="fbLoadAccess()" style="padding:8px 12px;border:1px solid #ccc;border-radius:8px;background:#fff;cursor:pointer;font-size:13px">↻ Обновить</button></div>
   </div>
 </div>
@@ -2054,6 +2053,13 @@ function restoreSnapshot(key){
 const FB_ADMINS=["proznanie.mogilev@gmail.com","smalprince@gmail.com","oks.kovaliova@gmail.com"];
 function _isAdminEmail(e){ return FB_ADMINS.indexOf(e)>=0; }
 let _fbMode="login", _fbApprRef=null, _fbGranted=false, _fbIsAdmin=false, _fbPendRef=null, _fbPendingData={}, _fbUsersData={};
+let _fbAccRef=null, _fbAccessData={};
+/* ===== ДОСТУП ПО ПОЧТЕ (надёжная схема) =====
+   Раньше права лежали в approved/{uid}. ID выдаётся Firebase при регистрации, и стоит человеку
+   перерегистрироваться — ID новый, права «теряются», хотя админ видит его в списке. Теперь
+   основной узел — access/{ключ почты}: почта не меняется, права переживают что угодно.
+   approved/{uid} читается как запасной (старые записи) — до переноса на почту. */
+function _accessKey(email){ return String(email||"").trim().toLowerCase().replace(/[.#$\[\]\/]/g,","); }
 function _fbAuth(){ return (typeof firebase!=="undefined" && firebase.auth) ? firebase.auth() : null; }
 function fbStart(){
   if(!FB_CONFIG.databaseURL) return;
@@ -2065,6 +2071,7 @@ function fbStart(){
   auth.onAuthStateChanged(function(user){
     _fbGranted=false; _fbIsAdmin=false;
     if(_fbApprRef){ try{_fbApprRef.off();}catch(e){} _fbApprRef=null; }
+    if(_fbAccRef){ try{_fbAccRef.off();}catch(e){} _fbAccRef=null; }
     if(!user){ _fbUpdateAdminUI(); _fbShowLogin(); return; }
     if(_isAdminEmail(user.email)){ _fbGrant(true); return; }    // админ — доступ по почте
     _fbWatchApproval(user);                                     // остальные — по одобрению
@@ -2156,25 +2163,38 @@ function _fbEnsurePending(user){
   if(!_fbDb||!user||!user.uid) return;
   try{ _fbDb.ref("pending/"+user.uid).set({email:user.email||"", at: firebase.database.ServerValue.TIMESTAMP}); }catch(e){}
 }
+/* Слушаем ОБА источника: access/{почта} (основной) и approved/{uid} (старый).
+   Права даёт любой из них — так переход на новую схему не выбивает тех, кто уже работал.
+   Экран «ждите» показываем только когда ответили оба, иначе он мигал бы на долю секунды. */
 function _fbWatchApproval(user){
-  _fbApprRef=_fbDb.ref("approved/"+user.uid);
-  _fbApprRef.on("value", function(s){
-    _fbApprErr="";
-    const v=s.val();
-    if(v){ _fbGrant(false, (v&&v.tabs)||_defaultTabsMap()); }
+  const key=_accessKey(user.email);
+  let byEmail=null, byUid=null, gotE=false, gotU=false;
+  const apply=function(){
+    if(!gotE || !gotU) return;                       // ждём ответа обоих источников
+    const v=byEmail||byUid;
+    if(v){ _fbGrant(false, v.tabs||_defaultTabsMap()); }
     else if(!_fbGranted){ _fbEnsurePending(user); _fbShowPending(); }
-  }, function(e){ _fbApprErr=(e&&e.message)||"нет доступа к проверке"; if(!_fbGranted) _fbShowPending(); });
+  };
+  _fbAccRef=_fbDb.ref("access/"+key);
+  _fbAccRef.on("value", function(s){ byEmail=s.val(); gotE=true; if(byEmail) _fbApprErr=""; apply(); },
+    function(){ byEmail=null; gotE=true; apply(); });   // нет прав на чтение access — тихо, работает старый путь
+  _fbApprRef=_fbDb.ref("approved/"+user.uid);
+  _fbApprRef.on("value", function(s){ byUid=s.val(); gotU=true; _fbApprErr=""; apply(); },
+    function(e){ byUid=null; gotU=true; _fbApprErr=(e&&e.message)||"нет доступа к проверке"; apply(); });
 }
 /* перечитать доступ вручную (после того как админ одобрил) — без перезагрузки страницы */
 function fbRecheckAccess(){
   const au=_fbAuth();
   if(!au||!au.currentUser||!_fbDb){ toast("Нужно войти заново"); return; }
+  const u=au.currentUser;
   toast("Проверяю доступ…");
-  _fbDb.ref("approved/"+au.currentUser.uid).once("value").then(function(s){
-    const v=s.val();
-    if(v){ _fbApprErr=""; _fbGrant(false,(v&&v.tabs)||_defaultTabsMap()); toast("Доступ открыт"); }
-    else { _fbApprErr=""; _fbEnsurePending(au.currentUser); _fbShowPending(); toast("Администратор пока не одобрил заявку"); }
-  }).catch(function(e){ _fbApprErr=(e&&e.message)||"нет доступа к проверке"; _fbShowPending(); });
+  const byEmail=_fbDb.ref("access/"+_accessKey(u.email)).once("value").then(function(s){ return s.val(); }).catch(function(){ return null; });
+  const byUid=_fbDb.ref("approved/"+u.uid).once("value").then(function(s){ return s.val(); }).catch(function(e){ _fbApprErr=(e&&e.message)||"нет доступа к проверке"; return null; });
+  Promise.all([byEmail,byUid]).then(function(r){
+    const v=r[0]||r[1];
+    if(v){ _fbApprErr=""; _fbGrant(false,v.tabs||_defaultTabsMap()); toast("Доступ открыт"); }
+    else { _fbEnsurePending(u); _fbShowPending(); toast("Администратор пока не одобрил заявку"); }
+  });
 }
 function _fbGrant(isAdmin, tabs){
   _fbIsAdmin=isAdmin;
@@ -2293,13 +2313,22 @@ function openAdminPanel(){ document.getElementById("fbAdminModal").style.display
 function closeAdminPanel(){ document.getElementById("fbAdminModal").style.display="none"; }
 function fbLoadAccess(){
   if(!_fbDb) return;
-  // approved читаем ПЕРВЫМ: список заявок сверяется с ним (тот же email под другим ID)
-  _fbDb.ref("approved").once("value").then(function(s){
-    _renderUsers(s.val()||{});
-    return _fbDb.ref("pending").once("value");
-  }).then(function(s){ _renderPending(s.val()||{}); }).catch(function(){
-    _fbDb.ref("pending").once("value").then(function(s){ _renderPending(s.val()||{}); }).catch(function(){});
+  const rd=function(p){ return _fbDb.ref(p).once("value").then(function(s){ return s.val()||{}; }).catch(function(){ return {}; }); };
+  Promise.all([rd("access"),rd("approved"),rd("pending")]).then(function(r){
+    _fbAccessData=r[0]; _fbUsersData=r[1];
+    _renderUsers(); _renderPending(r[2]);
   });
+}
+/* Единый список людей: ключ — ПОЧТА. Собираем из нового узла access и из старого approved,
+   чтобы в одной строке было видно и права, и есть ли ещё привязка к ID. */
+function _accessRows(){
+  const by={};
+  const row=function(em){ const k=String(em||"").toLowerCase(); if(!by[k]) by[k]={email:em,tabs:{},uids:[],onEmail:false}; return by[k]; };
+  Object.keys(_fbAccessData||{}).forEach(function(k){ const a=_fbAccessData[k]||{}; if(!a.email) return;
+    const r=row(a.email); r.onEmail=true; r.key=k; r.tabs=a.tabs||{}; });
+  Object.keys(_fbUsersData||{}).forEach(function(uid){ const u=_fbUsersData[uid]||{}; const em=u.email||uid;
+    const r=row(em); r.uids.push(uid); if(!r.onEmail) r.tabs=u.tabs||r.tabs; });
+  return Object.keys(by).sort().map(function(k){ return by[k]; });
 }
 function _renderPending(v){
   _fbPendingData=v||{};
@@ -2310,56 +2339,81 @@ function _renderPending(v){
     const em=(_fbPendingData[uid]&&_fbPendingData[uid].email)||uid;
     // тот же email уже есть в доступах, но под ДРУГИМ ID — человек перерегистрировался,
     // и старая запись ему больше не подходит: надо одобрить эту заявку, а старую убрать
-    const old=Object.keys(_fbUsersData||{}).filter(function(u){
-      return u!==uid && ((_fbUsersData[u]||{}).email||"").toLowerCase()===String(em).toLowerCase(); });
-    const warn=old.length?'<div style="font-size:11px;color:#B0493D;line-height:1.4;margin-top:2px">⚠ У этой почты уже есть доступ под другим ID — вход по нему не сработает. Одобрите заявку, затем уберите старую запись ниже.</div>':'';
+    const known=_accessRows().find(function(r){ return r.email.toLowerCase()===String(em).toLowerCase(); });
+    const warn=(known&&!known.onEmail)?'<div style="font-size:11px;color:#8a6412;line-height:1.4;margin-top:2px">Этой почте доступ уже выдавали (по старой схеме, привязка к устройству). Одобрите — перепривяжем к почте.</div>':'';
     return '<div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid #eee;flex-wrap:wrap">'
-      +'<span style="flex:1;font-size:13px">'+esc(em)+'<span style="display:block;font-size:10px;color:#8a8178">ID '+esc(uid)+'</span>'+warn+'</span>'
+      +'<span style="flex:1;font-size:13px">'+esc(em)+warn+'</span>'
       +'<button onclick="fbApprove(\''+uid+'\')" style="padding:6px 10px;border:none;border-radius:6px;background:#2e7d32;color:#fff;font-size:12px;cursor:pointer">Одобрить</button>'
       +'<button onclick="fbReject(\''+uid+'\')" style="padding:6px 10px;border:1px solid #ccc;border-radius:6px;background:#fff;font-size:12px;cursor:pointer">Отклонить</button>'
       +'</div>';
   }).join("");
 }
-function _renderUsers(v){
-  _fbUsersData=v||{};
+function _renderUsers(){
   const box=document.getElementById("fbUsersList"); if(!box) return;
-  const ids=Object.keys(_fbUsersData);
-  if(!ids.length){ box.innerHTML='<div style="color:#8a8178;font-size:13px;padding:6px 0">Пока нет пользователей с доступом.</div>'; return; }
-  box.innerHTML=ids.map(function(uid){
-    const u=_fbUsersData[uid]||{}; const em=(u&&u.email)||uid; const tabs=(u&&u.tabs)||{};
+  const rows=_accessRows();
+  const oldOnly=rows.filter(function(r){ return !r.onEmail; }).length;
+  let h="";
+  if(oldOnly){
+    h+='<div style="background:#FBF2CE;border-radius:8px;padding:8px 10px;font-size:11px;color:#6B5411;line-height:1.45;margin-bottom:8px">'
+      +'⚠ У <b>'+oldOnly+'</b> чел. доступ ещё привязан к ID устройства — при перерегистрации он теряется. '
+      +'<button onclick="fbMigrateAccess()" style="margin-left:4px;padding:4px 9px;border:none;border-radius:6px;background:#2e7d32;color:#fff;font-size:11px;cursor:pointer">Перенести всех на почту</button></div>';
+  }
+  if(!rows.length){ box.innerHTML=h+'<div style="color:#8a8178;font-size:13px;padding:6px 0">Пока нет пользователей с доступом.</div>'; return; }
+  box.innerHTML=h+rows.map(function(r){
+    const em=r.email, ej=_jsStr(em);
     const checks=TAB_DEFS.filter(function(t){ return !ADMIN_TABS[t[0]]; }).map(function(t){
       return '<label style="display:inline-flex;align-items:center;gap:3px;font-size:11px;margin:2px 8px 2px 0;white-space:nowrap;cursor:pointer">'
-        +'<input type="checkbox" '+(tabs[t[0]]===true?"checked":"")+' onchange="fbSetUserTab(\''+uid+'\',\''+t[0]+'\',this.checked)"> '+esc(t[1])+'</label>';
+        +'<input type="checkbox" '+(r.tabs[t[0]]===true?"checked":"")+' onchange="fbSetUserTab(\''+ej+'\',\''+t[0]+'\',this.checked)"> '+esc(t[1])+'</label>';
     }).join("");
-    // дубль почты с разными ID: рабочий только тот, под которым человек реально входит
-    const twin=ids.filter(function(u){ return u!==uid && ((_fbUsersData[u]||{}).email||"").toLowerCase()===String(em).toLowerCase(); }).length;
+    const mark=r.onEmail
+      ? '<span style="color:#3B7A57;font-size:11px;font-weight:400" title="Права привязаны к почте — переживают смену пароля и перерегистрацию">✓ по почте</span>'
+      : '<span style="color:#B0493D;font-size:11px;font-weight:400" title="Старая привязка к ID: при перерегистрации доступ пропадёт">⚠ только по ID</span>';
     return '<div style="padding:10px 0;border-bottom:1px solid #eee">'
-      +'<div style="display:flex;align-items:center;gap:8px;margin-bottom:2px"><b style="flex:1;font-size:13px">'+esc(em)
-      +(twin?' <span style="color:#B0493D;font-size:11px;font-weight:400">⚠ дубль: та же почта под '+(twin+1)+' ID — лишние убрать</span>':'')+'</b>'
-      +'<button onclick="fbRemoveAccess(\''+uid+'\')" style="padding:5px 9px;border:1px solid #ddd;border-radius:6px;background:#fff;font-size:11px;cursor:pointer;color:#c0392b">Убрать доступ</button></div>'
-      +'<div style="font-size:10px;color:#8a8178;margin-bottom:6px">ID '+esc(uid)+'</div>'
+      +'<div style="display:flex;align-items:center;gap:8px;margin-bottom:2px"><b style="flex:1;font-size:13px">'+esc(em)+' '+mark+'</b>'
+      +'<button onclick="fbRemoveAccess(\''+ej+'\')" style="padding:5px 9px;border:1px solid #ddd;border-radius:6px;background:#fff;font-size:11px;cursor:pointer;color:#c0392b">Убрать доступ</button></div>'
       +'<div>'+checks+'</div></div>';
   }).join("");
+}
+/* выдать доступ на ПОЧТУ (основной путь). uid — необязателен: если заявка есть, заодно
+   пишем и старый узел, чтобы человек вошёл даже до обновления правил базы. */
+function _fbGrantEmail(email, tabs, uid){
+  const em=String(email||"").trim();
+  if(!em){ toast("Не указана почта"); return Promise.reject(); }
+  const upd={};
+  upd["access/"+_accessKey(em)]={email:em, tabs:tabs||_defaultTabsMap(), at:firebase.database.ServerValue.TIMESTAMP};
+  if(uid) upd["approved/"+uid]={email:em, tabs:tabs||_defaultTabsMap()};
+  if(uid) upd["pending/"+uid]=null;
+  return _fbDb.ref().update(upd);
 }
 function fbApprove(uid){
   if(!_fbDb) return;
   const em=(_fbPendingData[uid]&&_fbPendingData[uid].email)||"";
-  _fbDb.ref("approved/"+uid).set({email:em, tabs:_defaultTabsMap()}).then(function(){ return _fbDb.ref("pending/"+uid).remove(); })
+  if(!em){ toast("У заявки нет почты — обновите список"); return; }
+  _fbGrantEmail(em, _defaultTabsMap(), uid)
     .then(function(){ toast("Доступ открыт (базовые вкладки)"); fbLoadAccess(); })
     .catch(function(e){ toast("Ошибка: "+((e&&e.message)||"")); });
 }
-/* выдать доступ по ID напрямую — когда заявки в списке нет */
-function fbGrantByUid(){
+/* выдать доступ заранее, по одной почте — человек потом просто регистрируется и сразу входит */
+function fbGrantByEmail(){
   if(!_fbDb) return;
-  const uid=(document.getElementById("fbManualUid").value||"").trim();
   const em=(document.getElementById("fbManualEmail").value||"").trim();
-  if(uid.length<10){ toast("Вставьте ID пользователя с его экрана входа"); return; }
-  _fbDb.ref("approved/"+uid).set({email:em, tabs:_defaultTabsMap()})
-    .then(function(){ return _fbDb.ref("pending/"+uid).remove().catch(function(){}); })
-    .then(function(){
-      document.getElementById("fbManualUid").value=""; document.getElementById("fbManualEmail").value="";
-      toast("Доступ открыт — пусть нажмёт «Проверить ещё раз»"); fbLoadAccess();
-    })
+  if(!/@/.test(em)){ toast("Введите почту сотрудника"); return; }
+  // если этот человек уже подавал заявку — подхватим его ID, чтобы вход сработал сразу
+  const uid=Object.keys(_fbPendingData||{}).find(function(u){
+    return ((_fbPendingData[u]||{}).email||"").toLowerCase()===em.toLowerCase(); })||null;
+  _fbGrantEmail(em, _defaultTabsMap(), uid)
+    .then(function(){ document.getElementById("fbManualEmail").value=""; toast("Доступ открыт на "+em); fbLoadAccess(); })
+    .catch(function(e){ toast("Ошибка: "+((e&&e.message)||"")); });
+}
+/* разовый перенос старых доступов (по ID) на почту */
+function fbMigrateAccess(){
+  if(!_fbDb) return;
+  const rows=_accessRows().filter(function(r){ return !r.onEmail && /@/.test(r.email); });
+  if(!rows.length){ toast("Переносить нечего"); return; }
+  const upd={};
+  rows.forEach(function(r){ upd["access/"+_accessKey(r.email)]={email:r.email, tabs:r.tabs||_defaultTabsMap(), at:firebase.database.ServerValue.TIMESTAMP}; });
+  _fbDb.ref().update(upd)
+    .then(function(){ toast("Перенесено на почту: "+rows.length); fbLoadAccess(); })
     .catch(function(e){ toast("Ошибка: "+((e&&e.message)||"")); });
 }
 function fbReject(uid){
@@ -2367,17 +2421,27 @@ function fbReject(uid){
   _fbDb.ref("pending/"+uid).remove().then(function(){ toast("Заявка отклонена"); fbLoadAccess(); })
     .catch(function(e){ toast("Ошибка: "+((e&&e.message)||"")); });
 }
-function fbSetUserTab(uid,k,val){
+/* галочка вкладки — по ПОЧТЕ: пишем в access и заодно во все старые записи этой почты,
+   чтобы права совпадали, пока часть людей ещё сидит на старой привязке */
+function fbSetUserTab(email,k,val){
   if(!_fbDb) return;
-  _fbDb.ref("approved/"+uid+"/tabs/"+k).set(val?true:null)
-    .then(function(){ if(_fbUsersData[uid]){ if(!_fbUsersData[uid].tabs)_fbUsersData[uid].tabs={}; if(val)_fbUsersData[uid].tabs[k]=true; else delete _fbUsersData[uid].tabs[k]; } })
+  const r=_accessRows().find(function(x){ return x.email===email; }); if(!r) return;
+  const upd={};
+  upd["access/"+_accessKey(email)+"/tabs/"+k]=val?true:null;
+  upd["access/"+_accessKey(email)+"/email"]=email;
+  r.uids.forEach(function(u){ upd["approved/"+u+"/tabs/"+k]=val?true:null; });
+  _fbDb.ref().update(upd)
+    .then(function(){ if(val) r.tabs[k]=true; else delete r.tabs[k]; })
     .catch(function(e){ toast("Ошибка: "+((e&&e.message)||"")); });
 }
-function fbRemoveAccess(uid){
+function fbRemoveAccess(email){
   if(!_fbDb) return;
-  const em=(_fbUsersData[uid]&&_fbUsersData[uid].email)||uid;
-  if(!confirm("Убрать доступ у "+em+"? Он снова окажется в режиме «ждите одобрения».")) return;
-  _fbDb.ref("approved/"+uid).remove().then(function(){ toast("Доступ убран"); fbLoadAccess(); })
+  const r=_accessRows().find(function(x){ return x.email===email; }); if(!r) return;
+  if(!confirm("Убрать доступ у "+email+"? Он снова окажется в режиме «ждите одобрения».")) return;
+  const upd={};
+  upd["access/"+_accessKey(email)]=null;
+  r.uids.forEach(function(u){ upd["approved/"+u]=null; });
+  _fbDb.ref().update(upd).then(function(){ toast("Доступ убран"); fbLoadAccess(); })
     .catch(function(e){ toast("Ошибка: "+((e&&e.message)||"")); });
 }
 function _snap(){ try{ return JSON.stringify(S); }catch(e){ return null; } }
