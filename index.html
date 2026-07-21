@@ -1450,6 +1450,9 @@ const DEFAULT_STATE = {
   // отслеживаемый этап воронки amoCRM: дети оттуда ждут распределения в группу
   amoWatch: { pipelineId:0, statusIds:[], seen:{}, nameSrc:"lead", nameField:"" },
   amoAutoFix: false,   // самим править имена клиентов в Альфе (вебхук заводит их по названию сделки)
+  // один человек — несколько аккаунтов (перерегистрация, работа с чужого компьютера):
+  // [{name:"Ольга Шакуро", emails:["shakuro.olha@gmail.com", "..."]}] — статистика суммируется
+  staffAliases: [],
   gasUrl: "https://script.google.com/macros/s/AKfycbxJajbntVctGjXImc1hVhWimvOkXHcNCkuVFpszEbA8ad-B40Lj2Q8gdMMTBar4YLnsew/exec"
 };
 const LS_KEY = "proznanie_finmodel_v1";
@@ -1824,6 +1827,60 @@ function openMgrStat(){
   }).catch(function(e){ if(body) body.innerHTML='<div style="color:var(--red);padding:10px 0">Не удалось загрузить журнал: '+esc((e&&e.message)||"")+'</div>'; });
 }
 function closeMgrStat(){ const m=document.getElementById("mgrStatModal"); if(m) m.classList.remove("show"); }
+/* ===== ОДИН ЧЕЛОВЕК — НЕСКОЛЬКО АККАУНТОВ =====
+   Бывает: перерегистрировался (новая почта), работал с чужого компьютера под чужим входом.
+   Тогда его работа размазана по нескольким аккаунтам. Здесь их можно связать — статистика
+   складывается в одну карточку, а исходные записи журнала не трогаются. */
+function _aliasGroups(){ return Array.isArray(S.staffAliases)?S.staffAliases:[]; }
+function _aliasOf(email){
+  const e=String(email||"").toLowerCase();
+  const g=_aliasGroups().find(x=>(x.emails||[]).some(y=>String(y).toLowerCase()===e));
+  return g?{key:(g.emails||[])[0]||e, name:g.name||((g.emails||[])[0]||e)}
+          :{key:e, name:String(email||"—").split("@")[0]};   // без группы — как было, имя до @
+}
+function _aliasLabel(key){ const a=_aliasOf(key); return a.name||key; }
+function _aliasEmails(key){
+  const g=_aliasGroups().find(x=>((x.emails||[])[0]||"").toLowerCase()===String(key).toLowerCase());
+  return g?(g.emails||[]):[key];
+}
+function _aliasSave(name, emails){
+  const list=_aliasGroups().filter(g=>!(g.emails||[]).some(e=>emails.includes(String(e).toLowerCase())));
+  list.push({name:name, emails:emails});
+  S.staffAliases=list; persistLocal(); if(typeof fbSchedulePush==="function") fbSchedulePush();
+}
+function aliasCreate(){
+  const picked=[...document.querySelectorAll(".alias-chk")].filter(c=>c.checked).map(c=>c.value);
+  if(picked.length<2){ toast("Отметьте хотя бы два аккаунта"); return; }
+  const nm=(document.getElementById("aliasName").value||"").trim()||picked[0].split("@")[0];
+  _aliasSave(nm, picked);
+  toast("Объединено: "+nm); renderMgrStat();
+}
+function aliasRemove(i){
+  const list=_aliasGroups().slice(); if(!list[i]) return;
+  if(!confirm("Разъединить «"+(list[i].name||"")+"»? Статистика снова разойдётся по аккаунтам.")) return;
+  list.splice(i,1); S.staffAliases=list; persistLocal(); if(typeof fbSchedulePush==="function") fbSchedulePush();
+  renderMgrStat();
+}
+function _aliasPanelHTML(emails){
+  const gs=_aliasGroups();
+  return `<div class="ms-sum" style="margin-top:6px">
+    <div class="h">👥 Один человек — несколько аккаунтов
+      <span style="font-weight:400;color:#8C8677;font-size:12px">· если работали с разных входов, свяжите их — статистика сложится</span></div>
+    ${gs.length?`<div style="display:flex;flex-direction:column;gap:6px;margin-bottom:10px">
+      ${gs.map((g,i)=>`<div style="display:flex;align-items:center;gap:10px;font-size:13px">
+        <b style="min-width:130px">${esc(g.name||"")}</b>
+        <span style="color:#8C8677;font-size:12px;flex:1">${esc((g.emails||[]).join(" + "))}</span>
+        <button onclick="aliasRemove(${i})" style="padding:3px 8px;border:1px solid #ddd;border-radius:6px;background:#fff;font-size:11px;cursor:pointer;color:#c0392b">Разъединить</button>
+      </div>`).join("")}</div>`:''}
+    <div style="display:flex;flex-wrap:wrap;gap:6px 14px;align-items:center;font-size:12px">
+      ${emails.map(e=>`<label style="display:flex;align-items:center;gap:5px;cursor:pointer">
+        <input type="checkbox" class="alias-chk" value="${esc(e)}" style="width:auto"> ${esc(e)}</label>`).join("")}
+    </div>
+    <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">
+      <input id="aliasName" placeholder="Имя человека (например «Ольга Шакуро»)" style="flex:1;min-width:200px;padding:6px 9px;border:1px solid #ccc;border-radius:8px;font-size:12px">
+      <button onclick="aliasCreate()" style="padding:6px 12px;border:none;border-radius:8px;background:#2e7d32;color:#fff;font-size:12px;cursor:pointer">Объединить отмеченные</button>
+    </div></div>`;
+}
 function renderMgrStat(){
   const body=document.getElementById("mgrStatBody"); if(!body) return;
   const dsel=document.getElementById("mgrStatDepth");
@@ -1839,7 +1896,7 @@ function renderMgrStat(){
   if(!entries.length){ body.innerHTML=`<div class="callout">${allMode?'В журнале пока нет записей.':'За этот день записей в журнале нет.'}</div>`; return; }
   const _dk=ts=>{ const d=new Date(ts),p=n=>String(n).padStart(2,"0"); return d.getFullYear()+"-"+p(d.getMonth()+1)+"-"+p(d.getDate()); };
   const byM={};
-  entries.forEach(e=>{ const em=e.email||"—";
+  entries.forEach(e=>{ const em=_aliasOf(e.email||"—").key;   // связанные аккаунты считаем как одного человека
     if(!byM[em]) byM[em]={email:em, actions:0, parts:0, first:e.at, last:e.at, days:new Set(), cnt:_mgrCount("")};
     const g=byM[em]; g.actions++; g.parts+=(+e.n||0); if(e.at<g.first)g.first=e.at; if(e.at>g.last)g.last=e.at; g.days.add(_dk(e.at));
     const c=_mgrCount(e.text); for(const k in c) g.cnt[k]+=c[k];
@@ -1852,7 +1909,7 @@ function renderMgrStat(){
   // дельты к ПРОШЛОМУ дню (только в режиме «за день»): собираем по email→день из всего журнала
   const _agg=list=>{ const c=_mgrCount(""); list.forEach(e=>{ const x=_mgrCount(e.text); for(const k in x) c[k]+=x[k]; }); return c; };
   const eDay={};
-  if(!allMode && day) _mgrLogData.forEach(e=>{ const em=e.email||"—", dk=_dk(e.at); (eDay[em]=eDay[em]||{}); (eDay[em][dk]=eDay[em][dk]||[]).push(e); });
+  if(!allMode && day) _mgrLogData.forEach(e=>{ const em=_aliasOf(e.email||"—").key, dk=_dk(e.at); (eDay[em]=eDay[em]||{}); (eDay[em][dk]=eDay[em][dk]||[]).push(e); });
   const prevOf=em=>{ if(allMode||!day||!eDay[em]) return null; const pk=Object.keys(eDay[em]).filter(k=>k<day).sort().pop(); return pk?_agg(eDay[em][pk]):null; };
   const prevTot=(!allMode&&day)?(function(){ const pk=[...new Set(_mgrLogData.map(e=>_dk(e.at)))].filter(k=>k<day).sort().pop(); return pk?_agg(_mgrLogData.filter(e=>_dk(e.at)===pk)):null; })():null;
   // хелперы вёрстки
@@ -1878,17 +1935,20 @@ function renderMgrStat(){
       ${heroFor(tot.cnt,prevTot)}${gridFor(tot.cnt,prevTot)}
     </div>`;
   // по каждому менеджеру
-  mgrs.forEach(g=>{ const who=(g.email||"—").split("@")[0]; const pc=prevOf(g.email);
+  mgrs.forEach(g=>{ const who=_aliasLabel(g.email)||(g.email||"—").split("@")[0]; const pc=prevOf(g.email);
     // «действий» — это записи журнала (правки схлопываются пачками), «событий» — что в них внутри.
     // Без этой пары непонятно, почему за полдня работы «действий: 8».
     const ev=g.parts>g.actions?` · событий: ${g.parts}`:"";
     const meta=allMode?`📅 ${ds(g.first)}–${ds(g.last)} · дней: ${g.days.size} · записей: ${g.actions}${ev}`:`🕒 ${tm(g.first)}–${tm(g.last)} · записей: ${g.actions}${ev}`;
     h+=`<div class="ms-card">
-      <div class="ms-top"><span class="nm">${esc(who)}</span><span class="em">${esc(g.email||"")}</span><span class="mt">${meta}</span></div>
+      <div class="ms-top"><span class="nm">${esc(who)}</span><span class="em">${esc(_aliasEmails(g.email).join(" + "))}</span><span class="mt">${meta}</span></div>
       <div class="ms-b">${heroFor(g.cnt,pc)}${gridFor(g.cnt,pc)}</div>
     </div>`;
   });
   h+=_statVerifyHTML(day, allMode, byM);
+  // все почты, встречавшиеся в журнале — из них и собираются группы «один человек»
+  const allEmails=[...new Set(_mgrLogData.map(e=>e.email).filter(Boolean))].sort();
+  h+=_aliasPanelHTML(allEmails);
   // «подсматривали итоги отдела» — только тебе (кто сколько раз нажал 👀)
   const peeks=Object.values(_peeksData||{}).filter(x=>x&&(+x.count>0)).sort((a,b)=>(+b.count)-(+a.count));
   if(peeks.length){
