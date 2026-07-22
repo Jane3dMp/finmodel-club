@@ -1526,7 +1526,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-07-22-08";
+const APP_VER="2026-07-22-09";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -3415,9 +3415,9 @@ function renderCards(){
   if(eb) eb.innerHTML=[["","Все"],["Прознание","Прознание"],["CODDY","CODDY"],["Детали","Детали"]]
     .map(([v,lab])=>`<button class="btn ${_cardsEco===v?'sm':'ghost sm'}" onclick="_cardsEco=${v?`'${v}'`:"''"};renderCards()">${lab}</button>`).join(" ");
   const desc=document.getElementById("cardsDesc");
-  if(desc) desc.textContent=_fbIsAdmin
-    ? "Шпаргалка для менеджеров. Нажмите на курс и заполните: для кого, что внутри, что даёт ребёнку — менеджеры увидят сразу."
-    : "Шпаргалка для разговора с родителем: нажмите на курс — для кого он, что внутри и что даёт ребёнку.";
+  if(desc) desc.textContent=(_fbIsAdmin && navMode==="fin")
+    ? "Заполните карточки: для кого, что внутри, что даёт ребёнку — менеджеры увидят сразу. В режиме «Работа» карточка открывается только для чтения."
+    : "Шпаргалка для разговора с родителем: нажмите на курс — для кого он, что внутри и что даёт ребёнку. Есть кнопка «Скопировать».";
   let rows=(S.courses||[]).slice();
   if(_cardsEco) rows=rows.filter(c=>c.eco===_cardsEco);
   const q=(_cardsQ||"").trim().toLowerCase();
@@ -3430,7 +3430,7 @@ function renderCards(){
   const imp=document.getElementById("cardsImportRow");
   if(imp){
     const empty=(S.courses||[]).filter(c=>!_cardFilled(c) && COURSE_CARD_SEED.some(r=>r[0]===String(c.name))).length;
-    imp.innerHTML=(_fbIsAdmin && empty)
+    imp.innerHTML=(_fbIsAdmin && navMode==="fin" && empty)
       ? `<button class="btn sm" onclick="importCourseCards(false)" title="Заполнить карточки готовыми текстами. Сопоставление по точному названию курса; ваши тексты не затираются">📥 Загрузить готовые тексты (${empty})</button>`
       : "";
   }
@@ -3492,20 +3492,35 @@ function openCourseCard(name){
     +((c.sub!=null&&c.sub!=="")?` · абонемент ${fmt(+c.sub||0)} р`:"")
     +` · ${(+c.visits||1)}×/нед`+(c.dur?` · ${c.dur} ч`:"")+(c.groupSize?` · группа до ${c.groupSize}`:"");
   const body=document.getElementById("ccBody");
-  if(_fbIsAdmin){
+  // Редактируем ТОЛЬКО в режиме «Финмодель». В «Работе» карточка — рабочий инструмент разговора
+  // с родителем: чистый текст и кнопка «Скопировать», случайно ничего не испортишь.
+  if(_fbIsAdmin && navMode==="fin"){
     body.innerHTML=CARD_FIELDS.map(f=>`
       <label style="font-weight:600;font-size:13px">${f[1]}</label>
       <textarea class="cell wide" rows="3" style="margin:4px 0 12px;font-size:13px;line-height:1.45;font-family:inherit"
         placeholder="${esc(f[2])}" onchange="saveCourseCard('${_jsStr(c.name)}','${f[0]}',this.value)">${esc(c[f[0]]||"")}</textarea>`).join("")
-      +`<div style="font-size:11px;color:var(--muted)">Сохраняется само при выходе из поля. Менеджеры видят этот текст без возможности править.</div>`;
+      +`<div style="font-size:11px;color:var(--muted)">Сохраняется само при выходе из поля. В режиме «Работа» карточка открывается только для чтения.</div>`;
   } else {
     const secs=CARD_FIELDS.map(f=>{
       const v=String(c[f[0]]||"").trim(); if(!v) return "";
       return `<div class="cc-sec"><div class="cc-sec-t">${f[1]}</div><div class="cc-sec-b">${esc(v).replace(/\n/g,"<br>")}</div></div>`;
     }).filter(Boolean).join("");
-    body.innerHTML=secs||'<div style="color:var(--muted);padding:6px 0">Карточку ещё не заполнили — загляните позже.</div>';
+    body.innerHTML=(secs||'<div style="color:var(--muted);padding:6px 0">Карточку ещё не заполнили — загляните позже.</div>')
+      +(secs?`<div class="hd-actions les-foot" style="margin-top:12px">
+          <button class="btn sm" onclick="copyCourseCard('${_jsStr(c.name)}')" title="Скопировать текст карточки — можно вставить родителю в переписку">📋 Скопировать</button>
+          ${_fbIsAdmin?`<span style="font-size:11px;color:var(--muted);margin-left:auto">Правится в режиме «Финмодель»</span>`:''}
+        </div>`:"");
   }
   document.getElementById("courseCardModal").classList.add("show");
+}
+/* текст карточки для отправки родителю: название, цена и три блока */
+async function copyCourseCard(name){
+  const c=(S.courses||[]).find(x=>x.name===name); if(!c) return;
+  const lines=[c.name||""];
+  lines.push(`${fmt(+c.price||0)} р за занятие · ${(+c.visits||1)}×/нед`+(c.dur?` · ${c.dur} ч`:"")+(c.groupSize?` · группа до ${c.groupSize}`:""));
+  CARD_FIELDS.forEach(f=>{ const v=String(c[f[0]]||"").trim(); if(v) lines.push("", f[1]+":", v); });
+  const ok=await _copyText(lines.join("\n"));
+  toast(ok?"Текст карточки скопирован — вставьте родителю (Ctrl+V)":"Не удалось скопировать");
 }
 function saveCourseCard(name,field,val){
   const c=(S.courses||[]).find(x=>x.name===name); if(!c) return;
