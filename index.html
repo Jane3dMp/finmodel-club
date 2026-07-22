@@ -1510,7 +1510,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-07-22-01";
+const APP_VER="2026-07-22-02";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -4271,6 +4271,7 @@ function renderGrid(){
   migrateAllKids();
   _ensureLessonIds();   // у каждого занятия должен быть стабильный id ДО рендера (действия — по id)
   _migrateViberTpl();
+  _migrateDob();        // даты вида «26.12.2021», записанные раньше, → ISO (иначе возраст не считался)
   let dt="";
   for(let d=1;d<=7;d++){
     const cnt=S.grid.filter(l=>l.day===d).length;
@@ -5533,7 +5534,32 @@ function _migrateChildren(){
   }));
 }
 /* возраст из даты рождения Альфы (dob = "YYYY-MM-DD...") */
-function _ageFromDob(dob){ if(!dob) return null; const d=new Date(String(dob).slice(0,10)); if(isNaN(d.getTime())) return null;
+/* Дата рождения к виду ГГГГ-ММ-ДД. Alfa отдаёт «26.12.2021», amo — иногда unix-время, у нас
+   исторически лежит ISO. `new Date("26.12.2021")` — недействительная дата, поэтому возраст
+   молча не считался: дата у ребёнка есть, а в интерфейсе пусто. */
+function _dobIso(v){
+  const s=String(v==null?"":v).trim(); if(!s) return "";
+  let m=s.match(/^(\d{4})-(\d{2})-(\d{2})/);              if(m) return m[1]+"-"+m[2]+"-"+m[3];
+  m=s.match(/^(\d{1,2})[.\/-](\d{1,2})[.\/-](\d{4})/);
+  if(m){ const p=n=>String(n).padStart(2,"0"); return m[3]+"-"+p(m[2])+"-"+p(m[1]); }
+  if(/^\d{9,11}$/.test(s)){ const d=new Date(+s*1000), p=n=>String(n).padStart(2,"0");
+    if(!isNaN(d.getTime())) return d.getFullYear()+"-"+p(d.getMonth()+1)+"-"+p(d.getDate()); }
+  return "";
+}
+/* Разовая починка дат, записанных в старом формате (Alfa отдавала «26.12.2021»): приводим к ISO
+   один раз, дальше всё пишется уже нормализованным. Молча и без лишних записей в облако. */
+function _migrateDob(){
+  let n=0;
+  const fix=o=>{ if(!o||!o.dob) return; const iso=_dobIso(o.dob); if(iso && iso!==o.dob){ o.dob=iso; n++; } };
+  (S.grid||[]).forEach(l=>kidsOf(l).forEach(fix));
+  (Array.isArray(S.waitlist)?S.waitlist:[]).forEach(fix);
+  Object.keys(S.children||{}).forEach(k=>fix(S.children[k]));
+  (Array.isArray(S.mayList)?S.mayList:[]).forEach(fix);
+  if(n){ persistLocal(); if(typeof fbSchedulePush==="function") fbSchedulePush();
+    try{ console.log("🎂 дат рождения приведено к общему формату:",n); }catch(e){} }
+}
+function _ageFromDob(dob){ const iso=_dobIso(dob); if(!iso) return null;
+  const d=new Date(iso); if(isNaN(d.getTime())) return null;
   const now=new Date(); let a=now.getFullYear()-d.getFullYear(); const m=now.getMonth()-d.getMonth();
   if(m<0||(m===0&&now.getDate()<d.getDate())) a--; return (a>=0&&a<100)?a:null; }
 function _yearsWord(n){ const a=n%10,b=n%100; if(a===1&&b!==11) return "год"; if(a>=2&&a<=4&&(b<10||b>=20)) return "года"; return "лет"; }
@@ -5963,15 +5989,15 @@ function alfaApply(){
   let updated=0;
   (S.grid||[]).forEach(l=>kidsOf(l).forEach(k=>{
     const v=set.get(_normName(k.n)); if(!v) return;
-    if(k.phone!==v.phone || k.alfaId!==v.id || (v.dob&&k.dob!==v.dob)){ k.phone=v.phone; k.alfaId=v.id; if(v.dob) k.dob=v.dob; updated++; }
-    else if(v.dob && !k.dob){ k.dob=v.dob; }
+    if(k.phone!==v.phone || k.alfaId!==v.id || (v.dob&&k.dob!==_dobIso(v.dob))){ k.phone=v.phone; k.alfaId=v.id; if(v.dob) k.dob=_dobIso(v.dob); updated++; }
+    else if(v.dob && !k.dob){ k.dob=_dobIso(v.dob); }
     if(v.balance!=null) k.alfaBalance=v.balance;   // активный баланс из Альфы (последний известный)
   }));
   // дети без группы (список ожидания) — в S.grid их нет, обновляем отдельно, иначе у них
   // навсегда остаётся пустой телефон/баланс и непонятно, у кого есть деньги
   (Array.isArray(S.waitlist)?S.waitlist:[]).forEach(w=>{
     const v=set.get(_normName(w.n||"")); if(!v) return;
-    if(v.phone) w.phone=v.phone; if(v.id!=null) w.alfaId=v.id; if(v.dob&&!w.dob) w.dob=v.dob;
+    if(v.phone) w.phone=v.phone; if(v.id!=null) w.alfaId=v.id; if(v.dob&&!w.dob) w.dob=_dobIso(v.dob);
     if(v.balance!=null) w.alfaBalance=v.balance;
   });
   persistLocal(); if(typeof fbSchedulePush==="function") fbSchedulePush();
@@ -6470,7 +6496,7 @@ async function kidAlfaUpdate(i){
     _kidsFromDOM();   // пока шёл запрос, пользователь мог править строки — берём свежий снимок и ищем ребёнка по имени, не по индексу
     const kk=_editKids.find(x=>_nameKey(x.n)===_nameKey(nm)) || _editKids[i];
     if(!kk){ toast("Строка ребёнка изменилась — повторите ⟳"); return; }
-    if(s.dob) kk.dob=s.dob;
+    if(s.dob) kk.dob=_dobIso(s.dob);
     if(j.customerId) kk.alfaId=j.customerId;
     // телефон родителя — вручную его нигде не вводят, приходит только из Альфы → обновляем
     const ph=(s.phones||[]).find(p=>String(p).replace(/\D/g,"").length>=6)||"";
@@ -6518,7 +6544,7 @@ async function kidsPullAges(){
           return;
         }
       }
-      if(c.dob && !k.dob){ k.dob=c.dob; nAge++; }
+      if(c.dob && !k.dob){ k.dob=_dobIso(c.dob); nAge++; }
       else if(!c.dob && !k.dob) rep.noDob.push({n:k.n});   // ребёнок найден, но в Альфе не заполнена дата рождения
       if(c.id!=null && (k.alfaId==null||k.alfaId==="")) k.alfaId=c.id;
       if(c.phones && c.phones[0] && !k.phone) k.phone=c.phones[0];
@@ -6569,7 +6595,7 @@ async function kidsPullAgesDeep(){
         // по имени Alfa могла вернуть другого человека — сверяем ФИО, прежде чем брать дату
         const okName=(k.alfaId!=null&&k.alfaId!=="") || (s.name && _sameKid(s.name,k.n));
         if(r.ok&&j.ok&&!j.notFound&&s.dob&&okName){
-          k.dob=s.dob; found++;
+          k.dob=_dobIso(s.dob); found++;
           if(j.customerId && (k.alfaId==null||k.alfaId==="")) k.alfaId=j.customerId;
           if(!k.phone && (s.phones||[])[0]) k.phone=s.phones[0];
         } else notFound.push(k.n+(s.name&&!okName?(" (Альфа вернула: "+s.name+")"):""));
@@ -7698,7 +7724,7 @@ async function pullBalances(){
       }
       if(c && c.balance!=null && c.balance!=="") k.alfaBalance=c.balance;
       if(c && Array.isArray(c.branch_ids)) k.alfaBr=c.branch_ids.map(Number);   // филиалы (каникулы/интенсивы ≠ учебный год)
-      if(c && c.dob && !k.dob){ k.dob=c.dob; dobN++; }                          // заодно возраст — выгрузка та же
+      if(c && c.dob && !k.dob){ k.dob=_dobIso(c.dob); dobN++; }                          // заодно возраст — выгрузка та же
     };
     (S.grid||[]).forEach(l=>kidsOf(l).forEach(apply));
     (Array.isArray(S.waitlist)?S.waitlist:[]).forEach(apply);
@@ -7995,7 +8021,7 @@ function _amoNameAt(i,c){
 function _amoKidFrom(c,name){
   const kid=_blankKid(name||c.name);
   if(c.phone) kid.phone=c.phone;
-  if(c.dob) kid.dob=c.dob;          // дата рождения из карточки контакта — сразу виден возраст
+  if(c.dob) kid.dob=_dobIso(c.dob);   // дата рождения из карточки контакта — сразу виден возраст
   kid.amoLeadId=c.lead.id;
   return kid;
 }
@@ -8240,7 +8266,7 @@ function alfaNewApply(){
   let added=0;
   picks.forEach(c=>{ const nk=_nameKey(c.name);
     if(_gridHasKid(nk) || S.waitlist.some(w=>_nameKey(w.n)===nk)) return;   // уже в системе
-    const kid=_blankKid(c.name); kid.alfaId=c.id; if(c.phones&&c.phones[0]) kid.phone=c.phones[0]; if(c.dob) kid.dob=c.dob;
+    const kid=_blankKid(c.name); kid.alfaId=c.id; if(c.phones&&c.phones[0]) kid.phone=c.phones[0]; if(c.dob) kid.dob=_dobIso(c.dob);
     if(c.balance!=null) kid.alfaBalance=c.balance;   // активный баланс из Альфы
     kid.wlAt=new Date().toISOString(); S.waitlist.push(kid); added++;
   });
@@ -8553,7 +8579,7 @@ async function mayPullAges(){
     const cust=(j.customers||[]).filter(c=>c&&c.dob&&c.name);
     const byN2={}; cust.forEach(c=>{ const n=_normName(c.name); if(n && !byN2[n]) byN2[n]=c; });
     let n=0;
-    list.forEach(row=>{ if(row.dob) return; const c=cust.find(c=>_sameKid(c.name, row.fio))||byN2[_normName(row.fio)]; if(c&&c.dob){ row.dob=c.dob; n++; } });
+    list.forEach(row=>{ if(row.dob) return; const c=cust.find(c=>_sameKid(c.name, row.fio))||byN2[_normName(row.fio)]; if(c&&c.dob){ row.dob=_dobIso(c.dob); n++; } });
     persistLocal(); if(typeof fbSchedulePush==="function") fbSchedulePush(); renderMay();
     toast("Возраст подтянут: +"+n+" (в списке "+list.length+")");
   }catch(e){ toast("Не удалось: "+((e&&e.message)||e)); }
