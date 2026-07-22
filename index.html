@@ -7239,10 +7239,10 @@ function renderClients(){
     </div>
     <div class="cli-addrow" title="Создать нового ребёнка и вписать в группу" onclick="openAddKid()"><span class="plus">+</span> Новый ребёнок</div>
     <div style="margin:-4px 0 10px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-      <!-- распределение детей из amo — ежедневная работа, доступна всем менеджерам -->
+      <!-- подтяжка детей из CRM — ежедневная работа, доступна всем менеджерам -->
       <button class="btn ghost sm" onclick="openAmoNew()" title="Дети с оплаченного этапа amoCRM — распределить в группы">📥 Новые из amoCRM${_amoBadgeN?` <b style="color:var(--red)">${_amoBadgeN}</b>`:''}</button>
-      ${_fbIsAdmin?`
       <button class="btn ghost sm" onclick="openAlfaNew()" title="Найти в Альфе детей, которых ещё нет у вас, и добавить в список ожидания">🔽 Новые дети из Альфы</button>
+      ${_fbIsAdmin?`
       <button class="btn ghost sm" id="balBtn" onclick="pullBalances()" title="Обновить активный баланс из Альфы у всех детей — и в группах, и в списке ожидания">💰 Обновить балансы</button>
       <button class="btn ghost sm" onclick="openArchProbe()" title="Сверить на боевой Альфе, каким полем помечается архив">🔍 Поля архива</button>
       ${S.balancesAt?`<span style="font-size:11px;color:var(--muted)">балансы от ${esc(new Date(S.balancesAt).toLocaleString("ru-RU",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"}))}</span>`:''}`:''}
