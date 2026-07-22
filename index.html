@@ -1510,7 +1510,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-07-22-03";
+const APP_VER="2026-07-22-04";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -4894,7 +4894,7 @@ function renderKidsEditor(){
     </tr></thead><tbody>${
     _editKids.map((k,i)=>`<tr class="${k.no?'k-off':''}">
       <td class="k-num">${i+1}</td>
-      <td class="k-name"><div style="display:flex;align-items:center;gap:5px"><input type="text" class="k-in-name" style="flex:1;min-width:0;width:auto" value="${esc(k.n)}" placeholder="Фамилия Имя" oninput="refreshLesWage()">${k.dob?`<span style="font-size:11px;color:var(--blue);white-space:nowrap" title="Возраст из Альфы (ДР ${esc(String(k.dob).slice(0,10))})">${esc(_ageStr(k.dob))}</span>`:''}${_fbIsAdmin?`<button type="button" class="btn ghost sm" style="padding:0 5px;font-size:11px" title="Подтянуть возраст и связь этого ребёнка из Альфы (по ФИО)" onclick="kidAlfaUpdate(${i})">⟳</button>`:''}</div></td>
+      <td class="k-name"><div style="display:flex;align-items:center;gap:5px"><input type="text" class="k-in-name" style="flex:1;min-width:0;width:auto" value="${esc(k.n)}" placeholder="Фамилия Имя" oninput="refreshLesWage()">${k.dob?`<span style="font-size:11px;color:var(--blue);white-space:nowrap" title="${esc(_ageStrFull(k.dob))} · ДР ${esc(String(k.dob).slice(0,10).split("-").reverse().join("."))}">${esc(_ageStr(k.dob))}</span>`:''}${_fbIsAdmin?`<button type="button" class="btn ghost sm" style="padding:0 5px;font-size:11px" title="Подтянуть возраст и связь этого ребёнка из Альфы (по ФИО)" onclick="kidAlfaUpdate(${i})">⟳</button>`:''}</div></td>
       ${KID_FLAGS.map(f=>`<td><input type="checkbox" class="k-in-${f.k}" ${k[f.k]?"checked":""} title="${f.lab}" onchange="kidFlagChanged()"></td>`).join("")}
       <td><input type="text" class="k-in-c" value="${esc(k.c||"")}" placeholder="—"></td>
       <td><div style="display:inline-flex;gap:3px;align-items:center;white-space:nowrap"><button type="button" class="btn ghost sm" style="padding:1px 6px${k.vbSent?';background:#e6f4ea;border-color:#66bb6a':''}" ${k.phone?"":"disabled"} title="${k.phone?(k.vbSent?('Отправлено'+(k.vbSentAt?' '+_vbDate(k.vbSentAt):'')+' · клик — отправить снова, правый клик — снять отметку'):('Viber → '+esc(k.phone))):'Нет телефона — сначала «Контакты из Альфы»'}" onclick="kidViber(${i})" oncontextmenu="event.preventDefault();kidViberReset(${i});return false">${k.vbSent?ic('check'):ic('send')}</button>${k.alfaId?`<button type="button" class="btn ghost sm" style="padding:1px 5px" title="История ребёнка в Альфе — куда ходил, баланс" onclick="kidHist(${i})">${ic('user')}</button>`:''}${_fbIsAdmin?(function(){const ez=kidEvzz(k);return `<button type="button" class="btn ghost sm" style="padding:1px 5px${ez?';background:#eef3ee;border-color:#66bb6a':''}" title="Карточка ребёнка — ЭВ, телефон, активные/архивные абонементы из Альфы${ez?(' · ЭВ 26/27: '+esc(ez)):''}" onclick="kidCard(${i})">${ic('idcard')}</button>`;})():''}</div></td>
@@ -5563,7 +5563,25 @@ function _ageFromDob(dob){ const iso=_dobIso(dob); if(!iso) return null;
   const now=new Date(); let a=now.getFullYear()-d.getFullYear(); const m=now.getMonth()-d.getMonth();
   if(m<0||(m===0&&now.getDate()<d.getDate())) a--; return (a>=0&&a<100)?a:null; }
 function _yearsWord(n){ const a=n%10,b=n%100; if(a===1&&b!==11) return "год"; if(a>=2&&a<=4&&(b<10||b>=20)) return "года"; return "лет"; }
-function _ageStr(dob){ const a=_ageFromDob(dob); return a==null?"":(a+" "+_yearsWord(a)); }
+/* Возраст с месяцами: «2,11» = 2 года 11 месяцев. Полных лет мало — ребёнку почти 3, а видно 2,
+   и при наборе в группу это решает. Формат «годы,месяцы» короткий и влезает в строку списка. */
+function _ageYM(dob){
+  const iso=_dobIso(dob); if(!iso) return null;
+  const d=new Date(iso); if(isNaN(d.getTime())) return null;
+  const now=new Date();
+  let y=now.getFullYear()-d.getFullYear(), m=now.getMonth()-d.getMonth();
+  if(now.getDate()<d.getDate()) m--;                  // месяц ещё не «стукнул»
+  if(m<0){ y--; m+=12; }
+  if(y<0||y>=100) return null;
+  return {y:y, m:m};
+}
+function _ageStr(dob){ const a=_ageYM(dob); return a==null?"":(a.y+","+a.m); }
+/* полная словесная форма — для подсказок при наведении */
+function _ageStrFull(dob){
+  const a=_ageYM(dob); if(a==null) return "";
+  const mw=n=>{ const x=n%10,b=n%100; return (x===1&&b!==11)?"месяц":((x>=2&&x<=4&&(b<10||b>=20))?"месяца":"месяцев"); };
+  return a.y+" "+_yearsWord(a.y)+(a.m?(" "+a.m+" "+mw(a.m)):"");
+}
 /* ответ родителя на приглашение: "" не ответил · yes подтвердил · no отказ · maybe думает */
 const VB_REPLY=[["","— нет ответа"],["yes","🟢 Подтвердил"],["no","🔴 Отказ"],["maybe","🟡 Думает"]];
 function _vbReplyIcon(v){ return v==="yes"?"🟢":v==="no"?"🔴":v==="maybe"?"🟡":""; }
@@ -6428,7 +6446,7 @@ function _kidCardAlfa(j){
   const phone=(s.phones||[])[0]||"";
   let h=`<div style="display:flex;gap:14px;flex-wrap:wrap;font-size:12px;margin-bottom:10px">`
     +(phone?`<span>📞 <b>${esc(phone)}</b></span>`:`<span style="color:var(--muted)">📞 нет телефона</span>`)
-    +(s.dob?`<span>🎂 <b>${esc(_ageStr(s.dob)||"—")}</b></span>`:``)
+    +(s.dob?`<span title="ДР ${esc(String(_dobIso(s.dob)).split("-").reverse().join("."))}">🎂 <b>${esc(_ageStr(s.dob)||"—")}</b> <span style="color:var(--muted);font-weight:400">(${esc(_ageStrFull(s.dob))})</span></span>`:``)
     +(s.balance!=null?`<span>💰 <b style="color:${(+s.balance)<0?'var(--red)':'var(--green)'}">${money(s.balance)}</b></span>`:``)
     +(s.paid_till?`<span>оплачено до <b>${dOnly(s.paid_till)}</b></span>`:``)
     +((j.school||j.klass)?`<span>🏫 <b>${esc([j.school,(j.klass?j.klass+' кл.':'')].filter(Boolean).join(', '))}</b></span>`:``)
@@ -6515,7 +6533,7 @@ async function kidAlfaUpdate(i){
     if(S.grid[idx]) S.grid[idx].kids=_editKids.filter(x=>x.n);
     persistLocal(); _flushCardEdit();
     renderKidsEditor();
-    toast("Обновлено из Альфы: "+shortName(nm)+(s.dob?(" · "+_ageStr(s.dob)):" · возраст не указан")+(ph?" · 📞 телефон":" · телефона нет"));
+    toast("Обновлено из Альфы: "+shortName(nm)+(s.dob?(" · "+_ageStrFull(s.dob)):" · возраст не указан")+(ph?" · 📞 телефон":" · телефона нет"));
   }catch(e){ toast("Не удалось: "+((e&&e.message)||e)); }
 }
 /* Подтянуть из Альфы возраст (ДР) + телефон + связь сразу ВСЕМ детям занятия —
@@ -7562,7 +7580,7 @@ function renderClients(){
     const altTag=c.br.length
       ? ` <span class="cli-brs" title="Филиалы в Альфе: ${esc(c.br.map(_brName).join(", "))}">${c.altOnly?'<span class="cli-altmark" title="Только каникулы/интенсивы — на образовательные программы не ходил(а)">🏕</span>':''}${_brChips(c.br)}</span>`
       : '';
-    const nameEl=`<b class="cli-name" style="cursor:pointer;text-decoration:underline dotted" title="Открыть карточку ребёнка" onclick="event.stopPropagation();event.preventDefault();openKidCardByName('${_jsStr(c.name)}')">${esc(c.name)}</b>${c.dob?` <span style="font-size:11px;color:var(--blue)">· ${esc(_ageStr(c.dob))}</span>`:''}${altTag}`;
+    const nameEl=`<b class="cli-name" style="cursor:pointer;text-decoration:underline dotted" title="Открыть карточку ребёнка" onclick="event.stopPropagation();event.preventDefault();openKidCardByName('${_jsStr(c.name)}')">${esc(c.name)}</b>${c.dob?` <span style="font-size:11px;color:var(--blue)" title="${esc(_ageStrFull(c.dob))} · ДР ${esc(String(c.dob).slice(0,10).split("-").reverse().join("."))}">· ${esc(_ageStr(c.dob))}</span>`:''}${altTag}`;
     if(c.waiting){   // ребёнок без группы — список ожидания
       const w=c.wl||{};
       html+=`<details class="client${c.altOnly?" alt":""}" ontoggle="cliFillGroups(this)">
@@ -8756,7 +8774,7 @@ function renderMay(){
     if(!action) action=`<span style="color:var(--muted);font-size:12px">—</span>`;
     html+=`<tr>
       <td style="text-align:center;color:var(--muted)">${i+1}</td>
-      <td style="text-align:left">${esc(r.fio)}${r.alfaMay?` <span style="font-size:10px;background:#fce9c8;color:#8a5a12;border-radius:8px;padding:0 6px;white-space:nowrap" title="Оплачено майских в Альфе (обычно = число курсов). Оставьте столько строк, сколько майских">🧾 ${r.alfaMay}</span>`:''}${(function(){ const kd=_dobKids.find(x=>_sameKid(x.n, r.fio)); const dob=r.dob||(kd&&kd.dob)||""; return dob?` <span style="font-size:11px;color:var(--blue);white-space:nowrap" title="Возраст из Альфы">· ${_ageStr(dob)}</span>`:''; })()} <button type="button" class="btn ghost sm" style="padding:0 5px;font-size:12px" title="История ребёнка в Альфе — куда ходил в прошлом году" onclick="mayHist(${i})">👤</button></td>
+      <td style="text-align:left">${esc(r.fio)}${r.alfaMay?` <span style="font-size:10px;background:#fce9c8;color:#8a5a12;border-radius:8px;padding:0 6px;white-space:nowrap" title="Оплачено майских в Альфе (обычно = число курсов). Оставьте столько строк, сколько майских">🧾 ${r.alfaMay}</span>`:''}${(function(){ const kd=_dobKids.find(x=>_sameKid(x.n, r.fio)); const dob=r.dob||(kd&&kd.dob)||""; return dob?` <span style="font-size:11px;color:var(--blue);white-space:nowrap" title="${esc(_ageStrFull(dob))} · из Альфы">· ${_ageStr(dob)}</span>`:''; })()} <button type="button" class="btn ghost sm" style="padding:0 5px;font-size:12px" title="История ребёнка в Альфе — куда ходил в прошлом году" onclick="mayHist(${i})">👤</button></td>
       <td style="text-align:left">${courseCell}</td>
       <td style="text-align:left">${action}</td>
       <td style="text-align:center"><span class="k-del" title="Убрать строку" onclick="mayDelRow(${i})">×</span></td>
