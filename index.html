@@ -6466,23 +6466,35 @@ async function kidsPullAges(){
     const j=await r.json().catch(()=>({ok:false,error:"ответ не JSON (код "+r.status+")"}));
     if(!r.ok||!j.ok) throw new Error(j.error||("Ошибка "+r.status));
     const cust=(j.customers||[]).filter(c=>c&&c.name);
-    // сопоставление: строгое по словам, иначе мягко по «Фамилия Имя» (ловит усечённые/без отчества)
-    const byN2={}; cust.forEach(c=>{ const n=_normName(c.name); if(n && !byN2[n]) byN2[n]=c; });
-    const findC=(name)=>{ const s=cust.find(x=>_sameKid(x.name, name)); return s||byN2[_normName(name)]||null; };
+    // Сопоставление: СНАЧАЛА по связи с Альфой (alfaId — точное), потом по имени.
+    // По имени — только если кандидат РОВНО ОДИН: раньше брали первого попавшегося тёзку,
+    // и ребёнок получал чужую дату рождения.
+    const byId=new Map(); cust.forEach(c=>{ if(c.id!=null) byId.set(String(c.id),c); });
+    const bySurname=new Map();
+    cust.forEach(c=>{ const s=(String(c.name).trim().split(/\s+/)[0]||"").toLowerCase(); if(!s) return;
+      if(!bySurname.has(s)) bySurname.set(s,[]); bySurname.get(s).push(c); });
     _kidsFromDOM();   // пока шёл запрос, пользователь мог править ФИО/поля — берём свежий снимок, иначе ререндер их сотрёт
-    let nAge=0, nMiss=0;
+    let nAge=0, byIdN=0, byNameN=0, ambig=0, nMiss=0;
     _editKids.forEach(k=>{ if(!k.n) return;
-      const c=findC(k.n);
-      if(!c){ if(!k.dob) nMiss++; return; }
+      let c=(k.alfaId!=null&&k.alfaId!=="")?byId.get(String(k.alfaId)):null;
+      if(c) byIdN++;
+      else{
+        const s=(String(k.n).trim().split(/\s+/)[0]||"").toLowerCase();
+        const cand=(bySurname.get(s)||[]).filter(x=>_sameKid(x.name,k.n));
+        if(cand.length===1){ c=cand[0]; byNameN++; }
+        else if(cand.length>1){ ambig++; return; }        // тёзки — не рискуем чужой датой
+        else { if(!k.dob) nMiss++; return; }
+      }
       if(c.dob && !k.dob){ k.dob=c.dob; nAge++; }
-      if(c.id && !k.alfaId) k.alfaId=c.id;
+      if(c.id!=null && (k.alfaId==null||k.alfaId==="")) k.alfaId=c.id;
       if(c.phones && c.phones[0] && !k.phone) k.phone=c.phones[0];
     });
     const idx=_modalLesIdx();
     if(S.grid[idx]) S.grid[idx].kids=_editKids.filter(x=>x.n);
     persistLocal(); _flushCardEdit();
     renderKidsEditor();
-    toast("Возраст подтянут: +"+nAge+(nMiss?(" · не найдено в Альфе: "+nMiss):""));
+    toast("Возраст подтянут: +"+nAge+" (по связи "+byIdN+", по имени "+byNameN+")"
+      +(ambig?(" · тёзки (пропущены) "+ambig):"")+(nMiss?(" · не найдено: "+nMiss):""));
   }catch(e){ toast("Не удалось: "+((e&&e.message)||e)); }
   const b2=document.getElementById("kidsPullAgesBtn"); if(b2){ b2.disabled=false; b2.textContent="🎂 Возраст всем"; }
 }
@@ -7376,7 +7388,7 @@ function renderClients(){
       <button class="btn ghost sm" onclick="openAmoNew()" title="Дети с оплаченного этапа amoCRM — распределить в группы">📥 Новые из amoCRM${_amoBadgeN?` <b style="color:var(--red)">${_amoBadgeN}</b>`:''}</button>
       <button class="btn ghost sm" onclick="openAlfaNew()" title="Найти в Альфе детей, которых ещё нет у вас, и добавить в список ожидания">🔽 Новые дети из Альфы</button>
       ${_fbIsAdmin?`
-      <button class="btn ghost sm" id="balBtn" onclick="pullBalances()" title="Обновить активный баланс из Альфы у всех детей — и в группах, и в списке ожидания">💰 Обновить балансы</button>
+      <button class="btn ghost sm" id="balBtn" onclick="pullBalances()" title="Одна выгрузка из Альфы на всех детей (группы + ожидание): баланс, филиалы и возраст">💰 Балансы и возраст</button>
       <button class="btn ghost sm" onclick="openArchProbe()" title="Сверить на боевой Альфе, каким полем помечается архив">🔍 Поля архива</button>
       ${S.balancesAt?`<span style="font-size:11px;color:var(--muted)">балансы от ${esc(new Date(S.balancesAt).toLocaleString("ru-RU",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"}))}</span>`:''}`:''}
     </div>`;
@@ -7583,7 +7595,7 @@ async function pullBalances(){
     const bySurname=new Map();
     list.forEach(c=>{ const s=(String(c.name).trim().split(/\s+/)[0]||"").toLowerCase(); if(!s) return;
       if(!bySurname.has(s)) bySurname.set(s,[]); bySurname.get(s).push(c); });
-    let byIdN=0, byNameN=0, ambig=0, miss=0;
+    let byIdN=0, byNameN=0, ambig=0, miss=0, dobN=0;
     const apply=k=>{
       if(!k||!k.n) return;
       let c=(k.alfaId!=null&&k.alfaId!=="")?byId.get(String(k.alfaId)):null;
@@ -7597,6 +7609,7 @@ async function pullBalances(){
       }
       if(c && c.balance!=null && c.balance!=="") k.alfaBalance=c.balance;
       if(c && Array.isArray(c.branch_ids)) k.alfaBr=c.branch_ids.map(Number);   // филиалы (каникулы/интенсивы ≠ учебный год)
+      if(c && c.dob && !k.dob){ k.dob=c.dob; dobN++; }                          // заодно возраст — выгрузка та же
     };
     (S.grid||[]).forEach(l=>kidsOf(l).forEach(apply));
     (Array.isArray(S.waitlist)?S.waitlist:[]).forEach(apply);
@@ -7604,10 +7617,11 @@ async function pullBalances(){
     S.balancesAt=new Date().toISOString();
     persistLocal(); if(typeof fbSchedulePush==="function") fbSchedulePush();
     renderClients();
-    toast("Балансы и филиалы обновлены: по связи с Альфой "+byIdN+", по ФИО "+byNameN
+    toast("Балансы, филиалы и возраст обновлены: по связи "+byIdN+", по ФИО "+byNameN
+      +(dobN?(" · 🎂 возраст +"+dobN):"")
       +(ambig?(" · тёзки (пропущены) "+ambig):"")+(miss?(" · нет в Альфе "+miss):""));
   }catch(e){ toast("Не удалось обновить балансы: "+((e&&e.message)||e)); }
-  if(btn){ btn.disabled=false; btn.textContent="💰 Обновить балансы"; }
+  if(btn){ btn.disabled=false; btn.textContent="💰 Балансы и возраст"; }
 }
 /* ===== 📥 НОВЫЕ ИЗ amoCRM — сделки выбранного этапа воронки → список ожидания =====
    Отдельная CRM: заявки живут там, а обучение — в Альфе. Тянем ТОЛЬКО чтение.
