@@ -321,6 +321,7 @@ details.cwarn .cwarn-body{padding:0 14px 12px}
 #courseTable th.c-price,#courseTable td.c-price,
 #courseTable th.c-single,#courseTable td.c-single,
 #courseTable th.c-sub,#courseTable td.c-sub,
+#courseTable th.c-pay,#courseTable td.c-pay,
 #courseTable th.c-wage,#courseTable td.c-wage,
 #courseTable th.c-groups,#courseTable td.c-groups,
 #courseTable th.c-fill,#courseTable td.c-fill,
@@ -332,7 +333,7 @@ details.cwarn .cwarn-body{padding:0 14px 12px}
 #courseTable th.c-mpct,#courseTable td.c-mpct,
 #courseTable th.c-lyfill,#courseTable td.c-lyfill,
 #courseTable th.c-lyrev,#courseTable td.c-lyrev{width:88px;min-width:88px}
-#courseTable td.c-price input,#courseTable td.c-single input,#courseTable td.c-sub input,#courseTable td.c-groups input,#courseTable td.c-fill input{width:100%}
+#courseTable td.c-price input,#courseTable td.c-single input,#courseTable td.c-sub input,#courseTable td.c-pay input,#courseTable td.c-groups input,#courseTable td.c-fill input{width:100%}
 
 /* спидометры набора / отчёта по набору (общий дашборд #goals + #report) */
 :is(#goals #goalsBody,#report #reportBody){max-width:940px;margin:0 auto}   /* сузить дашборд, свободные поля по бокам */
@@ -1326,10 +1327,21 @@ details.client .cli-cols .cc-bal{width:74px;font-weight:600}
   <div class="hd-actions" style="margin-bottom:8px;align-items:center;gap:8px">
    <button id="vtplTabReg" class="btn sm" onclick="vtplSetMode('reg')" title="Тем, кто ещё не оплатил — приглашение подтвердить">Обычное (приглашение)</button>
    <button id="vtplTabMay" class="btn ghost sm" onclick="vtplSetMode('may')" title="Тем, у кого уже 💰 куплен майский — приветствие и расписание">💰 Оплатившим майский</button>
+   <button id="vtplTabPay" class="btn ghost sm" onclick="vtplSetMode('pay')" title="Реквизиты ЕРИП родителю — кнопка 💳 у ребёнка">💳 Путь оплаты</button>
    <span style="margin-left:auto;font-size:12px;color:var(--muted)">Начало занятий: <input id="vtplStart" class="cell" style="width:150px" oninput="renderVtplPreview()" placeholder="2 сентября 2026"></span>
   </div>
+  <div id="vtplPayRow" style="display:none;gap:10px;flex-wrap:wrap;align-items:center;margin:0 0 8px;font-size:12px;color:var(--muted)">
+   <label>Код услуги ЕРИП: <input id="vtplErip" class="cell" style="width:110px" oninput="renderVtplPreview()" placeholder="7471986"></label>
+   <label>Оплатить до: <input id="vtplDue" class="cell" style="width:110px" oninput="renderVtplPreview()" placeholder="1 августа"></label>
+   <label>Менеджер: <input id="vtplMgr" class="cell" style="width:110px" oninput="renderVtplPreview()" placeholder="Ольга"></label>
+   <span style="color:var(--terra-d)">Сумма берётся у курса — столбец «Оплата ЕРИП» на «Курсах и марже».</span>
+  </div>
   <p style="font-size:12px;color:var(--muted);margin:0 0 8px;line-height:1.5">
-   Система сама шлёт нужный текст: детям с 💰 (майский куплен) — «Оплатившим», остальным — «Обычное».<br>
+   Система сама шлёт нужный текст: детям с 💰 (майский куплен) — «Оплатившим», остальным — «Обычное».
+   «💳 Путь оплаты» уходит отдельной кнопкой у ребёнка.<br>
+   <b>В «пути оплаты»:</b> <code>{родитель}</code> <code>{лн}</code> <code title="Сумма из курса">{сумма}</code>
+   <code>{код}</code> <code>{срок}</code> <code>{менеджер}</code> <code title="день недели строчными: воскресенье">{деньнеделя}</code>
+   <code title="Дата первого занятия без дня недели: «6 сентября 2026»">{стартдата}</code> <code title="Короткое имя: Прознание / CODDY / Детали">{бренд2}</code><br>
    <b>Данные:</b> <code>{имя}</code> <code>{фио}</code> <code>{группа}</code>
    <code>{курс}</code> <code>{день}</code> <code>{время}</code> <code>{педагог}</code>
    <code title="Дата ПЕРВОГО занятия этой группы: считается от даты начала года по дню недели группы">{старт}</code><br>
@@ -1499,6 +1511,8 @@ const DEFAULT_STATE = {
   alfaArchiveMode: "is_study",  // чем архивируем в Альфе: is_study | removed | both (сверяется кнопкой «Поля архива»)
   // отслеживаемый этап воронки amoCRM: дети оттуда ждут распределения в группу
   amoWatch: { pipelineId:0, statusIds:[], seen:{}, nameSrc:"lead", nameField:"" },
+  // «путь оплаты» через ЕРИП: реквизиты и срок (сумма — у курса, поле payAmount)
+  eripCode:"", payDue:"", payManager:"",
   amoAutoFix: false,   // самим править имена клиентов в Альфе (вебхук заводит их по названию сделки)
   // один человек — несколько аккаунтов (перерегистрация, работа с чужого компьютера):
   // [{name:"Ольга Шакуро", emails:["shakuro.olha@gmail.com", "..."]}] — статистика суммируется
@@ -1510,7 +1524,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-07-22-05";
+const APP_VER="2026-07-22-06";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -3199,6 +3213,7 @@ function renderCourses(){
     ${_sortTh("price")}
     ${_sortTh("single",{title:"Стоимость разового занятия (справочно; в расчётах оборота/маржи не участвует)"})}
     ${_sortTh("sub",{title:"Абонемент (заполняется вручную; справочно, в расчётах не участвует)"})}
+    ${_sortTh("payAmount",{lab:"Оплата<br>ЕРИП",title:"Сумма для сообщения «путь оплаты» (кнопка 💳 у ребёнка). Пусто — возьмём абонемент или цену×визиты×4"})}
     ${_sortTh("wage")}
     ${_sortTh("groups")}
     ${_sortTh("ingrid",{lab:"В сетке",title:"Сколько групп этого курса уже стоит в расписании (занятия÷визиты). Обновляется из сетки"})}
@@ -3228,6 +3243,7 @@ function renderCourses(){
       <td class="c-price a-right"><input class="cell" type="number" value="${c.price}" ${da} onchange="upd(${i},'price',this.value)"></td>
       <td class="c-single a-right"><input class="cell" type="number" value="${c.single}" ${da} onchange="upd(${i},'single',this.value)"></td>
       <td class="c-sub a-right"><input class="cell" type="number" value="${(c.sub==null||c.sub==='')?'':c.sub}" ${da} onchange="updOpt(${i},'sub',this.value)"></td>
+      <td class="c-pay a-right"><input class="cell" type="number" value="${(c.payAmount==null||c.payAmount==='')?'':c.payAmount}" ${da} placeholder="${esc(_payAmount(c.name)||'')}" title="Сумма в сообщении об оплате. Пусто — подставим ${esc(_payAmount(c.name)||'—')}" onchange="updOpt(${i},'payAmount',this.value)"></td>
       <td class="num c-wage a-right" title="${S._wageMode==='fix'?'фикс-ставка педагога курса (прочерк = один педагог не назначен или ставка не задана)':'из справочника ставок по '+(r.fillN||c.fill||4)+' детям'}"><b>${(()=>{ if(S._wageMode==='fix'){ const fw=courseFixWageDisplay(c.name); return fw!=null?fmt(fw):'—'; } return fmt(r.wage); })()}</b></td>
       <td class="c-groups a-right"><input class="cell" type="number" value="${c.groups}" ${da} onchange="upd(${i},'groups',this.value)"></td>
       <td class="num c-ingrid a-right" title="групп в расписании (из сетки)">${(()=>{ const g=courseGroupsInGrid(c.name,c.visits); const plan=+c.groups||0; const cls=g===plan?'pos':(g<plan?'neg':''); return `<b class="${cls}">${g}</b>`; })()}</td>
@@ -3255,6 +3271,7 @@ function renderCourses(){
     `<td class="c-price"></td>`+
     `<td class="c-single"></td>`+
     `<td class="c-sub"></td>`+
+    `<td class="c-pay"></td>`+
     `<td class="c-wage"></td>`+
     `<td class="num c-groups a-right" title="Всего групп в неделю по всем курсам">${_totGroups}</td>`+
     `<td class="num c-ingrid a-right" title="Всего групп в расписании (из сетки)">${S.courses.reduce((a,c)=>a+courseGroupsInGrid(c.name,c.visits),0)}</td>`+
@@ -3308,6 +3325,7 @@ const COURSE_PRINT_COLS=[
   {k:"price",  lab:"Цена",              al:"right", get:(c,r)=>fmt(+c.price||0), val:(c,r)=>+c.price||0},
   {k:"single", lab:"Разовое",           al:"right", get:(c,r)=>fmt(+c.single||0), val:(c,r)=>+c.single||0},
   {k:"sub",    lab:"Абонемент",          al:"right", get:(c,r)=>(c.sub==null||c.sub==="")?"":fmt(+c.sub||0), val:(c,r)=>+c.sub||0},
+  {k:"payAmount", lab:"Оплата ЕРИП",    al:"right", get:(c,r)=>(c.payAmount==null||c.payAmount==="")?"":fmt(+c.payAmount||0), val:(c,r)=>+c.payAmount||0},
   {k:"wage",   lab:"ЗП/зан",            al:"right", get:(c,r)=>{ if(S._wageMode==="fix"){ const fw=courseFixWageDisplay(c.name); return fw!=null?fmt(fw):"—"; } return fmt(r.wage); }, val:(c,r)=>{ if(S._wageMode==="fix"){ const fw=courseFixWageDisplay(c.name); return fw!=null?+fw:-1; } return +r.wage||0; }},
   {k:"groups", lab:"Групп/нед",         al:"right", get:(c,r)=>String(+c.groups||0), val:(c,r)=>+c.groups||0},
   {k:"ingrid", lab:"В расписании",      al:"right", get:(c,r)=>String(courseGroupsInGrid(c.name,c.visits)), val:(c,r)=>courseGroupsInGrid(c.name,c.visits)},
@@ -4897,7 +4915,7 @@ function renderKidsEditor(){
       <td class="k-name"><div style="display:flex;align-items:center;gap:5px"><input type="text" class="k-in-name" style="flex:1;min-width:0;width:auto" value="${esc(k.n)}" placeholder="Фамилия Имя" oninput="refreshLesWage()">${k.dob?`<span style="font-size:11px;color:var(--blue);white-space:nowrap" title="${esc(_ageStrFull(k.dob))} · ДР ${esc(String(k.dob).slice(0,10).split("-").reverse().join("."))}">${esc(_ageStr(k.dob))}</span>`:''}${_fbIsAdmin?`<button type="button" class="btn ghost sm" style="padding:0 5px;font-size:11px" title="Подтянуть возраст и связь этого ребёнка из Альфы (по ФИО)" onclick="kidAlfaUpdate(${i})">⟳</button>`:''}</div></td>
       ${KID_FLAGS.map(f=>`<td><input type="checkbox" class="k-in-${f.k}" ${k[f.k]?"checked":""} title="${f.lab}" onchange="kidFlagChanged()"></td>`).join("")}
       <td><input type="text" class="k-in-c" value="${esc(k.c||"")}" placeholder="—"></td>
-      <td><div style="display:inline-flex;gap:3px;align-items:center;white-space:nowrap"><button type="button" class="btn ghost sm" style="padding:1px 6px${k.vbSent?';background:#e6f4ea;border-color:#66bb6a':''}" ${k.phone?"":"disabled"} title="${k.phone?(k.vbSent?('Отправлено'+(k.vbSentAt?' '+_vbDate(k.vbSentAt):'')+' · клик — отправить снова, правый клик — снять отметку'):('Viber → '+esc(k.phone))):'Нет телефона — сначала «Контакты из Альфы»'}" onclick="kidViber(${i})" oncontextmenu="event.preventDefault();kidViberReset(${i});return false">${k.vbSent?ic('check'):ic('send')}</button>${k.alfaId?`<button type="button" class="btn ghost sm" style="padding:1px 5px" title="История ребёнка в Альфе — куда ходил, баланс" onclick="kidHist(${i})">${ic('user')}</button>`:''}${_fbIsAdmin?(function(){const ez=kidEvzz(k);return `<button type="button" class="btn ghost sm" style="padding:1px 5px${ez?';background:#eef3ee;border-color:#66bb6a':''}" title="Карточка ребёнка — ЭВ, телефон, активные/архивные абонементы из Альфы${ez?(' · ЭВ 26/27: '+esc(ez)):''}" onclick="kidCard(${i})">${ic('idcard')}</button>`;})():''}</div></td>
+      <td><div style="display:inline-flex;gap:3px;align-items:center;white-space:nowrap"><button type="button" class="btn ghost sm" style="padding:1px 6px${k.vbSent?';background:#e6f4ea;border-color:#66bb6a':''}" ${k.phone?"":"disabled"} title="${k.phone?(k.vbSent?('Отправлено'+(k.vbSentAt?' '+_vbDate(k.vbSentAt):'')+' · клик — отправить снова, правый клик — снять отметку'):('Viber → '+esc(k.phone))):'Нет телефона — сначала «Контакты из Альфы»'}" onclick="kidViber(${i})" oncontextmenu="event.preventDefault();kidViberReset(${i});return false">${k.vbSent?ic('check'):ic('send')}</button><button type="button" class="btn ghost sm" style="padding:1px 5px${k.paySent?';background:#fdf3d6;border-color:#e0a02e':''}" ${k.phone?"":"disabled"} title="${k.phone?(k.paySent?('Путь оплаты отправлен'+(k.paySentAt?' '+_vbDate(k.paySentAt):'')+' · клик — отправить снова, правый клик — снять отметку'):'Путь оплаты (реквизиты ЕРИП) родителю в Viber'):'Нет телефона'}" onclick="kidPay(${i})" oncontextmenu="event.preventDefault();kidPayReset(${i});return false">💳</button>${k.alfaId?`<button type="button" class="btn ghost sm" style="padding:1px 5px" title="История ребёнка в Альфе — куда ходил, баланс" onclick="kidHist(${i})">${ic('user')}</button>`:''}${_fbIsAdmin?(function(){const ez=kidEvzz(k);return `<button type="button" class="btn ghost sm" style="padding:1px 5px${ez?';background:#eef3ee;border-color:#66bb6a':''}" title="Карточка ребёнка — ЭВ, телефон, активные/архивные абонементы из Альфы${ez?(' · ЭВ 26/27: '+esc(ez)):''}" onclick="kidCard(${i})">${ic('idcard')}</button>`;})():''}</div></td>
       <td><select class="k-in-reply cell" style="font-size:11px;padding:3px 2px;min-width:96px" onchange="kidFlagChanged()">${VB_REPLY.map(r=>`<option value="${r[0]}" ${k.vbReply===r[0]?'selected':''}>${r[1]}</option>`).join("")}</select></td>
       <td style="text-align:center"><details class="kid-move"><summary title="Перевести в другую группу">↔</summary><div><select class="cell kmv-sel">${moveOpts}</select><button type="button" class="btn sm" onclick="kidMoveToGroup(${i}, this.previousElementSibling.value)">Перевести</button></div></details></td>
       <td><span class="k-del" title="Удалить" onclick="kidDel(${i})">×</span></td>
@@ -6084,6 +6102,26 @@ const VIBER_TPL_MAY_DEFAULT=[
 ].join("\n");
 /* {старт} — дата начала занятий (можно поменять кнопкой «Шаблон Viber») */
 const VIBER_START_DEFAULT="2 сентября 2026";
+/* ===== ТРЕТИЙ ШАБЛОН: «ПУТЬ ОПЛАТЫ» (реквизиты ЕРИП) =====
+   Отличается от приглашений: адресован РОДИТЕЛЮ по имени и несёт реквизиты — код услуги,
+   личный номер (= ID ребёнка в Альфе) и сумму. Всё подставляется из модели, менеджеру
+   остаётся только вставить текст в Viber. */
+const VIBER_TPL_PAY_DEFAULT=[
+"Добрый день, {родитель}🌺",
+"",
+"На связи «{бренд2}», менеджер {менеджер}.",
+"",
+"Для фиксации места на курс {курс} с {стартдата} по расписанию {деньнеделя} {время}, внесите, пожалуйста, оплату через ЕРИП до {срок}:",
+"",
+"код услуги: {код}",
+"личный номер: {лн}",
+"сумма: {сумма}",
+"",
+"После проведения оплаты чек отправьте в этот чат🤗"
+].join("\n");
+const ERIP_CODE_DEFAULT="7471986";
+const PAY_DUE_DEFAULT="1 августа";
+const PAY_MANAGER_DEFAULT="Ольга";
 /* ===== ПЕРВОЕ ЗАНЯТИЕ ГРУППЫ ПО КАЛЕНДАРЮ =====
    Родителю нужна не общая дата старта учебного года, а день, когда занятие будет
    именно у ЕГО группы: у среды это 2 сентября, а у субботы — уже 5-е. Считаем
@@ -6274,6 +6312,81 @@ function _vbDate(iso){ try{ const d=new Date(iso); return d.toLocaleDateString("
 /* зафиксировать текущий список детей карточки в модель (чтобы отметка «отправлено» сохранилась
    сразу, не дожидаясь «Сохранить»); прочие поля занятия не трогаем */
 function _commitEditKids(les){ if(les) les.kids=_editKids.filter(x=>x.n); }
+/* ===== «ПУТЬ ОПЛАТЫ»: текст с реквизитами ЕРИП для родителя ===== */
+/* имя родителя: наше поле по alfaId (карточка 🪪), иначе — что подтянули из Альфы */
+function _parentName(k){
+  const rec=(k&&k.alfaId!=null)?_childRec(k.alfaId,false):null;
+  return String((rec&&rec.parentName)||k.parentName||"").trim();
+}
+/* сумма к оплате: своя у курса (payAmount), иначе абонемент, иначе цена × визитов × 4 недели */
+function _payAmount(course){
+  const c=(S.courses||[]).find(x=>x.name===course);
+  if(!c) return "";
+  if(c.payAmount!=null && String(c.payAmount).trim()!=="") return String(c.payAmount).trim();
+  if(c.sub!=null && String(c.sub).trim()!=="") return String(Math.round(+c.sub||0));
+  const p=+c.price||0, v=+c.visits||1;
+  return p?String(Math.round(p*v*4)):"";
+}
+function _buildPayMsg(k,les,tpl){
+  tpl=tpl||S.viberTplPay||VIBER_TPL_PAY_DEFAULT;
+  const brand=VIBER_BRAND[_courseEco(les.course)]||VIBER_BRAND["Прознание"];
+  const time=les.start?(les.start+(les.end?("–"+les.end):"")):"";
+  const parts=String(k.n||"").trim().split(/\s+/);
+  // {старт} несёт день недели («6 сентября 2026, воскресенье») — в этом тексте день уже есть
+  // отдельно, поэтому для реквизитов даём короткую дату без него
+  const startFull=_viberStartFor(les);
+  const startShort=startFull.split(",")[0];
+  const eco=_courseEco(les.course);
+  return tpl
+    .replace(/\{родитель\}/g,  _parentName(k)||"…")
+    .replace(/\{менеджер\}/g,  (S.payManager||PAY_MANAGER_DEFAULT))
+    .replace(/\{бренд2\}/g,    eco||"Прознание")     // короткое имя: «Прознание», «CODDY»
+    .replace(/\{стартдата\}/g, startShort)
+    .replace(/\{бренд\}/g,     brand)
+    .replace(/\{курс\}/g,      les.course||"")
+    .replace(/\{группа\}/g,    les.group||les.course||"")
+    .replace(/\{деньнеделя\}/g,(DAY_FULL[les.day]||"").toLowerCase())
+    .replace(/\{день\}/g,      DAY_FULL[les.day]||"")
+    .replace(/\{время\}/g,     time)
+    .replace(/\{старт\}/g,     _viberStartFor(les))
+    .replace(/\{срок\}/g,      (S.payDue||PAY_DUE_DEFAULT))
+    .replace(/\{код\}/g,       (S.eripCode||ERIP_CODE_DEFAULT))
+    .replace(/\{лн\}/g,        (k.alfaId!=null&&k.alfaId!=="")?String(k.alfaId):"…")
+    .replace(/\{сумма\}/g,     _payAmount(les.course)||"…")
+    .replace(/\{имя\}/g,       (parts.length>1?parts[1]:(parts[0]||"")))
+    .replace(/\{фио\}/g,       k.n||"");
+}
+/* кнопка 💳 у ребёнка: текст с реквизитами в буфер + открыть Viber родителю */
+async function kidPay(i){
+  _kidsFromDOM();
+  const idx=_modalLesIdx();
+  const les=S.grid[idx]; const k=_editKids[i];
+  if(!les||!k) return;
+  const num=_viberNumber(k.phone);
+  if(!num){ toast("У ребёнка нет телефона — сначала «Контакты из Альфы»"); return; }
+  // без личного номера платёж не пройдёт — предупреждаем до отправки
+  const miss=[];
+  if(k.alfaId==null||k.alfaId==="") miss.push("личный номер (связь с Альфой)");
+  if(!_parentName(k)) miss.push("имя родителя (карточка 🪪)");
+  if(!_payAmount(les.course)) miss.push("сумма (поле «Оплата ЕРИП» у курса)");
+  if(miss.length && !confirm("Не хватает данных:\n• "+miss.join("\n• ")+"\n\nВ тексте на их месте будет «…».\nВсё равно открыть Viber?")) return;
+  const msg=_buildPayMsg(k,les);
+  const copied=await _copyText(msg);
+  _openViber(num);
+  k.paySent=true; k.paySentAt=new Date().toISOString();
+  _commitEditKids(les); persistLocal(); _flushCardEdit();
+  renderKidsEditor();
+  toast(copied?"Путь оплаты в буфере — вставьте в Viber (Ctrl+V). Отмечено 💳":"Открываю Viber. Отмечено 💳");
+}
+function kidPayReset(i){
+  _kidsFromDOM();
+  const les=S.grid[_modalLesIdx()]; const k=_editKids[i];
+  if(!k) return;
+  k.paySent=false; k.paySentAt="";
+  _commitEditKids(les); persistLocal(); _flushCardEdit();
+  renderKidsEditor();
+  toast("Отметка «путь оплаты отправлен» снята");
+}
 async function kidViber(i){
   _kidsFromDOM();
   const idx=_modalLesIdx();
@@ -7176,9 +7289,10 @@ function renderGoals(){
 }
 function _renderGoalsAll(){ if(typeof renderGoals==="function") renderGoals(); if(typeof renderReport==="function") renderReport(); }
 
-let _vtplMode="reg", _vtplEdit={reg:"",may:"",start:""};
+let _vtplMode="reg", _vtplEdit={reg:"",may:"",pay:"",start:""};
 function editViberTpl(){
-  _vtplEdit={ reg:(S.viberTpl||VIBER_TPL_DEFAULT), may:(S.viberTplMay||VIBER_TPL_MAY_DEFAULT), start:(S.viberStart||VIBER_START_DEFAULT) };
+  _vtplEdit={ reg:(S.viberTpl||VIBER_TPL_DEFAULT), may:(S.viberTplMay||VIBER_TPL_MAY_DEFAULT),
+    pay:(S.viberTplPay||VIBER_TPL_PAY_DEFAULT), start:(S.viberStart||VIBER_START_DEFAULT) };
   _vtplMode="reg"; _vtplLoad();
   document.getElementById("vtplModal").classList.add("show");
 }
@@ -7186,9 +7300,16 @@ function _vtplSaveDraft(){ _vtplEdit[_vtplMode]=document.getElementById("vtplTex
 function _vtplLoad(){
   document.getElementById("vtplText").value=_vtplEdit[_vtplMode];
   const sd=document.getElementById("vtplStart"); if(sd) sd.value=_vtplEdit.start;
-  const rb=document.getElementById("vtplTabReg"), mb=document.getElementById("vtplTabMay");
+  const rb=document.getElementById("vtplTabReg"), mb=document.getElementById("vtplTabMay"), pb=document.getElementById("vtplTabPay");
   if(rb) rb.className="btn "+(_vtplMode==="reg"?"":"ghost")+" sm";
   if(mb) mb.className="btn "+(_vtplMode==="may"?"":"ghost")+" sm";
+  if(pb) pb.className="btn "+(_vtplMode==="pay"?"":"ghost")+" sm";
+  // реквизиты ЕРИП нужны только в режиме «путь оплаты»
+  const pr=document.getElementById("vtplPayRow"); if(pr) pr.style.display=(_vtplMode==="pay")?"":"none";
+  if(_vtplMode==="pay"){
+    const g=(id,v)=>{ const e=document.getElementById(id); if(e) e.value=v; };
+    g("vtplErip",S.eripCode||ERIP_CODE_DEFAULT); g("vtplDue",S.payDue||PAY_DUE_DEFAULT); g("vtplMgr",S.payManager||PAY_MANAGER_DEFAULT);
+  }
   // кнопка «↩ Вернуть мой прежний» — только в режиме «обычный» и если есть сохранённый бэкап
   const rst=document.getElementById("vtplRestoreBtn");
   if(rst) rst.style.display=(_vtplMode==="reg" && (S.viberTplBackup||"").trim())?"":"none";
@@ -7196,7 +7317,7 @@ function _vtplLoad(){
 }
 function vtplSetMode(m){ _vtplSaveDraft(); _vtplMode=m; _vtplLoad(); }
 function closeVtpl(){ document.getElementById("vtplModal").classList.remove("show"); }
-function resetViberTpl(){ const def=_vtplMode==="may"?VIBER_TPL_MAY_DEFAULT:VIBER_TPL_DEFAULT; _vtplEdit[_vtplMode]=def; document.getElementById("vtplText").value=def; renderVtplPreview(); }
+function resetViberTpl(){ const def=_vtplMode==="pay"?VIBER_TPL_PAY_DEFAULT:(_vtplMode==="may"?VIBER_TPL_MAY_DEFAULT:VIBER_TPL_DEFAULT); _vtplEdit[_vtplMode]=def; document.getElementById("vtplText").value=def; renderVtplPreview(); }
 function restoreViberTplBackup(){
   const bk=(S.viberTplBackup||"").trim();
   if(!bk){ toast("Прежнего шаблона нет"); return; }
@@ -7213,7 +7334,15 @@ function renderVtplPreview(){
   const tpl=document.getElementById("vtplText").value;
   const sd=document.getElementById("vtplStart");
   const savedStart=S.viberStart; S.viberStart=(sd&&sd.value)||VIBER_START_DEFAULT;   // временно для {старт}
-  const msg=_buildViberMsg({n:"Иванов Кирилл", may:(_vtplMode==="may")},_vtplSampleLes(),tpl);
+  let msg;
+  if(_vtplMode==="pay"){
+    // реквизиты берём прямо из полей — предпросмотр должен меняться, пока их правят
+    const g=(id,d)=>{ const e=document.getElementById(id); return (e&&String(e.value||"").trim())||d; };
+    const sv={e:S.eripCode,d:S.payDue,m:S.payManager};
+    S.eripCode=g("vtplErip",ERIP_CODE_DEFAULT); S.payDue=g("vtplDue",PAY_DUE_DEFAULT); S.payManager=g("vtplMgr",PAY_MANAGER_DEFAULT);
+    msg=_buildPayMsg({n:"Иванов Кирилл", alfaId:4998, parentName:"Людмила"},_vtplSampleLes(),tpl);
+    S.eripCode=sv.e; S.payDue=sv.d; S.payManager=sv.m;
+  } else msg=_buildViberMsg({n:"Иванов Кирилл", may:(_vtplMode==="may")},_vtplSampleLes(),tpl);
   S.viberStart=savedStart;
   document.getElementById("vtplPreview").textContent=msg;
 }
@@ -7221,7 +7350,10 @@ function saveViberTpl(){
   _vtplSaveDraft();
   S.viberTpl=(_vtplEdit.reg||"").trim()||VIBER_TPL_DEFAULT;
   S.viberTplMay=(_vtplEdit.may||"").trim()||VIBER_TPL_MAY_DEFAULT;
+  S.viberTplPay=(_vtplEdit.pay||"").trim()||VIBER_TPL_PAY_DEFAULT;
   S.viberStart=(_vtplEdit.start||"").trim()||VIBER_START_DEFAULT;
+  const g=id=>{ const e=document.getElementById(id); return e?String(e.value||"").trim():""; };
+  S.eripCode=g("vtplErip")||ERIP_CODE_DEFAULT; S.payDue=g("vtplDue")||PAY_DUE_DEFAULT; S.payManager=g("vtplMgr")||PAY_MANAGER_DEFAULT;
   persistLocal(); if(typeof fbSchedulePush==="function") fbSchedulePush();
   closeVtpl(); toast("Шаблоны Viber сохранены");
 }
