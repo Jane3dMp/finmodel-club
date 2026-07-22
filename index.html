@@ -1510,7 +1510,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-07-22-02";
+const APP_VER="2026-07-22-03";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -5712,9 +5712,19 @@ function _normName(s){
    но «Полонников Даниил Ильич» ↔ «Полонников Даниил Петрович» — НЕТ (разные тёзки).
    Раньше сравнивали только «Фамилия Имя» → однофамильцы-тёзки сливались, и детям
    показывались/отмечались чужие абонементы. Требуем минимум 2 слова с обеих сторон. */
+/* Нормализация ФИО — самая горячая функция в системе: несколько регулярок на каждый вызов,
+   а зовут её десятки тысяч раз за один рендер «Клиентов»/«Набора». Имена не меняются, поэтому
+   результат кэшируем (ключ — исходная строка). Кэш ограничен, чтобы не расти бесконечно. */
+const _nwCache=new Map();
 function _nameWords(s){
-  return _foldLat(cleanKidName(String(s||"").replace(/\(.*?\)/g," ").replace(/\bрезерв\w*\b/gi," ")).replace(/ё/gi,"е"))
+  const key=String(s||"");
+  const hit=_nwCache.get(key);
+  if(hit) return hit;
+  const res=_foldLat(cleanKidName(key.replace(/\(.*?\)/g," ").replace(/\bрезерв\w*\b/gi," ")).replace(/ё/gi,"е"))
     .split(" ").filter(Boolean);
+  if(_nwCache.size>20000) _nwCache.clear();
+  _nwCache.set(key,res);
+  return res;
 }
 function _sameKid(a,b){
   const A=_nameWords(a), B=_nameWords(b), n=Math.min(A.length,B.length);
@@ -7303,6 +7313,18 @@ function _cliTh(col,lab,cls,tip){
   return `<span class="${cls} cli-th${_clientsSort.col===col?" on":""}" onclick="cliSort('${col}')" title="${esc(tip||"Сортировать")}">${lab}${a}</span>`;
 }
 function _cliNum(v){ if(v==null||v==="") return null; const n=parseFloat(String(v).replace(",",".")); return isFinite(n)?n:null; }
+/* Выпадашка групп (141 пункт) заполняется только когда карточку ребёнка реально раскрыли.
+   Иначе на 2000 детей выходило ~280 000 узлов <option> — браузер «думал» секунды. */
+let _grpOptsHtml="", _grpOptsStamp=-1;
+function cliFillGroups(det){
+  if(!det||!det.open) return;
+  const sel=det.querySelector('select.wl-sel[data-lazy]');
+  if(!sel) return;
+  const st=_gridStamp();
+  if(!_grpOptsHtml || _grpOptsStamp!==st){ _grpOptsHtml=_gridGroupOptsHtml(); _grpOptsStamp=st; }
+  sel.innerHTML=_grpOptsHtml;
+  sel.removeAttribute("data-lazy");
+}
 /* ===== ФИЛИАЛЫ «НЕ УЧЕБНЫЙ ГОД» (каникулы / интенсивы) =====
    Ребёнок, который есть ТОЛЬКО в таких филиалах, приходил на каникулы или интенсив, но на
    образовательные программы не ходил. Из системы его не убираем (он ценный контакт и его надо
@@ -7310,10 +7332,18 @@ function _cliNum(v){ if(v==null||v==="") return null; const n=parseFloat(String(
    Какие филиалы считать «не учебными» — S.altBranches (задаётся галочками); пока не задано —
    определяем по названию филиала из Альфы. */
 const ALT_BRANCH_RE=/каникул|интенсив/i;
+/* Набор «неучебных» филиалов спрашивают на каждого ребёнка и на каждый значок филиала —
+   при 2000 клиентов это тысячи новых Set подряд. Держим готовый, пересобираем при смене настройки. */
+let _altIdsCache=null, _altIdsKey="";
 function _altBranchIds(){
-  if(Array.isArray(S.altBranches)) return new Set(S.altBranches.map(Number));
+  const key=JSON.stringify(S.altBranches||null)+"|"+JSON.stringify(S.alfaBranchNames||null);
+  if(_altIdsCache && _altIdsKey===key) return _altIdsCache;
   const nm=S.alfaBranchNames||{};
-  return new Set(Object.keys(nm).filter(id=>ALT_BRANCH_RE.test(nm[id]||"")).map(Number));
+  _altIdsCache=Array.isArray(S.altBranches)
+    ? new Set(S.altBranches.map(Number))
+    : new Set(Object.keys(nm).filter(id=>ALT_BRANCH_RE.test(nm[id]||"")).map(Number));
+  _altIdsKey=key;
+  return _altIdsCache;
 }
 function _brName(id){ return (S.alfaBranchNames||{})[String(id)]||("филиал "+id); }
 /* ребёнок «только из каникул/интенсивов»: филиалы известны и ВСЕ они из неосновных */
@@ -7416,11 +7446,29 @@ function _clientEnrollStatus(e){
    Ребёнок существует только в занятиях. Чтобы удаление из ПОСЛЕДНЕЙ группы не стирало его из
    системы, осиротевшего кладём в S.waitlist (со всеми полями: телефон/alfaId/ДР/ЭВ). Когда снова
    попадает в группу — убираем из ожидания. Удаление из ожидания спрашивает про архив в Альфе. */
-function _gridHasKid(nk){ if(!nk) return false; return (S.grid||[]).some(l=>kidsOf(l).some(k=>_nameKey(k.n)===nk)); }
+function _gridHasKid(nk){ if(!nk) return false; return _gridNameSet().has(nk); }
+/* Множество имён всех детей в расписании. Раньше каждая проверка обходила ВСЮ сетку заново:
+   при 1000 ожидающих × 1300 детей выходило больше миллиона нормализаций ФИО — «Клиенты»
+   открывались 20+ секунд. Считаем один раз и держим, пока сетка не изменилась. */
+let _gnsCache=null, _gnsStamp=-1;
+function _gridBump(){ _gnsStamp=-1; }        // сетку правили — пересчитать при следующем обращении
+function _gridNameSet(){
+  if(_gnsCache && _gnsStamp===_gridStamp()) return _gnsCache;
+  const s=new Set();
+  (S.grid||[]).forEach(l=>kidsOf(l).forEach(k=>{ const n=_nameKey(k.n); if(n) s.add(n); }));
+  _gnsCache=s; _gnsStamp=_gridStamp();
+  return s;
+}
+/* дешёвая «отметка» состава сетки: число занятий + суммарное число детей */
+function _gridStamp(){
+  let n=0; (S.grid||[]).forEach(l=>{ n+=(l.kids&&l.kids.length)||0; });
+  return (S.grid||[]).length*100000+n;
+}
 function _cleanWaitlist(){   // убрать из ожидания тех, кто снова попал в расписание
   if(!Array.isArray(S.waitlist) || !S.waitlist.length) return false;
+  const inGrid=_gridNameSet();
   const before=S.waitlist.length;
-  S.waitlist=S.waitlist.filter(w=>w&&w.n&&!_gridHasKid(_nameKey(w.n)));
+  S.waitlist=S.waitlist.filter(w=>w&&w.n&&!inGrid.has(_nameKey(w.n)));
   return S.waitlist.length!==before;
 }
 function _reconcileWaitlist(cands){   // кандидаты-осиротевшие: если больше нигде в гриде — в ожидание
@@ -7517,7 +7565,7 @@ function renderClients(){
     const nameEl=`<b class="cli-name" style="cursor:pointer;text-decoration:underline dotted" title="Открыть карточку ребёнка" onclick="event.stopPropagation();event.preventDefault();openKidCardByName('${_jsStr(c.name)}')">${esc(c.name)}</b>${c.dob?` <span style="font-size:11px;color:var(--blue)">· ${esc(_ageStr(c.dob))}</span>`:''}${altTag}`;
     if(c.waiting){   // ребёнок без группы — список ожидания
       const w=c.wl||{};
-      html+=`<details class="client${c.altOnly?" alt":""}">
+      html+=`<details class="client${c.altOnly?" alt":""}" ontoggle="cliFillGroups(this)">
         <summary>${nameEl}<span class="cli-wait">⏳ без группы — список ожидания</span>
           <span class="cli-cols">
             <span class="cc cc-cr" style="color:var(--muted)">—</span>
@@ -7526,7 +7574,7 @@ function renderClients(){
           </span></summary>
         <div class="cli-list" style="padding:8px 10px">
           <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-            <select class="cell wl-sel" style="max-width:280px">${_gridGroupOptsHtml()}</select>
+            <select class="cell wl-sel" data-lazy="1" style="max-width:280px"><option value="">— выбрать группу —</option></select>
             <button class="btn sm" onclick="wlPlace('${_jsStr(c.name)}', this.previousElementSibling.value)" title="Вписать этого ребёнка в выбранную группу">Вписать в группу</button>
             <button class="btn ghost sm" style="margin-left:auto" onclick="wlDelete('${_jsStr(c.name)}')" title="Убрать из системы (спросит про архив в Альфе)">🗑 Убрать</button>
           </div>
@@ -7543,7 +7591,7 @@ function renderClients(){
         <span class="cli-meta">${e.room?'каб. '+esc(e.room)+' · ':''}${esc(shortName(e.teacher))}</span>
         <span class="cli-st">${_clientEnrollStatus(e)}</span>
       </div>`).join("");
-    html+=`<details class="client${c.altOnly?" alt":""}">
+    html+=`<details class="client${c.altOnly?" alt":""}" ontoggle="cliFillGroups(this)">
       <summary>${nameEl}
         <span class="cli-cols">
           <span class="cc cc-cr" title="Курсов/групп">${c.nCourses} курс(ов)</span>
@@ -7552,7 +7600,7 @@ function renderClients(){
         </span></summary>
       <div class="cli-list">${rows}</div>
       <div class="cli-place" title="Вписать этого ребёнка ещё в одну группу — второй курс, параллель, добор">
-        <select class="cell wl-sel" style="max-width:280px">${_gridGroupOptsHtml()}</select>
+        <select class="cell wl-sel" data-lazy="1" style="max-width:280px"><option value="">— выбрать группу —</option></select>
         <button class="btn sm" onclick="cliPlace('${_jsStr(c.name)}', this.previousElementSibling.value)">Вписать в группу</button>
       </div>
     </details>`;
