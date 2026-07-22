@@ -2263,6 +2263,9 @@ const ADMIN_TABS={report:1};     // только для админа, не на�
 function _defaultTabsMap(){ const m={}; MANAGER_DEFAULT_TABS.forEach(function(k){ m[k]=true; }); return m; }
 /* ---- режимы навигации: «Работа» (ежедневное) и «Финмодель» (финансы) ---- */
 const TAB_MODES={grid:"work",groups:"work",clients:"work",price:"work",cards:"work",may:"work",goals:"work",dash:"fin",report:"fin",courses:"fin",real:"fin",planner:"fin",staff:"fin",fixed:"fin",tax:"fin","break":"fin",scenario:"fin",settings:"fin"};
+// вкладки, видимые в ОБОИХ режимах: «О курсах» заполняет Жанна из «Финмодели»,
+// а менеджеры читают в «Работе» — без этого админу приходилось переключать режим
+const TAB_BOTH_MODES={cards:1};
 let _tabAccess=null;   // null = все вкладки (админ / до входа), иначе {tabKey:true}
 let navMode=(function(){ try{ return localStorage.getItem("navMode")||"work"; }catch(e){ return "work"; } })();
 function _tabAllowed(k){ if(ADMIN_TABS[k]) return _fbIsAdmin; return ALWAYS_TABS[k]===1 || !_tabAccess || _tabAccess[k]===true; }
@@ -2274,7 +2277,7 @@ function _updateTabVisibility(){
   TAB_DEFS.forEach(function(t){
     const btn=document.querySelector('.tab[data-t="'+t[0]+'"]');
     if(!btn) return;
-    btn.style.display = (_tabAllowed(t[0]) && TAB_MODES[t[0]]===navMode) ? "" : "none";
+    btn.style.display = (_tabAllowed(t[0]) && (TAB_MODES[t[0]]===navMode || TAB_BOTH_MODES[t[0]])) ? "" : "none";
   });
   // переключатель режимов: активный + прятать, если доступен только один режим
   const box=document.getElementById("navMode");
@@ -2297,7 +2300,7 @@ function setNavMode(m){
 }
 function activateTab(k){
   // программный переход на вкладку с учётом режима (например, из поиска ребёнка)
-  if(TAB_MODES[k] && TAB_MODES[k]!==navMode && _tabAllowed(k)) setNavMode(TAB_MODES[k]);
+  if(TAB_MODES[k] && TAB_MODES[k]!==navMode && !TAB_BOTH_MODES[k] && _tabAllowed(k)) setNavMode(TAB_MODES[k]);
   const btn=document.querySelector('.tab[data-t="'+k+'"]');
   if(btn && btn.style.display!=="none") btn.click();
 }
