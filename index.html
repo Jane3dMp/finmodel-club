@@ -632,6 +632,9 @@ details.client .cli-altmark{font-size:11px;margin-right:2px}
 .cc-sec{margin-bottom:12px}
 .cc-sec-t{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin-bottom:3px}
 .cc-sec-b{font-size:13.5px;line-height:1.55}
+/* рукописные возраст/класс в таблице «Группы» */
+.grp-meta{width:64px;text-align:center;padding:4px 6px;font-size:12px}
+.grp-meta::placeholder{color:#c9c2b8}
 .cli-altbar{display:flex;align-items:center;gap:14px;flex-wrap:wrap;font-size:12px;margin:6px 0 2px}
 .cli-altchk{display:flex;align-items:center;gap:6px;cursor:pointer;user-select:none}
 .cli-brset summary{cursor:pointer;color:var(--muted)}
@@ -1639,7 +1642,7 @@ let _fbSeeding=false;   // true во время стартовой заливк�
 const _LOG_SECTIONS={
   courses:"курсы", planner:"планировщик", staff:"педсостав", wageTable:"справочник ставок ЗП",
   fixed:"постоянные расходы", fixedGroup:"группировка расходов", fixedPct:"процентные расходы",
-  tax:"налоги", assume:"параметры расчёта", mayList:"список майских", groupsDone:"готовность групп",
+  tax:"налоги", assume:"параметры расчёта", mayList:"список майских", groupsDone:"готовность групп", groupMeta:"возраст/класс групп",
   viberTpl:"шаблон Viber", viberTplMay:"шаблон Viber (оплатившим)", viberStart:"дата старта Viber",
   fotTaxable:"налоговая база ФОТ"
 };
@@ -2952,6 +2955,7 @@ function renameCourseEverywhere(oldName,newName){
     delete S.wageTable[oldName];
   }
   if(S.groupsDone){ const nd={}; for(const k in S.groupsDone){ nd[(k===oldName||k.indexOf(oldName+"||")===0)?(newName+k.slice(oldName.length)):k]=S.groupsDone[k]; } S.groupsDone=nd; }
+  if(S.groupMeta){ const nm={}; for(const k in S.groupMeta){ nm[(k===oldName||k.indexOf(oldName+"||")===0)?(newName+k.slice(oldName.length)):k]=S.groupMeta[k]; } S.groupMeta=nm; }   // возраст/класс групп едут вместе с курсом
   (S.mayList||[]).forEach(r=>{ if(r.courseManual===oldName) r.courseManual=newName; });
   persistLocal(); if(typeof fbSchedulePush==="function") fbSchedulePush();
   if(typeof renderAll==="function") renderAll();
@@ -7072,6 +7076,16 @@ let _groupsQuery="", _groupsSort={col:"course",dir:1}, _groupsHideDone=false, _g
 function grpRerenderKeepFocus(){ renderGroups(); const el=document.getElementById("grpQ"); if(el){ const v=el.value; el.focus(); el.value=""; el.value=v; } }
 function grpSort(col){ if(_groupsSort.col===col) _groupsSort.dir*=-1; else _groupsSort={col,dir:1}; renderGroups(); }
 function grpToggleDone(i){ const g=_groupsShown[i]; if(!g) return; if(!S.groupsDone) S.groupsDone={}; if(S.groupsDone[g.key]) delete S.groupsDone[g.key]; else S.groupsDone[g.key]=1; persistLocal(); renderGroups(); }
+/* возраст/класс группы — рукописные, хранятся по ключу группы (как groupsDone), синхронизируются.
+   Без rerender: значение уже в поле, а перерисовка выбивала бы фокус при заполнении подряд */
+function setGroupMeta(key,f,v){
+  if(!S.groupMeta) S.groupMeta={};
+  const m=S.groupMeta[key]||(S.groupMeta[key]={});
+  v=String(v||"").trim();
+  if(v) m[f]=v; else delete m[f];
+  if(!Object.keys(m).length) delete S.groupMeta[key];
+  persistLocal(); if(typeof fbSchedulePush==="function") fbSchedulePush();
+}
 function _grpTh(col,lab,align){ const a=_groupsSort.col===col?(_groupsSort.dir>0?" ▲":" ▼"):""; return `<th style="text-align:${align};cursor:pointer;user-select:none;white-space:nowrap" onclick="grpSort('${col}')" title="Сортировать">${lab}${a}</th>`; }
 function renderGroups(){
   const box=document.getElementById("groupsBody"); if(!box) return;
@@ -7088,6 +7102,7 @@ function renderGroups(){
   });
   const groups=order.map(k=>{ const g=map[k];
     g.key=k; g.done=!!(S.groupsDone||{})[k];
+    const gm=(S.groupMeta||{})[k]||{}; g.age=gm.age||""; g.klass=gm.klass||"";   // рукописные возраст/класс группы
     const names=new Set(), paid=new Set();
     g.idxs.forEach(i=>kidsOf(S.grid[i]).forEach(kd=>{ const n=_nameKey(kd.n); if(!n) return; names.add(n); if(kd.may) paid.add(n); }));   // тёзки = разные дети
     g.kids=names.size; g.paid=paid.size;
@@ -7101,7 +7116,7 @@ function renderGroups(){
     g.name=g.group || ([...g.teachers][0]?shortName([...g.teachers][0]):"без номера");
     return g;
   });
-  const _gsVal={name:g=>g.name,course:g=>g.course,teacher:g=>g.teacherText,sched:g=>g.schedKey,room:g=>g.roomText,kids:g=>g.kids,paid:g=>g.paid};
+  const _gsVal={name:g=>g.name,age:g=>g.age,klass:g=>g.klass,course:g=>g.course,teacher:g=>g.teacherText,sched:g=>g.schedKey,room:g=>g.roomText,kids:g=>g.kids,paid:g=>g.paid};
   const _gsNum={sched:1,kids:1,paid:1};
   const _gv=_gsVal[_groupsSort.col]||_gsVal.course;
   groups.sort((a,b)=>{
@@ -7126,12 +7141,14 @@ function renderGroups(){
       <span class="hd-grp"><button class="btn sm" onclick="openAddKid()" title="Создать нового ребёнка и вписать в группу">➕ Новый ребёнок</button></span>
     </div>
     <div class="tscroll"><table id="groupsTable"><thead><tr>
-      <th style="width:30px" title="Закреп (готово)">📌</th>${_grpTh("name","Группа","left")}${_grpTh("kids","Детей","center")}${_grpTh("paid","💰","center")}${_grpTh("course","Курс","left")}${_grpTh("teacher","Педагог","left")}${_grpTh("sched","Расписание","left")}${_grpTh("room","Каб.","center")}<th></th>
+      <th style="width:30px" title="Закреп (готово)">📌</th>${_grpTh("name","Группа","left")}${_grpTh("age","Возраст","center")}${_grpTh("klass","Класс","center")}${_grpTh("kids","Детей","center")}${_grpTh("paid","💰","center")}${_grpTh("course","Курс","left")}${_grpTh("teacher","Педагог","left")}${_grpTh("sched","Расписание","left")}${_grpTh("room","Каб.","center")}<th></th>
     </tr></thead><tbody>`;
   shown.forEach((g,i)=>{
     html+=`<tr class="${g.done?'grp-done':''}">
       <td style="text-align:center"><span class="grp-pin${g.done?' on':''}" title="${g.done?'Готова — снять закреп':'Отметить готовой (закрепить)'}" onclick="grpToggleDone(${i})">📌</span></td>
       <td style="text-align:left"><span class="grp-name" title="Открыть карточку занятия" onclick="${g.firstId?`editLes(_lesIdx('${esc(g.firstId)}'))`:`editLes(${g.firstIdx})`}"><b>${esc(g.name)}</b></span>${g.newIntake?' <span class="ni-tag" title="Группа с новым набором">NEW</span>':''}</td>
+      <td style="text-align:center"><input class="cell grp-meta" value="${esc(g.age)}" placeholder="—" title="Возраст группы — впишите вручную (напр. 7–9)" onchange="setGroupMeta('${_jsStr(g.key)}','age',this.value)"></td>
+      <td style="text-align:center"><input class="cell grp-meta" value="${esc(g.klass)}" placeholder="—" title="Класс — впишите вручную (напр. 1–3)" onchange="setGroupMeta('${_jsStr(g.key)}','klass',this.value)"></td>
       <td style="text-align:center">${g.kids}${g.cap?(" / "+g.cap):""}</td>
       <td style="text-align:center">${g.paid?('<b style="color:var(--green)">'+g.paid+'</b>'):'0'}</td>
       <td style="text-align:left">${esc(g.course)}</td>
@@ -7141,7 +7158,7 @@ function renderGroups(){
       <td style="text-align:center"><button class="btn ghost sm" onclick="${g.firstId?`gotoKidLessonId('${esc(g.firstId)}')`:`gotoKidLesson(${g.firstIdx})`}" title="Открыть группу в сетке">→</button></td>
     </tr>`;
   });
-  if(!shown.length) html+=`<tr><td colspan="9" style="padding:12px;color:var(--muted)">${_groupsHideDone&&doneCount?'Все группы под фильтром закреплены (готовы). Нажмите «Показать готовые».':'Групп не найдено.'}</td></tr>`;
+  if(!shown.length) html+=`<tr><td colspan="11" style="padding:12px;color:var(--muted)">${_groupsHideDone&&doneCount?'Все группы под фильтром закреплены (готовы). Нажмите «Показать готовые».':'Групп не найдено.'}</td></tr>`;
   html+=`</tbody></table></div>`;
   box.innerHTML=html;
 }
