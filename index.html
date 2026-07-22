@@ -7628,16 +7628,33 @@ function _amoPhone(l){
   return "";
 }
 function _amoBuildCands(){
-  // кто уже есть у нас — в расписании или в ожидании (тёзок не сливаем: сравниваем полное ФИО)
-  const have=new Set();
-  (S.grid||[]).forEach(l=>kidsOf(l).forEach(k=>{ const n=_nameKey(k.n); if(n) have.add(n); }));
-  (S.waitlist||[]).forEach(w=>{ const n=_nameKey(w.n); if(n) have.add(n); });
+  // Кто уже есть у нас — раздельно расписание и ожидание (тёзок не сливаем: полное ФИО).
+  // У каждой «разобранной» сделки запоминаем ПРИЧИНУ — иначе «на этапе 2 · распределить 0»
+  // выглядит нестыковкой, и проверить её можно только раскопками.
+  const inGrid=new Set(), inWait=new Set();
+  (S.grid||[]).forEach(l=>kidsOf(l).forEach(k=>{ const n=_nameKey(k.n); if(n) inGrid.add(n); }));
+  (S.waitlist||[]).forEach(w=>{ const n=_nameKey(w.n); if(n) inWait.add(n); });
   const haveAmo=new Set((S.waitlist||[]).map(w=>w&&w.amoLeadId).filter(x=>x!=null).map(String));
+  const seen=_amoWatch().seen||{};
   _amoCands=_amoLeads.map(l=>{
-    const nm=_amoKidName(l);
+    const nm=_amoKidName(l), key=nm?_nameKey(nm):"";
+    const sn=seen[String(l.id)];
+    let why="";
+    if(sn) why=(sn.how==="group"?"вписан(а) в группу отсюда":sn.how==="wait"?"отправлен(а) в ожидание отсюда":"скрыт(а) вручную");
+    else if(key && inGrid.has(key)) why="уже в расписании";
+    else if(haveAmo.has(String(l.id)) || (key && inWait.has(key))) why="уже в списке ожидания";
+    // сделка БЕЗ ФИО — не «разобрана»: остаётся в списке с пустым полем имени (впишут руками)
     return {lead:l, name:nm, phone:_amoPhone(l), dob:_amoDob(l), stage:_amoStageName(l.status_id),
-            dup: !nm || have.has(_nameKey(nm)) || haveAmo.has(String(l.id))};
+            why:why, canReturn:!!sn, dup:!!why};
   });
+}
+/* вернуть скрытую/обработанную сделку обратно в список «распределить» */
+function amoUnseen(leadId){
+  const w=_amoWatch(); delete w.seen[String(leadId)];
+  S.amoWatch=Object.assign({}, S.amoWatch||{}, {seen:w.seen});
+  persistLocal(); if(typeof fbSchedulePush==="function") fbSchedulePush();
+  _amoBuildCands(); _amoRenderCands();
+  _amoBadgeN=_amoCands.filter(c=>!c.dup).length; _amoUpdateBadge();
 }
 function _amoStageName(sid){
   for(const p of _amoPipes){ const s=(p.statuses||[]).find(x=>+x.id===+sid); if(s) return s.name; }
@@ -7677,8 +7694,8 @@ function _amoGuessGroup(leadName){
 }
 function _amoRenderCands(){
   const out=document.getElementById("amoOut"); if(!out) return;
-  const w=_amoWatch();
-  const fresh=_amoCands.filter(c=>!c.dup && !w.seen[String(c.lead.id)]), done=_amoCands.length-fresh.length;
+  const fresh=_amoCands.filter(c=>!c.dup), done=_amoCands.filter(c=>c.dup);
+  const noName=fresh.filter(c=>!c.name).length;
   const fo=_amoFieldOpts();
   const opt=(v,lab)=>`<option value="${esc(v)}"${String(_amoNameSrc)===v?" selected":""}>${esc(lab)}</option>`;
   const srcSel=`<select class="cell" style="width:auto;font-size:12px" onchange="amoSetNameSrc(this.value)" title="Где в amo лежит ФИО ребёнка">
@@ -7688,7 +7705,16 @@ function _amoRenderCands(){
     </select>`;
   _amoFresh=fresh;
   out.innerHTML=`
-    <div class="callout" style="margin-bottom:8px">На этапе: <b>${_amoLeads.length}</b> · нужно распределить: <b style="color:${fresh.length?'var(--red)':'var(--green)'}">${fresh.length}</b>${done?` · уже разобрано: ${done}`:''}</div>
+    <div class="callout" style="margin-bottom:8px">На этапе: <b>${_amoLeads.length}</b> · нужно распределить: <b style="color:${fresh.length?'var(--red)':'var(--green)'}">${fresh.length}</b>${noName?` <span style="color:var(--muted)">(из них без ФИО: ${noName} — впишите имя)</span>`:''}${done.length?` · разобрано: ${done.length}`:''}</div>
+    ${done.length?`<details class="amo-done" style="margin:0 0 8px"><summary style="cursor:pointer;font-size:12px;color:var(--muted)">Почему ${done.length} не в списке — показать</summary>
+      <div style="border:1px solid var(--line);border-radius:8px;padding:6px 10px;margin-top:6px;max-height:30vh;overflow:auto">
+      ${done.map(c=>`<div style="display:flex;align-items:center;gap:8px;padding:4px 0;border-bottom:1px solid #f0ebe4;font-size:12px">
+        <span style="flex:1"><b>${esc(c.name||c.lead.name||("#"+c.lead.id))}</b>
+          <span style="color:var(--muted)"> · ${esc(c.why)}</span>
+          <span style="color:var(--muted);display:block;font-size:11px">сделка: ${esc(c.lead.name||("#"+c.lead.id))}</span></span>
+        ${c.canReturn?`<button class="btn ghost sm" onclick="amoUnseen(${c.lead.id})" title="Вернуть сделку в список «распределить»">↩ Вернуть</button>`:''}
+      </div>`).join("")}
+      </div></details>`:''}
     <div class="amo-srcbar">
       <span style="color:var(--muted)">ФИО ребёнка брать из:</span>${srcSel}
       <span style="color:var(--muted);font-size:11px">выбор запоминается</span>
@@ -7907,7 +7933,7 @@ async function _amoCheck(silent){
     _amoPipeId=w.pipelineId; _amoStatusIds=w.statusIds.slice();
     _amoNameSrc=w.nameSrc; _amoNameField=w.nameField;
     _amoBuildCands();
-    _amoBadgeN=_amoCands.filter(c=>!c.dup && !w.seen[String(c.lead.id)]).length;
+    _amoBadgeN=_amoCands.filter(c=>!c.dup).length;   // «разобранность» уже учтена внутри dup
     _amoUpdateBadge();
     if(!silent) _amoRenderCands();
     if(S.amoAutoFix) _amoAutoFixRun();          // заодно тихо чиним имена в Альфе
