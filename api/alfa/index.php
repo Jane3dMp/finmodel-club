@@ -73,6 +73,8 @@ switch ($action) {
                             'phones'   => array_values(array_filter(array_map('strval', (array)$phones))),
                             'is_study' => (int)($c['is_study'] ?? 0),
                             'dob'      => $c['dob'] ?? null,
+                            // «Заказчик» в Alfa — это родитель; нужен для обращения в сообщениях
+                            'parent'   => $c['legal_name'] ?? null,
                             'balance'  => $c['balance'] ?? null,   // активный баланс (остаток по счёту клиента)
                             // дата создания клиента (для «подтянуть новых») — берём первый непустой кандидат
                             'created'  => $c['dt_add'] ?? ($c['created_at'] ?? ($c['b_date'] ?? ($c['added'] ?? null))),
@@ -236,6 +238,7 @@ switch ($action) {
         $summary = [
             'name'        => $c0['name'] ?? '',
             'dob'         => $c0['dob'] ?? null,
+            'parent'      => $c0['legal_name'] ?? null,   // «Заказчик» = родитель
             'phones'      => array_values(array_filter(array_map('strval', (array)$ph0))),
             'balance'     => $c0['balance'] ?? null,
             'last_attend' => $c0['last_attend_date'] ?? null,

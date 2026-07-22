@@ -1339,7 +1339,7 @@ details.client .cli-cols .cc-bal{width:74px;font-weight:600}
   <p style="font-size:12px;color:var(--muted);margin:0 0 8px;line-height:1.5">
    Система сама шлёт нужный текст: детям с 💰 (майский куплен) — «Оплатившим», остальным — «Обычное».
    «💳 Путь оплаты» уходит отдельной кнопкой у ребёнка.<br>
-   <b>В «пути оплаты»:</b> <code>{родитель}</code> <code>{лн}</code> <code title="Сумма из курса">{сумма}</code>
+   <b>В «пути оплаты»:</b> <code title="Только имя: из «Заказчика» в Альфе берём второе слово — «Половикова Екатерина Сергеевна» → «Екатерина»">{родитель}</code> <code title="Родитель полностью, как в Альфе">{родительфио}</code> <code>{лн}</code> <code title="Сумма из курса">{сумма}</code>
    <code>{код}</code> <code>{срок}</code> <code>{менеджер}</code> <code title="день недели строчными: воскресенье">{деньнеделя}</code>
    <code title="Дата первого занятия без дня недели: «6 сентября 2026»">{стартдата}</code> <code title="Короткое имя: Прознание / CODDY / Детали">{бренд2}</code><br>
    <b>Данные:</b> <code>{имя}</code> <code>{фио}</code> <code>{группа}</code>
@@ -1524,7 +1524,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-07-22-06";
+const APP_VER="2026-07-22-07";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -6318,6 +6318,19 @@ function _parentName(k){
   const rec=(k&&k.alfaId!=null)?_childRec(k.alfaId,false):null;
   return String((rec&&rec.parentName)||k.parentName||"").trim();
 }
+/* Обращение к родителю. В Альфе «Заказчик» записан полностью («Половикова Екатерина Сергеевна»),
+   а в сообщении нужно только имя — берём второе слово, как в русском ФИО. Если слово одно
+   («Людмила»), его и используем. */
+function _parentFirst(k){
+  const w=_parentName(k).split(/\s+/).filter(Boolean);
+  if(!w.length) return "";
+  if(w.length===1) return w[0];
+  // Второе слово — имя только в настоящем ФИО (3 слова) или когда третьего нет, но первое
+  // похоже на фамилию (-ов/-ова/-ский/-ич…). Иначе это заметка вроде «Мама Оля» — берём последнее.
+  const surname=/(ов|ова|ев|ева|ин|ина|ский|ская|цкий|цкая|ич|юк|ук|ко|енко|швили|ян|дзе)$/i;
+  if(w.length>=3) return w[1];
+  return surname.test(w[0])?w[1]:w[w.length-1];
+}
 /* сумма к оплате: своя у курса (payAmount), иначе абонемент, иначе цена × визитов × 4 недели */
 function _payAmount(course){
   const c=(S.courses||[]).find(x=>x.name===course);
@@ -6338,7 +6351,8 @@ function _buildPayMsg(k,les,tpl){
   const startShort=startFull.split(",")[0];
   const eco=_courseEco(les.course);
   return tpl
-    .replace(/\{родитель\}/g,  _parentName(k)||"…")
+    .replace(/\{родительфио\}/g, _parentName(k)||"…")
+    .replace(/\{родитель\}/g,  _parentFirst(k)||"…")
     .replace(/\{менеджер\}/g,  (S.payManager||PAY_MANAGER_DEFAULT))
     .replace(/\{бренд2\}/g,    eco||"Прознание")     // короткое имя: «Прознание», «CODDY»
     .replace(/\{стартдата\}/g, startShort)
@@ -6367,7 +6381,7 @@ async function kidPay(i){
   // без личного номера платёж не пройдёт — предупреждаем до отправки
   const miss=[];
   if(k.alfaId==null||k.alfaId==="") miss.push("личный номер (связь с Альфой)");
-  if(!_parentName(k)) miss.push("имя родителя (карточка 🪪)");
+  if(!_parentName(k)) miss.push("имя родителя (кнопка «💰 Балансы и возраст» на «Клиентах» или карточка 🪪)");
   if(!_payAmount(les.course)) miss.push("сумма (поле «Оплата ЕРИП» у курса)");
   if(miss.length && !confirm("Не хватает данных:\n• "+miss.join("\n• ")+"\n\nВ тексте на их месте будет «…».\nВсё равно открыть Viber?")) return;
   const msg=_buildPayMsg(k,les);
@@ -6529,6 +6543,11 @@ async function openKidCard(alfaId,name,kid){
     const cid=j.customerId||alfaId;
     if(cid){ link.href=ALFA_HOST_URL+"/company/"+(j.branch||1)+"/customer/view?id="+cid; link.style.display=""; }
     if(cid){ if(_kidCardRef) _kidCardRef.alfaId=cid; if(kid && !kid.alfaId){ kid.alfaId=cid; persistLocal(); } }   // нашли по имени — запомним связь (для хранения по ID)
+    // «Заказчик» из Альфы → поле «Родитель», если оно ещё пустое (карточка покажет уже заполненным)
+    if(cid && j.summary && j.summary.parent){
+      const rec=_childRec(cid,true);
+      if(rec && !String(rec.parentName||"").trim()){ rec.parentName=String(j.summary.parent).trim(); persistLocal(); }
+    }
     // раз уж Альфа ответила — запомним свежий баланс (в т.ч. для детей из списка ожидания)
     if(j.summary && j.summary.balance!=null && _rememberAlfaBalance(cid, name, j.summary.balance)){
       persistLocal(); if(typeof fbSchedulePush==="function") fbSchedulePush();
@@ -6639,6 +6658,11 @@ async function kidAlfaUpdate(i){
     if(!kk){ toast("Строка ребёнка изменилась — повторите ⟳"); return; }
     if(s.dob) kk.dob=_dobIso(s.dob);
     if(j.customerId) kk.alfaId=j.customerId;
+    // «Заказчик» из Альфы → имя родителя (для «💳 Путь оплаты»); своё введённое не перетираем
+    if(s.parent && j.customerId){
+      const rec=_childRec(j.customerId,true);
+      if(rec && !String(rec.parentName||"").trim()) rec.parentName=String(s.parent).trim();
+    }
     // телефон родителя — вручную его нигде не вводят, приходит только из Альфы → обновляем
     const ph=(s.phones||[]).find(p=>String(p).replace(/\D/g,"").length>=6)||"";
     if(ph) kk.phone=ph;
@@ -7908,7 +7932,7 @@ async function pullBalances(){
     const bySurname=new Map();
     list.forEach(c=>{ const s=(_nameWords(c.name)[0]||""); if(!s) return;   // нормализованная фамилия (ё→е, латиница-двойники)
       if(!bySurname.has(s)) bySurname.set(s,[]); bySurname.get(s).push(c); });
-    let byIdN=0, byNameN=0, ambig=0, miss=0, dobN=0;
+    let byIdN=0, byNameN=0, ambig=0, miss=0, dobN=0, parN=0;
     const apply=k=>{
       if(!k||!k.n) return;
       let c=(k.alfaId!=null&&k.alfaId!=="")?byId.get(String(k.alfaId)):null;
@@ -7923,6 +7947,11 @@ async function pullBalances(){
       if(c && c.balance!=null && c.balance!=="") k.alfaBalance=c.balance;
       if(c && Array.isArray(c.branch_ids)) k.alfaBr=c.branch_ids.map(Number);   // филиалы (каникулы/интенсивы ≠ учебный год)
       if(c && c.dob && !k.dob){ k.dob=_dobIso(c.dob); dobN++; }                          // заодно возраст — выгрузка та же
+      // «Заказчик» из Альфы → имя родителя (нужно для «💳 Путь оплаты»); своё введённое не трогаем
+      if(c && c.parent && k.alfaId!=null && k.alfaId!==""){
+        const rec=_childRec(k.alfaId,true);
+        if(rec && !String(rec.parentName||"").trim()){ rec.parentName=String(c.parent).trim(); parN++; }
+      }
     };
     (S.grid||[]).forEach(l=>kidsOf(l).forEach(apply));
     (Array.isArray(S.waitlist)?S.waitlist:[]).forEach(apply);
@@ -7931,7 +7960,7 @@ async function pullBalances(){
     persistLocal(); if(typeof fbSchedulePush==="function") fbSchedulePush();
     renderClients();
     toast("Балансы, филиалы и возраст обновлены: по связи "+byIdN+", по ФИО "+byNameN
-      +(dobN?(" · 🎂 возраст +"+dobN):"")
+      +(dobN?(" · 🎂 возраст +"+dobN):"")+(parN?(" · 👪 родителей +"+parN):"")
       +(ambig?(" · тёзки (пропущены) "+ambig):"")+(miss?(" · нет в Альфе "+miss):""));
   }catch(e){ toast("Не удалось обновить балансы: "+((e&&e.message)||e)); }
   if(btn){ btn.disabled=false; btn.textContent="💰 Балансы и возраст"; }
