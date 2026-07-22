@@ -6471,21 +6471,26 @@ async function kidsPullAges(){
     // и ребёнок получал чужую дату рождения.
     const byId=new Map(); cust.forEach(c=>{ if(c.id!=null) byId.set(String(c.id),c); });
     const bySurname=new Map();
-    cust.forEach(c=>{ const s=(String(c.name).trim().split(/\s+/)[0]||"").toLowerCase(); if(!s) return;
+    cust.forEach(c=>{ const s=(_nameWords(c.name)[0]||""); if(!s) return;   // нормализованная фамилия (ё→е, латиница-двойники)
       if(!bySurname.has(s)) bySurname.set(s,[]); bySurname.get(s).push(c); });
     _kidsFromDOM();   // пока шёл запрос, пользователь мог править ФИО/поля — берём свежий снимок, иначе ререндер их сотрёт
-    let nAge=0, byIdN=0, byNameN=0, ambig=0, nMiss=0;
+    let nAge=0, byIdN=0, byNameN=0;
+    const rep={noDob:[], ambig:[], miss:[]};              // разбор по детям — числа в тосте не объясняли, КОГО добивать руками
     _editKids.forEach(k=>{ if(!k.n) return;
       let c=(k.alfaId!=null&&k.alfaId!=="")?byId.get(String(k.alfaId)):null;
       if(c) byIdN++;
       else{
-        const s=(String(k.n).trim().split(/\s+/)[0]||"").toLowerCase();
+        const s=(_nameWords(k.n)[0]||"");
         const cand=(bySurname.get(s)||[]).filter(x=>_sameKid(x.name,k.n));
         if(cand.length===1){ c=cand[0]; byNameN++; }
-        else if(cand.length>1){ ambig++; return; }        // тёзки — не рискуем чужой датой
-        else { if(!k.dob) nMiss++; return; }
+        else if(cand.length>1){ rep.ambig.push({n:k.n, cand:cand.map(x=>x.name)}); return; }   // тёзки — не рискуем чужой датой
+        else {
+          if(!k.dob){ const near=(bySurname.get(s)||[]).map(x=>x.name).slice(0,3); rep.miss.push({n:k.n, near:near}); }
+          return;
+        }
       }
       if(c.dob && !k.dob){ k.dob=c.dob; nAge++; }
+      else if(!c.dob && !k.dob) rep.noDob.push({n:k.n});   // ребёнок найден, но в Альфе не заполнена дата рождения
       if(c.id!=null && (k.alfaId==null||k.alfaId==="")) k.alfaId=c.id;
       if(c.phones && c.phones[0] && !k.phone) k.phone=c.phones[0];
     });
@@ -6493,8 +6498,18 @@ async function kidsPullAges(){
     if(S.grid[idx]) S.grid[idx].kids=_editKids.filter(x=>x.n);
     persistLocal(); _flushCardEdit();
     renderKidsEditor();
-    toast("Возраст подтянут: +"+nAge+" (по связи "+byIdN+", по имени "+byNameN+")"
-      +(ambig?(" · тёзки (пропущены) "+ambig):"")+(nMiss?(" · не найдено: "+nMiss):""));
+    toast("Возраст подтянут: +"+nAge+" (по связи "+byIdN+", по имени "+byNameN+")");
+    // отчёт под таблицей: кого не нашли и почему (с подсказкой, как ребёнок записан в Альфе)
+    const box=document.getElementById("kidsBox");
+    if(box && (rep.noDob.length||rep.ambig.length||rep.miss.length)){
+      const sec=(title,items,fmtRow)=>items.length?`<div style="margin-top:6px"><b>${title} (${items.length}):</b> ${items.map(fmtRow).join("; ")}</div>`:"";
+      box.insertAdjacentHTML("beforeend",
+        `<div class="callout" style="margin-top:8px;font-size:12px;line-height:1.5">
+          ${sec("В Альфе нет даты рождения", rep.noDob, x=>esc(x.n))}
+          ${sec("Тёзки в Альфе — выберите вручную (⟳ у ребёнка)", rep.ambig, x=>esc(x.n)+" <span style='color:var(--muted)'>(в Альфе: "+x.cand.map(esc).join(" / ")+")</span>")}
+          ${sec("Не найдены в Альфе", rep.miss, x=>esc(x.n)+(x.near.length?" <span style='color:var(--muted)'>(похожие: "+x.near.map(esc).join(" / ")+")</span>":""))}
+        </div>`);
+    }
   }catch(e){ toast("Не удалось: "+((e&&e.message)||e)); }
   const b2=document.getElementById("kidsPullAgesBtn"); if(b2){ b2.disabled=false; b2.textContent="🎂 Возраст всем"; }
 }
@@ -7593,7 +7608,7 @@ async function pullBalances(){
     const byId=new Map(); list.forEach(c=>{ if(c.id!=null) byId.set(String(c.id),c); });
     // индекс по фамилии — чтобы не сравнивать каждого с каждым
     const bySurname=new Map();
-    list.forEach(c=>{ const s=(String(c.name).trim().split(/\s+/)[0]||"").toLowerCase(); if(!s) return;
+    list.forEach(c=>{ const s=(_nameWords(c.name)[0]||""); if(!s) return;   // нормализованная фамилия (ё→е, латиница-двойники)
       if(!bySurname.has(s)) bySurname.set(s,[]); bySurname.get(s).push(c); });
     let byIdN=0, byNameN=0, ambig=0, miss=0, dobN=0;
     const apply=k=>{
@@ -7601,7 +7616,7 @@ async function pullBalances(){
       let c=(k.alfaId!=null&&k.alfaId!=="")?byId.get(String(k.alfaId)):null;
       if(c) byIdN++;
       else{
-        const s=(String(k.n).trim().split(/\s+/)[0]||"").toLowerCase();
+        const s=(_nameWords(k.n)[0]||"");
         const cand=(bySurname.get(s)||[]).filter(x=>_sameKid(x.name,k.n));
         if(cand.length===1){ c=cand[0]; byNameN++; if(k.alfaId==null||k.alfaId==="") k.alfaId=c.id; }
         else if(cand.length>1){ ambig++; }
