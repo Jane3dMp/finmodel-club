@@ -618,6 +618,20 @@ details.client .cli-altmark{font-size:11px;margin-right:2px}
 .amo-h{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;font-size:13px}
 .amo-m{font-size:11px;color:var(--muted);line-height:1.4}
 .amo-act{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:6px}
+/* «О курсах» — карточки-шпаргалки */
+.cc-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(215px,1fr));gap:12px}
+.cc-card{background:#fff;border:1px solid var(--line);border-top:4px solid var(--line);border-radius:14px;
+  padding:12px 14px;cursor:pointer;transition:box-shadow .15s,transform .15s;display:flex;flex-direction:column;gap:4px}
+.cc-card:hover{box-shadow:0 4px 16px rgba(28,20,16,.10);transform:translateY(-1px)}
+.cc-card.empty{opacity:.72}
+.cc-eco{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em}
+.cc-name{font-size:14px;font-weight:700;line-height:1.3}
+.cc-who{font-size:12px;color:var(--text);line-height:1.4;flex:1}
+.cc-foot{display:flex;align-items:center;justify-content:space-between;font-size:11px;color:var(--muted);margin-top:4px}
+.cc-ok{background:#E7F0E4;color:#3B7A57;border-radius:10px;padding:1px 7px;font-weight:700}
+.cc-sec{margin-bottom:12px}
+.cc-sec-t{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin-bottom:3px}
+.cc-sec-b{font-size:13.5px;line-height:1.55}
 .cli-altbar{display:flex;align-items:center;gap:14px;flex-wrap:wrap;font-size:12px;margin:6px 0 2px}
 .cli-altchk{display:flex;align-items:center;gap:6px;cursor:pointer;user-select:none}
 .cli-brset summary{cursor:pointer;color:var(--muted)}
@@ -696,6 +710,7 @@ details.client .cli-cols .cc-bal{width:74px;font-weight:600}
  <button class="tab" data-t="groups">Группы</button>
  <button class="tab" data-t="clients">Клиенты</button>
  <button class="tab" data-t="price"><i data-ic="price"></i>Прайс</button>
+ <button class="tab" data-t="cards"><i data-ic="idcard"></i>О курсах</button>
  <button class="tab" data-t="may"><i data-ic="may"></i>Майский</button>
  <button class="tab" data-t="staff">Педсостав и ФОТ</button>
  <button class="tab" data-t="fixed">Постоянные расходы</button>
@@ -807,6 +822,32 @@ details.client .cli-cols .cc-bal{width:74px;font-weight:600}
  </div>
  <div class="tscroll"><table id="priceTable"></table></div>
 </section>
+
+<!-- ===== О КУРСАХ (карточки для менеджеров) ===== -->
+<section class="panel" id="cards">
+ <h2 class="sec">О курсах</h2>
+ <div class="sec-desc" id="cardsDesc">Шпаргалка для разговора с родителем: нажмите на курс — для кого он, что внутри и что даёт ребёнку.</div>
+ <div class="hd-actions" style="gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px">
+  <input id="cardsQ" class="cell" style="width:210px;text-align:left" placeholder="Поиск по названию курса…" oninput="_cardsQ=this.value;renderCards()">
+  <span id="cardsEcoBtns"></span>
+  <span id="cardsCount" style="font-size:12px;color:var(--muted);margin-left:auto"></span>
+ </div>
+ <div id="cardsBody" class="cc-grid"></div>
+</section>
+
+<!-- модалка карточки курса: менеджеру — просмотр, админу — редактирование -->
+<div class="modal-bg" id="courseCardModal">
+ <div class="modal" style="max-width:640px">
+  <div style="display:flex;align-items:flex-start;gap:10px;margin-bottom:2px">
+   <div>
+    <h3 id="ccTitle" style="margin:0 0 2px"></h3>
+    <div id="ccMeta" style="font-size:12px;color:var(--muted)"></div>
+   </div>
+   <button class="btn ghost sm" style="margin-left:auto" onclick="closeCourseCard()">Закрыть</button>
+  </div>
+  <div id="ccBody" style="margin-top:10px"></div>
+ </div>
+</div>
 
 <!-- ===== ПЛАНИРОВЩИК ===== -->
 <section class="panel" id="planner">
@@ -2215,13 +2256,13 @@ function fbStart(){
   });
 }
 /* ---- вкладки по ролям ---- */
-const TAB_DEFS=[["dash","Дашборд"],["report","Отчёт по набору"],["courses","Курсы и маржа"],["real","Реальный оборот"],["planner","Планировщик загрузки"],["goals","Набор"],["grid","Расписание (сетка)"],["groups","Группы"],["clients","Клиенты"],["price","Прайс"],["may","Майский"],["staff","Педсостав и ФОТ"],["fixed","Постоянные расходы"],["tax","Налоги РБ и ФОТ"],["break","Точка безубыточности"],["scenario","Сценарии"],["settings","Параметры"]];
+const TAB_DEFS=[["dash","Дашборд"],["report","Отчёт по набору"],["courses","Курсы и маржа"],["real","Реальный оборот"],["planner","Планировщик загрузки"],["goals","Набор"],["grid","Расписание (сетка)"],["groups","Группы"],["clients","Клиенты"],["price","Прайс"],["cards","О курсах"],["may","Майский"],["staff","Педсостав и ФОТ"],["fixed","Постоянные расходы"],["tax","Налоги РБ и ФОТ"],["break","Точка безубыточности"],["scenario","Сценарии"],["settings","Параметры"]];
 const MANAGER_DEFAULT_TABS=["grid","groups","clients","may","goals"];
-const ALWAYS_TABS={clients:1,price:1,goals:1};   // видны всем ролям, даже если не отмечены в доступах
+const ALWAYS_TABS={clients:1,price:1,goals:1,cards:1};   // видны всем ролям, даже если не отмечены в доступах
 const ADMIN_TABS={report:1};     // только для админа, не назначаются менеджерам
 function _defaultTabsMap(){ const m={}; MANAGER_DEFAULT_TABS.forEach(function(k){ m[k]=true; }); return m; }
 /* ---- режимы навигации: «Работа» (ежедневное) и «Финмодель» (финансы) ---- */
-const TAB_MODES={grid:"work",groups:"work",clients:"work",price:"work",may:"work",goals:"work",dash:"fin",report:"fin",courses:"fin",real:"fin",planner:"fin",staff:"fin",fixed:"fin",tax:"fin","break":"fin",scenario:"fin",settings:"fin"};
+const TAB_MODES={grid:"work",groups:"work",clients:"work",price:"work",cards:"work",may:"work",goals:"work",dash:"fin",report:"fin",courses:"fin",real:"fin",planner:"fin",staff:"fin",fixed:"fin",tax:"fin","break":"fin",scenario:"fin",settings:"fin"};
 let _tabAccess=null;   // null = все вкладки (админ / до входа), иначе {tabKey:true}
 let navMode=(function(){ try{ return localStorage.getItem("navMode")||"work"; }catch(e){ return "work"; } })();
 function _tabAllowed(k){ if(ADMIN_TABS[k]) return _fbIsAdmin; return ALWAYS_TABS[k]===1 || !_tabAccess || _tabAccess[k]===true; }
@@ -3294,6 +3335,78 @@ function _priceRows(){
     return r*d;
   });
   return rows;
+}
+/* ===== «О КУРСАХ» — карточки-шпаргалки для менеджеров =====
+   Текст живёт прямо в объекте курса (c.cardWho / c.cardAbout / c.cardValue): переживает
+   переименование и уезжает в Firebase вместе с курсами. Заполняет админ в этой же модалке,
+   менеджеры видят только текст. */
+const CARD_ECO_COLORS={"Прознание":"#A49E93","CODDY":"#1F5BC0","Детали":"#4F7A55"};
+const CARD_FIELDS=[
+  ["cardWho",  "Для кого",          "Возраст, уровень, кому особенно зайдёт. Напр.: «7–10 лет, без подготовки; подойдёт усидчивым и любителям строить»"],
+  ["cardAbout","Что в курсе",       "Коротко о содержании: чем занимаются на занятиях, что сделают за год"],
+  ["cardValue","Ценности для ребёнка","Что курс развивает и что останется у ребёнка: навыки, проекты, уверенность"]
+];
+let _cardsQ="", _cardsEco="";
+function _cardFilled(c){ return CARD_FIELDS.filter(f=>String(c[f[0]]||"").trim()).length; }
+function renderCards(){
+  const box=document.getElementById("cardsBody"); if(!box) return;
+  const eb=document.getElementById("cardsEcoBtns");
+  if(eb) eb.innerHTML=[["","Все"],["Прознание","Прознание"],["CODDY","CODDY"],["Детали","Детали"]]
+    .map(([v,lab])=>`<button class="btn ${_cardsEco===v?'sm':'ghost sm'}" onclick="_cardsEco=${v?`'${v}'`:"''"};renderCards()">${lab}</button>`).join(" ");
+  const desc=document.getElementById("cardsDesc");
+  if(desc) desc.textContent=_fbIsAdmin
+    ? "Шпаргалка для менеджеров. Нажмите на курс и заполните: для кого, что внутри, что даёт ребёнку — менеджеры увидят сразу."
+    : "Шпаргалка для разговора с родителем: нажмите на курс — для кого он, что внутри и что даёт ребёнку.";
+  let rows=(S.courses||[]).slice();
+  if(_cardsEco) rows=rows.filter(c=>c.eco===_cardsEco);
+  const q=(_cardsQ||"").trim().toLowerCase();
+  if(q) rows=rows.filter(c=>(c.name||"").toLowerCase().includes(q));
+  rows.sort((a,b)=>(a.name||"").localeCompare(b.name||"","ru"));
+  const filled=rows.filter(c=>_cardFilled(c)>0).length;
+  const cnt=document.getElementById("cardsCount");
+  if(cnt) cnt.textContent=rows.length+" курсов · заполнено "+filled;
+  if(!rows.length){ box.innerHTML='<div style="color:var(--muted);padding:10px 2px">Ничего не найдено.</div>'; return; }
+  box.innerHTML=rows.map(c=>{
+    const col=CARD_ECO_COLORS[c.eco]||"#A49E93";
+    const nf=_cardFilled(c);
+    const who=String(c.cardWho||"").trim().split(/\n/)[0];
+    return `<div class="cc-card${nf?'':' empty'}" style="border-top-color:${col}" onclick="openCourseCard('${_jsStr(c.name)}')">
+      <div class="cc-eco" style="color:${col}">${esc(c.eco||"")}</div>
+      <div class="cc-name">${esc(c.name||"")}</div>
+      ${who?`<div class="cc-who">${esc(who)}</div>`:`<div class="cc-who" style="color:var(--muted)">${_fbIsAdmin?"нажмите и заполните":"описание скоро появится"}</div>`}
+      <div class="cc-foot"><span>${fmt(+c.price||0)} р · ${(+c.visits||1)}×/нед</span>${nf?`<span class="cc-ok">${nf}/3</span>`:''}</div>
+    </div>`; }).join("");
+}
+function closeCourseCard(){ document.getElementById("courseCardModal").classList.remove("show"); renderCards(); }
+function openCourseCard(name){
+  const c=(S.courses||[]).find(x=>x.name===name); if(!c) return;
+  const col=CARD_ECO_COLORS[c.eco]||"#A49E93";
+  document.getElementById("ccTitle").textContent=c.name||"";
+  document.getElementById("ccMeta").innerHTML=
+    `<span style="color:${col};font-weight:600">${esc(c.eco||"")}</span>`
+    +` · занятие ${fmt(+c.price||0)} р · разовое ${fmt(+c.single||0)} р`
+    +((c.sub!=null&&c.sub!=="")?` · абонемент ${fmt(+c.sub||0)} р`:"")
+    +` · ${(+c.visits||1)}×/нед`+(c.dur?` · ${c.dur} ч`:"")+(c.groupSize?` · группа до ${c.groupSize}`:"");
+  const body=document.getElementById("ccBody");
+  if(_fbIsAdmin){
+    body.innerHTML=CARD_FIELDS.map(f=>`
+      <label style="font-weight:600;font-size:13px">${f[1]}</label>
+      <textarea class="cell wide" rows="3" style="margin:4px 0 12px;font-size:13px;line-height:1.45;font-family:inherit"
+        placeholder="${esc(f[2])}" onchange="saveCourseCard('${_jsStr(c.name)}','${f[0]}',this.value)">${esc(c[f[0]]||"")}</textarea>`).join("")
+      +`<div style="font-size:11px;color:var(--muted)">Сохраняется само при выходе из поля. Менеджеры видят этот текст без возможности править.</div>`;
+  } else {
+    const secs=CARD_FIELDS.map(f=>{
+      const v=String(c[f[0]]||"").trim(); if(!v) return "";
+      return `<div class="cc-sec"><div class="cc-sec-t">${f[1]}</div><div class="cc-sec-b">${esc(v).replace(/\n/g,"<br>")}</div></div>`;
+    }).filter(Boolean).join("");
+    body.innerHTML=secs||'<div style="color:var(--muted);padding:6px 0">Карточку ещё не заполнили — загляните позже.</div>';
+  }
+  document.getElementById("courseCardModal").classList.add("show");
+}
+function saveCourseCard(name,field,val){
+  const c=(S.courses||[]).find(x=>x.name===name); if(!c) return;
+  c[field]=String(val||"").trim();
+  persistLocal(); if(typeof fbSchedulePush==="function") fbSchedulePush();
 }
 function priceSortBy(k){ _priceSort=(_priceSort.k===k)?{k:k,dir:-_priceSort.dir}:{k:k,dir:1}; renderPrice(); }
 function renderPrice(){
@@ -8712,7 +8825,7 @@ function _migrateSingle(){
 function renderAll(){
   _migrateSingle();
   _migrateChildren();
-  renderCourses(); renderPlanner(); renderGrid(); renderGroups(); renderClients(); if(typeof renderPrice==="function") renderPrice(); if(typeof renderReal==="function") renderReal(); if(typeof renderGoals==="function") renderGoals(); renderMay(); renderStaff(); renderFixed(); renderTax(); renderBreak(); renderSettings(); renderDash(); if(typeof renderReport==="function") renderReport(); onSlider(); renderConflictBanner(); renderScenarioBar(); updateNavHeightDelayed();
+  renderCourses(); renderPlanner(); renderGrid(); renderGroups(); renderClients(); if(typeof renderPrice==="function") renderPrice(); if(typeof renderCards==="function") renderCards(); if(typeof renderReal==="function") renderReal(); if(typeof renderGoals==="function") renderGoals(); renderMay(); renderStaff(); renderFixed(); renderTax(); renderBreak(); renderSettings(); renderDash(); if(typeof renderReport==="function") renderReport(); onSlider(); renderConflictBanner(); renderScenarioBar(); updateNavHeightDelayed();
 }
 function toast(m){ const t=document.getElementById("toast"); t.textContent=m; t.classList.add("show");
   clearTimeout(t._h); t._h=setTimeout(()=>t.classList.remove("show"),2200); }
@@ -8806,6 +8919,7 @@ document.querySelectorAll(".tab").forEach(tb=>tb.onclick=()=>{
   document.getElementById(tb.dataset.t).classList.add("active");
   if(tb.dataset.t==="report" && typeof renderReport==="function") renderReport();
   if(tb.dataset.t==="goals" && typeof renderGoals==="function") renderGoals();
+  if(tb.dataset.t==="cards" && typeof renderCards==="function") renderCards();
   updateNavHeightDelayed();
 });
 /* стартовый режим навигации («Работа» по умолчанию, запоминается в браузере) */
