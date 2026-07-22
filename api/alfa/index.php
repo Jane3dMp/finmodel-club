@@ -84,14 +84,20 @@ switch ($action) {
                 }
                 $total = (int)($r['total'] ?? 0);
                 $page++;
-                // продолжаем, пока страница полная И не выбрали весь total филиала
-            } while (count($items) === $perPage && ($page * $perPage) < $total && $page < $maxPages);
+                // Продолжаем, пока страница ПОЛНАЯ. Раньше здесь был ещё и лимит по total, но если
+                // Alfa его не вернула (total=0), обход обрывался после первой страницы — и в выгрузку
+                // попадали только 50 клиентов филиала. Полная страница сама по себе значит «есть ещё».
+            } while (count($items) === $perPage && $page < $maxPages);
             $perBranch[$bid] = count($byId) - $before;
         }
 
         $all = array_values($byId);
+        // сколько записей реально несут дату рождения — чтобы клиент мог отличить «не нашли ребёнка»
+        // от «Alfa не отдала dob в списке» (иначе «Возраст всем» молча ничего не делает)
+        $withDob = 0;
+        foreach ($all as $c) { if (!empty($c['dob'])) $withDob++; }
         json_out(['ok' => true, 'count' => count($all), 'customers' => $all, 'branchNames' => $brNames,
-                  'branches' => count($branches), 'per_branch' => $perBranch]);
+                  'branches' => count($branches), 'per_branch' => $perBranch, 'with_dob' => $withDob]);
         break;
 
     // --- история ребёнка: в каких группах был + краткая сводка (READ) ---

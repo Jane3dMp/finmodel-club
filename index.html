@@ -6503,15 +6503,60 @@ async function kidsPullAges(){
     const box=document.getElementById("kidsBox");
     if(box && (rep.noDob.length||rep.ambig.length||rep.miss.length)){
       const sec=(title,items,fmtRow)=>items.length?`<div style="margin-top:6px"><b>${title} (${items.length}):</b> ${items.map(fmtRow).join("; ")}</div>`:"";
+      const dobInfo=(j.with_dob!=null)?`<div style="color:var(--muted);margin-bottom:4px">Из Альфы пришло ${cust.length} клиентов, дата рождения заполнена у ${j.with_dob}.</div>`:"";
+      const rest=rep.noDob.length+rep.miss.length;
       box.insertAdjacentHTML("beforeend",
-        `<div class="callout" style="margin-top:8px;font-size:12px;line-height:1.5">
+        `<div class="callout" id="ageRep" style="margin-top:8px;font-size:12px;line-height:1.5">
+          ${dobInfo}
           ${sec("В Альфе нет даты рождения", rep.noDob, x=>esc(x.n))}
           ${sec("Тёзки в Альфе — выберите вручную (⟳ у ребёнка)", rep.ambig, x=>esc(x.n)+" <span style='color:var(--muted)'>(в Альфе: "+x.cand.map(esc).join(" / ")+")</span>")}
           ${sec("Не найдены в Альфе", rep.miss, x=>esc(x.n)+(x.near.length?" <span style='color:var(--muted)'>(похожие: "+x.near.map(esc).join(" / ")+")</span>":""))}
+          ${rest?`<div style="margin-top:8px"><button class="btn ghost sm" onclick="kidsPullAgesDeep()" title="Спросить Альфу по каждому из оставшихся отдельно — медленнее, но находит тех, кого нет в общем списке">🔎 Дотянуть по одному (${rest})</button></div>`:""}
         </div>`);
     }
   }catch(e){ toast("Не удалось: "+((e&&e.message)||e)); }
   const b2=document.getElementById("kidsPullAgesBtn"); if(b2){ b2.disabled=false; b2.textContent="🎂 Возраст всем"; }
+}
+/* Дотяжка возраста ПО ОДНОМУ через ?action=history: спрашиваем Альфу по каждому ребёнку
+   отдельно (по alfaId или по имени). Медленнее общего списка, зато находит тех, кого в нём
+   не оказалось, и возвращает дату даже когда списочный метод её не отдал. */
+async function kidsPullAgesDeep(){
+  _kidsFromDOM();
+  const todo=_editKids.filter(k=>k.n && !k.dob);
+  if(!todo.length){ toast("Возраст есть у всех"); return; }
+  const rep=document.getElementById("ageRep");
+  let done=0, found=0, notFound=[];
+  try{
+    const token=await _alfaIdToken();
+    for(let i=0;i<todo.length;i++){
+      const k=todo[i]; done++;
+      if(rep) rep.innerHTML='<b>Спрашиваю Альфу по одному… '+done+"/"+todo.length+"</b>";
+      try{
+        const payload=(k.alfaId!=null&&k.alfaId!=="")?{customerId:k.alfaId}:{name:k.n};
+        const r=await fetch(ALFA_PROXY+"?action=history",{method:"POST",
+          headers:{"Content-Type":"application/json","Authorization":"Bearer "+token},body:JSON.stringify(payload)});
+        const j=await r.json().catch(()=>({ok:false}));
+        const s=(j&&j.summary)||{};
+        // по имени Alfa могла вернуть другого человека — сверяем ФИО, прежде чем брать дату
+        const okName=(k.alfaId!=null&&k.alfaId!=="") || (s.name && _sameKid(s.name,k.n));
+        if(r.ok&&j.ok&&!j.notFound&&s.dob&&okName){
+          k.dob=s.dob; found++;
+          if(j.customerId && (k.alfaId==null||k.alfaId==="")) k.alfaId=j.customerId;
+          if(!k.phone && (s.phones||[])[0]) k.phone=s.phones[0];
+        } else notFound.push(k.n+(s.name&&!okName?(" (Альфа вернула: "+s.name+")"):""));
+      }catch(e){ notFound.push(k.n); }
+    }
+  }catch(e){ toast("Не удалось: "+((e&&e.message)||e)); return; }
+  const idx=_modalLesIdx();
+  if(S.grid[idx]) S.grid[idx].kids=_editKids.filter(x=>x.n);
+  persistLocal(); _flushCardEdit(); renderKidsEditor();
+  toast("Дотянуто по одному: +"+found+(notFound.length?(" · осталось без даты: "+notFound.length):""));
+  if(notFound.length){
+    const box=document.getElementById("kidsBox");
+    if(box) box.insertAdjacentHTML("beforeend",
+      `<div class="callout" style="margin-top:8px;font-size:12px;line-height:1.5"><b>Без даты рождения (${notFound.length}):</b> ${notFound.map(esc).join("; ")}
+       <div style="color:var(--muted);margin-top:4px">Либо ребёнка нет в Альфе, либо ДР там не заполнена — впишите возраст вручную или заполните в Альфе.</div></div>`);
+  }
 }
 function vbHist(li,ki){ const les=S.grid[li]; const k=les&&(les.kids||[])[ki]; if(k) openAlfaHistory(k.alfaId,k.n); }
 async function openAlfaHistory(alfaId,name){
