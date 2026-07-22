@@ -632,6 +632,12 @@ details.client .cli-altmark{font-size:11px;margin-right:2px}
 .cc-sec{margin-bottom:12px}
 .cc-sec-t{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin-bottom:3px}
 .cc-sec-b{font-size:13.5px;line-height:1.55}
+/* плашка «вышла новая версия» — снизу слева, не перекрывает плавающую кнопку «Итоги отдела» */
+#verNag{position:fixed;left:16px;bottom:16px;z-index:9997;display:flex;align-items:center;gap:8px;
+  background:var(--graphite);color:#fff;border-radius:12px;padding:10px 12px;font-size:13px;
+  box-shadow:0 8px 28px rgba(0,0,0,.28)}
+#verNag .btn{padding:5px 10px}
+#verNag .btn.ghost{background:transparent;color:#fff;border:1px solid rgba(255,255,255,.35)}
 /* рукописные возраст/класс в таблице «Группы» */
 .grp-meta{width:64px;text-align:center;padding:4px 6px;font-size:12px}
 .grp-meta::placeholder{color:#c9c2b8}
@@ -1500,6 +1506,29 @@ const DEFAULT_STATE = {
   gasUrl: "https://script.google.com/macros/s/AKfycbxJajbntVctGjXImc1hVhWimvOkXHcNCkuVFpszEbA8ad-B40Lj2Q8gdMMTBar4YLnsew/exec"
 };
 const LS_KEY = "proznanie_finmodel_v1";
+/* ===== ВЕРСИЯ СБОРКИ И АВТОПРОВЕРКА ОБНОВЛЕНИЙ =====
+   Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
+   версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
+   рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
+const APP_VER="2026-07-22-01";
+let _verNagShown=false;
+async function _checkAppVersion(){
+  if(_verNagShown) return;
+  try{
+    const r=await fetch(location.pathname+"?v="+Date.now(),{cache:"no-store"});
+    if(!r.ok) return;
+    const t=await r.text();
+    const m=t.match(/const APP_VER="([^"]+)"/);
+    if(!m || m[1]===APP_VER) return;
+    _verNagShown=true;
+    const b=document.createElement("div");
+    b.id="verNag";
+    b.innerHTML=`<span>Вышла новая версия админки</span>
+      <button class="btn sm" onclick="location.reload(true)">Обновить</button>
+      <button class="btn ghost sm" onclick="this.parentElement.remove()">Позже</button>`;
+    document.body.appendChild(b);
+  }catch(e){}
+}
 let S = load();
 let scenario = {fill:100,price:100,wage:100,rent:100};
 
@@ -9128,6 +9157,9 @@ setTimeout(_remCheck, 6000);     // и вскоре после загрузки 
    бейдж в шапке загорается, когда кого-то надо посадить в группу */
 setTimeout(function(){ try{ _amoCheck(true); }catch(e){} }, 12000);
 setInterval(function(){ try{ _amoCheck(true); }catch(e){} }, 600000);
+/* не даём людям работать на старой версии из кэша браузера */
+setTimeout(_checkAppVersion, 20000);
+setInterval(_checkAppVersion, 600000);
 /* Живая модель: всё автосохраняется в Firebase и localStorage. Перед уходом
    не показываем предупреждений (как в Альфе) — только тихо дожимаем отложенную
    запись, чтобы даже мгновенное обновление страницы ничего не потеряло. */
