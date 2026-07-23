@@ -484,6 +484,9 @@ switch ($action) {
         $host = 'https://' . alfa_host() . '/v2api/' . alfa_branch();
         $token = alfa_token();
         $PER = 50; $MAX_PAGES = 6;      // Alfa отдаёт ≤50 на страницу; 300 уроков на ребёнка хватает
+        // Порог «старого»: как только присутствий набралось столько, дальше считать незачем —
+        // ответ «≥ порога» уже не изменится. На 1400 детей это экономит тысячи запросов.
+        $TH = max(1, (int)($in['th'] ?? 0));
 
         $counts = [];                    // id => ['t'=>..,'d'=>..,'a'=>..]
         $dbg = ['ids' => count($ids), 'statusHist' => [], 'withDetails' => 0, 'noDetails' => 0,
@@ -528,6 +531,7 @@ switch ($action) {
                     if (!$absent) $a++;
                 }
                 if (count($items) < $PER) break;
+                if ($TH && $a >= $TH) break;      // порог взят (a ≤ d ≤ t, значит и они не меньше)
             }
             $counts[(string)$cid] = ['t' => $t, 'd' => $d, 'a' => $a];
         }

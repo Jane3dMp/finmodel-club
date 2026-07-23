@@ -1526,7 +1526,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-07-22-09";
+const APP_VER="2026-07-22-10";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -7114,27 +7114,35 @@ async function pullOldRoster(){
   if(!ids.length){ toast("Нет детей со связью с Альфой (сначала «Контакты из Альфы»)"); return; }
   if(!confirm("Выгрузить посещаемость прошлого года из Альфы?\n\nДетей со связью: "+ids.length+". Это "+ids.length+" запросов к Альфе, займёт несколько минут — не закрывайте вкладку.")) return;
   const btn=document.getElementById("oldRosterBtn"); if(btn){ btn.disabled=true; }
-  const roster={}; const BATCH=10; let dbg=null;
+  // Начатую выгрузку не теряем: сохраняем после каждой пачки. Если вкладку закрыли или связь
+  // оборвалась — посчитанные дети остаются, повторный запуск доберёт остальных.
+  const roster=Object.assign({}, S.oldRoster||{}); const BATCH=10; let dbg=null, done=0, failed=0;
+  const th=_oldTh();
   try{
     const token=await _alfaIdToken();
     for(let i=0;i<ids.length;i+=BATCH){
       const chunk=ids.slice(i,i+BATCH);
       if(btn) btn.textContent="Из Альфы… "+Math.min(i+BATCH,ids.length)+"/"+ids.length;
-      const r=await fetch(ALFA_PROXY+"?action=visitcounts",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+token},body:JSON.stringify({ids:chunk,from:LY_FROM,to:LY_TO})});
-      const j=await r.json().catch(()=>({ok:false,error:"ответ не JSON ("+r.status+")"}));
-      if(!r.ok||!j.ok) throw new Error(j.error||("ошибка "+r.status));
-      Object.assign(roster, j.counts||{});
-      if(!dbg && j.debug && j.debug.sampleLesson){ dbg=j.debug; try{ console.log("🔄 visitcounts — образец урока из Альфы:", dbg); }catch(e){} }
+      try{
+        const r=await fetch(ALFA_PROXY+"?action=visitcounts",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+token},
+          body:JSON.stringify({ids:chunk,from:LY_FROM,to:LY_TO,th:th})});   // th → прокси остановится, как только порог взят
+        const j=await r.json().catch(()=>({ok:false,error:"ответ не JSON ("+r.status+")"}));
+        if(!r.ok||!j.ok) throw new Error(j.error||("ошибка "+r.status));
+        Object.assign(roster, j.counts||{}); done+=chunk.length;
+        if(!dbg && j.debug && j.debug.sampleLesson){ dbg=j.debug; try{ console.log("🔄 visitcounts — образец урока из Альфы:", dbg); }catch(e){} }
+      }catch(e){ failed+=chunk.length; }   // пачка не прошла — идём дальше, не теряя остальных
+      // промежуточное сохранение: результат переживёт закрытие вкладки
+      if((i/BATCH)%5===4){ S.oldRoster=Object.assign({},roster); S.oldRosterAt=new Date().toISOString().slice(0,10); persistLocal(); }
     }
     S.oldRoster=roster; S.oldRosterAt=new Date().toISOString().slice(0,10);
     // компактная сводка для UI: сколько уроков вообще нашлось и как распределились статусы
     if(dbg) S.oldRosterDbg={statusHist:dbg.statusHist||{},withDetails:dbg.withDetails||0,noDetails:dbg.noDetails||0,
                             keys:(dbg.sampleKeys||[]).slice(0,40),detailKeys:(dbg.detailKeys||[]).slice(0,40)};
     persistLocal(); if(typeof fbSchedulePush==="function") fbSchedulePush(); _renderGoalsAll();
-    const th=_oldTh();
     const oldN=ids.filter(id=>_rosterCount(id)>=th).length;
     const empty=ids.filter(id=>{ const v=roster[String(id)]; return !v||!(v.t||0); }).length;
-    toast("Готово. Старых (≥"+th+"): "+oldN+" из "+ids.length+(empty?(" · без единого урока в Альфе: "+empty):""));
+    toast("Готово. Старых (≥"+th+" занятий): "+oldN+" из "+ids.length
+      +(empty?(" · не ходили в прошлом году: "+empty):"")+(failed?(" · не удалось спросить: "+failed+", запустите ещё раз"):""));
   }catch(e){ toast("Не удалось: "+((e&&e.message)||e)); }
   if(btn){ btn.disabled=false; btn.textContent=""; _renderGoalsAll(); }
 }
@@ -7159,8 +7167,11 @@ function _goalsData(){
   const arr=Object.values(map);
   const unplaced=(typeof _mayUnplacedByCourse==='function')?Object.values(_mayUnplacedByCourse()).reduce((a,b)=>a+b,0):0;
   const hasRoster=Object.keys(S.oldRoster||{}).length>0, th=_oldTh();
-  // старый = есть в реестре с ≥порога посещений; фолбэк (до выгрузки) — просто наличие связи с Альфой
-  const isOld=o=> hasRoster ? (o.alfaId!=null && _rosterCount(o.alfaId)>=th) : (o.alfaId!=null);
+  /* СТАРЫЙ = есть в Альфе И ходил в прошлом году не меньше порога (по умолчанию 3 занятия).
+     НОВЫЙ = либо в Альфе его нет, либо посещений ≤2.
+     Пока посещаемость не выгружена, честного ответа нет — не гадаем по наличию связи
+     (после массовой подтяжки она есть почти у всех), а помечаем данные как неготовые. */
+  const isOld=o=> hasRoster && o.alfaId!=null && _rosterCount(o.alfaId)>=th;
   const oldAll=arr.filter(isOld), newAll=arr.filter(k=>!isOld(k));
   const old=oldAll.filter(k=>!k.no), nw=newAll.filter(k=>!k.no);
   const retMay=old.filter(k=>k.may).length + unplaced;                  // майские (оплатили продолжение)
@@ -7257,23 +7268,33 @@ function _oldNewHTML(){
   let ctl="";
   if(_fbIsAdmin){
     ctl=`<div class="on-ctl">
-      <button class="btn ghost sm" id="oldRosterBtn" onclick="pullOldRoster()" title="Посчитать по каждому ребёнку занятия за прошлый год (01.09.2025–31.05.2026)">Определить старых из Альфы</button>
+      <button class="btn ghost sm" id="oldRosterBtn" onclick="pullOldRoster()" title="Спросить Альфу по каждому ребёнку: сколько занятий он посетил с 01.09.2025 по 31.05.2026">${st.has?"↻ Пересчитать":"Определить старых из Альфы"}</button>
       <label>Считать посещением: <select onchange="setRosterRule(this.value)">${ruleSel}</select></label>
       <label>Порог: <input type="number" min="1" step="1" value="${_oldTh()}" onchange="setOldTh(this.value)" style="width:56px"> занятий</label>
       <label>Цель возврата: <input type="number" min="0" step="10" value="${goalR}" onchange="saveGoal('ret',this.value)" style="width:70px"></label>
       <label>Цель новых: <input type="number" min="0" step="10" value="${goalN}" onchange="saveGoal('new',this.value)" style="width:70px"></label>
     </div>`;
   }
+  const th=_oldTh();
   const note = st.has
-    ? `Выгрузка из Альфы от ${esc(S.oldRosterAt||"—")} · со связью ${st.linked} детей · «старых» ${st.old}`
-      +(st.none?` · <span title="Ребёнок связан с Альфой, но уроков за прошлый год там нет">без уроков в Альфе: ${st.none}</span>`:"")
-    : `⚠ Посещаемость из Альфы ещё не выгружена — «старый/новый» показан ПРИБЛИЗИТЕЛЬНО (по наличию связи с Альфой). ${_fbIsAdmin?"Нажмите «Определить старых из Альфы».":"Попросите администратора выгрузить."}`;
-  return `<div class="oldnew">
-      <h3 style="font-size:15px;margin:0 0 10px;display:flex;align-items:center;gap:8px"><span data-ic="target"></span>Возврат и новый набор</h3>
-      <div class="on-row">
+    ? `Старый — ходил в прошлом году (01.09.2025–31.05.2026) не меньше ${th} занятий. Новый — нет в Альфе или занятий ${th-1} и меньше.`
+      +` Выгрузка от ${esc(S.oldRosterAt||"—")} · посчитано ${st.linked} детей со связью`
+      +(st.none?` · <span title="Ребёнок есть в Альфе, но занятий в прошлом году не было">не ходили в прошлом году: ${st.none}</span>`:"")
+    : `Чтобы разделить возврат и новичков, нужна посещаемость из Альфы: старый — ходил в прошлом году не меньше ${th} занятий, новый — нет в Альфе или занятий ${th-1} и меньше. `
+      +(_fbIsAdmin?"Нажмите «Определить старых из Альфы» — это займёт несколько минут.":"Попросите администратора нажать «Определить старых из Альфы».");
+  // без выгрузки цифры были бы выдумкой (раньше «новыми» считались просто не найденные в Альфе)
+  const body = st.has
+    ? `<div class="on-row">
         ${dn(G.retSecured,goalR,"#4F9E63","Возврат прошлогодних",`оплатили майский ${G.retMay} · «да» ${G.retYes} · в работе ${G.retWork} · отказ ${G.retNo}`)}
         ${dn(G.newTotal,goalN,"#1F5BC0","Новый набор",`вписано ${G.newTotal} · из них подтвердили ${G.newYes}`)}
-      </div>
+      </div>`
+    : `<div class="on-card" style="align-items:flex-start;text-align:left">
+        <div class="on-t">Пока не посчитано</div>
+        <div class="on-s">Возврат и новый набор появятся здесь после выгрузки посещаемости.</div>
+      </div>`;
+  return `<div class="oldnew">
+      <h3 style="font-size:15px;margin:0 0 10px;display:flex;align-items:center;gap:8px"><span data-ic="target"></span>Возврат и новый набор</h3>
+      ${body}
       ${ctl}
       <div class="on-note${st.has?"":" warn"}">${note}</div>
     </div>`;
