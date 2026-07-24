@@ -1535,7 +1535,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-07-22-16";
+const APP_VER="2026-07-22-17";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -7887,6 +7887,7 @@ function renderClients(){
       ${_fbIsAdmin?`
       <button class="btn ghost sm" id="balBtn" onclick="pullBalances()" title="Одна выгрузка из Альфы на всех детей (группы + ожидание): баланс, филиалы и возраст">💰 Балансы и возраст</button>
       <button class="btn ghost sm" onclick="openArchProbe()" title="Сверить на боевой Альфе, каким полем помечается архив">🔍 Поля архива</button>
+      <button class="btn ghost sm" onclick="alfaDiagDates()" title="Проверить, отдаёт ли Альфа дату создания записи (dt_add) — по ней делим новый/возврат">🔬 Поля дат из Альфы</button>
       ${S.balancesAt?`<span style="font-size:11px;color:var(--muted)">балансы от ${esc(new Date(S.balancesAt).toLocaleString("ru-RU",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"}))}</span>`:''}`:''}
     </div>`;
   if(!shown.length){ box.innerHTML=html+`<div style="color:var(--muted);padding:10px 2px">${clients.length?'Никого не найдено.':'В расписании пока нет детей.'}</div>`; return; }
@@ -8078,6 +8079,28 @@ async function archProbeRun(){
 /* ===== 💰 ОБНОВИТЬ БАЛАНСЫ ИЗ АЛЬФЫ (все дети: и в группах, и в списке ожидания) =====
    Одна выгрузка `customers` (там есть balance) → проставляем всем. Матчинг: сначала по alfaId,
    а у кого связи нет — по ФИО, но ТОЛЬКО если кандидат в Альфе ровно один (тёзок не трогаем). */
+/* Диагностика: какие поля с датами Альфа отдаёт в списке клиентов. Нужна, чтобы понять,
+   приходит ли dt_add (дата создания записи) — по ней делим «новый/возврат». */
+async function alfaDiagDates(){
+  if(!_fbIsAdmin){ toast("Только для админа"); return; }
+  toast("Спрашиваю Альфу…");
+  try{
+    const token=await _alfaIdToken();
+    const r=await fetch(ALFA_PROXY+"?action=customers",{method:"POST",
+      headers:{"Content-Type":"application/json","Authorization":"Bearer "+token},body:JSON.stringify({diag:true})});
+    const j=await r.json().catch(()=>({ok:false,error:"ответ не JSON ("+r.status+")"}));
+    if(!r.ok||!j.ok) throw new Error(j.error||("ошибка "+r.status));
+    const d=j.diag||{};
+    try{ console.log("🔬 поля клиента из Альфы:", d.all_keys); console.log("🔬 датовые поля:", d.date_fields); }catch(e){}
+    const df=d.date_fields||{};
+    const rows=Object.keys(df).map(k=>`<tr><td style="padding:3px 8px;border-bottom:1px solid var(--line)"><code>${esc(k)}</code></td><td style="padding:3px 8px;border-bottom:1px solid var(--line)">${esc(String(df[k]))}</td></tr>`).join("");
+    const hasDtAdd=Object.keys(df).some(k=>/dt_add/i.test(k));
+    alert("Клиентов из Альфы: "+(j.count||0)+"\nС датой рождения: "+(j.with_dob||0)+"\nС датой внесения (created): "+(j.with_created||0)
+      +"\n\ndt_add (дата создания) в списке: "+(hasDtAdd?"ЕСТЬ":"НЕТ")
+      +"\n\nПоля с датами:\n"+(Object.keys(df).length?Object.keys(df).map(k=>k+" = "+df[k]).join("\n"):"(нет ни одного датового поля)")
+      +"\n\nВсе поля записи — в консоли (F12).");
+  }catch(e){ toast("Не удалось: "+((e&&e.message)||e)); }
+}
 async function pullBalances(){
   const btn=document.getElementById("balBtn");
   if(btn){ btn.disabled=true; btn.textContent="Тяну из Альфы…"; }

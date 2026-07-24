@@ -100,9 +100,26 @@ switch ($action) {
         // «не нашли ребёнка» от «Alfa не отдала поле» (иначе кнопки молча ничего не делают)
         $withDob = 0; $withCreated = 0;
         foreach ($all as $c) { if (!empty($c['dob'])) $withDob++; if (!empty($c['created'])) $withCreated++; }
+
+        // ДИАГНОСТИКА: какие вообще поля есть в записи клиента и что в «датовых».
+        // Нужна, чтобы понять, отдаёт ли customer/index дату создания (dt_add) — по ней делим
+        // «новый/возврат». Просим ОДНУ сырую запись клиента (первый филиал, первый клиент).
+        $diag = null;
+        if (!empty($in['diag'])) {
+            $bid0 = $branches[0] ?? alfa_branch();
+            $r0 = alfa_call_branch((int)$bid0, 'customer', 'index', ['removed' => 0, 'page' => 0, 'count' => 1]);
+            $c0 = $r0['items'][0] ?? [];
+            $dateKeys = [];
+            foreach ($c0 as $k => $v) {
+                if (is_scalar($v) && preg_match('/date|add|creat|updat|b_date|dt_|added|reg/i', (string)$k)) {
+                    $dateKeys[$k] = is_string($v) ? mb_substr($v, 0, 30) : $v;
+                }
+            }
+            $diag = ['all_keys' => array_keys($c0), 'date_fields' => $dateKeys];
+        }
         json_out(['ok' => true, 'count' => count($all), 'customers' => $all, 'branchNames' => $brNames,
                   'branches' => count($branches), 'per_branch' => $perBranch,
-                  'with_dob' => $withDob, 'with_created' => $withCreated]);
+                  'with_dob' => $withDob, 'with_created' => $withCreated, 'diag' => $diag]);
         break;
 
     // --- история ребёнка: в каких группах был + краткая сводка (READ) ---
