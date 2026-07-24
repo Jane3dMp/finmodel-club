@@ -1535,7 +1535,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-07-22-14";
+const APP_VER="2026-07-22-15";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -7358,7 +7358,8 @@ function _oldNewHTML(){
         <div>${dn(G.newTotal,goalN,"#1F5BC0","Новый набор",`вписано ${G.newTotal} · из них подтвердили ${G.newYes}`)}
           ${_goalsKidListHTML("Новый набор",lists.newKids,"#1F5BC0")}</div>
       </div>
-      ${lists.unknownKids.length?`<div style="margin-top:10px">${_goalsKidListHTML("⚠ Не сопоставлены с Альфой (не в новых)",lists.unknownKids,"#8A6412")}</div>`:""}`
+      ${lists.unknownKids.length?`<div style="margin-top:10px">${_goalsKidListHTML("⚠ Не сопоставлены с Альфой (не в новых)",lists.unknownKids,"#8A6412")}
+        <div style="font-size:11px;color:#8A6412;margin-top:4px;line-height:1.45">Не удалось связать с Альфой (нет ID, разное ФИО или тёзка) — новые они или возврат, пока неизвестно, поэтому в счёт не идут. Нажмите «💰 Балансы и возраст» на «Клиентах» — большинство сопоставится.</div></div>`:""}`
     : `<div class="on-card" style="align-items:flex-start;text-align:left">
         <div class="on-t">Пока не посчитано</div>
         <div class="on-s">Возврат и новый набор появятся после выгрузки «💰 Балансы и возраст».</div>
