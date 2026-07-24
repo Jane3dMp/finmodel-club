@@ -76,8 +76,10 @@ switch ($action) {
                             // «Заказчик» в Alfa — это родитель; нужен для обращения в сообщениях
                             'parent'   => $c['legal_name'] ?? null,
                             'balance'  => $c['balance'] ?? null,   // активный баланс (остаток по счёту клиента)
-                            // дата создания клиента (для «подтянуть новых») — берём первый непустой кандидат
-                            'created'  => $c['dt_add'] ?? ($c['created_at'] ?? ($c['b_date'] ?? ($c['added'] ?? null))),
+                            // ТОЛЬКО реальная дата создания записи в Alfa (dt_add). Раньше был запасной
+                            // b_date — но это дата начала обучения/договора (часто это лето у вернувшихся),
+                            // из-за неё старые дети попадали в «новые». created_at — безобидный дубль dt_add.
+                            'created'  => $c['dt_add'] ?? ($c['created_at'] ?? null),
                             'branch_ids' => [],
                         ];
                     }
@@ -94,12 +96,13 @@ switch ($action) {
         }
 
         $all = array_values($byId);
-        // сколько записей реально несут дату рождения — чтобы клиент мог отличить «не нашли ребёнка»
-        // от «Alfa не отдала dob в списке» (иначе «Возраст всем» молча ничего не делает)
-        $withDob = 0;
-        foreach ($all as $c) { if (!empty($c['dob'])) $withDob++; }
+        // сколько записей реально несут дату рождения / дату внесения — клиенту, чтобы отличить
+        // «не нашли ребёнка» от «Alfa не отдала поле» (иначе кнопки молча ничего не делают)
+        $withDob = 0; $withCreated = 0;
+        foreach ($all as $c) { if (!empty($c['dob'])) $withDob++; if (!empty($c['created'])) $withCreated++; }
         json_out(['ok' => true, 'count' => count($all), 'customers' => $all, 'branchNames' => $brNames,
-                  'branches' => count($branches), 'per_branch' => $perBranch, 'with_dob' => $withDob]);
+                  'branches' => count($branches), 'per_branch' => $perBranch,
+                  'with_dob' => $withDob, 'with_created' => $withCreated]);
         break;
 
     // --- история ребёнка: в каких группах был + краткая сводка (READ) ---

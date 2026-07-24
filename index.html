@@ -1535,7 +1535,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-07-22-12";
+const APP_VER="2026-07-22-13";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -7118,10 +7118,13 @@ function _goalsKidLists(){
     if(rank(k.vbReply)>rank(o.reply)) o.reply=k.vbReply;
     if(l.course) o.courses.add(l.course);
   }));
-  const isNew=o=> !o.created || o.created>=cut;
   const arr=Object.values(map).map(o=>({...o, courses:[...o.courses]}));
   const sort=a=>a.sort((x,y)=>x.name.localeCompare(y.name,"ru"));
-  return {newKids:sort(arr.filter(isNew)), oldKids:sort(arr.filter(o=>!isNew(o)))};
+  return {
+    newKids:  sort(arr.filter(o=> !!o.created && o.created>=cut)),
+    oldKids:  sort(arr.filter(o=> !!o.created && o.created<cut)),
+    unknownKids: sort(arr.filter(o=> !o.created))
+  };
 }
 /* статус ребёнка коротким значком — для строки списка */
 function _goalsKidStatus(o){
@@ -7229,16 +7232,19 @@ function _goalsData(){
      запросов не нужно. Пока её ни у кого нет — данные не готовы, цифры не показываем. */
   const cut=_newSince();
   const hasRoster=arr.some(o=>o.created);        // «выгрузка сделана» = у кого-то есть дата внесения
-  const isOld=o=> !!o.created && o.created<cut;   // был в Альфе до отсечки
-  const isNew=o=> !o.created || o.created>=cut;   // заведён с отсечки ИЛИ ещё нет в Альфе
-  const oldAll=arr.filter(isOld), newAll=arr.filter(isNew);
+  // Классифицируем ТОЛЬКО по достоверной дате внесения. Ребёнок без даты (не сопоставлен с Альфой)
+  // НЕ считается новым — иначе в «новых» попадают вернувшиеся, у которых дату просто не подтянули.
+  const isOld=o=> !!o.created && o.created<cut;   // заведён в Альфе ДО отсечки → возврат
+  const isNew=o=> !!o.created && o.created>=cut;  // заведён С отсечки → новый
+  const oldAll=arr.filter(isOld), newAll=arr.filter(isNew), unknownAll=arr.filter(o=>!o.created);
   const old=oldAll.filter(k=>!k.no), nw=newAll.filter(k=>!k.no);
   const retMay=old.filter(k=>k.may).length + unplaced;                  // майские (оплатили продолжение)
   const retYes=old.filter(k=>!k.may && k.reply==='yes').length;         // подтвердили продолжение
   const retWork=old.filter(k=>!k.may && k.reply!=='yes').length;        // в работе
   const retNo=oldAll.filter(k=>k.no || k.reply==='no').length;          // отказ / не придёт
   const newTotal=nw.length, newYes=nw.filter(k=>k.reply==='yes').length;
-  return {retMay,retYes,retSecured:retMay+retYes,retWork,retNo,retPool:oldAll.length,newTotal,newYes,newPool:newAll.length,unplaced,hasRoster,rosterAt:S.oldRosterAt||""};
+  return {retMay,retYes,retSecured:retMay+retYes,retWork,retNo,retPool:oldAll.length,
+    newTotal,newYes,newPool:newAll.length,unknownPool:unknownAll.length,unplaced,hasRoster,rosterAt:S.oldRosterAt||""};
 }
 function _donut(pct,color){
   const size=156,r=size/2-13,c=2*Math.PI*r,off=c*(1-Math.max(0,Math.min(1,pct)));
@@ -7335,17 +7341,18 @@ function _oldNewHTML(){
   const note = st.has
     ? `Новый — впервые заведён в AlfaCRM с ${_dmy(cut)} (раньше в Альфе его не было). Возврат — заведён до этой даты.`
       +` По ${st.withDate} детям дата известна`
-      +(st.noDate?` · <span title="Ребёнок пока не сопоставлен с Альфой — нажмите «💰 Балансы и возраст» на «Клиентах». Пока считаются новыми">без даты внесения: ${st.noDate}</span>`:"")
+      +(st.noDate?` · <span style="color:#8A6412" title="Ребёнок не сопоставлен с Альфой (нет ID или не совпало ФИО). В «новых» НЕ учитывается — сначала «💰 Балансы и возраст», потом проверьте по ФИО/тёзкам">не сопоставлены с Альфой: ${st.noDate} — не в новых</span>`:"")
     : `Разделение «возврат / новый набор» — по дате внесения ребёнка в AlfaCRM. Даты приходят из выгрузки «💰 Балансы и возраст» на вкладке «Клиенты». `
       +(_fbIsAdmin?"Нажмите её, и цифры появятся здесь.":"Попросите администратора нажать «💰 Балансы и возраст».");
-  const lists=st.has?_goalsKidLists():{newKids:[],oldKids:[]};
+  const lists=st.has?_goalsKidLists():{newKids:[],oldKids:[],unknownKids:[]};
   const body = st.has
     ? `<div class="on-row">
         <div>${dn(G.retSecured,goalR,"#4F9E63","Возврат прошлогодних",`оплатили майский ${G.retMay} · «да» ${G.retYes} · в работе ${G.retWork} · отказ ${G.retNo}`)}
           ${_goalsKidListHTML("Возврат",lists.oldKids,"#4F9E63")}</div>
         <div>${dn(G.newTotal,goalN,"#1F5BC0","Новый набор",`вписано ${G.newTotal} · из них подтвердили ${G.newYes}`)}
           ${_goalsKidListHTML("Новый набор",lists.newKids,"#1F5BC0")}</div>
-      </div>`
+      </div>
+      ${lists.unknownKids.length?`<div style="margin-top:10px">${_goalsKidListHTML("⚠ Не сопоставлены с Альфой (не в новых)",lists.unknownKids,"#8A6412")}</div>`:""}`
     : `<div class="on-card" style="align-items:flex-start;text-align:left">
         <div class="on-t">Пока не посчитано</div>
         <div class="on-s">Возврат и новый набор появятся после выгрузки «💰 Балансы и возраст».</div>
@@ -8090,7 +8097,9 @@ async function pullBalances(){
       }
       if(c && c.balance!=null && c.balance!=="") k.alfaBalance=c.balance;
       if(c && Array.isArray(c.branch_ids)) k.alfaBr=c.branch_ids.map(Number);   // филиалы (каникулы/интенсивы ≠ учебный год)
-      if(c && c.created){ const iso=_alfaCreatedIso(c.created); if(iso) k.alfaCreated=iso; }   // дата внесения в Альфу → «старый/новый»
+      // дата внесения в Альфу → «старый/новый». Перезаписываем при совпадении (в т.ч. чистим
+      // прежние ошибочные значения, когда-то бравшиеся из b_date вместо dt_add).
+      if(c){ const iso=c.created?_alfaCreatedIso(c.created):""; if(iso) k.alfaCreated=iso; else if(k.alfaCreated) delete k.alfaCreated; }
       if(c && c.dob && !k.dob){ k.dob=_dobIso(c.dob); dobN++; }                          // заодно возраст — выгрузка та же
       // «Заказчик» из Альфы → имя родителя (нужно для «💳 Путь оплаты»); своё введённое не трогаем
       if(c && c.parent && k.alfaId!=null && k.alfaId!==""){
