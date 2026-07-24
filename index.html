@@ -388,6 +388,12 @@ details.cwarn .cwarn-body{padding:0 14px 12px}
 :is(#goals,#report) .gk-name{flex:1;font-weight:600;cursor:pointer;text-decoration:underline dotted}
 :is(#goals,#report) .gk-when{color:var(--muted);white-space:nowrap;font-size:11px}
 :is(#goals,#report) .gk-st{white-space:nowrap;min-width:64px;text-align:right}
+:is(#goals,#report) .on-clients{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+:is(#goals,#report) .on-clients .oc{font-size:12px;padding:4px 12px;border-radius:20px;background:#fff;border:1px solid var(--line)}
+:is(#goals,#report) .on-clients .oc-cli{color:#3B7A57}
+:is(#goals,#report) .on-clients .oc-cli b,:is(#goals,#report) .on-clients .oc-lead b{font-size:14px}
+:is(#goals,#report) .on-clients .oc-lead{color:#B0742A}
+:is(#goals,#report) .on-clients .oc-unk{color:var(--muted)}
 :is(#goals,#report) .goal-title{font-size:17px;font-weight:700;letter-spacing:-.01em}
 :is(#goals,#report) .goal-pct{font-size:34px;font-weight:800;letter-spacing:-.02em;margin-top:2px;line-height:1}
 :is(#goals,#report) .goal-left{font-size:13px;color:var(--muted);margin-top:4px}
@@ -1535,7 +1541,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-07-22-17";
+const APP_VER="2026-07-22-18";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -7215,6 +7221,27 @@ function _rosterStats(){
   return {nw:L.newKids.length, old:L.oldKids.length, noDate:L.unknownKids.length,
     has:(L.newKids.length+L.oldKids.length)>0};
 }
+/* Клиент vs лид в Альфе. Клиент/ученик (is_study=1) — оформлен, лид (is_study=0) — ещё нет.
+   Плюс дети, пришедшие из amo и НЕ сопоставленные с Альфой (тоже, по сути, лиды).
+   Уникальные дети по ФИО (тёзок не сливаем). */
+function _alfaClientStats(){
+  const map={};
+  (S.grid||[]).forEach(l=>kidsOf(l).forEach(k=>{ const key=_nameKey(k.n); if(!key) return;
+    const o=map[key]||(map[key]={study:null,alfaId:null,amo:false});
+    if(k.alfaIsStudy!=null) o.study=(o.study===1?1:k.alfaIsStudy);   // хоть где клиент → клиент
+    if(k.alfaId!=null&&k.alfaId!=="") o.alfaId=k.alfaId;
+    if(k.amoLeadId!=null&&k.amoLeadId!=="") o.amo=true;
+  }));
+  let clients=0, leads=0, amoLeads=0, unknown=0;
+  Object.values(map).forEach(o=>{
+    if(o.study===1) clients++;
+    else if(o.study===0) leads++;              // есть в Альфе как лид
+    else if(o.amo) amoLeads++;                 // из amo, в Альфе не нашли — тоже лид
+    else unknown++;                            // ни клиент, ни лид, ни amo — не сопоставлен
+  });
+  return {clients, leads:leads+amoLeads, leadsAlfa:leads, leadsAmo:amoLeads, unknown,
+    total:clients+leads+amoLeads+unknown, has:(clients+leads+amoLeads)>0};
+}
 function _goalsData(){
   const map={};
   (S.grid||[]).forEach(l=>{
@@ -7360,6 +7387,12 @@ function _oldNewHTML(){
         <div>${dn(G.newTotal,goalN,"#1F5BC0","Новый набор",`вписано ${G.newTotal} · из них подтвердили ${G.newYes}`)}
           ${_goalsKidListHTML("Новый набор",lists.newKids,"#1F5BC0")}</div>
       </div>
+      ${(()=>{ const cs=_alfaClientStats(); if(!cs.has) return "";
+        return `<div class="on-clients">
+          <span class="oc oc-cli" title="Оформлены в AlfaCRM как ученики (is_study=1)"><b>${cs.clients}</b> клиенты</span>
+          <span class="oc oc-lead" title="Есть в Альфе как лид (is_study=0: ${cs.leadsAlfa}) + пришли из amo, но в Альфе не оформлены (${cs.leadsAmo}). Ещё не ученики"><b>${cs.leads}</b> лиды</span>
+          ${cs.unknown?`<span class="oc oc-unk" title="Не сопоставлены с Альфой и не из amo">${cs.unknown} не сопоставлены</span>`:""}
+        </div>`; })()}
       ${lists.unknownKids.length?`<div style="margin-top:10px">${_goalsKidListHTML("⚠ Не сопоставлены с Альфой (не в новых)",lists.unknownKids,"#8A6412")}
         <div style="font-size:11px;color:#8A6412;margin-top:4px;line-height:1.45">Не удалось связать с Альфой (нет ID, разное ФИО или тёзка) — новые они или возврат, пока неизвестно, поэтому в счёт не идут. Нажмите «💰 Балансы и возраст» на «Клиентах» — большинство сопоставится.</div></div>`:""}`
     : `<div class="on-card" style="align-items:flex-start;text-align:left">
@@ -8129,6 +8162,7 @@ async function pullBalances(){
       }
       if(c && c.balance!=null && c.balance!=="") k.alfaBalance=c.balance;
       if(c && Array.isArray(c.branch_ids)) k.alfaBr=c.branch_ids.map(Number);   // филиалы (каникулы/интенсивы ≠ учебный год)
+      if(c && c.is_study!=null) k.alfaIsStudy=(+c.is_study?1:0);   // 1 = клиент/ученик, 0 = лид (ещё не оформлен)
       // дата внесения в Альфу → «старый/новый». Перезаписываем при совпадении (в т.ч. чистим
       // прежние ошибочные значения, когда-то бравшиеся из b_date вместо dt_add).
       if(c){ const iso=c.created?_alfaCreatedIso(c.created):""; if(iso) k.alfaCreated=iso; else if(k.alfaCreated) delete k.alfaCreated; }
