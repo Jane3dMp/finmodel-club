@@ -1535,7 +1535,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-07-22-15";
+const APP_VER="2026-07-22-16";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -7121,8 +7121,9 @@ function _goalsKidLists(){
   }));
   const arr=Object.values(map).map(o=>({...o, courses:[...o.courses]}));
   const sort=a=>a.sort((x,y)=>x.name.localeCompare(y.name,"ru"));
-  const isNew=o=> (!!o.created && o.created>=cut) || (!o.created && o.amo);
-  const isOld=o=> !!o.created && o.created<cut;
+  const inAlfa=o=> o.alfaId!=null;
+  const isNew=o=> (!!o.created && o.created>=cut) || (!inAlfa(o) && o.amo);
+  const isOld=o=> (!!o.created && o.created<cut) || (inAlfa(o) && !isNew(o));
   return {
     newKids:  sort(arr.filter(isNew)),
     oldKids:  sort(arr.filter(isOld)),
@@ -7141,7 +7142,7 @@ function _goalsKidStatus(o){
 function _goalsKidListHTML(title,list,color){
   if(!list.length) return "";
   const when=o=> o.created ? ("в Альфе с "+_dmy(o.created))
-    : (o.amo ? "из amo · нет в Альфе" : (o.alfaId!=null ? "дата не подтянута" : "нет в Альфе"));
+    : (o.alfaId!=null ? "в Альфе, дата не загружена" : (o.amo ? "из amo · нет в Альфе" : "нет в Альфе"));
   const row=o=>`<div class="gk-row">
       <span class="gk-name" title="Открыть карточку ребёнка" onclick="openKidCardByName('${_jsStr(o.name)}')">${esc(o.name)}${o.amo&&!o.created?' <span style="font-size:10px;background:#e7eefb;color:#1F5BC0;border-radius:8px;padding:0 6px">amo</span>':''}</span>
       <span class="gk-when">${when(o)}</span>
@@ -7210,11 +7211,9 @@ async function pullOldRoster(){
 /* сводка по выгрузке — сколько «старых» при текущем правиле/пороге (для подписи под донатами) */
 /* сводка для подписи под донатами: сколько детей с известной датой внесения, сколько без неё */
 function _rosterStats(){
-  const cut=_newSince();
-  const seen=new Set(); let withDate=0, noDate=0, nw=0, old=0;
-  (S.grid||[]).forEach(l=>kidsOf(l).forEach(k=>{ const key=_nameKey(k.n); if(!key||seen.has(key)) return; seen.add(key);
-    if(k.alfaCreated){ withDate++; if(k.alfaCreated>=cut) nw++; else old++; } else noDate++; }));
-  return {linked:withDate+noDate, withDate, noDate, nw, old, has:withDate>0};
+  const L=(typeof _goalsKidLists==='function')?_goalsKidLists():{newKids:[],oldKids:[],unknownKids:[]};
+  return {nw:L.newKids.length, old:L.oldKids.length, noDate:L.unknownKids.length,
+    has:(L.newKids.length+L.oldKids.length)>0};
 }
 function _goalsData(){
   const map={};
@@ -7237,12 +7236,16 @@ function _goalsData(){
      Дата внесения приходит из выгрузки «Балансы и возраст» (поле created) — отдельных
      запросов не нужно. Пока её ни у кого нет — данные не готовы, цифры не показываем. */
   const cut=_newSince();
-  const hasRoster=arr.some(o=>o.created);        // «выгрузка сделана» = у кого-то есть дата внесения
-  // НОВЫЙ = заведён в Альфе с отсечки, ЛИБО пришёл из amo (оплаченный этап) и в Альфе его ещё нет.
-  // СТАРЫЙ = заведён в Альфе до отсечки. Остальные без даты — «не сопоставлены», в новых не считаем.
-  const isOld=o=> !!o.created && o.created<cut;
-  const isNew=o=> (!!o.created && o.created>=cut) || (!o.created && o.amo);   // amo-оплаченный без Альфы = новый
+  // Классификация:
+  //   НОВЫЙ  — заведён в Альфе с отсечки, ЛИБО пришёл из amo (оплаченный этап) и в Альфе его ещё нет.
+  //   ВОЗВРАТ— заведён в Альфе до отсечки; ЛИБО есть в Альфе (ID проставлен), но дату внесения не
+  //            загрузили — раз он уже в системе, считаем вернувшимся, а не «неизвестным».
+  //   НЕ СОПОСТАВЛЕН — ни ID из Альфы, ни amo: про него ничего не знаем, в счёт не идёт.
+  const inAlfa=o=> o.alfaId!=null;
+  const isNew=o=> (!!o.created && o.created>=cut) || (!inAlfa(o) && o.amo);
+  const isOld=o=> (!!o.created && o.created<cut) || (inAlfa(o) && !isNew(o));
   const oldAll=arr.filter(isOld), newAll=arr.filter(isNew), unknownAll=arr.filter(o=>!isOld(o)&&!isNew(o));
+  const hasRoster=(oldAll.length+newAll.length)>0;   // есть кого классифицировать = данные готовы
   const old=oldAll.filter(k=>!k.no), nw=newAll.filter(k=>!k.no);
   const retMay=old.filter(k=>k.may).length + unplaced;                  // майские (оплатили продолжение)
   const retYes=old.filter(k=>!k.may && k.reply==='yes').length;         // подтвердили продолжение
@@ -7345,10 +7348,9 @@ function _oldNewHTML(){
     </div>`;
   }
   const note = st.has
-    ? `Новый — впервые заведён в AlfaCRM с ${_dmy(cut)} (раньше в Альфе его не было). Возврат — заведён до этой даты.`
-      +` По ${st.withDate} детям дата известна`
-      +(st.noDate?` · <span style="color:#8A6412" title="Ребёнок не сопоставлен с Альфой (нет ID или не совпало ФИО). В «новых» НЕ учитывается — сначала «💰 Балансы и возраст», потом проверьте по ФИО/тёзкам">не сопоставлены с Альфой: ${st.noDate} — не в новых</span>`:"")
-    : `Разделение «возврат / новый набор» — по дате внесения ребёнка в AlfaCRM. Даты приходят из выгрузки «💰 Балансы и возраст» на вкладке «Клиенты». `
+    ? `Новый — заведён в AlfaCRM с ${_dmy(cut)}, ИЛИ пришёл из amo (оплаченный этап) и в Альфе его ещё нет. Возврат — был в Альфе раньше (в т.ч. если дату внесения не удалось загрузить).`
+      +(st.noDate?` · <span style="color:#8A6412" title="Ни ID из Альфы, ни amo — про ребёнка ничего не известно. В счёт не идёт. Нажмите «💰 Балансы и возраст»">не сопоставлены: ${st.noDate} — не в счёте</span>`:"")
+    : `Разделение «возврат / новый набор» — по дате внесения в AlfaCRM (и приходу из amo). Даты приходят из выгрузки «💰 Балансы и возраст» на вкладке «Клиенты». `
       +(_fbIsAdmin?"Нажмите её, и цифры появятся здесь.":"Попросите администратора нажать «💰 Балансы и возраст».");
   const lists=st.has?_goalsKidLists():{newKids:[],oldKids:[],unknownKids:[]};
   const body = st.has
