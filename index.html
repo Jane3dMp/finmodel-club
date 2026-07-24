@@ -1541,7 +1541,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-07-22-18";
+const APP_VER="2026-07-22-19";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -7114,10 +7114,11 @@ function _oldTh(){ const v=parseInt(S.oldTh,10); return v>0?v:OLD_VISIT_TH; }
 function _goalsKidLists(){
   const cut=_newSince(), map={};
   (S.grid||[]).forEach(l=>kidsOf(l).forEach(k=>{ const key=_nameKey(k.n); if(!key) return;
-    const o=map[key]||(map[key]={name:k.n, created:k.alfaCreated||"", alfaId:(k.alfaId!=null?k.alfaId:null),
+    const o=map[key]||(map[key]={name:k.n, created:k.alfaCreated||"", lastAttend:k.alfaLastAttend||"", alfaId:(k.alfaId!=null?k.alfaId:null),
       may:false, reply:"", no:false, amo:false, courses:new Set()});
     if(String(k.n).trim().split(/\s+/).length>String(o.name).trim().split(/\s+/).length) o.name=k.n;
     if(k.alfaCreated && (!o.created || k.alfaCreated<o.created)) o.created=k.alfaCreated;
+    if(k.alfaLastAttend && (!o.lastAttend || k.alfaLastAttend>o.lastAttend)) o.lastAttend=k.alfaLastAttend;
     if(o.alfaId==null && k.alfaId!=null) o.alfaId=k.alfaId;
     if(k.amoLeadId!=null && k.amoLeadId!=="") o.amo=true;
     if(k.may) o.may=true; if(k.no) o.no=true;
@@ -7127,13 +7128,10 @@ function _goalsKidLists(){
   }));
   const arr=Object.values(map).map(o=>({...o, courses:[...o.courses]}));
   const sort=a=>a.sort((x,y)=>x.name.localeCompare(y.name,"ru"));
-  const inAlfa=o=> o.alfaId!=null;
-  const isNew=o=> (!!o.created && o.created>=cut) || (!inAlfa(o) && o.amo);
-  const isOld=o=> (!!o.created && o.created<cut) || (inAlfa(o) && !isNew(o));
   return {
-    newKids:  sort(arr.filter(isNew)),
-    oldKids:  sort(arr.filter(isOld)),
-    unknownKids: sort(arr.filter(o=> !isNew(o) && !isOld(o)))
+    newKids:  sort(arr.filter(o=>_kidClass(o,cut)==='new')),
+    oldKids:  sort(arr.filter(o=>_kidClass(o,cut)==='old')),
+    unknownKids: sort(arr.filter(o=>_kidClass(o,cut)==='unknown'))
   };
 }
 /* статус ребёнка коротким значком — для строки списка */
@@ -7147,8 +7145,12 @@ function _goalsKidStatus(o){
 /* раскрывающийся поимённый список под донатом */
 function _goalsKidListHTML(title,list,color){
   if(!list.length) return "";
-  const when=o=> o.created ? ("в Альфе с "+_dmy(o.created))
-    : (o.alfaId!=null ? "в Альфе, дата не загружена" : (o.amo ? "из amo · нет в Альфе" : "нет в Альфе"));
+  const cutW=_newSince();
+  const when=o=>
+      (o.lastAttend && o.lastAttend<cutW) ? ("посещал до "+_dmy(o.lastAttend))
+    : o.created ? ("в Альфе с "+_dmy(o.created))
+    : (o.alfaId!=null ? "в Альфе, дата не загружена"
+    : (o.amo ? "из amo · нет в Альфе" : "нет в Альфе"));
   const row=o=>`<div class="gk-row">
       <span class="gk-name" title="Открыть карточку ребёнка" onclick="openKidCardByName('${_jsStr(o.name)}')">${esc(o.name)}${o.amo&&!o.created?' <span style="font-size:10px;background:#e7eefb;color:#1F5BC0;border-radius:8px;padding:0 6px">amo</span>':''}</span>
       <span class="gk-when">${when(o)}</span>
@@ -7162,6 +7164,17 @@ const NEW_SINCE_DEFAULT="2026-07-01";
 function _newSince(){ const s=String(S.newSinceDate||"").trim(); return /^\d{4}-\d{2}-\d{2}/.test(s)?s.slice(0,10):NEW_SINCE_DEFAULT; }
 function setNewSince(v){ const s=String(v||"").trim(); S.newSinceDate=/^\d{4}-\d{2}-\d{2}/.test(s)?s.slice(0,10):NEW_SINCE_DEFAULT; persistLocal(); if(typeof fbSchedulePush==="function") fbSchedulePush(); _renderGoalsAll(); }
 function _dmy(iso){ const m=String(iso||"").match(/^(\d{4})-(\d{2})-(\d{2})/); return m?(m[3]+"."+m[2]+"."+m[1]):iso; }
+/* Единая классификация ребёнка → 'new' | 'old' | 'unknown'. Используется и в цифрах, и в списках.
+   o: {alfaId, created, lastAttend, amo}. cut — дата отсечки «нового». Порядок проверок важен:
+   посещал до лета → возврат (самый надёжный признак), иначе по дате создания записи, иначе amo. */
+function _kidClass(o, cut){
+  const inAlfa = o.alfaId!=null;
+  if((o.lastAttend && o.lastAttend<cut) || (o.created && o.created<cut)) return 'old';  // был в клубе раньше
+  if(o.created && o.created>=cut) return 'new';         // запись в Альфе создана с отсечки
+  if(!inAlfa && o.amo) return 'new';                    // пришёл из amo, в Альфе ещё нет
+  if(inAlfa) return 'old';                              // есть в Альфе, дату не знаем → считаем возвратом
+  return 'unknown';                                     // ни Альфы, ни amo — про ребёнка ничего не знаем
+}
 /* число посещений ребёнка по текущему правилу. Понимает и старый формат (просто число). */
 function _rosterCount(alfaId){
   const v=(S.oldRoster||{})[String(alfaId)];
@@ -7246,10 +7259,11 @@ function _goalsData(){
   const map={};
   (S.grid||[]).forEach(l=>{
     kidsOf(l).forEach(k=>{ const key=_nameKey(k.n); if(!key) return;
-      const o=map[key]||(map[key]={may:false,reply:'',no:false,alfaId:null,created:'',amo:false});
+      const o=map[key]||(map[key]={may:false,reply:'',no:false,alfaId:null,created:'',lastAttend:'',amo:false});
       if(o.alfaId==null && k.alfaId!=null && k.alfaId!=="") o.alfaId=k.alfaId;
-      // самая ранняя дата внесения (ребёнок мог встретиться в нескольких занятиях)
+      // самая ранняя дата внесения и самое позднее посещение (ребёнок мог встретиться в нескольких занятиях)
       if(k.alfaCreated && (!o.created || k.alfaCreated<o.created)) o.created=k.alfaCreated;
+      if(k.alfaLastAttend && (!o.lastAttend || k.alfaLastAttend>o.lastAttend)) o.lastAttend=k.alfaLastAttend;
       if(k.amoLeadId!=null && k.amoLeadId!=="") o.amo=true;   // пришёл из amo (оплаченный этап)
       if(k.may) o.may=true; if(k.no) o.no=true;
       const rank=r=>r==='yes'?3:r==='no'?2:r==='maybe'?1:0;
@@ -7268,10 +7282,9 @@ function _goalsData(){
   //   ВОЗВРАТ— заведён в Альфе до отсечки; ЛИБО есть в Альфе (ID проставлен), но дату внесения не
   //            загрузили — раз он уже в системе, считаем вернувшимся, а не «неизвестным».
   //   НЕ СОПОСТАВЛЕН — ни ID из Альфы, ни amo: про него ничего не знаем, в счёт не идёт.
-  const inAlfa=o=> o.alfaId!=null;
-  const isNew=o=> (!!o.created && o.created>=cut) || (!inAlfa(o) && o.amo);
-  const isOld=o=> (!!o.created && o.created<cut) || (inAlfa(o) && !isNew(o));
-  const oldAll=arr.filter(isOld), newAll=arr.filter(isNew), unknownAll=arr.filter(o=>!isOld(o)&&!isNew(o));
+  const oldAll=arr.filter(o=>_kidClass(o,cut)==='old'),
+        newAll=arr.filter(o=>_kidClass(o,cut)==='new'),
+        unknownAll=arr.filter(o=>_kidClass(o,cut)==='unknown');
   const hasRoster=(oldAll.length+newAll.length)>0;   // есть кого классифицировать = данные готовы
   const old=oldAll.filter(k=>!k.no), nw=newAll.filter(k=>!k.no);
   const retMay=old.filter(k=>k.may).length + unplaced;                  // майские (оплатили продолжение)
@@ -7375,7 +7388,7 @@ function _oldNewHTML(){
     </div>`;
   }
   const note = st.has
-    ? `Новый — заведён в AlfaCRM с ${_dmy(cut)}, ИЛИ пришёл из amo (оплаченный этап) и в Альфе его ещё нет. Возврат — был в Альфе раньше (в т.ч. если дату внесения не удалось загрузить).`
+    ? `Возврат — посещал занятия до ${_dmy(cut)} или заведён в Альфе раньше. Новый — заведён с ${_dmy(cut)} и раньше не ходил, ИЛИ пришёл из amo (оплаченный этап) и в Альфе его ещё нет.`
       +(st.noDate?` · <span style="color:#8A6412" title="Ни ID из Альфы, ни amo — про ребёнка ничего не известно. В счёт не идёт. Нажмите «💰 Балансы и возраст»">не сопоставлены: ${st.noDate} — не в счёте</span>`:"")
     : `Разделение «возврат / новый набор» — по дате внесения в AlfaCRM (и приходу из amo). Даты приходят из выгрузки «💰 Балансы и возраст» на вкладке «Клиенты». `
       +(_fbIsAdmin?"Нажмите её, и цифры появятся здесь.":"Попросите администратора нажать «💰 Балансы и возраст».");
@@ -8163,6 +8176,7 @@ async function pullBalances(){
       if(c && c.balance!=null && c.balance!=="") k.alfaBalance=c.balance;
       if(c && Array.isArray(c.branch_ids)) k.alfaBr=c.branch_ids.map(Number);   // филиалы (каникулы/интенсивы ≠ учебный год)
       if(c && c.is_study!=null) k.alfaIsStudy=(+c.is_study?1:0);   // 1 = клиент/ученик, 0 = лид (ещё не оформлен)
+      if(c){ const la=c.last_attend?_dobIso(c.last_attend):""; if(la) k.alfaLastAttend=la; else if(k.alfaLastAttend&&!c.last_attend) delete k.alfaLastAttend; }   // последнее посещение → «возврат»
       // дата внесения в Альфу → «старый/новый». Перезаписываем при совпадении (в т.ч. чистим
       // прежние ошибочные значения, когда-то бравшиеся из b_date вместо dt_add).
       if(c){ const iso=c.created?_alfaCreatedIso(c.created):""; if(iso) k.alfaCreated=iso; else if(k.alfaCreated) delete k.alfaCreated; }
