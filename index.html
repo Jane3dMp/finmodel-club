@@ -1510,6 +1510,7 @@ const DEFAULT_STATE = {
   oldRosterAt: "",   // дата последней выгрузки
   oldRosterRule: "a",// какое из трёх чисел считаем посещением: a | d | t (меняется без новой выгрузки)
   oldTh: 3,          // порог «старого»: столько посещений за прошлый год
+  newSinceDate: "2026-07-01",   // «новый» = впервые заведён в Альфе не раньше этой даты
   alfaArchiveMode: "is_study",  // чем архивируем в Альфе: is_study | removed | both (сверяется кнопкой «Поля архива»)
   // отслеживаемый этап воронки amoCRM: дети оттуда ждут распределения в группу
   amoWatch: { pipelineId:0, statusIds:[], seen:{}, nameSrc:"lead", nameField:"" },
@@ -1526,7 +1527,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-07-22-10";
+const APP_VER="2026-07-22-11";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -7094,6 +7095,11 @@ const OLD_VISIT_TH=3, LY_FROM="2025-09-01", LY_TO="2026-05-31";
 const ROSTER_RULES={a:"был на занятии",d:"занятие проведено",t:"любое занятие в расписании"};
 function _rosterRule(){ return ROSTER_RULES[S.oldRosterRule]?S.oldRosterRule:"a"; }
 function _oldTh(){ const v=parseInt(S.oldTh,10); return v>0?v:OLD_VISIT_TH; }
+/* дата отсечки «новый/старый»: заведён в Альфе с этой даты — новый. ISO для сравнения. */
+const NEW_SINCE_DEFAULT="2026-07-01";
+function _newSince(){ const s=String(S.newSinceDate||"").trim(); return /^\d{4}-\d{2}-\d{2}/.test(s)?s.slice(0,10):NEW_SINCE_DEFAULT; }
+function setNewSince(v){ const s=String(v||"").trim(); S.newSinceDate=/^\d{4}-\d{2}-\d{2}/.test(s)?s.slice(0,10):NEW_SINCE_DEFAULT; persistLocal(); if(typeof fbSchedulePush==="function") fbSchedulePush(); _renderGoalsAll(); }
+function _dmy(iso){ const m=String(iso||"").match(/^(\d{4})-(\d{2})-(\d{2})/); return m?(m[3]+"."+m[2]+"."+m[1]):iso; }
 /* число посещений ребёнка по текущему правилу. Понимает и старый формат (просто число). */
 function _rosterCount(alfaId){
   const v=(S.oldRoster||{})[String(alfaId)];
@@ -7147,18 +7153,22 @@ async function pullOldRoster(){
   if(btn){ btn.disabled=false; btn.textContent=""; _renderGoalsAll(); }
 }
 /* сводка по выгрузке — сколько «старых» при текущем правиле/пороге (для подписи под донатами) */
+/* сводка для подписи под донатами: сколько детей с известной датой внесения, сколько без неё */
 function _rosterStats(){
-  const ids=_scheduleAlfaIds(), th=_oldTh();
-  let old=0, none=0;
-  ids.forEach(id=>{ const c=_rosterCount(id); if(c>=th) old++; const v=(S.oldRoster||{})[String(id)]; if(!v||(typeof v==="object"&&!(v.t||0))) none++; });
-  return {linked:ids.length, old, none, has:Object.keys(S.oldRoster||{}).length>0};
+  const cut=_newSince();
+  const seen=new Set(); let withDate=0, noDate=0, nw=0, old=0;
+  (S.grid||[]).forEach(l=>kidsOf(l).forEach(k=>{ const key=_nameKey(k.n); if(!key||seen.has(key)) return; seen.add(key);
+    if(k.alfaCreated){ withDate++; if(k.alfaCreated>=cut) nw++; else old++; } else noDate++; }));
+  return {linked:withDate+noDate, withDate, noDate, nw, old, has:withDate>0};
 }
 function _goalsData(){
   const map={};
   (S.grid||[]).forEach(l=>{
     kidsOf(l).forEach(k=>{ const key=_nameKey(k.n); if(!key) return;
-      const o=map[key]||(map[key]={may:false,reply:'',no:false,alfaId:null});
+      const o=map[key]||(map[key]={may:false,reply:'',no:false,alfaId:null,created:''});
       if(o.alfaId==null && k.alfaId!=null && k.alfaId!=="") o.alfaId=k.alfaId;
+      // самая ранняя дата внесения (ребёнок мог встретиться в нескольких занятиях)
+      if(k.alfaCreated && (!o.created || k.alfaCreated<o.created)) o.created=k.alfaCreated;
       if(k.may) o.may=true; if(k.no) o.no=true;
       const rank=r=>r==='yes'?3:r==='no'?2:r==='maybe'?1:0;
       if(rank(k.vbReply)>rank(o.reply)) o.reply=k.vbReply;
@@ -7166,13 +7176,15 @@ function _goalsData(){
   });
   const arr=Object.values(map);
   const unplaced=(typeof _mayUnplacedByCourse==='function')?Object.values(_mayUnplacedByCourse()).reduce((a,b)=>a+b,0):0;
-  const hasRoster=Object.keys(S.oldRoster||{}).length>0, th=_oldTh();
-  /* СТАРЫЙ = есть в Альфе И ходил в прошлом году не меньше порога (по умолчанию 3 занятия).
-     НОВЫЙ = либо в Альфе его нет, либо посещений ≤2.
-     Пока посещаемость не выгружена, честного ответа нет — не гадаем по наличию связи
-     (после массовой подтяжки она есть почти у всех), а помечаем данные как неготовые. */
-  const isOld=o=> hasRoster && o.alfaId!=null && _rosterCount(o.alfaId)>=th;
-  const oldAll=arr.filter(isOld), newAll=arr.filter(k=>!isOld(k));
+  /* НОВЫЙ = впервые заведён в Альфе не раньше даты отсечки (по умолчанию 01.07.2026);
+     раньше в Альфе его не было. СТАРЫЙ = заведён в Альфе ДО этой даты (был там прошлым годом).
+     Дата внесения приходит из выгрузки «Балансы и возраст» (поле created) — отдельных
+     запросов не нужно. Пока её ни у кого нет — данные не готовы, цифры не показываем. */
+  const cut=_newSince();
+  const hasRoster=arr.some(o=>o.created);        // «выгрузка сделана» = у кого-то есть дата внесения
+  const isOld=o=> !!o.created && o.created<cut;   // был в Альфе до отсечки
+  const isNew=o=> !o.created || o.created>=cut;   // заведён с отсечки ИЛИ ещё нет в Альфе
+  const oldAll=arr.filter(isOld), newAll=arr.filter(isNew);
   const old=oldAll.filter(k=>!k.no), nw=newAll.filter(k=>!k.no);
   const retMay=old.filter(k=>k.may).length + unplaced;                  // майские (оплатили продолжение)
   const retYes=old.filter(k=>!k.may && k.reply==='yes').length;         // подтвердили продолжение
@@ -7264,25 +7276,21 @@ function _oldNewHTML(){
       <div class="donut">${_donut(pct,color)}<div class="donut-c"><div class="dn" style="color:${color}">${val}</div><div class="dd">из ${goal||"—"}</div></div></div>
       <div class="on-t">${title}</div><div class="on-s">${sub}</div></div>`;
   };
-  const ruleSel=Object.keys(ROSTER_RULES).map(r=>`<option value="${r}"${_rosterRule()===r?" selected":""}>${ROSTER_RULES[r]}</option>`).join("");
+  const cut=_newSince();
   let ctl="";
   if(_fbIsAdmin){
     ctl=`<div class="on-ctl">
-      <button class="btn ghost sm" id="oldRosterBtn" onclick="pullOldRoster()" title="Спросить Альфу по каждому ребёнку: сколько занятий он посетил с 01.09.2025 по 31.05.2026">${st.has?"↻ Пересчитать":"Определить старых из Альфы"}</button>
-      <label>Считать посещением: <select onchange="setRosterRule(this.value)">${ruleSel}</select></label>
-      <label>Порог: <input type="number" min="1" step="1" value="${_oldTh()}" onchange="setOldTh(this.value)" style="width:56px"> занятий</label>
+      <label>Новый — заведён в Альфе с: <input type="date" value="${esc(cut)}" onchange="setNewSince(this.value)" style="width:150px"></label>
       <label>Цель возврата: <input type="number" min="0" step="10" value="${goalR}" onchange="saveGoal('ret',this.value)" style="width:70px"></label>
       <label>Цель новых: <input type="number" min="0" step="10" value="${goalN}" onchange="saveGoal('new',this.value)" style="width:70px"></label>
     </div>`;
   }
-  const th=_oldTh();
   const note = st.has
-    ? `Старый — ходил в прошлом году (01.09.2025–31.05.2026) не меньше ${th} занятий. Новый — нет в Альфе или занятий ${th-1} и меньше.`
-      +` Выгрузка от ${esc(S.oldRosterAt||"—")} · посчитано ${st.linked} детей со связью`
-      +(st.none?` · <span title="Ребёнок есть в Альфе, но занятий в прошлом году не было">не ходили в прошлом году: ${st.none}</span>`:"")
-    : `Чтобы разделить возврат и новичков, нужна посещаемость из Альфы: старый — ходил в прошлом году не меньше ${th} занятий, новый — нет в Альфе или занятий ${th-1} и меньше. `
-      +(_fbIsAdmin?"Нажмите «Определить старых из Альфы» — это займёт несколько минут.":"Попросите администратора нажать «Определить старых из Альфы».");
-  // без выгрузки цифры были бы выдумкой (раньше «новыми» считались просто не найденные в Альфе)
+    ? `Новый — впервые заведён в AlfaCRM с ${_dmy(cut)} (раньше в Альфе его не было). Возврат — заведён до этой даты.`
+      +` По ${st.withDate} детям дата известна`
+      +(st.noDate?` · <span title="Ребёнок пока не сопоставлен с Альфой — нажмите «💰 Балансы и возраст» на «Клиентах». Пока считаются новыми">без даты внесения: ${st.noDate}</span>`:"")
+    : `Разделение «возврат / новый набор» — по дате внесения ребёнка в AlfaCRM. Даты приходят из выгрузки «💰 Балансы и возраст» на вкладке «Клиенты». `
+      +(_fbIsAdmin?"Нажмите её, и цифры появятся здесь.":"Попросите администратора нажать «💰 Балансы и возраст».");
   const body = st.has
     ? `<div class="on-row">
         ${dn(G.retSecured,goalR,"#4F9E63","Возврат прошлогодних",`оплатили майский ${G.retMay} · «да» ${G.retYes} · в работе ${G.retWork} · отказ ${G.retNo}`)}
@@ -7290,7 +7298,7 @@ function _oldNewHTML(){
       </div>`
     : `<div class="on-card" style="align-items:flex-start;text-align:left">
         <div class="on-t">Пока не посчитано</div>
-        <div class="on-s">Возврат и новый набор появятся здесь после выгрузки посещаемости.</div>
+        <div class="on-s">Возврат и новый набор появятся после выгрузки «💰 Балансы и возраст».</div>
       </div>`;
   return `<div class="oldnew">
       <h3 style="font-size:15px;margin:0 0 10px;display:flex;align-items:center;gap:8px"><span data-ic="target"></span>Возврат и новый набор</h3>
@@ -8032,6 +8040,7 @@ async function pullBalances(){
       }
       if(c && c.balance!=null && c.balance!=="") k.alfaBalance=c.balance;
       if(c && Array.isArray(c.branch_ids)) k.alfaBr=c.branch_ids.map(Number);   // филиалы (каникулы/интенсивы ≠ учебный год)
+      if(c && c.created){ const iso=_alfaCreatedIso(c.created); if(iso) k.alfaCreated=iso; }   // дата внесения в Альфу → «старый/новый»
       if(c && c.dob && !k.dob){ k.dob=_dobIso(c.dob); dobN++; }                          // заодно возраст — выгрузка та же
       // «Заказчик» из Альфы → имя родителя (нужно для «💳 Путь оплаты»); своё введённое не трогаем
       if(c && c.parent && k.alfaId!=null && k.alfaId!==""){
