@@ -1535,7 +1535,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-07-22-13";
+const APP_VER="2026-07-22-14";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -7109,10 +7109,11 @@ function _goalsKidLists(){
   const cut=_newSince(), map={};
   (S.grid||[]).forEach(l=>kidsOf(l).forEach(k=>{ const key=_nameKey(k.n); if(!key) return;
     const o=map[key]||(map[key]={name:k.n, created:k.alfaCreated||"", alfaId:(k.alfaId!=null?k.alfaId:null),
-      may:false, reply:"", no:false, courses:new Set()});
+      may:false, reply:"", no:false, amo:false, courses:new Set()});
     if(String(k.n).trim().split(/\s+/).length>String(o.name).trim().split(/\s+/).length) o.name=k.n;
     if(k.alfaCreated && (!o.created || k.alfaCreated<o.created)) o.created=k.alfaCreated;
     if(o.alfaId==null && k.alfaId!=null) o.alfaId=k.alfaId;
+    if(k.amoLeadId!=null && k.amoLeadId!=="") o.amo=true;
     if(k.may) o.may=true; if(k.no) o.no=true;
     const rank=r=>r==='yes'?3:r==='no'?2:r==='maybe'?1:0;
     if(rank(k.vbReply)>rank(o.reply)) o.reply=k.vbReply;
@@ -7120,10 +7121,12 @@ function _goalsKidLists(){
   }));
   const arr=Object.values(map).map(o=>({...o, courses:[...o.courses]}));
   const sort=a=>a.sort((x,y)=>x.name.localeCompare(y.name,"ru"));
+  const isNew=o=> (!!o.created && o.created>=cut) || (!o.created && o.amo);
+  const isOld=o=> !!o.created && o.created<cut;
   return {
-    newKids:  sort(arr.filter(o=> !!o.created && o.created>=cut)),
-    oldKids:  sort(arr.filter(o=> !!o.created && o.created<cut)),
-    unknownKids: sort(arr.filter(o=> !o.created))
+    newKids:  sort(arr.filter(isNew)),
+    oldKids:  sort(arr.filter(isOld)),
+    unknownKids: sort(arr.filter(o=> !isNew(o) && !isOld(o)))
   };
 }
 /* статус ребёнка коротким значком — для строки списка */
@@ -7137,9 +7140,11 @@ function _goalsKidStatus(o){
 /* раскрывающийся поимённый список под донатом */
 function _goalsKidListHTML(title,list,color){
   if(!list.length) return "";
+  const when=o=> o.created ? ("в Альфе с "+_dmy(o.created))
+    : (o.amo ? "из amo · нет в Альфе" : (o.alfaId!=null ? "дата не подтянута" : "нет в Альфе"));
   const row=o=>`<div class="gk-row">
-      <span class="gk-name" title="Открыть карточку ребёнка" onclick="openKidCardByName('${_jsStr(o.name)}')">${esc(o.name)}</span>
-      <span class="gk-when">${o.created?("в Альфе с "+_dmy(o.created)):(o.alfaId!=null?"дата не подтянута":"нет в Альфе")}</span>
+      <span class="gk-name" title="Открыть карточку ребёнка" onclick="openKidCardByName('${_jsStr(o.name)}')">${esc(o.name)}${o.amo&&!o.created?' <span style="font-size:10px;background:#e7eefb;color:#1F5BC0;border-radius:8px;padding:0 6px">amo</span>':''}</span>
+      <span class="gk-when">${when(o)}</span>
       <span class="gk-st">${_goalsKidStatus(o)}</span>
     </div>`;
   return `<details class="gk"><summary style="color:${color}">${title} — список (${list.length})</summary>
@@ -7215,10 +7220,11 @@ function _goalsData(){
   const map={};
   (S.grid||[]).forEach(l=>{
     kidsOf(l).forEach(k=>{ const key=_nameKey(k.n); if(!key) return;
-      const o=map[key]||(map[key]={may:false,reply:'',no:false,alfaId:null,created:''});
+      const o=map[key]||(map[key]={may:false,reply:'',no:false,alfaId:null,created:'',amo:false});
       if(o.alfaId==null && k.alfaId!=null && k.alfaId!=="") o.alfaId=k.alfaId;
       // самая ранняя дата внесения (ребёнок мог встретиться в нескольких занятиях)
       if(k.alfaCreated && (!o.created || k.alfaCreated<o.created)) o.created=k.alfaCreated;
+      if(k.amoLeadId!=null && k.amoLeadId!=="") o.amo=true;   // пришёл из amo (оплаченный этап)
       if(k.may) o.may=true; if(k.no) o.no=true;
       const rank=r=>r==='yes'?3:r==='no'?2:r==='maybe'?1:0;
       if(rank(k.vbReply)>rank(o.reply)) o.reply=k.vbReply;
@@ -7232,11 +7238,11 @@ function _goalsData(){
      запросов не нужно. Пока её ни у кого нет — данные не готовы, цифры не показываем. */
   const cut=_newSince();
   const hasRoster=arr.some(o=>o.created);        // «выгрузка сделана» = у кого-то есть дата внесения
-  // Классифицируем ТОЛЬКО по достоверной дате внесения. Ребёнок без даты (не сопоставлен с Альфой)
-  // НЕ считается новым — иначе в «новых» попадают вернувшиеся, у которых дату просто не подтянули.
-  const isOld=o=> !!o.created && o.created<cut;   // заведён в Альфе ДО отсечки → возврат
-  const isNew=o=> !!o.created && o.created>=cut;  // заведён С отсечки → новый
-  const oldAll=arr.filter(isOld), newAll=arr.filter(isNew), unknownAll=arr.filter(o=>!o.created);
+  // НОВЫЙ = заведён в Альфе с отсечки, ЛИБО пришёл из amo (оплаченный этап) и в Альфе его ещё нет.
+  // СТАРЫЙ = заведён в Альфе до отсечки. Остальные без даты — «не сопоставлены», в новых не считаем.
+  const isOld=o=> !!o.created && o.created<cut;
+  const isNew=o=> (!!o.created && o.created>=cut) || (!o.created && o.amo);   // amo-оплаченный без Альфы = новый
+  const oldAll=arr.filter(isOld), newAll=arr.filter(isNew), unknownAll=arr.filter(o=>!isOld(o)&&!isNew(o));
   const old=oldAll.filter(k=>!k.no), nw=newAll.filter(k=>!k.no);
   const retMay=old.filter(k=>k.may).length + unplaced;                  // майские (оплатили продолжение)
   const retYes=old.filter(k=>!k.may && k.reply==='yes').length;         // подтвердили продолжение
@@ -8446,6 +8452,7 @@ function _amoKidFrom(c,name){
   if(c.phone) kid.phone=c.phone;
   if(c.dob) kid.dob=_dobIso(c.dob);   // дата рождения из карточки контакта — сразу виден возраст
   kid.amoLeadId=c.lead.id;
+  if(c.stage) kid.amoStage=c.stage;   // этап воронки (например «Абонемент 26/27») — для «новых»
   return kid;
 }
 /* вписать прямо в группу — ради этого всё и затевалось */
