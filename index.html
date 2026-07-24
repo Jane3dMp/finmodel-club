@@ -380,6 +380,14 @@ details.cwarn .cwarn-body{padding:0 14px 12px}
 :is(#goals,#report) .on-ctl select,:is(#goals,#report) .on-ctl input{padding:3px 5px;font-size:12px}
 :is(#goals,#report) .on-note{font-size:11.5px;color:var(--muted);margin-top:8px;line-height:1.45}
 :is(#goals,#report) .on-note.warn{color:#8A6412;background:#FBF2CE;border-radius:8px;padding:7px 10px}
+:is(#goals,#report) .gk{margin-top:8px}
+:is(#goals,#report) .gk>summary{cursor:pointer;font-size:12px;font-weight:600;text-align:center;user-select:none}
+:is(#goals,#report) .gk-list{margin-top:6px;max-height:280px;overflow:auto;border:1px solid var(--line);border-radius:10px;background:#fff}
+:is(#goals,#report) .gk-row{display:flex;align-items:center;gap:8px;padding:5px 10px;border-bottom:1px solid #f0ebe4;font-size:12px}
+:is(#goals,#report) .gk-row:last-child{border-bottom:none}
+:is(#goals,#report) .gk-name{flex:1;font-weight:600;cursor:pointer;text-decoration:underline dotted}
+:is(#goals,#report) .gk-when{color:var(--muted);white-space:nowrap;font-size:11px}
+:is(#goals,#report) .gk-st{white-space:nowrap;min-width:64px;text-align:right}
 :is(#goals,#report) .goal-title{font-size:17px;font-weight:700;letter-spacing:-.01em}
 :is(#goals,#report) .goal-pct{font-size:34px;font-weight:800;letter-spacing:-.02em;margin-top:2px;line-height:1}
 :is(#goals,#report) .goal-left{font-size:13px;color:var(--muted);margin-top:4px}
@@ -1527,7 +1535,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-07-22-11";
+const APP_VER="2026-07-22-12";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -7095,6 +7103,45 @@ const OLD_VISIT_TH=3, LY_FROM="2025-09-01", LY_TO="2026-05-31";
 const ROSTER_RULES={a:"был на занятии",d:"занятие проведено",t:"любое занятие в расписании"};
 function _rosterRule(){ return ROSTER_RULES[S.oldRosterRule]?S.oldRosterRule:"a"; }
 function _oldTh(){ const v=parseInt(S.oldTh,10); return v>0?v:OLD_VISIT_TH; }
+/* поимённые списки «новый» / «возврат» для раскрывашки под донатами. Ребёнок = уникальное ФИО
+   (тёзок не сливаем), берём самое полное написание и раннюю дату внесения. */
+function _goalsKidLists(){
+  const cut=_newSince(), map={};
+  (S.grid||[]).forEach(l=>kidsOf(l).forEach(k=>{ const key=_nameKey(k.n); if(!key) return;
+    const o=map[key]||(map[key]={name:k.n, created:k.alfaCreated||"", alfaId:(k.alfaId!=null?k.alfaId:null),
+      may:false, reply:"", no:false, courses:new Set()});
+    if(String(k.n).trim().split(/\s+/).length>String(o.name).trim().split(/\s+/).length) o.name=k.n;
+    if(k.alfaCreated && (!o.created || k.alfaCreated<o.created)) o.created=k.alfaCreated;
+    if(o.alfaId==null && k.alfaId!=null) o.alfaId=k.alfaId;
+    if(k.may) o.may=true; if(k.no) o.no=true;
+    const rank=r=>r==='yes'?3:r==='no'?2:r==='maybe'?1:0;
+    if(rank(k.vbReply)>rank(o.reply)) o.reply=k.vbReply;
+    if(l.course) o.courses.add(l.course);
+  }));
+  const isNew=o=> !o.created || o.created>=cut;
+  const arr=Object.values(map).map(o=>({...o, courses:[...o.courses]}));
+  const sort=a=>a.sort((x,y)=>x.name.localeCompare(y.name,"ru"));
+  return {newKids:sort(arr.filter(isNew)), oldKids:sort(arr.filter(o=>!isNew(o)))};
+}
+/* статус ребёнка коротким значком — для строки списка */
+function _goalsKidStatus(o){
+  if(o.no||o.reply==='no') return '<span style="color:var(--red)">отказ</span>';
+  if(o.may) return '<span style="color:var(--green)">💰 оплатил</span>';
+  if(o.reply==='yes') return '<span style="color:var(--green)">🟢 да</span>';
+  if(o.reply==='maybe') return '<span style="color:#C9922E">🟡 думает</span>';
+  return '<span style="color:var(--muted)">молчит</span>';
+}
+/* раскрывающийся поимённый список под донатом */
+function _goalsKidListHTML(title,list,color){
+  if(!list.length) return "";
+  const row=o=>`<div class="gk-row">
+      <span class="gk-name" title="Открыть карточку ребёнка" onclick="openKidCardByName('${_jsStr(o.name)}')">${esc(o.name)}</span>
+      <span class="gk-when">${o.created?("в Альфе с "+_dmy(o.created)):(o.alfaId!=null?"дата не подтянута":"нет в Альфе")}</span>
+      <span class="gk-st">${_goalsKidStatus(o)}</span>
+    </div>`;
+  return `<details class="gk"><summary style="color:${color}">${title} — список (${list.length})</summary>
+    <div class="gk-list">${list.map(row).join("")}</div></details>`;
+}
 /* дата отсечки «новый/старый»: заведён в Альфе с этой даты — новый. ISO для сравнения. */
 const NEW_SINCE_DEFAULT="2026-07-01";
 function _newSince(){ const s=String(S.newSinceDate||"").trim(); return /^\d{4}-\d{2}-\d{2}/.test(s)?s.slice(0,10):NEW_SINCE_DEFAULT; }
@@ -7291,10 +7338,13 @@ function _oldNewHTML(){
       +(st.noDate?` · <span title="Ребёнок пока не сопоставлен с Альфой — нажмите «💰 Балансы и возраст» на «Клиентах». Пока считаются новыми">без даты внесения: ${st.noDate}</span>`:"")
     : `Разделение «возврат / новый набор» — по дате внесения ребёнка в AlfaCRM. Даты приходят из выгрузки «💰 Балансы и возраст» на вкладке «Клиенты». `
       +(_fbIsAdmin?"Нажмите её, и цифры появятся здесь.":"Попросите администратора нажать «💰 Балансы и возраст».");
+  const lists=st.has?_goalsKidLists():{newKids:[],oldKids:[]};
   const body = st.has
     ? `<div class="on-row">
-        ${dn(G.retSecured,goalR,"#4F9E63","Возврат прошлогодних",`оплатили майский ${G.retMay} · «да» ${G.retYes} · в работе ${G.retWork} · отказ ${G.retNo}`)}
-        ${dn(G.newTotal,goalN,"#1F5BC0","Новый набор",`вписано ${G.newTotal} · из них подтвердили ${G.newYes}`)}
+        <div>${dn(G.retSecured,goalR,"#4F9E63","Возврат прошлогодних",`оплатили майский ${G.retMay} · «да» ${G.retYes} · в работе ${G.retWork} · отказ ${G.retNo}`)}
+          ${_goalsKidListHTML("Возврат",lists.oldKids,"#4F9E63")}</div>
+        <div>${dn(G.newTotal,goalN,"#1F5BC0","Новый набор",`вписано ${G.newTotal} · из них подтвердили ${G.newYes}`)}
+          ${_goalsKidListHTML("Новый набор",lists.newKids,"#1F5BC0")}</div>
       </div>`
     : `<div class="on-card" style="align-items:flex-start;text-align:left">
         <div class="on-t">Пока не посчитано</div>
