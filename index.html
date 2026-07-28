@@ -1542,7 +1542,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-07-22-25";
+const APP_VER="2026-07-22-27";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -7144,15 +7144,13 @@ function _oldTh(){ const v=parseInt(S.oldTh,10); return v>0?v:OLD_VISIT_TH; }
 /* дата за день до отсечки (окно «был в клубе раньше» = до 01.07.2026 включительно 30.06) */
 function _dayBefore(iso){ const d=new Date(iso); if(isNaN(d))return "2026-06-30"; d.setDate(d.getDate()-1); const p=n=>String(n).padStart(2,"0"); return d.getFullYear()+"-"+p(d.getMonth()+1)+"-"+p(d.getDate()); }
 /* Кого проверять по посещениям: сейчас в «новых» из-за отсутствия даты — есть связь с Альфой,
-   но ни даты внесения, ни последнего посещения, ни прежней проверки. */
+   но ни даты внесения, ни последнего посещения, ни прежней проверки. Берём из общего списка
+   (агрегация по ФИО), чтобы не промахнуться, когда alfaId стоит на другом занятии ребёнка. */
 function _visitCheckIds(){
-  const cut=_newSince(), seen=new Set(), ids=[];
-  (S.grid||[]).forEach(l=>kidsOf(l).forEach(k=>{ const key=_nameKey(k.n); if(!key||seen.has(key)) return; seen.add(key);
-    const o={alfaId:k.alfaId,created:k.alfaCreated,lastAttend:k.alfaLastAttend,prevAttend:k.alfaPrevAttend,amo:!!k.amoLeadId};
-    if(_kidClass(o,cut)==='new' && k.alfaId!=null && k.alfaId!=="" && !k.alfaCreated && !k.alfaLastAttend && !k.alfaPrevAttend)
-      ids.push(String(k.alfaId));
-  }));
-  return [...new Set(ids)];
+  const L=_goalsKidLists();
+  return [...new Set(L.newKids
+    .filter(o=> o.alfaId!=null && !o.created && !o.lastAttend && !o.prevAttend)
+    .map(o=>String(o.alfaId)))];
 }
 /* Проверить по истории Альфы: был ли ребёнок на занятиях ДО отсечки. Хоть одно — значит возврат.
    Только для тех, у кого даты нет (иначе классификация уже определена). */
@@ -7473,15 +7471,18 @@ function _oldNewHTML(){
   let ctl="";
   if(_fbIsAdmin){
     const incU=S.newIncludeUnmatched!==false;
-    const needCheck=(typeof _visitCheckIds==='function')?_visitCheckIds().length:0;
     ctl=`<div class="on-ctl">
       <label>Новый — заведён в Альфе с: <input type="date" value="${esc(cut)}" onchange="setNewSince(this.value)" style="width:150px"></label>
       <label title="Дети без связи с Альфой (не были в системе) — считать новичками. Выключите, если много непроверенных ФИО"><input type="checkbox" ${incU?"checked":""} onchange="setNewInclUnmatched(this.checked)" style="width:auto"> несопоставленных — в новые</label>
       <label>Цель возврата: <input type="number" min="0" step="10" value="${goalR}" onchange="saveGoal('ret',this.value)" style="width:70px"></label>
       <label>Цель новых: <input type="number" min="0" step="10" value="${goalN}" onchange="saveGoal('new',this.value)" style="width:70px"></label>
-      ${needCheck?`<button class="btn ghost sm" id="prevAttendBtn" onclick="checkPrevAttend()" title="Для новых без даты — проверить в Альфе, был ли ребёнок на занятиях до отсечки. Был хоть на одном → возврат">🔍 Проверить по посещениям (${needCheck})</button>`:""}
     </div>`;
   }
+  const needCheck=(_fbIsAdmin && typeof _visitCheckIds==='function')?_visitCheckIds().length:0;
+  const checkBtn=needCheck?`<div style="text-align:center;margin:6px 0 2px">
+      <button class="btn sm" id="prevAttendBtn" onclick="checkPrevAttend()" title="Для новых без даты — спросить Альфу, был ли ребёнок на занятиях до отсечки. Был хоть на одном → возврат">🔍 Проверить по посещениям (${needCheck})</button>
+      <div style="font-size:11px;color:var(--muted);margin-top:3px">у ${needCheck} новых нет даты — уточнить, ходили ли они до ${_dmy(cut)}</div>
+    </div>`:"";
   const note = st.has
     ? `Возврат — посещал занятия до ${_dmy(cut)} или заведён в Альфе раньше. Новый — всё остальное: заведён с ${_dmy(cut)}, из amo, или следов прошлого в клубе нет.`
       +(G.newUnver?` · <span style="color:#8A6412" title="В новых, но связь с Альфой не подтверждена (нет ID/amo) — возможно, вернувшиеся с другим написанием ФИО. Сверьте через «💰 Балансы и возраст»">из новых не подтверждены Альфой: ${G.newUnver}</span>`:"")
@@ -7510,6 +7511,7 @@ function _oldNewHTML(){
       </div>`;
   return `<div class="oldnew">
       <h3 style="font-size:15px;margin:0 0 10px;display:flex;align-items:center;gap:8px"><span data-ic="target"></span>Возврат и новый набор</h3>
+      ${checkBtn}
       ${body}
       ${ctl}
       <div class="on-note${st.has?"":" warn"}">${note}</div>
