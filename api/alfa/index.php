@@ -581,29 +581,72 @@ switch ($action) {
         @set_time_limit(60);
         $host  = 'https://' . alfa_host() . '/v2api/' . alfa_branch();
         $token = alfa_token();
-        $out = []; $page = 0;
+        $out = []; $page = 0; $sample = null;
         do {
             $r = alfa_http('POST', "$host/group/index", ['page' => $page, 'count' => 100], $token, true, 12);
             $items = isset($r['__err']) ? [] : ($r['items'] ?? []);
             foreach ($items as $g) {
                 if (!isset($g['id'])) continue;
+                if ($sample === null) $sample = $g;   // образец со ВСЕМИ полями — сверить имена полей
                 $out[] = [
                     'id'          => (int)$g['id'],
                     'name'        => (string)($g['name'] ?? ''),
                     'subject_ids' => array_values(array_map('intval', (array)($g['subject_ids'] ?? []))),
                     'teacher_ids' => array_values(array_map('intval', (array)($g['teacher_ids'] ?? ($g['teachers'] ?? [])))),
                     'status_id'   => $g['status_id'] ?? null,
+                    'level_id'    => $g['level_id'] ?? null,
                     'limit'       => $g['limit'] ?? null,
+                    'note'        => $g['note'] ?? null,
+                    'b_date'      => $g['b_date'] ?? null,
+                    'e_date'      => $g['e_date'] ?? null,
                     'is_archive'  => (int)($g['is_archive'] ?? 0),
                 ];
             }
             $page++;
         } while (isset($items) && count($items) === 100 && $page < 30);
-        json_out(['ok' => true, 'branch' => alfa_branch(), 'count' => count($out), 'groups' => $out]);
+        json_out(['ok' => true, 'branch' => alfa_branch(), 'count' => count($out), 'groups' => $out, 'sample' => $sample]);
+        break;
+
+    // --- РЕГУЛЯРНОЕ РАСПИСАНИЕ УЖЕ СУЩЕСТВУЮЩИХ ГРУПП (READ). Нужно, чтобы БЕЗ пробной записи
+    //     сверить нумерацию дня недели в Alfa и реальные имена полей (day / time_from_v / ...). ---
+    case 'regularLessons':
+        @set_time_limit(60);
+        $gid   = (int)($in['groupId'] ?? 0);
+        $host  = 'https://' . alfa_host() . '/v2api/' . alfa_branch();
+        $token = alfa_token();
+        $body  = ['count' => 100];
+        if ($gid > 0) { $body['related_class'] = 'Group'; $body['related_id'] = $gid; }
+        $out = []; $sample = null; $page = 0; $items = [];
+        do {
+            $body['page'] = $page;
+            $r = alfa_http('POST', "$host/regular-lesson/index", $body, $token, true, 12);
+            $items = isset($r['__err']) ? [] : ($r['items'] ?? []);
+            foreach ($items as $rl) {
+                // Alfa может проигнорировать фильтр в теле — отсекаем чужие уроки сами
+                if ($gid > 0 && (int)($rl['related_id'] ?? 0) !== $gid) continue;
+                if ($sample === null) $sample = $rl;
+                $out[] = [
+                    'id'             => $rl['id'] ?? null,
+                    'related_id'     => $rl['related_id'] ?? null,
+                    'subject_id'     => $rl['subject_id'] ?? null,
+                    'room_id'        => $rl['room_id'] ?? null,
+                    'teacher_ids'    => array_values(array_map('intval', (array)($rl['teacher_ids'] ?? []))),
+                    'day'            => $rl['day'] ?? null,
+                    'time_from'      => $rl['time_from_v'] ?? ($rl['time_from'] ?? null),
+                    'time_to'        => $rl['time_to_v'] ?? ($rl['time_to'] ?? null),
+                    'lesson_type_id' => $rl['lesson_type_id'] ?? null,
+                    'b_date'         => $rl['b_date'] ?? null,
+                    'e_date'         => $rl['e_date'] ?? null,
+                ];
+            }
+            $page++;
+        } while ($gid <= 0 && count($items) === 100 && $page < 20);
+        json_out(['ok' => true, 'branch' => alfa_branch(), 'count' => count($out), 'lessons' => $out, 'sample' => $sample]);
         break;
 
     // --- публикация ОДНОЙ группы: dryRun=true по умолчанию (ничего не создаёт) ---
     case 'publish':
+        @set_time_limit(120);
         $dry      = !isset($in['dryRun']) || $in['dryRun'] !== false;
         $g        = is_array($in['group'] ?? null) ? $in['group'] : [];
         $sched    = is_array($in['schedule'] ?? null) ? $in['schedule'] : [];
@@ -638,11 +681,24 @@ switch ($action) {
         // ЖИВОЕ создание (только при явном dryRun:false)
         $gr  = alfa_create('group', $groupPayload);
         $gid = $gr['id'] ?? ($gr['model']['id'] ?? null);
-        if (!$gid) json_out(['ok' => false, 'error' => 'AlfaCRM не вернула id группы', 'alfa' => $gr], 502);
-        $created = ['group_id' => $gid, 'lessons' => [], 'links' => []];
-        foreach ($plan['schedule'] as $rl) { $rl['related_id'] = $gid; $created['lessons'][] = alfa_create('regular-lesson', $rl); }
-        foreach ($students as $cid) { $created['links'][] = alfa_create('cgi', ['customer_id' => $cid, 'group_id' => $gid, 'b_date' => $bDate, 'e_date' => $eDate]); }
-        json_out(['ok' => true, 'dryRun' => false, 'created' => $created]);
+        if (!$gid) json_out(['ok' => false, 'error' => 'AlfaCRM не вернула id группы', 'sent' => $groupPayload, 'alfa' => $gr], 502);
+        // Группа уже создана — дальше ошибки НЕ обрываем, а собираем: клиенту важно записать
+        // group_id (иначе при повторе создастся дубль), а недоделанное показать списком.
+        $created = ['group_id' => (int)$gid, 'lessons' => [], 'links' => [], 'errors' => []];
+        foreach ($plan['schedule'] as $i => $rl) {
+            $rl['related_id'] = (int)$gid;
+            $res = alfa_create('regular-lesson', $rl);
+            $rid = $res['id'] ?? ($res['model']['id'] ?? null);
+            if ($rid) $created['lessons'][] = (int)$rid;
+            else      $created['errors'][] = ['step' => 'расписание #' . ($i + 1), 'sent' => $rl, 'alfa' => $res];
+        }
+        foreach ($students as $cid) {
+            $res = alfa_create('cgi', ['customer_id' => (int)$cid, 'group_id' => (int)$gid, 'b_date' => $bDate, 'e_date' => $eDate]);
+            $lid = $res['id'] ?? ($res['model']['id'] ?? null);
+            if ($lid) $created['links'][] = (int)$cid;
+            else      $created['errors'][] = ['step' => 'ученик ' . $cid, 'alfa' => $res];
+        }
+        json_out(['ok' => true, 'dryRun' => false, 'partial' => !empty($created['errors']), 'created' => $created]);
         break;
 
     // --- майские из Alfa: ПЛАТЕЖИ (pay) с пометкой «май» → кто купил; курс — из custom_dogovora клиента ---
