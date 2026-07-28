@@ -1525,6 +1525,7 @@ const DEFAULT_STATE = {
   oldRosterRule: "a",// какое из трёх чисел считаем посещением: a | d | t (меняется без новой выгрузки)
   oldTh: 3,          // порог «старого»: столько посещений за прошлый год
   newSinceDate: "2026-07-01",   // «новый» = впервые заведён в Альфе не раньше этой даты
+  newIncludeUnmatched: true,    // несопоставленных с Альфой считать новыми (не были в системе = новичок)
   alfaArchiveMode: "is_study",  // чем архивируем в Альфе: is_study | removed | both (сверяется кнопкой «Поля архива»)
   // отслеживаемый этап воронки amoCRM: дети оттуда ждут распределения в группу
   amoWatch: { pipelineId:0, statusIds:[], seen:{}, nameSrc:"lead", nameField:"" },
@@ -1541,7 +1542,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-07-22-22";
+const APP_VER="2026-07-22-23";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -7194,18 +7195,24 @@ function _goalsKidListHTML(title,list,color){
 const NEW_SINCE_DEFAULT="2026-07-01";
 function _newSince(){ const s=String(S.newSinceDate||"").trim(); return /^\d{4}-\d{2}-\d{2}/.test(s)?s.slice(0,10):NEW_SINCE_DEFAULT; }
 function setNewSince(v){ const s=String(v||"").trim(); S.newSinceDate=/^\d{4}-\d{2}-\d{2}/.test(s)?s.slice(0,10):NEW_SINCE_DEFAULT; persistLocal(); if(typeof fbSchedulePush==="function") fbSchedulePush(); _renderGoalsAll(); }
+function setNewInclUnmatched(on){ S.newIncludeUnmatched=!!on; persistLocal(); if(typeof fbSchedulePush==="function") fbSchedulePush(); _renderGoalsAll(); }
 function _dmy(iso){ const m=String(iso||"").match(/^(\d{4})-(\d{2})-(\d{2})/); return m?(m[3]+"."+m[2]+"."+m[1]):iso; }
 /* Единая классификация ребёнка → 'new' | 'old' | 'unknown'. Используется и в цифрах, и в списках.
    o: {alfaId, created, lastAttend, amo}. cut — дата отсечки «нового». Порядок проверок важен:
    посещал до лета → возврат (самый надёжный признак), иначе по дате создания записи, иначе amo. */
 function _kidClass(o, cut){
   const inAlfa = o.alfaId!=null;
-  if((o.lastAttend && o.lastAttend<cut) || (o.created && o.created<cut)) return 'old';  // был в клубе раньше
-  if(o.created && o.created>=cut) return 'new';         // запись в Альфе создана с отсечки
-  if(!inAlfa && o.amo) return 'new';                    // пришёл из amo, в Альфе ещё нет
-  if(inAlfa) return 'old';                              // есть в Альфе, дату не знаем → считаем возвратом
-  return 'unknown';                                     // ни Альфы, ни amo — про ребёнка ничего не знаем
+  // ВОЗВРАТ — только по НАДЁЖНОМУ признаку «был в клубе раньше»: посещал занятия до этого лета
+  // ИЛИ запись в Альфе создана раньше этого лета. Больше не считаем возвратом «просто есть в Альфе».
+  if((o.lastAttend && o.lastAttend<cut) || (o.created && o.created<cut)) return 'old';
+  // НОВЫЙ — запись создана с отсечки, ЛИБО пришёл из amo, ЛИБО есть в Альфе, но следов прошлого нет.
+  if((o.created && o.created>=cut) || o.amo || inAlfa) return 'new';
+  // Совсем не сопоставлен (ни Альфы, ни amo, ни дат). По умолчанию — новый (не был в системе = новичок),
+  // но можно исключить галочкой, если много непроверенных.
+  return (S.newIncludeUnmatched===false) ? 'unknown' : 'new';
 }
+/* ребёнок в «новых», но связь с Альфой не подтверждена (может оказаться вернувшимся с другим ФИО) */
+function _newUnverified(o){ return o.alfaId==null && !o.amo && !o.created && !o.lastAttend; }
 /* число посещений ребёнка по текущему правилу. Понимает и старый формат (просто число). */
 function _rosterCount(alfaId){
   const v=(S.oldRoster||{})[String(alfaId)];
@@ -7323,8 +7330,9 @@ function _goalsData(){
   const retWork=old.filter(k=>!k.may && k.reply!=='yes').length;        // в работе
   const retNo=oldAll.filter(k=>k.no || k.reply==='no').length;          // отказ / не придёт
   const newTotal=nw.length, newYes=nw.filter(k=>k.reply==='yes').length;
+  const newUnver=newAll.filter(_newUnverified).length;   // в новых, но связь с Альфой не подтверждена
   return {retMay,retYes,retSecured:retMay+retYes,retWork,retNo,retPool:oldAll.length,
-    newTotal,newYes,newPool:newAll.length,unknownPool:unknownAll.length,unplaced,hasRoster,rosterAt:S.oldRosterAt||""};
+    newTotal,newYes,newUnver,newPool:newAll.length,unknownPool:unknownAll.length,unplaced,hasRoster,rosterAt:S.oldRosterAt||""};
 }
 function _donut(pct,color){
   const size=156,r=size/2-13,c=2*Math.PI*r,off=c*(1-Math.max(0,Math.min(1,pct)));
@@ -7412,23 +7420,26 @@ function _oldNewHTML(){
   const cut=_newSince();
   let ctl="";
   if(_fbIsAdmin){
+    const incU=S.newIncludeUnmatched!==false;
     ctl=`<div class="on-ctl">
       <label>Новый — заведён в Альфе с: <input type="date" value="${esc(cut)}" onchange="setNewSince(this.value)" style="width:150px"></label>
+      <label title="Дети без связи с Альфой (не были в системе) — считать новичками. Выключите, если много непроверенных ФИО"><input type="checkbox" ${incU?"checked":""} onchange="setNewInclUnmatched(this.checked)" style="width:auto"> несопоставленных — в новые</label>
       <label>Цель возврата: <input type="number" min="0" step="10" value="${goalR}" onchange="saveGoal('ret',this.value)" style="width:70px"></label>
       <label>Цель новых: <input type="number" min="0" step="10" value="${goalN}" onchange="saveGoal('new',this.value)" style="width:70px"></label>
     </div>`;
   }
   const note = st.has
-    ? `Возврат — посещал занятия до ${_dmy(cut)} или заведён в Альфе раньше. Новый — заведён с ${_dmy(cut)} и раньше не ходил, ИЛИ пришёл из amo (оплаченный этап) и в Альфе его ещё нет.`
-      +(st.noDate?` · <span style="color:#8A6412" title="Ни ID из Альфы, ни amo — про ребёнка ничего не известно. В счёт не идёт. Нажмите «💰 Балансы и возраст»">не сопоставлены: ${st.noDate} — не в счёте</span>`:"")
-    : `Разделение «возврат / новый набор» — по дате внесения в AlfaCRM (и приходу из amo). Даты приходят из выгрузки «💰 Балансы и возраст» на вкладке «Клиенты». `
+    ? `Возврат — посещал занятия до ${_dmy(cut)} или заведён в Альфе раньше. Новый — всё остальное: заведён с ${_dmy(cut)}, из amo, или следов прошлого в клубе нет.`
+      +(G.newUnver?` · <span style="color:#8A6412" title="В новых, но связь с Альфой не подтверждена (нет ID/amo) — возможно, вернувшиеся с другим написанием ФИО. Сверьте через «💰 Балансы и возраст»">из новых не подтверждены Альфой: ${G.newUnver}</span>`:"")
+      +` · Чтобы не спутать возвратных, важно последнее посещение из Альфы — нажмите «💰 Балансы и возраст».`
+    : `Разделение «возврат / новый набор» — по данным из AlfaCRM (последнее посещение, дата внесения) и приходу из amo. Приходят из выгрузки «💰 Балансы и возраст» на вкладке «Клиенты». `
       +(_fbIsAdmin?"Нажмите её, и цифры появятся здесь.":"Попросите администратора нажать «💰 Балансы и возраст».");
   const lists=st.has?_goalsKidLists():{newKids:[],oldKids:[],unknownKids:[]};
   const body = st.has
     ? `<div class="on-row">
         <div>${dn(G.retSecured,goalR,"#4F9E63","Возврат прошлогодних",`оплатили майский ${G.retMay} · «да» ${G.retYes} · в работе ${G.retWork} · отказ ${G.retNo}`)}
           ${_goalsKidListHTML("Возврат",lists.oldKids,"#4F9E63")}</div>
-        <div>${dn(G.newTotal,goalN,"#1F5BC0","Новый набор",`вписано ${G.newTotal} · из них подтвердили ${G.newYes}`)}
+        <div>${dn(G.newTotal,goalN,"#1F5BC0","Новый набор",`вписано ${G.newTotal} · подтвердили ${G.newYes}${G.newUnver?` · не подтверждены Альфой ${G.newUnver}`:""}`)}
           ${_goalsKidListHTML("Новый набор",lists.newKids,"#1F5BC0")}</div>
       </div>
       ${(()=>{ const cs=_alfaClientStats(); if(!cs.has) return "";
