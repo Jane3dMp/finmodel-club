@@ -1541,7 +1541,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-07-22-21";
+const APP_VER="2026-07-22-22";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -6309,12 +6309,36 @@ function _viberFlavor(course){ for(const it of VIBER_FLAVORS){ if(it[0].test(cou
 /* стабильный индекс из строки — вариант зависит от ребёнка+курса, но одинаков при повторе */
 function _hashIdx(s,n){ let h=5381; for(let i=0;i<s.length;i++){ h=((h*33)^s.charCodeAt(i))>>>0; } return n>0?h%n:h; }
 
+/* Все занятия ГРУППЫ (курс+номер), а не только открытое: у 2×/нед их два. Уникальные по день+время. */
+function _groupSessions(les){
+  const course=les.course||"", grp=(les.group||"").trim();
+  const src=grp?(S.grid||[]).filter(l=>(l.course||"")===course && (l.group||"").trim()===grp):[les];
+  const seen=new Set(), out=[];
+  (src.length?src:[les]).forEach(l=>{ const time=l.start?(l.start+(l.end?("–"+l.end):"")):""; const key=(+l.day||0)+"|"+time;
+    if(!seen.has(key)){ seen.add(key); out.push({day:+l.day||0, start:l.start||"", time}); } });
+  out.sort((a,b)=>(a.day-b.day)||String(a.start).localeCompare(String(b.start)));
+  return out.length?out:[{day:+les.day||0, start:les.start||"", time:les.start?(les.start+(les.end?("–"+les.end):"")):""}];
+}
+/* «Вторник и Пятница»; для трёх — «Пн, Ср и Пт» */
+function _joinRu(arr){ arr=arr.filter(Boolean); if(arr.length<=1) return arr[0]||""; return arr.slice(0,-1).join(", ")+" и "+arr[arr.length-1]; }
+/* {день} и {время} с учётом всех занятий группы. Если время одинаковое — «Вт и Пт» + одно время;
+   если разное — «Вт 11:00, Пт 15:00» в {день}, {время} пустое (шаблон сам подчистит хвостовую запятую). */
+function _groupSchedule(les){
+  const s=_groupSessions(les);
+  const days=s.map(x=>DAY_FULL[x.day]||"").filter(Boolean);
+  const times=[...new Set(s.map(x=>x.time).filter(Boolean))];
+  if(s.length<=1) return {days:days[0]||"", time:s[0]?s[0].time:""};
+  if(times.length===1) return {days:_joinRu(days), time:times[0]};
+  return {days:s.map(x=>(DAY_FULL[x.day]||"")+(x.time?(" "+x.time):"")).join(", "), time:""};
+}
+/* убрать повисшую «, » в конце строки (когда {время} пустое после «{день}, {время}») */
+function _tidyMsg(s){ return String(s||"").replace(/,[ \t]+(?=\r?\n|$)/g,""); }
 function _buildViberMsg(k,les,tpl){
   // без явного шаблона: у оплативших майский (k.may) — приветственный шаблон, у остальных — обычный
   if(!tpl) tpl = k.may ? (S.viberTplMay||VIBER_TPL_MAY_DEFAULT) : (S.viberTpl||VIBER_TPL_DEFAULT);
   const parts=String(k.n||"").trim().split(/\s+/);
   const imya=parts.length>1?parts[1]:(parts[0]||"");
-  const time=les.start?(les.start+(les.end?("–"+les.end):"")):"";
+  const sch=_groupSchedule(les);
   const brand=VIBER_BRAND[_courseEco(les.course)]||VIBER_BRAND["Прознание"];
   const key=(_normName(k.n)||imya)+"|"+(les.course||"");
   // 1) генеративные плейсхолдеры (варьируются по ребёнку+курсу, могут содержать данные-плейсхолдеры)
@@ -6326,15 +6350,15 @@ function _buildViberMsg(k,les,tpl){
     .replace(/\{прощание\}/g,   VIBER_BYE[_hashIdx(key+"b",VIBER_BYE.length)])
     .replace(/\{бренд\}/g,      brand);   // после вступления — чтобы {бренд} внутри него раскрылся
   // 2) данные
-  return out
+  return _tidyMsg(out
     .replace(/\{группа\}/g, les.group||les.course||"")
     .replace(/\{курс\}/g,   les.course||"")
-    .replace(/\{день\}/g,   DAY_FULL[les.day]||"")
-    .replace(/\{время\}/g,  time)
+    .replace(/\{день\}/g,   sch.days)
+    .replace(/\{время\}/g,  sch.time)
     .replace(/\{имя\}/g,    imya)
     .replace(/\{фио\}/g,    k.n||"")
     .replace(/\{педагог\}/g,les.teacher||"")
-    .replace(/\{старт\}/g,  _viberStartFor(les));   // дата первого занятия ИМЕННО этой группы
+    .replace(/\{старт\}/g,  _viberStartFor(les)));   // дата первого занятия ИМЕННО этой группы
 }
 /* старые версии дефолтного шаблона — если у пользователя сохранён один из них
    (или пусто), автоматически меняем на новый. Кастомный текст не трогаем. */
@@ -6430,14 +6454,14 @@ function _payAmount(course){
 function _buildPayMsg(k,les,tpl){
   tpl=tpl||S.viberTplPay||VIBER_TPL_PAY_DEFAULT;
   const brand=VIBER_BRAND[_courseEco(les.course)]||VIBER_BRAND["Прознание"];
-  const time=les.start?(les.start+(les.end?("–"+les.end):"")):"";
+  const sch=_groupSchedule(les);   // все занятия группы (2×/нед → оба дня)
   const parts=String(k.n||"").trim().split(/\s+/);
   // {старт} несёт день недели («6 сентября 2026, воскресенье») — в этом тексте день уже есть
   // отдельно, поэтому для реквизитов даём короткую дату без него
   const startFull=_viberStartFor(les);
   const startShort=startFull.split(",")[0];
   const eco=_courseEco(les.course);
-  return tpl
+  return _tidyMsg(tpl
     .replace(/\{родительфио\}/g, _parentName(k)||"…")
     .replace(/\{родитель\}/g,  _parentFirst(k)||"…")
     .replace(/\{менеджер\}/g,  (S.payManager||PAY_MANAGER_DEFAULT))
@@ -6446,16 +6470,16 @@ function _buildPayMsg(k,les,tpl){
     .replace(/\{бренд\}/g,     brand)
     .replace(/\{курс\}/g,      les.course||"")
     .replace(/\{группа\}/g,    les.group||les.course||"")
-    .replace(/\{деньнеделя\}/g,(DAY_FULL[les.day]||"").toLowerCase())
-    .replace(/\{день\}/g,      DAY_FULL[les.day]||"")
-    .replace(/\{время\}/g,     time)
+    .replace(/\{деньнеделя\}/g,(sch.days||"").toLowerCase())
+    .replace(/\{день\}/g,      sch.days)
+    .replace(/\{время\}/g,     sch.time)
     .replace(/\{старт\}/g,     _viberStartFor(les))
     .replace(/\{срок\}/g,      (S.payDue||PAY_DUE_DEFAULT))
     .replace(/\{код\}/g,       (S.eripCode||ERIP_CODE_DEFAULT))
     .replace(/\{лн\}/g,        (k.alfaId!=null&&k.alfaId!=="")?String(k.alfaId):"…")
     .replace(/\{сумма\}/g,     _payAmount(les.course)||"…")
     .replace(/\{имя\}/g,       (parts.length>1?parts[1]:(parts[0]||"")))
-    .replace(/\{фио\}/g,       k.n||"");
+    .replace(/\{фио\}/g,       k.n||""));
 }
 /* кнопка 💳 у ребёнка: текст с реквизитами в буфер + открыть Viber родителю */
 async function kidPay(i){
