@@ -2560,6 +2560,10 @@ function _fbUpdateAdminUI(){
   if(lg) lg.style.display=_fbIsAdmin?"":"none";
   const ms=document.getElementById("mgrStatBtn");
   if(ms) ms.style.display=_fbIsAdmin?"":"none";
+  // «📤 Опубликовать в Alfa» рисуется ВНУТРИ таблицы групп, а не статичной кнопкой в шапке.
+  // Права приходят из Firebase уже ПОСЛЕ первого рендера, поэтому вкладку надо перерисовать —
+  // иначе админ, зашедший сразу на «Группы», кнопки не увидит.
+  if(typeof renderGroups==="function") renderGroups();
   if(_fbPendRef){ try{_fbPendRef.off();}catch(e){} _fbPendRef=null; }
   if(_fbIsAdmin && _fbDb){
     _fbPendRef=_fbDb.ref("pending");
