@@ -1542,7 +1542,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-07-22-27";
+const APP_VER="2026-07-22-28";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -7143,13 +7143,14 @@ function _rosterRule(){ return ROSTER_RULES[S.oldRosterRule]?S.oldRosterRule:"a"
 function _oldTh(){ const v=parseInt(S.oldTh,10); return v>0?v:OLD_VISIT_TH; }
 /* дата за день до отсечки (окно «был в клубе раньше» = до 01.07.2026 включительно 30.06) */
 function _dayBefore(iso){ const d=new Date(iso); if(isNaN(d))return "2026-06-30"; d.setDate(d.getDate()-1); const p=n=>String(n).padStart(2,"0"); return d.getFullYear()+"-"+p(d.getMonth()+1)+"-"+p(d.getDate()); }
-/* Кого проверять по посещениям: сейчас в «новых» из-за отсутствия даты — есть связь с Альфой,
-   но ни даты внесения, ни последнего посещения, ни прежней проверки. Берём из общего списка
-   (агрегация по ФИО), чтобы не промахнуться, когда alfaId стоит на другом занятии ребёнка. */
+/* Кого проверять по посещениям: ВСЕ, кто сейчас в «новых» и есть связь с Альфой, кроме уже
+   проверенных (prevAttend). Дата создания записи (created) в этом клубе ставится при записи на
+   осень — она есть и у вернувшихся, поэтому одной её мало: сверяем по факту посещений.
+   Берём из общего списка (агрегация по ФИО), чтобы не промахнуться по alfaId с другого занятия. */
 function _visitCheckIds(){
   const L=_goalsKidLists();
   return [...new Set(L.newKids
-    .filter(o=> o.alfaId!=null && !o.created && !o.lastAttend && !o.prevAttend)
+    .filter(o=> o.alfaId!=null && !o.prevAttend)
     .map(o=>String(o.alfaId)))];
 }
 /* Проверить по истории Альфы: был ли ребёнок на занятиях ДО отсечки. Хоть одно — значит возврат.
@@ -7480,8 +7481,8 @@ function _oldNewHTML(){
   }
   const needCheck=(_fbIsAdmin && typeof _visitCheckIds==='function')?_visitCheckIds().length:0;
   const checkBtn=needCheck?`<div style="text-align:center;margin:6px 0 2px">
-      <button class="btn sm" id="prevAttendBtn" onclick="checkPrevAttend()" title="Для новых без даты — спросить Альфу, был ли ребёнок на занятиях до отсечки. Был хоть на одном → возврат">🔍 Проверить по посещениям (${needCheck})</button>
-      <div style="font-size:11px;color:var(--muted);margin-top:3px">у ${needCheck} новых нет даты — уточнить, ходили ли они до ${_dmy(cut)}</div>
+      <button class="btn sm" id="prevAttendBtn" onclick="checkPrevAttend()" title="Спросить Альфу по каждому: был ли ребёнок на занятиях до отсечки. Был хоть на одном → возврат. Надёжнее даты записи (её ставят и вернувшимся при записи на осень)">🔍 Проверить новых по посещениям (${needCheck})</button>
+      <div style="font-size:11px;color:var(--muted);margin-top:3px">сверить ${needCheck} новых с Альфой: кто ходил до ${_dmy(cut)} — в возврат</div>
     </div>`:"";
   const note = st.has
     ? `Возврат — посещал занятия до ${_dmy(cut)} или заведён в Альфе раньше. Новый — всё остальное: заведён с ${_dmy(cut)}, из amo, или следов прошлого в клубе нет.`
