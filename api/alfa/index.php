@@ -575,6 +575,33 @@ switch ($action) {
         json_out(['ok' => true, 'branch' => alfa_branch(), 'refs' => $out]);
         break;
 
+    // --- СПИСОК ГРУПП В ALFA (READ): id + имя + предмет + педагоги — чтобы клиент понял,
+    //     какие группы уже есть, а какие надо создать. Активные и (мягко) архивные. ---
+    case 'groupsList':
+        @set_time_limit(60);
+        $host  = 'https://' . alfa_host() . '/v2api/' . alfa_branch();
+        $token = alfa_token();
+        $out = []; $page = 0;
+        do {
+            $r = alfa_http('POST', "$host/group/index", ['page' => $page, 'count' => 100], $token, true, 12);
+            $items = isset($r['__err']) ? [] : ($r['items'] ?? []);
+            foreach ($items as $g) {
+                if (!isset($g['id'])) continue;
+                $out[] = [
+                    'id'          => (int)$g['id'],
+                    'name'        => (string)($g['name'] ?? ''),
+                    'subject_ids' => array_values(array_map('intval', (array)($g['subject_ids'] ?? []))),
+                    'teacher_ids' => array_values(array_map('intval', (array)($g['teacher_ids'] ?? ($g['teachers'] ?? [])))),
+                    'status_id'   => $g['status_id'] ?? null,
+                    'limit'       => $g['limit'] ?? null,
+                    'is_archive'  => (int)($g['is_archive'] ?? 0),
+                ];
+            }
+            $page++;
+        } while (isset($items) && count($items) === 100 && $page < 30);
+        json_out(['ok' => true, 'branch' => alfa_branch(), 'count' => count($out), 'groups' => $out]);
+        break;
+
     // --- публикация ОДНОЙ группы: dryRun=true по умолчанию (ничего не создаёт) ---
     case 'publish':
         $dry      = !isset($in['dryRun']) || $in['dryRun'] !== false;
