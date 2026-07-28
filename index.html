@@ -1542,7 +1542,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-07-22-23";
+const APP_VER="2026-07-22-24";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -8204,7 +8204,7 @@ async function pullBalances(){
     const bySurname=new Map();
     list.forEach(c=>{ const s=(_nameWords(c.name)[0]||""); if(!s) return;   // нормализованная фамилия (ё→е, латиница-двойники)
       if(!bySurname.has(s)) bySurname.set(s,[]); bySurname.get(s).push(c); });
-    let byIdN=0, byNameN=0, ambig=0, miss=0, dobN=0, parN=0;
+    let byIdN=0, byNameN=0, ambig=0, miss=0, dobN=0, parN=0, createdN=0, attendN=0;
     const apply=k=>{
       if(!k||!k.n) return;
       let c=(k.alfaId!=null&&k.alfaId!=="")?byId.get(String(k.alfaId)):null;
@@ -8219,10 +8219,10 @@ async function pullBalances(){
       if(c && c.balance!=null && c.balance!=="") k.alfaBalance=c.balance;
       if(c && Array.isArray(c.branch_ids)) k.alfaBr=c.branch_ids.map(Number);   // филиалы (каникулы/интенсивы ≠ учебный год)
       if(c && c.is_study!=null) k.alfaIsStudy=(+c.is_study?1:0);   // 1 = клиент/ученик, 0 = лид (ещё не оформлен)
-      if(c){ const la=c.last_attend?_dobIso(c.last_attend):""; if(la) k.alfaLastAttend=la; else if(k.alfaLastAttend&&!c.last_attend) delete k.alfaLastAttend; }   // последнее посещение → «возврат»
+      if(c){ const la=c.last_attend?_dobIso(c.last_attend):""; if(la){ k.alfaLastAttend=la; attendN++; } else if(k.alfaLastAttend&&!c.last_attend) delete k.alfaLastAttend; }   // последнее посещение → «возврат»
       // дата внесения в Альфу → «старый/новый». Перезаписываем при совпадении (в т.ч. чистим
       // прежние ошибочные значения, когда-то бравшиеся из b_date вместо dt_add).
-      if(c){ const iso=c.created?_alfaCreatedIso(c.created):""; if(iso) k.alfaCreated=iso; else if(k.alfaCreated) delete k.alfaCreated; }
+      if(c){ const iso=c.created?_alfaCreatedIso(c.created):""; if(iso){ k.alfaCreated=iso; createdN++; } else if(k.alfaCreated) delete k.alfaCreated; }
       if(c && c.dob && !k.dob){ k.dob=_dobIso(c.dob); dobN++; }                          // заодно возраст — выгрузка та же
       // «Заказчик» из Альфы → имя родителя (нужно для «💳 Путь оплаты»); своё введённое не трогаем
       if(c && c.parent && k.alfaId!=null && k.alfaId!==""){
@@ -8236,9 +8236,13 @@ async function pullBalances(){
     S.balancesAt=new Date().toISOString();
     persistLocal(); if(typeof fbSchedulePush==="function") fbSchedulePush();
     renderClients();
-    toast("Балансы, филиалы и возраст обновлены: по связи "+byIdN+", по ФИО "+byNameN
+    // Сколько всего пришло из Альфы с датами — чтобы отличить «прокси не отдал» от «просто мало совпало»
+    const srvCreated=(j.with_created!=null)?(" · сервер отдал дат внесения: "+j.with_created+" из "+(j.count||0)):"";
+    toast("Из Альфы обновлено: по связи "+byIdN+", по ФИО "+byNameN
+      +" · 📅 дата внесения +"+createdN+" · 🕒 последнее посещение +"+attendN
       +(dobN?(" · 🎂 возраст +"+dobN):"")+(parN?(" · 👪 родителей +"+parN):"")
-      +(ambig?(" · тёзки (пропущены) "+ambig):"")+(miss?(" · нет в Альфе "+miss):""));
+      +(ambig?(" · тёзки "+ambig):"")+(miss?(" · нет в Альфе "+miss):"")+srvCreated);
+    try{ console.log("💰 выгрузка:", {поСвязи:byIdN,поФИО:byNameN,датаВнесения:createdN,последнееПосещение:attendN,серверДат:j.with_created,всегоКлиентов:j.count}); }catch(e){}
   }catch(e){ toast("Не удалось обновить балансы: "+((e&&e.message)||e)); }
   if(btn){ btn.disabled=false; btn.textContent="💰 Балансы и возраст"; }
 }
