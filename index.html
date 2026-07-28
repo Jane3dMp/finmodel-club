@@ -1558,7 +1558,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-07-28-31";
+const APP_VER="2026-07-28-32";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -7961,7 +7961,7 @@ function _pubBuildRows(){
     const hit=g.alfaId?null:_pubMatch(idx,g.alfaName);
     g.exists=!!hit && hit.kind==="exists";
     g.similar=!!hit && hit.kind==="similar";
-    g.existsId=hit?hit.g.id:0; g.existsName=hit?hit.g.name:"";
+    g.existsId=hit?hit.g.id:0; g.existsName=hit?hit.g.name:""; g.existsBranch=hit?(hit.g.branch||0):0;
     g.issues=_pubIssues(g);
     g.can=!g.alfaId && !g.issues.some(i=>i.hard);
     return g;
@@ -8028,8 +8028,8 @@ async function openPublish(){
   try{
     const [refs,gl]=await Promise.all([_pubCall("refs",{}), _pubCall("groupsList",{})]);
     _pubRefs=refs.refs||{}; _pubAlfaGroups=gl.groups||[];
-    _pubBranch=refs.branch||gl.branch||0;
-    console.log("📤 Alfa refs:",_pubRefs,"· групп в Alfa:",_pubAlfaGroups.length,"· образец группы:",gl.sample);
+    _pubBranch=refs.branch||gl.branch||0; _pubBranches=gl.branches||{};
+    console.log("📤 Alfa refs:",_pubRefs,"· групп в Alfa:",_pubAlfaGroups.length,"· по филиалам:",_pubBranches,"· образец группы:",gl.sample);
     _pubAutoMap();
     _pubRender();
   }catch(e){
@@ -8037,7 +8037,22 @@ async function openPublish(){
       <p style="font-size:12px;color:var(--muted)">Проверьте связь: «📞 Контакты из Альфы» → «🔌 Проверить связь с Альфой».</p>`;
   }
 }
-let _pubBranch=0;
+let _pubBranch=0, _pubBranches={}, _pubAlfaQ="";
+/* Список групп, которые мы РЕАЛЬНО получили из Alfa. Нужен, чтобы расхождение «в Alfa группа есть,
+   а у нас помечена новой» было видно сразу, а не выяснялось после создания дублей. */
+function pubAlfaFilter(v){ _pubAlfaQ=String(v||""); const el=document.getElementById("pubAlfaList"); if(el) el.innerHTML=_pubAlfaListHtml(); }
+function _pubAlfaListHtml(){
+  const matched={};
+  _pubRows.forEach(r=>{ if(r.existsId) matched[r.existsId]=r.alfaName; });
+  const all=_pubAlfaGroups||[], q=_normCourse(_pubAlfaQ);
+  const list=q?all.filter(a=>_normCourse(a.name).indexOf(q)>=0):all;
+  if(!list.length) return `<div style="color:var(--muted);padding:6px 0">Среди ${all.length} групп Alfa ничего не найдено. Если группа в Alfa точно есть — значит она не попала в выгрузку (другой филиал или архив), скажите об этом.</div>`;
+  return `<div style="max-height:26vh;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:6px 10px;line-height:1.6">`+
+    list.slice(0,300).map(a=>`<div>${matched[a.id]?"🔗":"·"} ${esc(a.name)}
+      <span style="color:var(--muted)">· id ${esc(a.id)}${a.branch?(" · филиал "+esc(a.branch)):""}${a.is_archive?" · архив":""}</span>
+      ${matched[a.id]?`<span style="color:var(--green)">→ сопоставлена с «${esc(matched[a.id])}»</span>`:""}</div>`).join("")+
+    (list.length>300?`<div style="color:var(--muted)">…показаны первые 300 из ${list.length}</div>`:"")+`</div>`;
+}
 /* авто-сопоставление по названиям — только то, что однозначно; остальное правится руками */
 function _pubAutoMap(){
   const m=_pubMap(), c=_pubCfg(), rows=_pubModelGroups();
@@ -8142,6 +8157,16 @@ function _pubRender(){
         <div style="padding:6px 0">${_pubMapRows("room",rooms,"rooms","— выбрать кабинет —")}</div></details>
     </div></details>`;
 
+  const brTxt=Object.keys(_pubBranches||{}).map(b=>"филиал "+b+": "+_pubBranches[b]).join(", ");
+  h+=`<details data-k="alfa" style="margin-bottom:8px">
+    <summary style="cursor:pointer;font-weight:600">🔍 Что мы видим в Alfa (${(_pubAlfaGroups||[]).length})</summary>
+    <div style="padding:6px 0">
+      ${brTxt?`<div style="font-size:11px;color:var(--muted);margin-bottom:4px">По филиалам: ${esc(brTxt)}</div>`:""}
+      <input class="cell" data-f="alfaq" style="width:100%" placeholder="Поиск по названию группы в Alfa" value="${esc(_pubAlfaQ)}" oninput="pubAlfaFilter(this.value)">
+      <div id="pubAlfaList">${_pubAlfaListHtml()}</div>
+      <div style="font-size:11px;color:var(--muted);margin-top:4px">🔗 — группа сопоставлена с нашей (создаваться не будет).</div>
+    </div></details>`;
+
   h+=`<div class="hd-actions" style="margin-bottom:6px">
     <button class="btn ghost sm" onclick="pubAll(true)">Отметить все новые</button>
     <button class="btn ghost sm" onclick="pubAll(false)">Снять все</button>
@@ -8197,7 +8222,7 @@ async function pubDetectDay(){
   const gid=r.alfaId||r.existsId;
   if(box) box.innerHTML=`Читаю расписание группы «${esc(r.alfaName)}» (id ${gid}) в Alfa…`;
   try{
-    const j=await _pubCall("regularLessons",{groupId:gid});
+    const j=await _pubCall("regularLessons",{groupId:gid, branch:r.existsBranch||0});
     console.log("🔎 regular-lesson группы",gid,j.lessons,"· образец полей:",j.sample);
     const byTime={};
     (j.lessons||[]).forEach(x=>{ const t=String(x.time_from||"").slice(0,5); if(t) byTime[t]=x.day; });

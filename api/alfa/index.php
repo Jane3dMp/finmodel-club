@@ -577,34 +577,48 @@ switch ($action) {
 
     // --- СПИСОК ГРУПП В ALFA (READ): id + имя + предмет + педагоги — чтобы клиент понял,
     //     какие группы уже есть, а какие надо создать. Активные и (мягко) архивные. ---
+    // ⚠️ Те же грабли, что были с выгрузкой клиентов: Alfa отдаёт максимум ~50 записей на
+    //    страницу, а группы лежат по ФИЛИАЛАМ. Просили по 100 и обходили один филиал → цикл
+    //    обрывался после первой страницы, в выгрузку попадало ≤50 групп одного филиала,
+    //    и почти все группы модели выглядели «новыми» (риск наделать дублей).
     case 'groupsList':
-        @set_time_limit(60);
-        $host  = 'https://' . alfa_host() . '/v2api/' . alfa_branch();
+        @set_time_limit(180);
         $token = alfa_token();
-        $out = []; $page = 0; $sample = null;
-        do {
-            $r = alfa_http('POST', "$host/group/index", ['page' => $page, 'count' => 100], $token, true, 12);
-            $items = isset($r['__err']) ? [] : ($r['items'] ?? []);
-            foreach ($items as $g) {
-                if (!isset($g['id'])) continue;
-                if ($sample === null) $sample = $g;   // образец со ВСЕМИ полями — сверить имена полей
-                $out[] = [
-                    'id'          => (int)$g['id'],
-                    'name'        => (string)($g['name'] ?? ''),
-                    'subject_ids' => array_values(array_map('intval', (array)($g['subject_ids'] ?? []))),
-                    'teacher_ids' => array_values(array_map('intval', (array)($g['teacher_ids'] ?? ($g['teachers'] ?? [])))),
-                    'status_id'   => $g['status_id'] ?? null,
-                    'level_id'    => $g['level_id'] ?? null,
-                    'limit'       => $g['limit'] ?? null,
-                    'note'        => $g['note'] ?? null,
-                    'b_date'      => $g['b_date'] ?? null,
-                    'e_date'      => $g['e_date'] ?? null,
-                    'is_archive'  => (int)($g['is_archive'] ?? 0),
-                ];
-            }
-            $page++;
-        } while (isset($items) && count($items) === 100 && $page < 30);
-        json_out(['ok' => true, 'branch' => alfa_branch(), 'count' => count($out), 'groups' => $out, 'sample' => $sample]);
+        $host  = 'https://' . alfa_host();
+        $perPage = 50;      // максимум страницы в Alfa
+        $maxPages = 100;    // предохранитель на филиал
+        $byId = []; $perBranch = []; $sample = null;
+        foreach (alfa_all_branch_ids() as $bid) {
+            $page = 0; $before = count($byId); $items = [];
+            do {
+                $r = alfa_http('POST', "$host/v2api/$bid/group/index", ['page' => $page, 'count' => $perPage], $token, true, 15);
+                $items = isset($r['__err']) ? [] : ($r['items'] ?? []);
+                foreach ($items as $g) {
+                    $gid = (int)($g['id'] ?? 0);
+                    if (!$gid || isset($byId[$gid])) continue;   // одна группа может встретиться в нескольких филиалах
+                    if ($sample === null) $sample = $g;          // образец со ВСЕМИ полями — сверить имена полей
+                    $byId[$gid] = [
+                        'id'          => $gid,
+                        'name'        => (string)($g['name'] ?? ''),
+                        'branch'      => (int)$bid,
+                        'subject_ids' => array_values(array_map('intval', (array)($g['subject_ids'] ?? []))),
+                        'teacher_ids' => array_values(array_map('intval', (array)($g['teacher_ids'] ?? ($g['teachers'] ?? [])))),
+                        'status_id'   => $g['status_id'] ?? null,
+                        'level_id'    => $g['level_id'] ?? null,
+                        'limit'       => $g['limit'] ?? null,
+                        'note'        => $g['note'] ?? null,
+                        'b_date'      => $g['b_date'] ?? null,
+                        'e_date'      => $g['e_date'] ?? null,
+                        'is_archive'  => (int)($g['is_archive'] ?? 0),
+                    ];
+                }
+                $page++;
+                // продолжаем, пока страница ПОЛНАЯ (total Alfa возвращает не всегда)
+            } while (count($items) === $perPage && $page < $maxPages);
+            $perBranch[$bid] = count($byId) - $before;
+        }
+        json_out(['ok' => true, 'branch' => alfa_branch(), 'branches' => $perBranch,
+                  'count' => count($byId), 'groups' => array_values($byId), 'sample' => $sample]);
         break;
 
     // --- РЕГУЛЯРНОЕ РАСПИСАНИЕ УЖЕ СУЩЕСТВУЮЩИХ ГРУПП (READ). Нужно, чтобы БЕЗ пробной записи
@@ -612,9 +626,12 @@ switch ($action) {
     case 'regularLessons':
         @set_time_limit(60);
         $gid   = (int)($in['groupId'] ?? 0);
-        $host  = 'https://' . alfa_host() . '/v2api/' . alfa_branch();
+        // группа может лежать не в дефолтном филиале — клиент передаёт её филиал из groupsList
+        $bid   = (int)($in['branch'] ?? 0) ?: alfa_branch();
+        $host  = 'https://' . alfa_host() . '/v2api/' . $bid;
         $token = alfa_token();
-        $body  = ['count' => 100];
+        $perPage = 50;                      // Alfa режет страницу; просить 100 бессмысленно
+        $body  = ['count' => $perPage];
         if ($gid > 0) { $body['related_class'] = 'Group'; $body['related_id'] = $gid; }
         $out = []; $sample = null; $page = 0; $items = [];
         do {
@@ -640,8 +657,8 @@ switch ($action) {
                 ];
             }
             $page++;
-        } while ($gid <= 0 && count($items) === 100 && $page < 20);
-        json_out(['ok' => true, 'branch' => alfa_branch(), 'count' => count($out), 'lessons' => $out, 'sample' => $sample]);
+        } while ($gid <= 0 && count($items) === $perPage && $page < 40);
+        json_out(['ok' => true, 'branch' => $bid, 'count' => count($out), 'lessons' => $out, 'sample' => $sample]);
         break;
 
     // --- публикация ОДНОЙ группы: dryRun=true по умолчанию (ничего не создаёт) ---
