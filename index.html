@@ -1558,7 +1558,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-07-28-29";
+const APP_VER="2026-07-28-30";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -8056,12 +8056,36 @@ function _pubMapRows(kind,items,refKey,ph){
       const bad=v==null||v==="";
       return `<div style="${bad?'color:var(--red);font-weight:600':''}">${esc(x)}</div>`+
         (ref.length
-          ? `<select class="cell" onchange="pubSetMap('${_jsStr(kind)}','${_jsStr(x)}',this.value)">${_pubOpts(ref,v,ph)}</select>`
-          : `<input class="cell" inputmode="numeric" placeholder="id в Alfa вручную" value="${esc(v==null?"":v)}" onchange="pubSetMap('${_jsStr(kind)}','${_jsStr(x)}',this.value)">`);
+          ? `<select class="cell" data-f="${esc(kind+":"+x)}" onchange="pubSetMap('${_jsStr(kind)}','${_jsStr(x)}',this.value)">${_pubOpts(ref,v,ph)}</select>`
+          : `<input class="cell" inputmode="numeric" data-f="${esc(kind+":"+x)}" placeholder="id в Alfa вручную" value="${esc(v==null?"":v)}" onchange="pubSetMap('${_jsStr(kind)}','${_jsStr(x)}',this.value)">`);
     }).join("")+`</div>`;
+}
+/* Любая правка соответствия перерисовывает тело модалки (меняются счётчики и статусы строк).
+   Без этого раскрытые блоки схлопывались, прокрутка прыгала наверх и терялся фокус —
+   каждый выбор кабинета приходилось начинать заново. Снимаем состояние до и возвращаем после. */
+function _pubSnapshot(){
+  const body=document.getElementById("pubBody"); if(!body) return null;
+  const open={};
+  body.querySelectorAll("details[data-k]").forEach(d=>{ open[d.getAttribute("data-k")]=d.open; });
+  const modal=body.closest(".modal"), tsc=body.querySelector(".tscroll"), ae=document.activeElement;
+  return {open, modal:modal?modal.scrollTop:0, table:tsc?tsc.scrollTop:0,
+    focus:(ae&&body.contains(ae)&&ae.getAttribute("data-f"))||""};
+}
+function _pubRestore(s){
+  if(!s) return;
+  const body=document.getElementById("pubBody"); if(!body) return;
+  body.querySelectorAll("details[data-k]").forEach(d=>{ const k=d.getAttribute("data-k"); if(k in s.open) d.open=s.open[k]; });
+  const modal=body.closest(".modal"); if(modal) modal.scrollTop=s.modal;
+  const tsc=body.querySelector(".tscroll"); if(tsc) tsc.scrollTop=s.table;
+  if(s.focus){
+    // имена курсов/кабинетов содержат кавычки и скобки — ищем перебором, а не селектором
+    const el=[...body.querySelectorAll("[data-f]")].find(x=>x.getAttribute("data-f")===s.focus);
+    if(el){ try{ el.focus({preventScroll:true}); }catch(e){ try{ el.focus(); }catch(x){} } }
+  }
 }
 function _pubRender(){
   const body=document.getElementById("pubBody"); if(!body) return;
+  const snap=_pubSnapshot();
   const c=_pubCfg(), rows=_pubBuildRows();
   const courses=[...new Set(rows.map(g=>g.course))].sort((a,b)=>a.localeCompare(b,"ru"));
   const rooms=[...new Set(rows.flatMap(g=>g.rooms))].sort((a,b)=>a.localeCompare(b,"ru"));
@@ -8075,32 +8099,32 @@ function _pubRender(){
     у нас в модели: <b>${rows.length}</b> → новых <b style="color:var(--green)">${nNew}</b>,
     уже есть по имени <b>${nEx}</b>, похожих <b>${nSim}</b>, опубликовано нами <b>${nPub}</b></div>`;
 
-  h+=`<details ${sel.length&&!courses.some(x=>_pubMap().subj[x]==null)?"":"open"} style="margin-bottom:10px">
+  h+=`<details data-k="cfg" ${sel.length&&!courses.some(x=>_pubMap().subj[x]==null)?"":"open"} style="margin-bottom:10px">
     <summary style="cursor:pointer;font-weight:700">⚙ Соответствия и настройки</summary>
     <div style="padding:8px 2px 0">
       <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:end;margin-bottom:10px">
-        <label>Начало<br><input type="date" class="cell" value="${esc(c.bDate)}" onchange="pubSetCfg('bDate',this.value)"></label>
-        <label>Окончание<br><input type="date" class="cell" value="${esc(c.eDate)}" onchange="pubSetCfg('eDate',this.value)"></label>
-        <label>Тип занятия<br><select class="cell" onchange="pubSetCfg('lessonTypeId',this.value)">${_pubOpts(_pubRefList("lesson_types"),c.lessonTypeId)}</select></label>
-        <label>Статус группы<br><select class="cell" onchange="pubSetCfg('statusId',this.value)">${_pubOpts(_pubFallbackOpts("group_statuses","status_id"),c.statusId,"— не отправлять —")}</select></label>
-        <label>Уровень<br><select class="cell" onchange="pubSetCfg('levelId',this.value)">${_pubOpts(_pubFallbackOpts("group_levels","level_id"),c.levelId,"— не отправлять —")}</select></label>
+        <label>Начало<br><input type="date" class="cell" data-f="cfg:bDate" value="${esc(c.bDate)}" onchange="pubSetCfg('bDate',this.value)"></label>
+        <label>Окончание<br><input type="date" class="cell" data-f="cfg:eDate" value="${esc(c.eDate)}" onchange="pubSetCfg('eDate',this.value)"></label>
+        <label>Тип занятия<br><select class="cell" data-f="cfg:lessonTypeId" onchange="pubSetCfg('lessonTypeId',this.value)">${_pubOpts(_pubRefList("lesson_types"),c.lessonTypeId)}</select></label>
+        <label>Статус группы<br><select class="cell" data-f="cfg:statusId" onchange="pubSetCfg('statusId',this.value)">${_pubOpts(_pubFallbackOpts("group_statuses","status_id"),c.statusId,"— не отправлять —")}</select></label>
+        <label>Уровень<br><select class="cell" data-f="cfg:levelId" onchange="pubSetCfg('levelId',this.value)">${_pubOpts(_pubFallbackOpts("group_levels","level_id"),c.levelId,"— не отправлять —")}</select></label>
       </div>
       <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:end;margin-bottom:10px">
-        <label>День недели в Alfa<br><select class="cell" onchange="pubSetCfg('dayBase',this.value)">${PUB_DAY_MODES.map(([v,t])=>`<option value="${v}"${c.dayBase===v?" selected":""}>${esc(t)}</option>`).join("")}</select></label>
+        <label>День недели в Alfa<br><select class="cell" data-f="cfg:dayBase" onchange="pubSetCfg('dayBase',this.value)">${PUB_DAY_MODES.map(([v,t])=>`<option value="${v}"${c.dayBase===v?" selected":""}>${esc(t)}</option>`).join("")}</select></label>
         <button class="btn ghost sm" onclick="pubDetectDay()" title="Прочитать расписание уже существующей группы в Alfa и понять нумерацию">🔎 Определить по существующей группе</button>
-        <label>Имя группы в Alfa<br><select class="cell" onchange="pubSetCfg('nameMode',this.value)">
+        <label>Имя группы в Alfa<br><select class="cell" data-f="cfg:nameMode" onchange="pubSetCfg('nameMode',this.value)">
           <option value="course"${c.nameMode==="course"?" selected":""}>Курс + № (совпадений: ${_pubNameHits("course")})</option>
           <option value="model"${c.nameMode==="model"?" selected":""}>Как в модели, № группы (совпадений: ${_pubNameHits("model")})</option>
           <option value="full"${c.nameMode==="full"?" selected":""}>Курс + № + день/время (совпадений: ${_pubNameHits("full")})</option>
         </select></label>
       </div>
       <div style="font-size:11px;color:var(--muted);margin-bottom:10px">«Совпадений» — сколько имён по этому шаблону нашлись среди существующих групп Alfa. Больше совпадений = меньше риск создать дубль. Имя любой группы можно поправить прямо в таблице.</div>
-      <details><summary style="cursor:pointer;font-weight:600">📚 Курсы → предметы Alfa (${courses.filter(x=>_pubMap().subj[x]!=null).length}/${courses.length})</summary>
+      <details data-k="subj"><summary style="cursor:pointer;font-weight:600">📚 Курсы → предметы Alfa (${courses.filter(x=>_pubMap().subj[x]!=null).length}/${courses.length})</summary>
         <div style="padding:6px 0">${_pubMapRows("subj",courses,"subjects","— выбрать предмет —")}</div></details>
-      <details><summary style="cursor:pointer;font-weight:600">👩‍🏫 Педагоги → teacher_id (${teachers.filter(x=>_pubMap().teacher[x]!=null).length}/${teachers.length})</summary>
+      <details data-k="teacher"><summary style="cursor:pointer;font-weight:600">👩‍🏫 Педагоги → teacher_id (${teachers.filter(x=>_pubMap().teacher[x]!=null).length}/${teachers.length})</summary>
         ${noTeachRef?`<div class="callout" style="margin:6px 0;border-color:var(--terra);font-size:12px">Alfa не отдала справочник педагогов по API. Впишите id вручную (в Alfa: Настройки → Сотрудники, id виден в адресе карточки) либо оставьте пусто — группа создастся без педагога, назначите в Alfa.</div>`:""}
         <div style="padding:6px 0">${_pubMapRows("teacher",teachers,"teachers","— выбрать педагога —")}</div></details>
-      <details><summary style="cursor:pointer;font-weight:600">🚪 Кабинеты → room_id (${rooms.filter(x=>_pubMap().room[x]!=null).length}/${rooms.length})</summary>
+      <details data-k="room"><summary style="cursor:pointer;font-weight:600">🚪 Кабинеты → room_id (${rooms.filter(x=>_pubMap().room[x]!=null).length}/${rooms.length})</summary>
         <div style="padding:6px 0">${_pubMapRows("room",rooms,"rooms","— выбрать кабинет —")}</div></details>
     </div></details>`;
 
@@ -8122,7 +8146,7 @@ function _pubRender(){
     const iss=r.issues.map(i=>`<span style="color:${i.hard?"var(--red)":"var(--muted)"}">${i.hard?"⛔":"⚠"} ${esc(i.t)}</span>`).join(" · ");
     h+=`<tr${r.alfaId?' style="opacity:.6"':''}>
       <td style="text-align:center"><input type="checkbox" ${on?"checked":""} ${r.can?"":"disabled"} onchange="pubToggle('${_jsStr(r.key)}')" title="${r.can?"Создать / пропустить":"Нельзя опубликовать: см. столбец справа"}"></td>
-      <td style="text-align:left"><input class="cell" style="min-width:220px" value="${esc(r.alfaName)}" onchange="pubSetName('${_jsStr(r.key)}',this.value)" title="Имя будущей группы в Alfa — можно поправить"></td>
+      <td style="text-align:left"><input class="cell" style="min-width:220px" data-f="name:${esc(r.key)}" value="${esc(r.alfaName)}" onchange="pubSetName('${_jsStr(r.key)}',this.value)" title="Имя будущей группы в Alfa — можно поправить"></td>
       <td style="text-align:left">${esc(r.course)}</td>
       <td style="text-align:left">${esc(r.teachers.map(shortName).join(", ")||"—")}</td>
       <td style="text-align:left;white-space:nowrap">${esc(r.schedText||"—")}${r.rooms.length?`<span style="color:var(--muted)"> · каб. ${esc(r.rooms.join(", "))}</span>`:""}</td>
@@ -8143,6 +8167,7 @@ function _pubRender(){
     </div>
     <div id="pubLog" style="margin-top:10px;font-size:12px"></div>`;
   body.innerHTML=h;
+  _pubRestore(snap);
 }
 /* нумерация дня: читаем regular-lesson существующей группы и смотрим, какой режим совпал */
 async function pubDetectDay(){
