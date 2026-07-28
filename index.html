@@ -825,7 +825,7 @@ details.client .cli-cols .cc-bal{width:74px;font-weight:600}
  <h2 class="sec"><span data-ic="target"></span>Набор — движение</h2>
  <div class="sec-desc">Кто точно подтвердил участие и как идёт воронка. Клик по названию группы открывает карточку занятия.</div>
  <div class="kidsearch">
-  <input type="search" class="kidsearch-in" placeholder="🔍 Найти ребёнка по ФИО — ищет во всех днях недели" oninput="renderKidSearchEl(this)" autocomplete="off">
+  <input type="search" class="kidsearch-in" placeholder="🔍 Найти по ФИО или телефону — во всех днях" oninput="renderKidSearchEl(this)" autocomplete="off">
   <button class="kidsearch-clear" type="button" title="Очистить" onclick="clearKidSearchEl(this)">×</button>
   <div class="kidsearch-res"></div>
  </div>
@@ -919,7 +919,7 @@ details.client .cli-cols .cc-bal{width:74px;font-weight:600}
   </div>
  </div>
  <div class="kidsearch">
-  <input id="kidSearchInput" type="search" class="kidsearch-in" placeholder="🔍 Найти ребёнка по ФИО — ищет во всех днях недели" oninput="renderKidSearch()" autocomplete="off">
+  <input id="kidSearchInput" type="search" class="kidsearch-in" placeholder="🔍 Найти по ФИО или телефону — во всех днях" oninput="renderKidSearch()" autocomplete="off">
   <button class="kidsearch-clear" type="button" title="Очистить" onclick="clearKidSearch()">×</button>
   <div id="kidSearchResults" class="kidsearch-res"></div>
  </div>
@@ -945,7 +945,7 @@ details.client .cli-cols .cc-bal{width:74px;font-weight:600}
  <h2 class="sec">Группы</h2>
  <div class="sec-desc">Все группы, собранные из расписания: курс, педагог, дни и время, сколько детей вписано (из «мест») и сколько с 💰. Клик по «→» открывает группу в сетке.</div>
  <div class="kidsearch">
-  <input type="search" class="kidsearch-in" placeholder="🔍 Найти ребёнка по ФИО — ищет во всех днях недели" oninput="renderKidSearchEl(this)" autocomplete="off">
+  <input type="search" class="kidsearch-in" placeholder="🔍 Найти по ФИО или телефону — во всех днях" oninput="renderKidSearchEl(this)" autocomplete="off">
   <button class="kidsearch-clear" type="button" title="Очистить" onclick="clearKidSearchEl(this)">×</button>
   <div class="kidsearch-res"></div>
  </div>
@@ -1541,7 +1541,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-07-22-19";
+const APP_VER="2026-07-22-20";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -5737,6 +5737,15 @@ function kidIcons(k){
 
 /* ===== ПОИСК РЕБЁНКА ПО РАСПИСАНИЮ (по всем дням недели) ===== */
 function _ksNorm(s){ return String(s||"").toLowerCase().replace(/ё/g,"е"); }
+/* совпадение по ФИО ИЛИ по телефону. Если в запросе ≥3 цифр — сверяем и телефон (только цифры,
+   форматы записи разные: +375, 80, скобки). По имени — как раньше. */
+function _ksDigits(s){ return String(s||"").replace(/\D/g,""); }
+function _ksMatch(name, phone, rawQ){
+  const q=_ksNorm(rawQ);
+  if(q && _ksNorm(name).includes(q)) return true;
+  const qd=_ksDigits(rawQ);
+  return qd.length>=3 && _ksDigits(phone).includes(qd);
+}
 function _ksHlName(name,q){
   const safe=esc(name);
   const nl=_ksNorm(name), ql=_ksNorm(q);
@@ -5766,12 +5775,12 @@ function renderKidSearchEl(inp){
   const box=wrap.querySelector(".kidsearch-res"); if(!box) return;
   const raw=inp.value.trim();
   wrap.classList.toggle("has-q", raw.length>0);
-  const q=_ksNorm(raw);
-  if(q.length<2){ box.innerHTML = raw.length ? '<div class="ksr-empty">Введите минимум 2 буквы</div>' : ''; return; }
+  const q=_ksNorm(raw), qd=_ksDigits(raw);
+  if(q.length<2 && qd.length<3){ box.innerHTML = raw.length ? '<div class="ksr-empty">Введите минимум 2 буквы или 3 цифры телефона</div>' : ''; return; }
   const hits=[];
   (S.grid||[]).forEach(l=>{
     kidsOf(l).forEach(k=>{
-      if(_ksNorm(k.n).includes(q)) hits.push({id:l.id||"", day:l.day||0, name:String(k.n||""), start:l.start||"", end:l.end||"", room:l.room||"—", course:l.course||"", teacher:l.teacher||"", no:!!k.no});
+      if(_ksMatch(k.n, k.phone, raw)) hits.push({id:l.id||"", day:l.day||0, name:String(k.n||""), phone:k.phone||"", start:l.start||"", end:l.end||"", room:l.room||"—", course:l.course||"", teacher:l.teacher||"", no:!!k.no});
     });
   });
   if(!hits.length){ box.innerHTML='<div class="ksr-empty">Ничего не найдено по «'+esc(raw)+'»</div>'; return; }
@@ -5784,7 +5793,7 @@ function renderKidSearchEl(inp){
     const jid=_jsStr(h.id);
     html+='<div class="ksr-item'+(h.no?' ksr-no':'')+'" onclick="gotoKidLessonId(\''+jid+'\')" title="Перейти к занятию в сетке">'
       +'<span class="ksr-name">'+_ksHlName(h.name,raw)+(h.no?' <span style="font-size:10px">(не придёт)</span>':'')+'</span>'
-      +'<span class="ksr-meta">'+esc(h.course)+' · '+esc(h.start)+'–'+esc(h.end)+' · каб. '+esc(h.room)+' · '+esc(shortName(h.teacher))+'</span>'
+      +'<span class="ksr-meta">'+esc(h.course)+' · '+esc(h.start)+'–'+esc(h.end)+' · каб. '+esc(h.room)+' · '+esc(shortName(h.teacher))+(h.phone?' · 📞 '+esc(h.phone):'')+'</span>'
       +'</div>';
   });
   box.innerHTML=html;
@@ -7869,8 +7878,9 @@ function renderClients(){
   const map={};
   (S.grid||[]).forEach(l=>kidsOf(l).forEach(k=>{
     const key=_nameKey(k.n); if(!key) return;
-    if(!map[key]) map[key]={name:k.n, dob:k.dob||"", enroll:[], balance:null, br:[]};
+    if(!map[key]) map[key]={name:k.n, dob:k.dob||"", enroll:[], balance:null, br:[], phone:k.phone||""};
     if(!map[key].dob && k.dob) map[key].dob=k.dob;
+    if(!map[key].phone && k.phone) map[key].phone=k.phone;
     if(Array.isArray(k.alfaBr)) k.alfaBr.forEach(b=>{ if(!map[key].br.includes(+b)) map[key].br.push(+b); });
     if(map[key].balance==null && k.alfaBalance!=null && k.alfaBalance!=="") map[key].balance=k.alfaBalance;   // активный баланс из Альфы
     if(map[key].name.split(" ").length < String(k.n).trim().split(" ").length) map[key].name=k.n; // берём наиболее полное написание
@@ -7880,7 +7890,7 @@ function renderClients(){
   // дети из списка ожидания (без группы) — тоже показываем в «Клиентах»
   (Array.isArray(S.waitlist)?S.waitlist:[]).forEach(w=>{ if(!w||!w.n) return; const key=_nameKey(w.n); if(!key||map[key]) return;
     map[key]={name:w.n, dob:w.dob||"", enroll:[], waiting:true, wl:w, balance:(w.alfaBalance!=null?w.alfaBalance:null),
-              br:(Array.isArray(w.alfaBr)?w.alfaBr.map(Number):[])}; });
+              br:(Array.isArray(w.alfaBr)?w.alfaBr.map(Number):[]), phone:w.phone||""}; });
   // метрики строки (нужны и для показа, и для сортировки)
   Object.values(map).forEach(c=>{
     c.nCourses=new Set((c.enroll||[]).map(e=>e.course).filter(Boolean)).size;
@@ -7917,13 +7927,13 @@ function renderClients(){
   else if(_cliBrFilter) shown=shown.filter(c=>c.br.includes(+_cliBrFilter) && (!_cliBrOnly || c.br.every(x=>x===+_cliBrFilter)));
   else if(_cliHideAlt) shown=shown.filter(c=>!c.altOnly);
   if(_clientsLetter) shown=shown.filter(c=>_firstLetter(c.name)===_clientsLetter);
-  if(q.length>=2) shown=shown.filter(c=>_ksNorm(c.name).includes(q));
+  if(q.length>=2 || _ksDigits(_clientsQuery).length>=3) shown=shown.filter(c=>_ksMatch(c.name, c.phone, _clientsQuery));
   const lbtn=(lab,val)=>`<button class="cli-lbtn${(_clientsLetter===val)?' on':''}" onclick="_clientsLetter=${val?`'${val}'`:"''"};renderClients()">${lab}</button>`;
   let html=`<div class="callout" style="margin-bottom:10px">Детей в системе: <b>${clients.length}</b>${(q.length>=2||_clientsLetter||_cliHideAlt)?` · показано: <b>${shown.length}</b>`:''}${altAll?` · <span title="Дети, которые в Альфе числятся только в филиалах каникул/интенсивов — на образовательные программы не ходили">🏕 только каникулы/интенсивы: <b>${altAll}</b></span>`:''}</div>
     ${_cliBranchBarHTML(clients)}${_altFilterHTML(altAll)}
     <div class="cli-letters">${lbtn('Все','')}${letters.map(L=>lbtn(L,L)).join("")}</div>
     <div class="kidsearch" style="margin:8px 0 10px">
-      <input id="clientsQ" type="search" class="kidsearch-in" placeholder="🔍 Поиск ребёнка по ФИО" value="${esc(_clientsQuery)}" oninput="_clientsQuery=this.value;clientsRerenderKeepFocus()" autocomplete="off">
+      <input id="clientsQ" type="search" class="kidsearch-in" placeholder="🔍 Поиск по ФИО или телефону" value="${esc(_clientsQuery)}" oninput="_clientsQuery=this.value;clientsRerenderKeepFocus()" autocomplete="off">
     </div>
     <div class="cli-addrow" title="Создать нового ребёнка и вписать в группу" onclick="openAddKid()"><span class="plus">+</span> Новый ребёнок</div>
     <div style="margin:-4px 0 10px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
