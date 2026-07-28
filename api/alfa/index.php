@@ -561,18 +561,38 @@ switch ($action) {
         break;
 
     // --- справочники для маппинга модель→Alfa (READ) ---
+    // Справочники собираем ПО ФИЛИАЛАМ: кабинеты (и часто педагоги) branch-scoped, поэтому
+    // единый список из дефолтного филиала подсовывал чужие id. Клиент может сузить обход
+    // параметром branches (напр. [1,2]) — меньше запросов, меньше риск таймаута шлюза.
     case 'refs':
-        $out = [
-            'subjects'     => alfa_ref('subject', ['id', 'name']),
-            'rooms'        => alfa_ref('room', ['id', 'name', 'is_enabled']),
-            'lesson_types' => alfa_ref('lesson-type', ['id', 'name']),
-        ];
-        // необязательные справочники — мягко (эндпоинт может отсутствовать в v2)
-        foreach (['teacher'=>'teachers','group-status'=>'group_statuses','group-level'=>'group_levels','level'=>'levels'] as $ent => $key) {
-            $items = alfa_try_index($ent);
-            if ($items !== null) $out[$key] = array_map(fn($i) => ['id' => $i['id'] ?? null, 'name' => $i['name'] ?? ''], $items);
+        @set_time_limit(180);
+        $brNames  = alfa_branch_names();
+        $want     = array_values(array_filter(array_map('intval', (array)($in['branches'] ?? []))));
+        $branches = $want ?: alfa_all_branch_ids();
+        $map = ['subject'=>'subjects','room'=>'rooms','lesson-type'=>'lesson_types',
+                'teacher'=>'teachers','group-status'=>'group_statuses','group-level'=>'group_levels'];
+        $perBranch = ['rooms'=>1,'teachers'=>1];      // у этих запоминаем, из какого филиала запись
+        $out = []; $seen = [];
+        foreach ($map as $key) $out[$key] = [];
+        foreach ($branches as $bid) {
+            foreach ($map as $ent => $key) {
+                $items = alfa_ref_branch((int)$bid, $ent);
+                if ($items === null) continue;        // эндпоинта нет в v2 — это нормально
+                foreach ($items as $it) {
+                    $id = $it['id'] ?? null;
+                    if ($id === null) continue;
+                    $k = $key . '#' . $id;
+                    if (isset($seen[$k])) continue;
+                    $seen[$k] = true;
+                    $row = ['id' => $id, 'name' => (string)($it['name'] ?? '')];
+                    if (isset($perBranch[$key])) $row['branch'] = (int)$bid;
+                    $out[$key][] = $row;
+                }
+            }
         }
-        json_out(['ok' => true, 'branch' => alfa_branch(), 'refs' => $out]);
+        foreach ($out as $k => $v) if (!$v) unset($out[$k]);   // пустые справочники не отдаём
+        json_out(['ok' => true, 'branch' => alfa_branch(), 'branchNames' => $brNames,
+                  'branchesUsed' => array_values($branches), 'refs' => $out]);
         break;
 
     // --- СПИСОК ГРУПП В ALFA (READ): id + имя + предмет + педагоги — чтобы клиент понял,
@@ -588,7 +608,8 @@ switch ($action) {
         $perPage = 50;      // максимум страницы в Alfa
         $maxPages = 100;    // предохранитель на филиал
         $byId = []; $perBranch = []; $sample = null;
-        foreach (alfa_all_branch_ids() as $bid) {
+        $want = array_values(array_filter(array_map('intval', (array)($in['branches'] ?? []))));
+        foreach ($want ?: alfa_all_branch_ids() as $bid) {
             $page = 0; $before = count($byId); $items = [];
             do {
                 $r = alfa_http('POST', "$host/v2api/$bid/group/index", ['page' => $page, 'count' => $perPage], $token, true, 15);
@@ -618,6 +639,7 @@ switch ($action) {
             $perBranch[$bid] = count($byId) - $before;
         }
         json_out(['ok' => true, 'branch' => alfa_branch(), 'branches' => $perBranch,
+                  'branchNames' => alfa_branch_names(),
                   'count' => count($byId), 'groups' => array_values($byId), 'sample' => $sample]);
         break;
 
@@ -668,7 +690,9 @@ switch ($action) {
         $g        = is_array($in['group'] ?? null) ? $in['group'] : [];
         $sched    = is_array($in['schedule'] ?? null) ? $in['schedule'] : [];
         $students = is_array($in['studentAlfaIds'] ?? null) ? $in['studentAlfaIds'] : [];
-        $branch   = alfa_branch();
+        // Филиал ВЫБИРАЕТ клиент: кабинеты branch-scoped, и группа обязана лечь в тот филиал,
+        // которому принадлежит её кабинет. Раньше молча писали в авто-определённый филиал.
+        $branch   = (int)($in['branch'] ?? 0) ?: alfa_branch();
         $bDate    = (string)($in['b_date'] ?? '2026-09-02');
         $eDate    = (string)($in['e_date'] ?? '2027-05-31');
 
@@ -677,7 +701,7 @@ switch ($action) {
             array_intersect_key($g, array_flip(['teacher_ids','level_id','status_id','limit','note','subject_ids']))
         );
 
-        $plan = ['group' => $groupPayload, 'schedule' => [], 'links' => []];
+        $plan = ['branch' => $branch, 'group' => $groupPayload, 'schedule' => [], 'links' => []];
         foreach ($sched as $s) {
             $plan['schedule'][] = [
                 'related_class' => 'Group', 'related_id' => '<group_id>',
@@ -695,22 +719,22 @@ switch ($action) {
 
         if ($dry) { json_out(['ok' => true, 'dryRun' => true, 'plan' => $plan]); }
 
-        // ЖИВОЕ создание (только при явном dryRun:false)
-        $gr  = alfa_create('group', $groupPayload);
+        // ЖИВОЕ создание (только при явном dryRun:false) — строго в выбранном филиале
+        $gr  = alfa_call_branch($branch, 'group', 'create', $groupPayload);
         $gid = $gr['id'] ?? ($gr['model']['id'] ?? null);
-        if (!$gid) json_out(['ok' => false, 'error' => 'AlfaCRM не вернула id группы', 'sent' => $groupPayload, 'alfa' => $gr], 502);
+        if (!$gid) json_out(['ok' => false, 'error' => 'AlfaCRM не вернула id группы', 'branch' => $branch, 'sent' => $groupPayload, 'alfa' => $gr], 502);
         // Группа уже создана — дальше ошибки НЕ обрываем, а собираем: клиенту важно записать
         // group_id (иначе при повторе создастся дубль), а недоделанное показать списком.
-        $created = ['group_id' => (int)$gid, 'lessons' => [], 'links' => [], 'errors' => []];
+        $created = ['group_id' => (int)$gid, 'branch' => $branch, 'lessons' => [], 'links' => [], 'errors' => []];
         foreach ($plan['schedule'] as $i => $rl) {
             $rl['related_id'] = (int)$gid;
-            $res = alfa_create('regular-lesson', $rl);
+            $res = alfa_call_branch($branch, 'regular-lesson', 'create', $rl);
             $rid = $res['id'] ?? ($res['model']['id'] ?? null);
             if ($rid) $created['lessons'][] = (int)$rid;
             else      $created['errors'][] = ['step' => 'расписание #' . ($i + 1), 'sent' => $rl, 'alfa' => $res];
         }
         foreach ($students as $cid) {
-            $res = alfa_create('cgi', ['customer_id' => (int)$cid, 'group_id' => (int)$gid, 'b_date' => $bDate, 'e_date' => $eDate]);
+            $res = alfa_call_branch($branch, 'cgi', 'create', ['customer_id' => (int)$cid, 'group_id' => (int)$gid, 'b_date' => $bDate, 'e_date' => $eDate]);
             $lid = $res['id'] ?? ($res['model']['id'] ?? null);
             if ($lid) $created['links'][] = (int)$cid;
             else      $created['errors'][] = ['step' => 'ученик ' . $cid, 'alfa' => $res];

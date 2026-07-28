@@ -252,6 +252,24 @@ function alfa_create(string $entity, array $data): array {
     return alfa_call($entity, 'create', $data);
 }
 
+// Справочник в контексте КОНКРЕТНОГО филиала. Кабинеты (и часто педагоги) привязаны к филиалу,
+// поэтому единый список из дефолтного филиала давал чужие id. null, если эндпоинта нет/ошибка.
+function alfa_ref_branch(int $branch, string $entity, int $timeout = 12): ?array {
+    $r = alfa_http('POST', 'https://' . alfa_host() . "/v2api/$branch/$entity/index",
+        ['page' => 0, 'count' => 200], alfa_token(), true, $timeout);
+    if (isset($r['__err']) || !isset($r['items'])) return null;
+    return $r['items'];
+}
+
+// Имена филиалов: id => name.
+function alfa_branch_names(): array {
+    $r = alfa_http('POST', 'https://' . alfa_host() . '/v2api/branch/index',
+        ['is_active' => 1, 'page' => 0], alfa_token(), true, 8);
+    $out = [];
+    foreach (($r['items'] ?? []) as $b) { if (isset($b['id'])) $out[(int)$b['id']] = (string)($b['name'] ?? ''); }
+    return $out;
+}
+
 // Прочитать справочник целиком (index, до 500 записей) → массив items с нужными полями.
 function alfa_ref(string $entity, array $fields, bool $global = false): array {
     $r = $global ? alfa_call($entity, 'index', ['page' => 0, 'count' => 500], true)
