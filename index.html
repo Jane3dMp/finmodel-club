@@ -1542,7 +1542,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-07-22-24";
+const APP_VER="2026-07-22-25";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -7141,16 +7141,66 @@ const OLD_VISIT_TH=3, LY_FROM="2025-09-01", LY_TO="2026-05-31";
 const ROSTER_RULES={a:"был на занятии",d:"занятие проведено",t:"любое занятие в расписании"};
 function _rosterRule(){ return ROSTER_RULES[S.oldRosterRule]?S.oldRosterRule:"a"; }
 function _oldTh(){ const v=parseInt(S.oldTh,10); return v>0?v:OLD_VISIT_TH; }
+/* дата за день до отсечки (окно «был в клубе раньше» = до 01.07.2026 включительно 30.06) */
+function _dayBefore(iso){ const d=new Date(iso); if(isNaN(d))return "2026-06-30"; d.setDate(d.getDate()-1); const p=n=>String(n).padStart(2,"0"); return d.getFullYear()+"-"+p(d.getMonth()+1)+"-"+p(d.getDate()); }
+/* Кого проверять по посещениям: сейчас в «новых» из-за отсутствия даты — есть связь с Альфой,
+   но ни даты внесения, ни последнего посещения, ни прежней проверки. */
+function _visitCheckIds(){
+  const cut=_newSince(), seen=new Set(), ids=[];
+  (S.grid||[]).forEach(l=>kidsOf(l).forEach(k=>{ const key=_nameKey(k.n); if(!key||seen.has(key)) return; seen.add(key);
+    const o={alfaId:k.alfaId,created:k.alfaCreated,lastAttend:k.alfaLastAttend,prevAttend:k.alfaPrevAttend,amo:!!k.amoLeadId};
+    if(_kidClass(o,cut)==='new' && k.alfaId!=null && k.alfaId!=="" && !k.alfaCreated && !k.alfaLastAttend && !k.alfaPrevAttend)
+      ids.push(String(k.alfaId));
+  }));
+  return [...new Set(ids)];
+}
+/* Проверить по истории Альфы: был ли ребёнок на занятиях ДО отсечки. Хоть одно — значит возврат.
+   Только для тех, у кого даты нет (иначе классификация уже определена). */
+async function checkPrevAttend(){
+  if(!_fbIsAdmin){ toast("Только для админа"); return; }
+  const ids=_visitCheckIds();
+  if(!ids.length){ toast("Нечего проверять — у новых уже есть дата или посещение"); return; }
+  if(!confirm("Проверить по посещениям "+ids.length+" детей без даты?\n\nЭто "+ids.length+" запросов к Альфе (несколько минут). Кто ходил на занятия до "+_dmy(_newSince())+" — станет возвратом.")) return;
+  const btn=document.getElementById("prevAttendBtn"); if(btn) btn.disabled=true;
+  const to=_dayBefore(_newSince()), from="2023-09-01";   // окно: любые прошлые занятия до отсечки
+  const attended=new Set(); const BATCH=10; let done=0, failed=0;
+  try{
+    const token=await _alfaIdToken();
+    for(let i=0;i<ids.length;i+=BATCH){
+      const chunk=ids.slice(i,i+BATCH);
+      if(btn) btn.textContent="Проверяю… "+Math.min(i+BATCH,ids.length)+"/"+ids.length;
+      try{
+        const r=await fetch(ALFA_PROXY+"?action=visitcounts",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+token},
+          body:JSON.stringify({ids:chunk,from,to,th:1})});   // th:1 — прокси остановится на первом занятии
+        const jj=await r.json().catch(()=>({ok:false}));
+        if(!r.ok||!jj.ok) throw new Error(jj.error||("ошибка "+r.status));
+        const cts=jj.counts||{};
+        chunk.forEach(id=>{ const v=cts[String(id)]; if(v && ((v.t||0)>0)) attended.add(String(id)); });   // было хоть одно занятие
+        done+=chunk.length;
+      }catch(e){ failed+=chunk.length; }
+    }
+    // проставляем метку «посещал до отсечки» на всех инстансах ребёнка
+    let marked=0;
+    const stamp=k=>{ if(k && k.alfaId!=null && attended.has(String(k.alfaId)) && !k.alfaPrevAttend){ k.alfaPrevAttend=true; marked++; } };
+    (S.grid||[]).forEach(l=>kidsOf(l).forEach(stamp));
+    (Array.isArray(S.waitlist)?S.waitlist:[]).forEach(stamp);
+    persistLocal(); if(typeof fbSchedulePush==="function") fbSchedulePush(); _renderGoalsAll();
+    toast("Проверено "+done+": посещали до "+_dmy(_newSince())+" → в возврат "+attended.size
+      +(failed?(" · не удалось "+failed+", запустите ещё раз"):""));
+  }catch(e){ toast("Не удалось: "+((e&&e.message)||e)); }
+  if(btn){ btn.disabled=false; btn.textContent=""; _renderGoalsAll(); }
+}
 /* поимённые списки «новый» / «возврат» для раскрывашки под донатами. Ребёнок = уникальное ФИО
    (тёзок не сливаем), берём самое полное написание и раннюю дату внесения. */
 function _goalsKidLists(){
   const cut=_newSince(), map={};
   (S.grid||[]).forEach(l=>kidsOf(l).forEach(k=>{ const key=_nameKey(k.n); if(!key) return;
-    const o=map[key]||(map[key]={name:k.n, created:k.alfaCreated||"", lastAttend:k.alfaLastAttend||"", alfaId:(k.alfaId!=null?k.alfaId:null),
+    const o=map[key]||(map[key]={name:k.n, created:k.alfaCreated||"", lastAttend:k.alfaLastAttend||"", prevAttend:!!k.alfaPrevAttend, alfaId:(k.alfaId!=null?k.alfaId:null),
       may:false, reply:"", no:false, amo:false, courses:new Set()});
     if(String(k.n).trim().split(/\s+/).length>String(o.name).trim().split(/\s+/).length) o.name=k.n;
     if(k.alfaCreated && (!o.created || k.alfaCreated<o.created)) o.created=k.alfaCreated;
     if(k.alfaLastAttend && (!o.lastAttend || k.alfaLastAttend>o.lastAttend)) o.lastAttend=k.alfaLastAttend;
+    if(k.alfaPrevAttend) o.prevAttend=true;
     if(o.alfaId==null && k.alfaId!=null) o.alfaId=k.alfaId;
     if(k.amoLeadId!=null && k.amoLeadId!=="") o.amo=true;
     if(k.may) o.may=true; if(k.no) o.no=true;
@@ -7180,6 +7230,7 @@ function _goalsKidListHTML(title,list,color){
   const cutW=_newSince();
   const when=o=>
       (o.lastAttend && o.lastAttend<cutW) ? ("посещал до "+_dmy(o.lastAttend))
+    : o.prevAttend ? "посещал занятия до отсечки"
     : o.created ? ("в Альфе с "+_dmy(o.created))
     : (o.alfaId!=null ? "в Альфе, дата не загружена"
     : (o.amo ? "из amo · нет в Альфе" : "нет в Альфе"));
@@ -7202,9 +7253,9 @@ function _dmy(iso){ const m=String(iso||"").match(/^(\d{4})-(\d{2})-(\d{2})/); r
    посещал до лета → возврат (самый надёжный признак), иначе по дате создания записи, иначе amo. */
 function _kidClass(o, cut){
   const inAlfa = o.alfaId!=null;
-  // ВОЗВРАТ — только по НАДЁЖНОМУ признаку «был в клубе раньше»: посещал занятия до этого лета
-  // ИЛИ запись в Альфе создана раньше этого лета. Больше не считаем возвратом «просто есть в Альфе».
-  if((o.lastAttend && o.lastAttend<cut) || (o.created && o.created<cut)) return 'old';
+  // ВОЗВРАТ — есть НАДЁЖНЫЙ след «был в клубе раньше»: проверено по посещениям (o.prevAttend),
+  // ИЛИ последнее посещение до этого лета, ИЛИ запись в Альфе создана раньше этого лета.
+  if(o.prevAttend || (o.lastAttend && o.lastAttend<cut) || (o.created && o.created<cut)) return 'old';
   // НОВЫЙ — запись создана с отсечки, ЛИБО пришёл из amo, ЛИБО есть в Альфе, но следов прошлого нет.
   if((o.created && o.created>=cut) || o.amo || inAlfa) return 'new';
   // Совсем не сопоставлен (ни Альфы, ни amo, ни дат). По умолчанию — новый (не был в системе = новичок),
@@ -7297,11 +7348,12 @@ function _goalsData(){
   const map={};
   (S.grid||[]).forEach(l=>{
     kidsOf(l).forEach(k=>{ const key=_nameKey(k.n); if(!key) return;
-      const o=map[key]||(map[key]={may:false,reply:'',no:false,alfaId:null,created:'',lastAttend:'',amo:false});
+      const o=map[key]||(map[key]={may:false,reply:'',no:false,alfaId:null,created:'',lastAttend:'',prevAttend:false,amo:false});
       if(o.alfaId==null && k.alfaId!=null && k.alfaId!=="") o.alfaId=k.alfaId;
       // самая ранняя дата внесения и самое позднее посещение (ребёнок мог встретиться в нескольких занятиях)
       if(k.alfaCreated && (!o.created || k.alfaCreated<o.created)) o.created=k.alfaCreated;
       if(k.alfaLastAttend && (!o.lastAttend || k.alfaLastAttend>o.lastAttend)) o.lastAttend=k.alfaLastAttend;
+      if(k.alfaPrevAttend) o.prevAttend=true;   // проверено: посещал занятия до отсечки
       if(k.amoLeadId!=null && k.amoLeadId!=="") o.amo=true;   // пришёл из amo (оплаченный этап)
       if(k.may) o.may=true; if(k.no) o.no=true;
       const rank=r=>r==='yes'?3:r==='no'?2:r==='maybe'?1:0;
@@ -7421,11 +7473,13 @@ function _oldNewHTML(){
   let ctl="";
   if(_fbIsAdmin){
     const incU=S.newIncludeUnmatched!==false;
+    const needCheck=(typeof _visitCheckIds==='function')?_visitCheckIds().length:0;
     ctl=`<div class="on-ctl">
       <label>Новый — заведён в Альфе с: <input type="date" value="${esc(cut)}" onchange="setNewSince(this.value)" style="width:150px"></label>
       <label title="Дети без связи с Альфой (не были в системе) — считать новичками. Выключите, если много непроверенных ФИО"><input type="checkbox" ${incU?"checked":""} onchange="setNewInclUnmatched(this.checked)" style="width:auto"> несопоставленных — в новые</label>
       <label>Цель возврата: <input type="number" min="0" step="10" value="${goalR}" onchange="saveGoal('ret',this.value)" style="width:70px"></label>
       <label>Цель новых: <input type="number" min="0" step="10" value="${goalN}" onchange="saveGoal('new',this.value)" style="width:70px"></label>
+      ${needCheck?`<button class="btn ghost sm" id="prevAttendBtn" onclick="checkPrevAttend()" title="Для новых без даты — проверить в Альфе, был ли ребёнок на занятиях до отсечки. Был хоть на одном → возврат">🔍 Проверить по посещениям (${needCheck})</button>`:""}
     </div>`;
   }
   const note = st.has
