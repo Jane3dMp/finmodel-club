@@ -1558,7 +1558,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-07-28-30";
+const APP_VER="2026-07-28-31";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -7869,6 +7869,16 @@ function _pubModelGroups(){
     return g;
   });
 }
+/* Склейка «курс + группа». В поле «Группа» у нас лежит не всегда номер: часто это уже полное
+   название («Пескография №3», «Digital Art: Художник космоса»). Тогда курс спереди приписывать
+   НЕЛЬЗЯ — выходило «Пескография Пескография №3». */
+function _pubJoin(course,num){
+  if(!num) return String(course||"").trim();
+  if(!course) return String(num).trim();
+  const n=_normCourse(num), c=_normCourse(course);
+  if(c && n.indexOf(c)>=0) return String(num).trim();      // название группы уже содержит курс
+  return (course+" "+num).replace(/\s+/g," ").trim();
+}
 /* имя будущей группы в Alfa: шаблон (в UI видно, сколько имён совпало с уже существующими) */
 function _pubName(g,mode){
   const c=_pubCfg();
@@ -7877,8 +7887,8 @@ function _pubName(g,mode){
   const num=g.group||"", s0=g.slots[0]||{};
   const dt=((DAY_NAMES[s0.day]||"")+" "+(s0.start||"")).trim();
   if(mode==="model") return num||((g.course+" "+dt).trim());
-  if(mode==="full")  return (g.course+" "+num+" "+dt).replace(/\s+/g," ").trim();
-  return (g.course+" "+num).replace(/\s+/g," ").trim();
+  if(mode==="full")  return (_pubJoin(g.course,num)+" "+dt).replace(/\s+/g," ").trim();
+  return _pubJoin(g.course,num);
 }
 /* Сопоставление с уже существующими группами Alfa — главная защита от дублей.
    Точного совпадения имён мало: у нас курс «Scratch (1 час)», в Alfa группа «Scratch 2».
@@ -7912,20 +7922,24 @@ function _pubGuess(name,list){
   return cand.length===1?cand[0].id:null;                            // неоднозначное не угадываем — пусть выберут руками
 }
 function _pubRefList(k){ return (_pubRefs&&_pubRefs[k])||[]; }
-function _pubOpts(list,sel,ph){
+function _pubOpts(list,sel,ph,noId){
   let h=`<option value="">${esc(ph||"— не выбрано —")}</option>`;
-  (list||[]).forEach(o=>{ h+=`<option value="${esc(o.id)}"${String(sel||"")===String(o.id)?" selected":""}>${esc(o.name||("#"+o.id))} · ${esc(o.id)}</option>`; });
+  (list||[]).forEach(o=>{ h+=`<option value="${esc(o.id)}"${String(sel||"")===String(o.id)?" selected":""}>${esc(o.name||("#"+o.id))}${noId?"":" · "+esc(o.id)}</option>`; });
   return h;
 }
+function _pubGrpWord(n){ n=Math.abs(+n||0); return (n%10===1&&n%100!==11)?"группы":"групп"; }
 /* статусы/уровни: берём справочник, а если Alfa его не отдала — собираем значения,
-   реально встречающиеся у существующих групп (лучше, чем угадывать) */
+   реально встречающиеся у существующих групп (лучше, чем угадывать).
+   Подпись пишем словами: «id 2 — как у 4 групп», иначе читалось как загадка. */
 function _pubFallbackOpts(refKey,field){
   const ref=_pubRefList(refKey);
-  if(ref.length) return ref;
+  if(ref.length) return {list:ref, noId:false};
   const seen={};
   (_pubAlfaGroups||[]).forEach(a=>{ const v=a[field]; if(v==null||v==="") return; seen[v]=(seen[v]||0)+1; });
-  return Object.keys(seen).sort((a,b)=>seen[b]-seen[a]).map(v=>({id:v,name:"как у "+seen[v]+" групп"}));
+  return {noId:true, list:Object.keys(seen).sort((a,b)=>seen[b]-seen[a])
+    .map(v=>({id:v, name:"id "+v+" — как у "+seen[v]+" "+_pubGrpWord(seen[v])}))};
 }
+function _pubFallbackHtml(refKey,field,sel,ph){ const f=_pubFallbackOpts(refKey,field); return _pubOpts(f.list,sel,ph,f.noId); }
 
 /* --- строки таблицы: что с группой (новая / уже есть / опубликована) и чего не хватает --- */
 function _pubIssues(g){
@@ -8038,8 +8052,8 @@ function _pubAutoMap(){
     const pick=lt.find(o=>/групп/i.test(o.name||""))||lt.find(o=>/занят|урок/i.test(o.name||""))||lt[0];
     if(pick) c.lessonTypeId=pick.id;
   }
-  if(!c.statusId){ const o=_pubFallbackOpts("group_statuses","status_id")[0]; if(o) c.statusId=o.id; }
-  if(!c.levelId){ const o=_pubFallbackOpts("group_levels","level_id")[0]; if(o) c.levelId=o.id; }
+  if(!c.statusId){ const o=_pubFallbackOpts("group_statuses","status_id").list[0]; if(o) c.statusId=o.id; }
+  if(!c.levelId){ const o=_pubFallbackOpts("group_levels","level_id").list[0]; if(o) c.levelId=o.id; }
   _pubSave();
 }
 /* сколько имён по каждому шаблону совпадёт с существующими группами Alfa — помогает выбрать шаблон */
@@ -8106,8 +8120,8 @@ function _pubRender(){
         <label>Начало<br><input type="date" class="cell" data-f="cfg:bDate" value="${esc(c.bDate)}" onchange="pubSetCfg('bDate',this.value)"></label>
         <label>Окончание<br><input type="date" class="cell" data-f="cfg:eDate" value="${esc(c.eDate)}" onchange="pubSetCfg('eDate',this.value)"></label>
         <label>Тип занятия<br><select class="cell" data-f="cfg:lessonTypeId" onchange="pubSetCfg('lessonTypeId',this.value)">${_pubOpts(_pubRefList("lesson_types"),c.lessonTypeId)}</select></label>
-        <label>Статус группы<br><select class="cell" data-f="cfg:statusId" onchange="pubSetCfg('statusId',this.value)">${_pubOpts(_pubFallbackOpts("group_statuses","status_id"),c.statusId,"— не отправлять —")}</select></label>
-        <label>Уровень<br><select class="cell" data-f="cfg:levelId" onchange="pubSetCfg('levelId',this.value)">${_pubOpts(_pubFallbackOpts("group_levels","level_id"),c.levelId,"— не отправлять —")}</select></label>
+        <label>Статус группы<br><select class="cell" data-f="cfg:statusId" onchange="pubSetCfg('statusId',this.value)">${_pubFallbackHtml("group_statuses","status_id",c.statusId,"— не отправлять —")}</select></label>
+        <label>Уровень<br><select class="cell" data-f="cfg:levelId" onchange="pubSetCfg('levelId',this.value)">${_pubFallbackHtml("group_levels","level_id",c.levelId,"— не отправлять —")}</select></label>
       </div>
       <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:end;margin-bottom:10px">
         <label>День недели в Alfa<br><select class="cell" data-f="cfg:dayBase" onchange="pubSetCfg('dayBase',this.value)">${PUB_DAY_MODES.map(([v,t])=>`<option value="${v}"${c.dayBase===v?" selected":""}>${esc(t)}</option>`).join("")}</select></label>
@@ -8133,10 +8147,13 @@ function _pubRender(){
     <button class="btn ghost sm" onclick="pubAll(false)">Снять все</button>
     <span style="margin-left:auto;font-size:12px;color:var(--muted)">отмечено: <b style="color:var(--coal)">${sel.length}</b></span></div>`;
 
-  h+=`<div class="tscroll" style="max-height:44vh;overflow:auto"><table><thead><tr>
-    <th style="width:28px"></th><th style="text-align:left">Имя в Alfa</th><th style="text-align:left">Курс</th>
-    <th style="text-align:left">Педагог</th><th style="text-align:left">Расписание</th><th>Мест</th><th>Детей</th>
-    <th style="text-align:left">Статус / что не так</th></tr></thead><tbody>`;
+  // ширины в процентах + table-layout:fixed — иначе длинные названия распирали таблицу
+  // и столбец «Статус / что не так» уезжал за правый край модалки
+  h+=`<div class="tscroll" style="max-height:44vh;overflow:auto"><table style="table-layout:fixed;width:100%"><thead><tr>
+    <th style="width:26px"></th><th style="text-align:left;width:23%">Имя в Alfa</th><th style="text-align:left;width:14%">Курс</th>
+    <th style="text-align:left;width:11%">Педагог</th><th style="text-align:left;width:17%">Расписание</th>
+    <th style="width:8%" title="Детей вписано / мест в группе">Детей</th>
+    <th style="text-align:left;width:27%">Статус / что не так</th></tr></thead><tbody>`;
   rows.forEach(r=>{
     const on=_pubOn(r);
     const st=r.alfaId?`<span style="color:var(--green);font-weight:600">✓ опубликована · id ${r.alfaId}</span>`
@@ -8146,15 +8163,14 @@ function _pubRender(){
     const iss=r.issues.map(i=>`<span style="color:${i.hard?"var(--red)":"var(--muted)"}">${i.hard?"⛔":"⚠"} ${esc(i.t)}</span>`).join(" · ");
     h+=`<tr${r.alfaId?' style="opacity:.6"':''}>
       <td style="text-align:center"><input type="checkbox" ${on?"checked":""} ${r.can?"":"disabled"} onchange="pubToggle('${_jsStr(r.key)}')" title="${r.can?"Создать / пропустить":"Нельзя опубликовать: см. столбец справа"}"></td>
-      <td style="text-align:left"><input class="cell" style="min-width:220px" data-f="name:${esc(r.key)}" value="${esc(r.alfaName)}" onchange="pubSetName('${_jsStr(r.key)}',this.value)" title="Имя будущей группы в Alfa — можно поправить"></td>
-      <td style="text-align:left">${esc(r.course)}</td>
-      <td style="text-align:left">${esc(r.teachers.map(shortName).join(", ")||"—")}</td>
-      <td style="text-align:left;white-space:nowrap">${esc(r.schedText||"—")}${r.rooms.length?`<span style="color:var(--muted)"> · каб. ${esc(r.rooms.join(", "))}</span>`:""}</td>
-      <td style="text-align:center">${r.cap||"—"}</td>
-      <td style="text-align:center">${r.kidsN||0}</td>
-      <td style="text-align:left;font-size:11px">${st}${iss?"<br>"+iss:""}</td></tr>`;
+      <td style="text-align:left"><input class="cell" style="width:100%;min-width:0" data-f="name:${esc(r.key)}" value="${esc(r.alfaName)}" onchange="pubSetName('${_jsStr(r.key)}',this.value)" title="${esc(r.alfaName)} — имя будущей группы в Alfa, можно поправить"></td>
+      <td style="text-align:left;overflow-wrap:anywhere">${esc(r.course)}</td>
+      <td style="text-align:left;overflow-wrap:anywhere">${esc(r.teachers.map(shortName).join(", ")||"—")}</td>
+      <td style="text-align:left;overflow-wrap:anywhere">${esc(r.schedText||"—")}${r.rooms.length?`<span style="color:var(--muted)"> · каб. ${esc(r.rooms.join(", "))}</span>`:""}</td>
+      <td style="text-align:center">${r.kidsN||0}${r.cap?`<span style="color:var(--muted)"> / ${r.cap}</span>`:""}</td>
+      <td style="text-align:left;font-size:11px;overflow-wrap:anywhere">${st}${iss?"<br>"+iss:""}</td></tr>`;
   });
-  if(!rows.length) h+=`<tr><td colspan="8" style="padding:12px;color:var(--muted)">В расписании нет групп с курсом.</td></tr>`;
+  if(!rows.length) h+=`<tr><td colspan="7" style="padding:12px;color:var(--muted)">В расписании нет групп с курсом.</td></tr>`;
   h+=`</tbody></table></div>`;
 
   h+=`<label style="display:flex;align-items:center;gap:8px;margin:10px 0 4px;font-size:12px;cursor:pointer">
