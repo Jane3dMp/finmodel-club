@@ -590,6 +590,18 @@ switch ($action) {
                 }
             }
         }
+        // Аудитория «Без локации» может не прийти в выборке по филиалу. Если её потерять,
+        // кабинет молча сопоставится с ПОХОЖИМ («1 этаж №1» → «1 этаж №2») и группа уедет
+        // не в тот кабинет. Поэтому добираем глобальным списком, помечая branch=0.
+        $glob = alfa_try_index('room', true);
+        if (is_array($glob)) {
+            foreach ($glob as $it) {
+                $id = $it['id'] ?? null;
+                if ($id === null || isset($seen['rooms#' . $id])) continue;
+                $seen['rooms#' . $id] = true;
+                $out['rooms'][] = ['id' => $id, 'name' => (string)($it['name'] ?? ''), 'branch' => 0];
+            }
+        }
         foreach ($out as $k => $v) if (!$v) unset($out[$k]);   // пустые справочники не отдаём
         json_out(['ok' => true, 'branch' => alfa_branch(), 'branchNames' => $brNames,
                   'branchesUsed' => array_values($branches), 'refs' => $out]);

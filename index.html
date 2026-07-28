@@ -1558,7 +1558,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-07-28-33";
+const APP_VER="2026-07-28-34";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -7931,9 +7931,13 @@ function _pubGuess(name,list){
   const b=_normCourse(typeof _courseBase==="function"?_courseBase(name):name);
   hit=list.find(o=>_normCourse(o.name)===b);
   if(hit) return hit.id;
-  const cand=list.filter(o=>{ const x=_normCourse(o.name); return x && (x.indexOf(n)>=0 || n.indexOf(x)>=0); });
+  // «Одно содержит другое» опасно для нумерованных кабинетов: «1 этаж №1» содержит «1 этаж»,
+  // и группа уехала бы в чужой кабинет. Поэтому требуем совпадения хвостового номера.
+  const cand=list.filter(o=>{ const x=_normCourse(o.name); return x && (x.indexOf(n)>=0 || n.indexOf(x)>=0); })
+    .filter(o=>_pubTailNum(_normCourse(o.name))===_pubTailNum(n));
   return cand.length===1?cand[0].id:null;                            // неоднозначное не угадываем — пусть выберут руками
 }
+function _pubTailNum(s){ const m=String(s||"").match(/(\d+)$/); return m?m[1]:""; }
 function _pubRefList(k){ return (_pubRefs&&_pubRefs[k])||[]; }
 function _pubOpts(list,sel,ph,noId){
   let h=`<option value="">${esc(ph||"— не выбрано —")}</option>`;
@@ -7999,6 +8003,15 @@ function pubSetName(key,v){
   const c=_pubCfg(); v=String(v||"").trim();
   if(v) c.names[key]=v; else delete c.names[key];
   _pubSave(); _pubRender();
+}
+/* Сопоставления сохраняются в модели, поэтому однажды сделанная (в т.ч. НЕВЕРНАЯ) авто-догадка
+   живёт дальше и сама не исправится. Кнопка сбрасывает всё и подбирает заново по текущим справочникам. */
+function pubResetMap(){
+  if(!confirm("Сбросить все соответствия (курсы, педагоги, кабинеты) и подобрать заново?\n\nРучные правки тоже будут потеряны.")) return;
+  S.alfaMap={subj:{},teacher:{},room:{}};
+  const c=_pubCfg(); c.lessonTypeId=""; c.statusId=""; c.levelId="";
+  _pubAutoMap(); _pubRender();
+  toast("Соответствия подобраны заново");
 }
 function _pubMarkPublished(key,id){
   if(!S.groupMeta) S.groupMeta={};
@@ -8198,6 +8211,7 @@ function _pubRender(){
         </select></label>
       </div>
       <div style="font-size:11px;color:var(--muted);margin-bottom:10px">«Совпадений» — сколько имён по этому шаблону нашлись среди существующих групп Alfa. Больше совпадений = меньше риск создать дубль. Имя любой группы можно поправить прямо в таблице.</div>
+      <div style="margin-bottom:6px"><button class="btn ghost sm" onclick="pubResetMap()" title="Сбросить сопоставления и подобрать заново по справочникам Alfa">↺ Пересопоставить заново</button></div>
       <details data-k="subj"><summary style="cursor:pointer;font-weight:600">📚 Курсы → предметы Alfa (${courses.filter(x=>_pubMap().subj[x]!=null).length}/${courses.length})</summary>
         <div style="padding:6px 0">${_pubMapRows("subj",courses,"subjects","— выбрать предмет —")}</div></details>
       <details data-k="teacher"><summary style="cursor:pointer;font-weight:600">👩‍🏫 Педагоги → teacher_id (${teachers.filter(x=>_pubMap().teacher[x]!=null).length}/${teachers.length})</summary>
