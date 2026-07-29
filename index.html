@@ -1558,7 +1558,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-07-28-34";
+const APP_VER="2026-07-28-35";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -7741,9 +7741,16 @@ function renderGroups(){
     g.key=k; g.done=!!(S.groupsDone||{})[k];
     const gm=(S.groupMeta||{})[k]||{}; g.age=gm.age||""; g.klass=gm.klass||"";   // рукописные возраст/класс группы
     g.alfaId=+(gm.alfaId||0)||0;                                                 // опубликована в Alfa — чтобы не создать дубль
-    const names=new Set(), paid=new Set();
-    g.idxs.forEach(i=>kidsOf(S.grid[i]).forEach(kd=>{ const n=_nameKey(kd.n); if(!n) return; names.add(n); if(kd.may) paid.add(n); }));   // тёзки = разные дети
+    const names=new Set(), paid=new Set(), rep={};   // rep: ФИО → лучший ответ + флаг «не придёт» (как в «Движении по группам»)
+    const rank=r=>r==="yes"?3:r==="no"?2:r==="maybe"?1:0;
+    g.idxs.forEach(i=>kidsOf(S.grid[i]).forEach(kd=>{ const n=_nameKey(kd.n); if(!n) return; names.add(n); if(kd.may) paid.add(n);   // тёзки = разные дети
+      const p=rep[n]||(rep[n]={reply:"",no:false}); if(kd.no) p.no=true; if(rank(kd.vbReply)>rank(p.reply)) p.reply=kd.vbReply; }));
     g.kids=names.size; g.paid=paid.size;
+    { const ks=Object.values(rep);
+      g.rNo   =ks.filter(p=>p.no||p.reply==="no").length;              // 🔴 отказ / не придёт
+      g.rYes  =ks.filter(p=>!p.no&&p.reply==="yes").length;            // 🟢 подтвердили
+      g.rMaybe=ks.filter(p=>!p.no&&p.reply==="maybe").length;          // 🟡 думают
+      g.rNone =g.kids-g.rYes-g.rNo-g.rMaybe; }                         // молчат
     g.cap=Math.max(0,...g.idxs.map(i=>+S.grid[i].students||0));
     const seen=new Set(), sc=[];
     g.sched.sort((a,b)=>(a.day-b.day)||String(a.start).localeCompare(String(b.start))).forEach(s=>{ const t=(DAY_NAMES[s.day]||"")+" "+(s.start||""); if(!seen.has(t)){seen.add(t); sc.push(t);} });
@@ -7754,8 +7761,9 @@ function renderGroups(){
     g.name=g.group || ([...g.teachers][0]?shortName([...g.teachers][0]):"без номера");
     return g;
   });
-  const _gsVal={name:g=>g.name,age:g=>g.age,klass:g=>g.klass,course:g=>g.course,teacher:g=>g.teacherText,sched:g=>g.schedKey,room:g=>g.roomText,kids:g=>g.kids,paid:g=>g.paid};
-  const _gsNum={sched:1,kids:1,paid:1};
+  const _gsVal={name:g=>g.name,age:g=>g.age,klass:g=>g.klass,course:g=>g.course,teacher:g=>g.teacherText,sched:g=>g.schedKey,room:g=>g.roomText,kids:g=>g.kids,paid:g=>g.paid,
+    ryes:g=>g.rYes,rno:g=>g.rNo,rmaybe:g=>g.rMaybe,rnone:g=>g.rNone};
+  const _gsNum={sched:1,kids:1,paid:1,ryes:1,rno:1,rmaybe:1,rnone:1};
   const _gv=_gsVal[_groupsSort.col]||_gsVal.course;
   groups.sort((a,b)=>{
     let r=_gsNum[_groupsSort.col]?(_gv(a)-_gv(b)):String(_gv(a)).localeCompare(String(_gv(b)),"ru",{numeric:true});
@@ -7780,7 +7788,7 @@ function renderGroups(){
       ${_fbIsAdmin?`<span class="hd-grp"><button class="btn sm" onclick="openPublish()" title="Создать эти группы и их расписание в AlfaCRM (сначала сухой прогон)">📤 Опубликовать в Alfa</button></span>`:""}
     </div>
     <div class="tscroll"><table id="groupsTable"><thead><tr>
-      <th style="width:30px" title="Закреп (готово)">📌</th>${_grpTh("name","Группа","left")}${_grpTh("age","Возраст","center")}${_grpTh("klass","Класс","center")}${_grpTh("kids","Детей","center")}${_grpTh("paid","💰","center")}${_grpTh("course","Курс","left")}${_grpTh("teacher","Педагог","left")}${_grpTh("sched","Расписание","left")}${_grpTh("room","Каб.","center")}<th></th>
+      <th style="width:30px" title="Закреп (готово)">📌</th>${_grpTh("name","Группа","left")}${_grpTh("age","Возраст","center")}${_grpTh("klass","Класс","center")}${_grpTh("kids","Детей","center")}${_grpTh("ryes",'<span style="color:#7CE0A0">🟢</span>',"center")}${_grpTh("rno",'<span style="color:#F0A0A0">🔴</span>',"center")}${_grpTh("rmaybe",'<span style="color:#F2D06B">🟡</span>',"center")}${_grpTh("rnone","Молчат","center")}${_grpTh("paid","💰","center")}${_grpTh("course","Курс","left")}${_grpTh("teacher","Педагог","left")}${_grpTh("sched","Расписание","left")}${_grpTh("room","Каб.","center")}<th></th>
     </tr></thead><tbody>`;
   shown.forEach((g,i)=>{
     html+=`<tr class="${g.done?'grp-done':''}">
@@ -7789,6 +7797,10 @@ function renderGroups(){
       <td style="text-align:center"><input class="cell grp-meta" value="${esc(g.age)}" placeholder="—" title="Возраст группы — впишите вручную (напр. 7–9)" onchange="setGroupMeta('${_jsStr(g.key)}','age',this.value)"></td>
       <td style="text-align:center"><input class="cell grp-meta" value="${esc(g.klass)}" placeholder="—" title="Класс — впишите вручную (напр. 1–3)" onchange="setGroupMeta('${_jsStr(g.key)}','klass',this.value)"></td>
       <td style="text-align:center">${g.kids}${g.cap?(" / "+g.cap):""}</td>
+      <td style="text-align:center">${g.rYes?('<b style="color:var(--green)">'+g.rYes+'</b>'):'<span style="color:var(--muted)">0</span>'}</td>
+      <td style="text-align:center">${g.rNo?('<b style="color:var(--red)">'+g.rNo+'</b>'):'<span style="color:var(--muted)">0</span>'}</td>
+      <td style="text-align:center">${g.rMaybe?('<b style="color:#C9922E">'+g.rMaybe+'</b>'):'<span style="color:var(--muted)">0</span>'}</td>
+      <td style="text-align:center"><span style="color:var(--muted)">${g.rNone||0}</span></td>
       <td style="text-align:center">${g.paid?('<b style="color:var(--green)">'+g.paid+'</b>'):'0'}</td>
       <td style="text-align:left">${esc(g.course)}</td>
       <td style="text-align:left">${esc(g.teacherText||"—")}</td>
@@ -7797,7 +7809,7 @@ function renderGroups(){
       <td style="text-align:center"><button class="btn ghost sm" onclick="${g.firstId?`gotoKidLessonId('${esc(g.firstId)}')`:`gotoKidLesson(${g.firstIdx})`}" title="Открыть группу в сетке">→</button></td>
     </tr>`;
   });
-  if(!shown.length) html+=`<tr><td colspan="11" style="padding:12px;color:var(--muted)">${_groupsHideDone&&doneCount?'Все группы под фильтром закреплены (готовы). Нажмите «Показать готовые».':'Групп не найдено.'}</td></tr>`;
+  if(!shown.length) html+=`<tr><td colspan="15" style="padding:12px;color:var(--muted)">${_groupsHideDone&&doneCount?'Все группы под фильтром закреплены (готовы). Нажмите «Показать готовые».':'Групп не найдено.'}</td></tr>`;
   html+=`</tbody></table></div>`;
   box.innerHTML=html;
 }
