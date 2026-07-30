@@ -1591,7 +1591,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-07-30-07";
+const APP_VER="2026-07-30-08";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -8870,6 +8870,7 @@ function _p1KidsHtml(){
   h+=`</div>`;
   h+=`<div style="font-size:11px;color:var(--muted);margin-top:4px">Период участия — как у группы: ${esc(_pubDMY(_pubCfg().bDate))} — ${esc(_pubDMY(_pubCfg().eDate))}. Отказавшиеся (🔴) по умолчанию не отмечены. Те же значки — в карточке занятия, там же кнопка 👥 у каждого ребёнка.</div>`;
   h+=`<div class="hd-actions les-foot" style="margin-top:8px">
+      <button class="btn ghost sm" onclick="p1TariffNeeds()" title="Посчитать по конструктору, какие шаблоны абонементов нужно завести в Alfa">📋 Какие абонементы нужны</button>
       <button class="btn ghost sm" onclick="p1Tariffs()" title="Посмотреть, какие шаблоны абонементов заведены в вашей AlfaCRM">🎫 Абонементы Альфы</button>
       <button class="btn ghost sm" onclick="p1KidsRefresh()" title="Перечитать состав группы из Alfa">⟳ Обновить состав из Alfa</button>
       <button class="btn sm" style="margin-left:auto" ${sel&&!_p1.busy?"":"disabled"} onclick="p1KidsAdd()">👥 Добавить в группу Alfa (${sel})</button>
@@ -8903,6 +8904,54 @@ async function p1KidsOpen(){
     if(_p1&&!_p1.members) await p1KidsRefresh();
   }catch(e){ if(_p1){ _p1.kidsLog=_pubErrHtml(e,"клиенты Alfa"); _p1Render(); } }
 }
+/* Сколько РАЗНЫХ шаблонов абонементов нужно завести в Alfa. Шаблон нужен на КАЖДУЮ ЦЕНУ,
+   а не на каждый курс: у нескольких курсов цена часто совпадает — им хватит одного.
+   Цена берётся так же, как в «Пути оплаты» (ЕРИП): майский → «Майская цена»,
+   иначе «Абонемент», а если он пуст — цена × визиты × 4. */
+function _pubTariffNeeds(){
+  const need={};                        // цена+вид → {price, may, courses:Set, kids}
+  const add=(price,may,course)=>{
+    const p=Math.round(+price||0); if(!p) return null;
+    const k=p+"|"+(may?"m":"n");
+    const o=need[k]||(need[k]={price:p,may:!!may,courses:new Set(),kids:0});
+    o.courses.add(course); o.kids++; return o;
+  };
+  const priceOf=(course,may)=>{
+    const c=(S.courses||[]).find(x=>x.name===course);
+    if(!c) return 0;
+    if(may) return (c.mayPrice!=null&&c.mayPrice!==""&&+c.mayPrice>0)?+c.mayPrice:_payAmount(course);
+    return +_payAmount(course)||0;
+  };
+  const seen=new Set(), noPrice={};
+  (S.grid||[]).forEach(l=>{
+    if(!l.course) return;
+    kidsOf(l).forEach(k=>{
+      const id=_grpKeyOf(l)+"|"+_nameKey(k.n); if(seen.has(id)) return; seen.add(id);
+      if(k.no||k.vbReply==="no") return;                       // отказавшимся абонемент не нужен
+      const p=priceOf(l.course,!!k.may);
+      if(!add(p,!!k.may,l.course)) noPrice[l.course]=(noPrice[l.course]||0)+1;
+    });
+  });
+  return {rows:Object.values(need).sort((a,b)=>(a.may-b.may)||(b.kids-a.kids)||(a.price-b.price)), noPrice};
+}
+async function p1TariffNeeds(){
+  if(!_p1) return;
+  const {rows,noPrice}=_pubTariffNeeds();
+  const bad=Object.keys(noPrice);
+  const line=r=>`<tr><td style="text-align:right"><b>${r.price} р</b></td>
+    <td style="text-align:left">${r.may?'<span style="color:var(--green)">💰 майская</span>':"обычная"}</td>
+    <td style="text-align:center">${r.kids}</td>
+    <td style="text-align:left;font-size:11px;color:var(--muted)">${esc([...r.courses].sort((a,b)=>a.localeCompare(b,"ru")).join(", "))}</td></tr>`;
+  _p1.kidsLog=`<div class="callout" style="margin-bottom:6px">Шаблон абонемента в Alfa нужен на каждую <b>цену</b>, а не на каждый курс. По конструктору таких цен: <b>${rows.length}</b> — столько шаблонов и надо завести (Alfa → Настройки → Абонементы).</div>
+    <div style="max-height:30vh;overflow:auto"><table style="width:100%"><thead><tr>
+      <th style="text-align:right">Цена</th><th style="text-align:left">Вид</th>
+      <th style="text-align:center">Детей</th><th style="text-align:left">Курсы с такой ценой</th>
+    </tr></thead><tbody>${rows.map(line).join("")||`<tr><td colspan="4" style="padding:8px;color:var(--muted)">Цены не заданы.</td></tr>`}</tbody></table></div>
+    ${bad.length?`<div class="callout" style="border-color:var(--terra);margin-top:6px;font-size:12px">Без цены (не попадут в абонемент): ${esc(bad.slice(0,8).join(", "))}${bad.length>8?" и ещё "+(bad.length-8):""}. Заполните «Абонемент» или «Цену» на вкладке «Курсы».</div>`:""}
+    <div style="font-size:11px;color:var(--muted);margin-top:4px">Сумма: майским — «Майская цена», остальным — «Абонемент», а если он пуст — цена × визиты × 4 (как в «Пути оплаты»). Отказавшиеся не считаются.</div>`;
+  _p1Render();
+}
+
 /* Что за шаблоны абонементов уже заведены в Alfa. Читаем, ничего не создавая: цена и правила
    списания живут в тарифе, поэтому сначала надо увидеть, с чем работаем. */
 const PUB_TARIFF_TYPE={1:"поурочный",2:"помесячный",3:"недельный"};
