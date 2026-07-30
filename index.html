@@ -1591,7 +1591,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-07-30-01";
+const APP_VER="2026-07-30-02";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -8373,40 +8373,47 @@ function _pubRender(){
   body.innerHTML=h;
   _pubRestore(snap);
 }
-/* нумерация дня: читаем regular-lesson существующей группы и смотрим, какой режим совпал */
+/* нумерация дня: читаем regular-lesson существующей группы и смотрим, какой режим совпал.
+   Вызывается из обеих модалок — результат пишем в ту, что сейчас открыта. */
+function _pubLogBox(){ return document.getElementById((_p1&&_p1.g)?"p1Log":"pubLog"); }
+/* пишем в лог той модалки, что открыта, и запоминаем — иначе перерисовка стирает результат */
+function _pubLogSet(html){ if(_p1&&_p1.g) _p1.log=html; const b=_pubLogBox(); if(b) b.innerHTML=html; }
 async function pubDetectDay(){
-  const box=document.getElementById("pubLog");
+  if(!_pubRows.length) _pubBuildRows();          // из модалки одной группы большая таблица не строилась
   // годится любая наша группа, у которой есть пара в Alfa: точная, похожая или уже опубликованная
   const r=_pubRows.find(x=>(x.exists||x.similar||x.alfaId)&&x.slots.some(s=>s.start));
   if(!r){
-    if(box) box.innerHTML=`<div class="callout" style="border-color:var(--terra)">Не с чем сверять: ни одна группа модели не найдена в Alfa. Проверьте шаблон имени выше — или сверьте нумерацию дня одной тестовой группой.</div>`;
+    _pubLogSet(`<div class="callout" style="border-color:var(--terra)">Не с чем сверять: ни одна группа модели не найдена в Alfa. Проверьте шаблон имени — или сверьте нумерацию дня одной тестовой группой.</div>`);
     toast("Нужна хотя бы одна группа, которая уже есть в Alfa"); return;
   }
   const gid=r.alfaId||r.existsId;
-  if(box) box.innerHTML=`Читаю расписание группы «${esc(r.alfaName)}» (id ${gid}) в Alfa…`;
+  _pubLogSet(`Читаю расписание группы «${esc(r.alfaName)}» (id ${gid}) в Alfa…`);
   try{
     const j=await _pubCall("regularLessons",{groupId:gid, branch:r.existsBranch||0});
     console.log("🔎 regular-lesson группы",gid,j.lessons,"· образец полей:",j.sample);
+    // у нас время пишут и «9:00», и «09:00», Alfa отдаёт «09:00:00» — сверяем в одном формате,
+    // иначе половина слотов молча выпадала из сверки (а то и все)
+    const hhmm=t=>{ const p=String(t||"").trim().split(":"); return p.length<2?"":String(+p[0]||0).padStart(2,"0")+":"+String(p[1]).slice(0,2).padStart(2,"0"); };
     const byTime={};
-    (j.lessons||[]).forEach(x=>{ const t=String(x.time_from||"").slice(0,5); if(t) byTime[t]=x.day; });
+    (j.lessons||[]).forEach(x=>{ const t=hhmm(x.time_from); if(t) byTime[t]=x.day; });
     const score=PUB_DAY_MODES.map(([mode])=>{
       let ok=0,tot=0;
-      r.slots.forEach(s=>{ const t=String(s.start||"").slice(0,5); if(byTime[t]==null) return; tot++; if(+byTime[t]===_pubDayIn(mode,s.day)) ok++; });
+      r.slots.forEach(s=>{ const t=hhmm(s.start); if(!t||byTime[t]==null) return; tot++; if(+byTime[t]===_pubDayIn(mode,s.day)) ok++; });
       return {mode,ok,tot};
     });
     const best=score.slice().sort((a,b)=>b.ok-a.ok)[0];
     if(!best||!best.tot){
-      if(box) box.innerHTML=`<div class="callout" style="border-color:var(--terra)">В Alfa у этой группы ${ (j.lessons||[]).length } регулярных занятий, но совпасть по времени не удалось — сверьте вручную (подробности в консоли, F12). Режим не меняли.</div>`;
+      _pubLogSet(`<div class="callout" style="border-color:var(--terra)">В Alfa у этой группы ${ (j.lessons||[]).length } регулярных занятий, но совпасть по времени не удалось — сверьте вручную (подробности в консоли, F12). Режим не меняли.</div>`);
       return;
     }
     if(!best.ok){
-      if(box) box.innerHTML=`<div class="callout" style="border-color:var(--red)">Ни один режим нумерации не совпал (сверено слотов: ${best.tot}). Смотрите консоль (F12) — там дни из Alfa.</div>`;
+      _pubLogSet(`<div class="callout" style="border-color:var(--red)">Ни один режим нумерации не совпал (сверено слотов: ${best.tot}). Смотрите консоль (F12) — там дни из Alfa.</div>`);
       return;
     }
     pubSetCfg("dayBase",best.mode);
     const label=(PUB_DAY_MODES.find(m=>m[0]===best.mode)||[])[1]||best.mode;
-    document.getElementById("pubLog").innerHTML=`<div class="callout" style="border-color:var(--green)">Нумерация определена по группе «${esc(r.alfaName)}»: <b>${esc(label)}</b> (совпало ${best.ok} из ${best.tot}).</div>`;
-  }catch(e){ if(box) box.innerHTML=`<div class="callout" style="border-color:var(--red)">Не получилось: ${esc((e&&e.message)||e)}</div>`; }
+    _pubLogSet(`<div class="callout" style="border-color:var(--green)">Нумерация определена по группе «${esc(r.alfaName)}»: <b>${esc(label)}</b> (совпало ${best.ok} из ${best.tot}).</div>`);
+  }catch(e){ _pubLogSet(`<div class="callout" style="border-color:var(--red)">Не получилось: ${esc((e&&e.message)||e)}</div>`); }
 }
 function _pubLogHTML(lines){ return `<div style="max-height:30vh;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:6px 10px;line-height:1.6">${lines.join("")}</div>`; }
 async function pubRun(live){
@@ -8620,6 +8627,11 @@ function _p1Render(){
       <td style="text-align:left">${s.teacher?esc(shortName(s.teacher))+(tid?` <span style="color:var(--muted)">→ ${esc(_pubRefName("teachers",tid))}</span>`:` <b style="color:var(--red)">не сопоставлен</b>`):'<span style="color:var(--muted)">—</span>'}</td></tr>`;
   });
   h+=`</tbody></table></div>`;
+
+  // нумерация дня недели в Alfa не документирована: ошибись — и всё ляжет не в тот день
+  h+=`<div style="font-size:11px;color:var(--muted);margin-top:6px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+    День недели уходит в Alfa как «${esc(((PUB_DAY_MODES.find(x=>x[0]===c.dayBase)||[])[1])||c.dayBase)}».
+    <button class="btn ghost sm" onclick="pubDetectDay()" title="Прочитать расписание уже существующей группы Alfa и понять, как там нумеруются дни">🔎 Проверить нумерацию</button></div>`;
 
   if(a&&(g.branchInfo||{}).branch&&+a.branch&&+a.branch!==+g.branchInfo.branch)
     h+=`<div class="callout" style="border-color:var(--terra);font-size:12px;margin-top:8px">⚠ Группа «${esc(a.name)}» в Alfa лежит в филиале <b>${esc(_pubBrName(+a.branch))}</b>, а кабинет нашей группы — из <b>${esc(_pubBrName(g.branchInfo.branch))}</b>. Расписание уйдёт в филиал группы, и кабинет из чужого филиала Alfa может не принять.</div>`;
