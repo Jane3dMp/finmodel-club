@@ -209,6 +209,33 @@ function alfa_http(string $method, string $url, array $body, ?string $token, boo
     return $data;
 }
 
+// Alfa принимает даты ТОЛЬКО как ДД.ММ.ГГГГ (проверено на createCustomer: с ISO-датой запись
+// молча не создавалась). Из <input type="date"> приходит ГГГГ-ММ-ДД — переводим.
+function alfa_date(string $d): string {
+    $d = trim($d);
+    if ($d === '') return '';
+    if (preg_match('#^(\d{4})-(\d{2})-(\d{2})#', $d, $m)) return "$m[3].$m[2].$m[1]";
+    return $d;
+}
+
+// Человекочитаемая причина отказа из ответа Alfa. Без неё «не вернула id» — загадка:
+// у Alfa текст лежит то в errors[поле][], то в error/message.
+function alfa_err_text($r): string {
+    if (!is_array($r)) return '';
+    $out = [];
+    if (!empty($r['errors']) && is_array($r['errors'])) {
+        foreach ($r['errors'] as $f => $msgs) {
+            $t = is_array($msgs) ? implode('; ', array_map('strval', $msgs)) : (string)$msgs;
+            if ($t !== '') $out[] = (is_string($f) && $f !== '' ? $f . ': ' : '') . $t;
+        }
+    }
+    foreach (['error', 'message', 'msg'] as $k) {
+        if (!empty($r[$k]) && is_string($r[$k])) $out[] = $r[$k];
+    }
+    if (isset($r['__err'])) $out[] = 'связь: ' . $r['__err'] . ' ' . (string)($r['msg'] ?? $r['code'] ?? '');
+    return implode(' · ', array_unique($out));
+}
+
 // Мягкая попытка получить справочник (index). null, если эндпоинта нет/ошибка.
 function alfa_try_index(string $entity, bool $global = false): ?array {
     $path = $global ? "/v2api/$entity/index" : '/v2api/' . alfa_branch() . "/$entity/index";

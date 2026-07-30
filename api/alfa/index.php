@@ -708,8 +708,10 @@ switch ($action) {
         // Филиал ВЫБИРАЕТ клиент: кабинеты branch-scoped, и группа обязана лечь в тот филиал,
         // которому принадлежит её кабинет. Раньше молча писали в авто-определённый филиал.
         $branch   = (int)($in['branch'] ?? 0) ?: alfa_branch();
-        $bDate    = (string)($in['b_date'] ?? '2026-09-02');
-        $eDate    = (string)($in['e_date'] ?? '2027-05-31');
+        // ⚠️ Alfa принимает даты только как ДД.ММ.ГГГГ — с ISO группа молча не создавалась
+        //    («AlfaCRM не вернула id группы»). Та же грабля, что была у createCustomer.
+        $bDate    = alfa_date((string)($in['b_date'] ?? '2026-09-02'));
+        $eDate    = alfa_date((string)($in['e_date'] ?? '2027-05-31'));
         $groupId  = (int)($in['groupId'] ?? 0);
         $updGroup = !empty($in['updateGroup']);   // прописать нашего педагога/даты в карточку существующей группы
 
@@ -764,7 +766,12 @@ switch ($action) {
         if (!$gid) {
             $gr  = alfa_call_branch($branch, 'group', 'create', $groupPayload);
             $gid = $gr['id'] ?? ($gr['model']['id'] ?? null);
-            if (!$gid) json_out(['ok' => false, 'error' => 'AlfaCRM не вернула id группы', 'branch' => $branch, 'sent' => $groupPayload, 'alfa' => $gr], 502);
+            if (!$gid) {
+                $det = alfa_err_text($gr);
+                json_out(['ok' => false,
+                          'error'  => 'AlfaCRM не создала группу' . ($det !== '' ? (': ' . $det) : ' — ответ без id и без описания ошибки (см. поле alfa)'),
+                          'branch' => $branch, 'sent' => $groupPayload, 'alfa' => $gr], 502);
+            }
             $created['group_id'] = (int)$gid; $created['createdGroup'] = true;
         } elseif ($updGroup) {
             // Alfa update перезаписывает запись ЦЕЛИКОМ → читаем карточку и меняем только своё
@@ -783,7 +790,7 @@ switch ($action) {
                 if (empty($keep['branch_ids'])) $keep['branch_ids'] = [$branch];
                 $res = alfa_http('POST', 'https://' . alfa_host() . "/v2api/$branch/group/update?id=" . (int)$gid,
                                  $keep, alfa_token(), true, 15);
-                if (empty($res['id']) && empty($res['model']['id'])) $created['errors'][] = ['step' => 'карточка группы', 'sent' => $keep, 'alfa' => $res];
+                if (empty($res['id']) && empty($res['model']['id'])) $created['errors'][] = ['step' => 'карточка группы', 'why' => alfa_err_text($res), 'sent' => $keep, 'alfa' => $res];
                 else $created['groupUpdated'] = true;
             }
         }
@@ -794,13 +801,13 @@ switch ($action) {
             $res = alfa_call_branch($branch, 'regular-lesson', 'create', $rl);
             $rid = $res['id'] ?? ($res['model']['id'] ?? null);
             if ($rid) $created['lessons'][] = (int)$rid;
-            else      $created['errors'][] = ['step' => 'расписание #' . ($i + 1), 'sent' => $rl, 'alfa' => $res];
+            else      $created['errors'][] = ['step' => 'расписание #' . ($i + 1), 'why' => alfa_err_text($res), 'sent' => $rl, 'alfa' => $res];
         }
         foreach ($students as $cid) {
             $res = alfa_call_branch($branch, 'cgi', 'create', ['customer_id' => (int)$cid, 'group_id' => (int)$gid, 'b_date' => $bDate, 'e_date' => $eDate]);
             $lid = $res['id'] ?? ($res['model']['id'] ?? null);
             if ($lid) $created['links'][] = (int)$cid;
-            else      $created['errors'][] = ['step' => 'ученик ' . $cid, 'alfa' => $res];
+            else      $created['errors'][] = ['step' => 'ученик ' . $cid, 'why' => alfa_err_text($res), 'alfa' => $res];
         }
         json_out(['ok' => true, 'dryRun' => false, 'partial' => !empty($created['errors']), 'created' => $created]);
         break;

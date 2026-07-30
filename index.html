@@ -1591,7 +1591,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-07-30-02";
+const APP_VER="2026-07-30-03";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -8119,8 +8119,19 @@ async function _pubCall(action,payload){
   const r=await fetch(ALFA_PROXY+"?action="+action,{method:"POST",
     headers:{"Content-Type":"application/json","Authorization":"Bearer "+token},body:JSON.stringify(payload||{})});
   const j=await r.json().catch(()=>({ok:false,error:"ответ не JSON ("+r.status+")"}));
-  if(!r.ok||!j.ok) throw new Error(j.error||("ошибка "+r.status));
+  // ответ Alfa (что именно она забраковала) кладём в ошибку — иначе диагностика превращается в гадание
+  if(!r.ok||!j.ok){ const e=new Error(j.error||("ошибка "+r.status)); e.data=j; throw e; }
   return j;
+}
+/* сообщение об ошибке + сырой ответ Alfa под раскрывашкой (и он же в консоли) */
+function _pubErrHtml(e,where){
+  const d=(e&&e.data)||null;
+  console.warn("📤 Alfa "+(where||"")+" — ошибка:",(e&&e.message)||e,d||e);
+  let h=`<div class="callout" style="border-color:var(--red)">Не получилось: ${esc((e&&e.message)||e)}</div>`;
+  if(d&&(d.alfa||d.sent)) h+=`<details style="margin-top:6px"><summary style="cursor:pointer;font-size:12px;color:var(--muted)">Что мы отправили и что ответила Alfa</summary>
+    <pre style="white-space:pre-wrap;font-size:11px;background:var(--paper);padding:6px;border-radius:6px;max-height:30vh;overflow:auto">${
+      esc(JSON.stringify({отправили:d.sent,ответ:d.alfa,филиал:d.branch},null,1))}</pre></details>`;
+  return h;
 }
 function closePublish(){ document.getElementById("pubModal").classList.remove("show"); }
 /* Справочники и список групп Alfa тянем ОДИН раз на сессию — их просят и массовая модалка,
@@ -8454,7 +8465,7 @@ async function pubRun(live){
           const errs=(cr.errors||[]);
           if(errs.length){
             fail++;
-            lines.push(`<div style="color:var(--terra)">⚠ ${esc(r.alfaName)} — группа создана (id ${esc(cr.group_id)}), но ${errs.length} шаг(ов) с ошибкой: ${esc(errs.map(e=>e.step).join(", "))}. Подробности в консоли.</div>`);
+            lines.push(`<div style="color:var(--terra)">⚠ ${esc(r.alfaName)} — группа создана (id ${esc(cr.group_id)}), но ${errs.length} шаг(ов) с ошибкой: ${esc(errs.map(e=>e.step+(e.why?(" — "+e.why):"")).join("; "))}. Подробности в консоли.</div>`);
             console.warn("📤 Alfa publish — ошибки шагов:",r.alfaName,errs);
           }else{
             done++;
@@ -8463,6 +8474,7 @@ async function pubRun(live){
         }
       }catch(e){
         fail++;
+        console.warn("📤 Alfa publish — отказ:",r.alfaName,(e&&e.data)||e);
         lines.push(`<div style="color:var(--red)">⛔ ${esc(r.alfaName)} — ${esc((e&&e.message)||e)}</div>`);
       }
       if(box) box.innerHTML=_pubLogHTML(lines);
@@ -8654,6 +8666,7 @@ function _p1Render(){
   b.innerHTML=h;
 }
 function _p1Opts(){ const a=_p1Alfa(); return {groupId:a?+a.id:0, branch:_p1Branch(), updateGroup:!!(a&&_p1.upd), kids:false}; }
+function _pubDMY(s){ const m=String(s||"").match(/^(\d{4})-(\d{2})-(\d{2})/); return m?(m[3]+"."+m[2]+"."+m[1]):String(s||""); }
 function _p1PlanHtml(p){
   p=p||{};
   const nNew=(p.schedule||[]).length, nSkip=(p.skipped||[]).length;
@@ -8663,7 +8676,7 @@ function _p1PlanHtml(p){
   const skip=(p.skipped||[]).map(s=>`<div style="color:var(--muted)">= день ${esc(s.day)} · ${esc(s.time)} — в Alfa уже стоит, пропустим</div>`);
   return `<div class="callout" style="border-color:${nNew?"var(--green)":"var(--terra)"};margin-bottom:6px">
       ${p.groupId?`Группа Alfa <b>id ${esc(p.groupId)}</b> — новую не создаём.`:`Будет создана <b>новая группа</b> «${esc((p.group||{}).name||"")}».`}
-      Добавим занятий: <b>${nNew}</b>${nSkip?`, пропустим как уже существующие: <b>${nSkip}</b>`:""} · период ${esc(_pubCfg().bDate)} … ${esc(_pubCfg().eDate)}</div>
+      Добавим занятий: <b>${nNew}</b>${nSkip?`, пропустим как уже существующие: <b>${nSkip}</b>`:""} · период ${esc(_pubDMY(_pubCfg().bDate))} … ${esc(_pubDMY(_pubCfg().eDate))}</div>
     <div style="border:1px solid var(--line);border-radius:8px;padding:6px 10px;line-height:1.6">${
       add.concat(skip).join("")||`<span style="color:var(--muted)">нечего добавлять</span>`}</div>`;
 }
@@ -8675,7 +8688,7 @@ async function p1Dry(){
     const j=await _pubCall("publish",Object.assign({dryRun:true},_pubPlan(_p1.g,_p1Opts())));
     console.log("👁 publish dryRun:",_p1.key,j.plan);
     _p1.log=_p1PlanHtml(j.plan);
-  }catch(e){ _p1.log=`<div class="callout" style="border-color:var(--red)">Не получилось: ${esc((e&&e.message)||e)}</div>`; }
+  }catch(e){ _p1.log=_pubErrHtml(e,"проверка"); }
   _p1.busy=false; _p1Render();
 }
 async function p1Go(){
@@ -8699,11 +8712,12 @@ async function p1Go(){
     _pubMarkPublished(_p1.key,cr.group_id,{sched:true,les:nLes,name:a?a.name:g.alfaName});
     _p1.mode="link"; _p1.sel=+cr.group_id||_p1.sel;
     _p1.log=errs.length
-      ? `<div class="callout" style="border-color:var(--terra)">⚠ Группа id ${esc(cr.group_id)}: добавлено занятий ${nLes}, но ${errs.length} шаг(ов) с ошибкой — ${esc(errs.map(e=>e.step).join(", "))}. Подробности в консоли (F12).</div>`
+      ? `<div class="callout" style="border-color:var(--terra)">⚠ Группа id ${esc(cr.group_id)}: добавлено занятий ${nLes}, но ${errs.length} шаг(ов) с ошибкой.<br>${
+          esc(errs.map(e=>e.step+(e.why?(" — "+e.why):"")).join("; "))}<br><span style="color:var(--muted)">Полный ответ Alfa — в консоли (F12).</span></div>`
       : `<div class="callout" style="border-color:var(--green)">✅ Готово. Группа Alfa id ${esc(cr.group_id)}${cr.createdGroup?" (создана)":""} · добавлено занятий: <b>${nLes}</b>${cr.skipped?(", пропущено как уже существующие: "+cr.skipped):""}${cr.groupUpdated?" · карточка группы обновлена":""}.</div>`;
     if(errs.length) console.warn("📤 publish — ошибки шагов:",_p1.key,errs);
     toast(errs.length?"Опубликовано с замечаниями":"Опубликовано в Alfa");
-  }catch(e){ _p1.log=`<div class="callout" style="border-color:var(--red)">Не получилось: ${esc((e&&e.message)||e)}</div>`; }
+  }catch(e){ _p1.log=_pubErrHtml(e,"публикация"); }
   _p1.busy=false; _p1Render();
   if(typeof renderGroups==="function") renderGroups();
 }
