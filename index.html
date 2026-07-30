@@ -661,17 +661,17 @@ details.client .cli-altmark{font-size:11px;margin-right:2px}
 .cli-brset summary{cursor:pointer;color:var(--muted)}
 .cli-brlist{display:flex;flex-direction:column;gap:4px;margin:6px 0 2px;padding:8px 10px;border:1px solid var(--line);border-radius:8px}
 .cli-brlist label{display:flex;align-items:center;gap:6px;cursor:pointer}
-/* точки-ответы по группам в строке ребёнка */
-details.client .cli-dots{display:inline-flex;gap:4px;align-items:center;margin-left:10px;flex-wrap:wrap}
-details.client .cli-dot{width:11px;height:11px;border-radius:50%;cursor:default;box-shadow:inset 0 0 0 1px rgba(0,0,0,.12)}
-details.client .cli-dot.d-green{background:#4F9E63}
-details.client .cli-dot.d-red{background:#C6553F}
-details.client .cli-dot.d-yellow{background:#E0A02E}
-details.client .cli-dot.d-paid{background:#C9922E;box-shadow:inset 0 0 0 2px #fff,0 0 0 1px #C9922E}
-details.client .cli-dot.d-silent{background:#fff;box-shadow:inset 0 0 0 1.5px #c9c2b8}
-details.client .cli-enr.hi{background:#fff6d9;outline:2px solid #E0A02E;outline-offset:-2px;border-radius:6px}
-.cli-legend{display:flex;gap:12px;flex-wrap:wrap;font-size:11px;color:var(--muted);margin:2px 0 8px;align-items:center}
-.cli-legend .cli-dot{display:inline-block;vertical-align:middle;margin-right:4px}
+/* колонки-ответы по группам + полоса фильтра в «Клиентах» */
+.cli-dot{display:inline-block;width:10px;height:10px;border-radius:50%;vertical-align:middle;box-shadow:inset 0 0 0 1px rgba(0,0,0,.12)}
+.cli-dot.d-green{background:#4F9E63}.cli-dot.d-red{background:#C6553F}.cli-dot.d-yellow{background:#E0A02E}
+.cli-dot.d-silent{background:#fff;box-shadow:inset 0 0 0 1.5px #c9c2b8}
+.cli-stbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;font-size:12px;color:var(--muted);margin:2px 0 8px}
+.cli-stbtn{display:inline-flex;align-items:center;gap:5px;font-size:12px;padding:4px 10px;border:1px solid var(--line);background:#fff;border-radius:20px;cursor:pointer;color:var(--text)}
+.cli-stbtn:hover{border-color:var(--graphite)}
+.cli-stbtn.on{background:var(--graphite);color:#fff;border-color:var(--graphite)}
+.cli-stbtn.on .cli-dot{box-shadow:inset 0 0 0 1px rgba(255,255,255,.5)}
+details.client .cli-cols .cc-st{width:34px}
+.cli-head .cc-st{width:34px}
 details.client .cli-cols{margin-left:auto;display:flex;align-items:center;font-size:12px;color:var(--muted)}
 details.client .cli-cols .cc{text-align:right;white-space:nowrap;padding-left:12px}
 details.client .cli-cols .cc-cr{width:82px}
@@ -1569,7 +1569,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-07-28-36";
+const APP_VER="2026-07-28-37";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -8398,7 +8398,8 @@ async function pubRun(live){
 }
 
 /* ===== ВКЛАДКА «КЛИЕНТЫ» — все дети + на какие курсы/группы вписаны и статус ===== */
-let _clientsQuery="", _clientsLetter="", _clientsSort={col:"name",dir:1};
+let _clientsQuery="", _clientsLetter="", _clientsSort={col:"name",dir:1}, _clientsStatus="";
+function setCliStatus(v){ _clientsStatus=(_clientsStatus===v)?"":v; renderClients(); }
 /* «скрыть каникулы/интенсивы» — личный режим просмотра, поэтому в localStorage, а не в общей модели */
 let _cliHideAlt=(()=>{ try{ return !!localStorage.getItem("cli_hide_alt"); }catch(e){ return false; } })();
 let _cliBrFilter=(()=>{ try{ return localStorage.getItem("cli_branch")||""; }catch(e){ return ""; } })();
@@ -8528,26 +8529,6 @@ function _cliBal(b){ if(b==null||b==="") return ""; const n=Math.round(+b||0);
 /* столбец «баланс» (без разделителя — для табличного вида в «Клиентах») */
 function _cliBalCol(b){ if(b==null||b==="") return ""; const n=Math.round(+b||0);
   return `<span style="color:${n<0?'var(--red)':'var(--green)'}">${fmt(n)} р</span>`; }
-/* точка-индикатор ответа родителя по группе (для «Клиентов»). Цвет = статус, подсказка = группа. */
-function _cliDot(e){
-  let cls,lab;
-  if(e.no){ cls="red"; lab="не придёт"; }
-  else if(e.vbReply==="no"){ cls="red"; lab="отказ"; }
-  else if(e.may){ cls="paid"; lab="💰 оплатил майский"; }
-  else if(e.vbReply==="yes"){ cls="green"; lab="подтвердил"; }
-  else if(e.vbReply==="maybe"){ cls="yellow"; lab="думает"; }
-  else { cls="silent"; lab="молчит"; }
-  const grp=(e.course||"")+(e.group?" "+e.group:"");
-  return `<span class="cli-dot d-${cls}" data-eid="${esc(e.id)}" title="${esc(grp)} · ${lab}" `
-    +`onmouseenter="cliDotHi(this,1)" onmouseleave="cliDotHi(this,0)"></span>`;
-}
-/* подсветить строку группы, к которой относится точка (когда карточка раскрыта) */
-function cliDotHi(dot,on){
-  const det=dot.closest("details.client"); if(!det) return;
-  const eid=dot.getAttribute("data-eid");
-  det.querySelectorAll(".cli-enr.hi").forEach(r=>r.classList.remove("hi"));
-  if(on&&eid){ det.querySelectorAll(".cli-enr").forEach(r=>{ if(r.getAttribute("data-eid")===eid) r.classList.add("hi"); }); }
-}
 function _clientEnrollStatus(e){
   const s=[];
   if(e.may) s.push('<span style="color:var(--green)">💰 майский</span>');
@@ -8625,13 +8606,26 @@ function renderClients(){
     c.nPaid=(c.enroll||[]).filter(e=>e.may).length;
     c.nBal=_cliNum(c.balance);
     c.altOnly=_isAltOnly(c.br);   // ходил только на каникулы/интенсивы
+    // ответы родителя ПО ГРУППАМ (дедуп: 2×/нед = одна группа). Каждая группа — в одну корзину.
+    const gm={}; (c.enroll||[]).forEach(e=>{ const gk=(e.course||"")+"||"+(e.group||"");
+      const g=gm[gk]||(gm[gk]={reply:"",no:false,may:false});
+      if(e.no) g.no=true; if(e.may) g.may=true;
+      const rank=r=>r==="yes"?3:r==="no"?2:r==="maybe"?1:0; if(rank(e.vbReply)>rank(g.reply)) g.reply=e.vbReply; });
+    let yes=0,no=0,maybe=0,none=0;
+    Object.values(gm).forEach(g=>{
+      if(g.no||g.reply==="no") no++;
+      else if(g.may||g.reply==="yes") yes++;   // оплатил майский = подтвердил участие
+      else if(g.reply==="maybe") maybe++;
+      else none++;
+    });
+    c.sYes=yes; c.sNo=no; c.sMaybe=maybe; c.sNone=none;
   });
   // сортировка: по имени — по алфавиту; по числовым столбцам — пустые ВСЕГДА внизу
   const _cs=_clientsSort.col, _cd=_clientsSort.dir;
+  const _sVal={courses:c=>c.nCourses,paid:c=>c.nPaid,bal:c=>c.nBal,yes:c=>c.sYes,no:c=>c.sNo,maybe:c=>c.sMaybe,none:c=>c.sNone};
   const clients=Object.values(map).sort((a,b)=>{
-    if(_cs!=="name"){
-      const va=(_cs==="courses"?a.nCourses:_cs==="paid"?a.nPaid:a.nBal);
-      const vb=(_cs==="courses"?b.nCourses:_cs==="paid"?b.nPaid:b.nBal);
+    if(_cs!=="name" && _sVal[_cs]){
+      const va=_sVal[_cs](a), vb=_sVal[_cs](b);
       if(va==null&&vb!=null) return 1;
       if(vb==null&&va!=null) return -1;
       if(va!=null&&vb!=null&&va!==vb) return (va-vb)*_cd;
@@ -8655,6 +8649,8 @@ function renderClients(){
   else if(_cliBrFilter) shown=shown.filter(c=>c.br.includes(+_cliBrFilter) && (!_cliBrOnly || c.br.every(x=>x===+_cliBrFilter)));
   else if(_cliHideAlt) shown=shown.filter(c=>!c.altOnly);
   if(_clientsLetter) shown=shown.filter(c=>_firstLetter(c.name)===_clientsLetter);
+  // фильтр по ответу: показать детей, у кого есть ХОТЬ ОДНА группа в выбранном статусе
+  if(_clientsStatus) shown=shown.filter(c=>({yes:c.sYes,no:c.sNo,maybe:c.sMaybe,none:c.sNone}[_clientsStatus]||0)>0);
   if(q.length>=2 || _ksDigits(_clientsQuery).length>=3) shown=shown.filter(c=>_ksMatch(c.name, c.phone, _clientsQuery));
   const lbtn=(lab,val)=>`<button class="cli-lbtn${(_clientsLetter===val)?' on':''}" onclick="_clientsLetter=${val?`'${val}'`:"''"};renderClients()">${lab}</button>`;
   let html=`<div class="callout" style="margin-bottom:10px">Детей в системе: <b>${clients.length}</b>${(q.length>=2||_clientsLetter||_cliHideAlt)?` · показано: <b>${shown.length}</b>`:''}${altAll?` · <span title="Дети, которые в Альфе числятся только в филиалах каникул/интенсивов — на образовательные программы не ходили">🏕 только каникулы/интенсивы: <b>${altAll}</b></span>`:''}</div>
@@ -8675,15 +8671,18 @@ function renderClients(){
       ${S.balancesAt?`<span style="font-size:11px;color:var(--muted)">балансы от ${esc(new Date(S.balancesAt).toLocaleString("ru-RU",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"}))}</span>`:''}`:''}
     </div>`;
   if(!shown.length){ box.innerHTML=html+`<div style="color:var(--muted);padding:10px 2px">${clients.length?'Никого не найдено.':'В расписании пока нет детей.'}</div>`; return; }
-  html+=`<div class="cli-legend">Ответ родителя по группам:
-      <span><span class="cli-dot d-green"></span>подтвердил</span>
-      <span><span class="cli-dot d-paid"></span>оплатил майский</span>
-      <span><span class="cli-dot d-red"></span>отказ / не придёт</span>
-      <span><span class="cli-dot d-yellow"></span>думает</span>
-      <span><span class="cli-dot d-silent"></span>молчит</span>
-      <span style="color:var(--muted)">· точка = группа, наведите — подсветит её ниже</span>
+  // фильтр по ответу родителя: у скольких детей есть группа в этом статусе
+  const stTot={yes:0,no:0,maybe:0,none:0};
+  clients.forEach(c=>{ if(c.sYes)stTot.yes++; if(c.sNo)stTot.no++; if(c.sMaybe)stTot.maybe++; if(c.sNone)stTot.none++; });
+  const sbtn=(v,dot,lab,n)=>`<button class="cli-stbtn${_clientsStatus===v?' on':''}" onclick="setCliStatus('${v}')" title="Показать детей, у кого есть группа в статусе «${lab}»"><span class="cli-dot d-${dot}"></span>${lab} <b>${n}</b></button>`;
+  html+=`<div class="cli-stbar">Ответ родителя:
+      ${sbtn('yes','green','подтвердили',stTot.yes)}
+      ${sbtn('no','red','отказ',stTot.no)}
+      ${sbtn('maybe','yellow','думают',stTot.maybe)}
+      ${sbtn('none','silent','молчат',stTot.none)}
+      ${_clientsStatus?`<button class="cli-stbtn" onclick="setCliStatus('${_clientsStatus}')" title="Сбросить фильтр">× сброс</button>`:''}
     </div>`;
-  html+=`<div class="cli-head">${_cliTh("name","Ребёнок","cli-thname")}<span class="cli-cols">${_cliTh("courses","Курсы","cc cc-cr","Сортировать по числу курсов")}${_cliTh("paid","💰","cc cc-paid","Сортировать по купленным майским")}${_cliTh("bal","Баланс","cc cc-bal","Сортировать по балансу в Альфе")}</span></div>`;
+  html+=`<div class="cli-head">${_cliTh("name","Ребёнок","cli-thname")}<span class="cli-cols">${_cliTh("courses","Курсы","cc cc-cr","Сортировать по числу курсов")}${_cliTh("yes",'🟢',"cc cc-st","Подтвердили (групп)")}${_cliTh("no",'🔴',"cc cc-st","Отказ/не придёт (групп)")}${_cliTh("maybe",'🟡',"cc cc-st","Думают (групп)")}${_cliTh("none",'Молч',"cc cc-st","Молчат (групп)")}${_cliTh("paid","💰","cc cc-paid","Сортировать по купленным майским")}${_cliTh("bal","Баланс","cc cc-bal","Сортировать по балансу в Альфе")}</span></div>`;
   shown.forEach(c=>{
     // значки филиалов (цифра = филиал, цвет постоянный) + 🏕, если ребёнок ТОЛЬКО из неучебных
     const altTag=c.br.length
@@ -8696,6 +8695,7 @@ function renderClients(){
         <summary>${nameEl}<span class="cli-wait">⏳ без группы — список ожидания</span>
           <span class="cli-cols">
             <span class="cc cc-cr" style="color:var(--muted)">—</span>
+            <span class="cc cc-st"></span><span class="cc cc-st"></span><span class="cc cc-st"></span><span class="cc cc-st"></span>
             <span class="cc cc-paid"></span>
             <span class="cc cc-bal" title="Активный баланс из Альфы">${_cliBalCol(c.balance)}</span>
           </span></summary>
@@ -8719,13 +8719,13 @@ function renderClients(){
         <span class="cli-meta">${e.room?'каб. '+esc(e.room)+' · ':''}${esc(shortName(e.teacher))}</span>
         <span class="cli-st">${_clientEnrollStatus(e)}</span>
       </div>`).join("");
-    // цветные точки по каждой группе: ответ родителя. Наведение — подсвечивает её строку ниже
-    const dots=enr.map(e=>_cliDot(e)).join("");
+    const stCell=(n,col)=>`<span class="cc cc-st">${n?`<b style="color:${col}">${n}</b>`:'<span style="color:#cfc8bd">·</span>'}</span>`;
     html+=`<details class="client${c.altOnly?" alt":""}" ontoggle="cliFillGroups(this)">
       <summary>${nameEl}
-        ${dots?`<span class="cli-dots" title="Ответы родителя по каждой группе — наведите на точку">${dots}</span>`:""}
         <span class="cli-cols">
           <span class="cc cc-cr" title="Курсов/групп">${c.nCourses} курс(ов)</span>
+          ${stCell(c.sYes,'#4F9E63')}${stCell(c.sNo,'#C6553F')}${stCell(c.sMaybe,'#C9922E')}
+          <span class="cc cc-st" title="Молчат (групп)">${c.sNone?c.sNone:'<span style="color:#cfc8bd">·</span>'}</span>
           <span class="cc cc-paid" title="Купленных майских (💰)">${paid?`<b style="color:var(--green)">💰 ${paid}</b>`:''}</span>
           <span class="cc cc-bal" title="Активный баланс из Альфы">${_cliBalCol(c.balance)}</span>
         </span></summary>
