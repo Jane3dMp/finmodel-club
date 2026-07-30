@@ -1591,7 +1591,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-07-30-03";
+const APP_VER="2026-07-30-04";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -8544,6 +8544,24 @@ function p1Pick(id){ if(!_p1) return; _p1.mode="link"; _p1.sel=+id; _p1.log="";
   const a=_p1Alfa(); _p1.upd=!!(a&&!(a.teacher_ids||[]).length);   // педагога дописываем сами, только если в Alfa его нет
   _p1Render(); }
 function p1Search(v){ if(!_p1) return; _p1.q=String(v||""); const el=document.getElementById("p1Cands"); if(el) el.innerHTML=_p1CandsHtml(); }
+/* связать по id: группа могла не попасть в выгрузку (другой филиал, архив) — спрашиваем Alfa напрямую */
+async function p1PickById(v){
+  if(!_p1) return;
+  const id=parseInt(String(v||"").replace(/\D+/g,""),10);
+  if(!id){ toast("Впишите числовой id группы из Alfa"); return; }
+  const known=(_pubAlfaGroups||[]).find(a=>+a.id===id);
+  if(known){ p1Pick(id); toast("Связана с «"+known.name+"»"); return; }
+  _p1.busy=true; _p1Render();
+  const box=document.getElementById("p1Log"); if(box) box.innerHTML="⏳ Ищу группу id "+id+" в Alfa…";
+  try{
+    const j=await _pubCall("groupById",{groupId:id, branches:_pubCfg().branches||[]});
+    const a=j.group;
+    if(_pubAlfaGroups) _pubAlfaGroups.push(a);              // чтобы дальше работала как обычный кандидат
+    _p1.busy=false; p1Pick(+a.id);
+    _p1.log=`<div class="callout" style="border-color:var(--green)">Нашли: «${esc(a.name)}» · id ${esc(a.id)} · ${esc(_pubBrName(+a.branch||0))}${a.is_archive?" · <b>в архиве</b>":""}</div>`;
+    _p1Render();
+  }catch(e){ _p1.busy=false; _p1.log=_pubErrHtml(e,"поиск группы по id"); _p1Render(); }
+}
 function p1SetName(v){ if(!_p1) return; pubSetName(_p1.key,v); _p1.g.alfaName=_pubName(_p1.g); _p1Render(); }
 function p1Unlink(){
   if(!_p1) return;
@@ -8604,7 +8622,15 @@ function _p1Render(){
       <input type="radio" name="p1mode" style="width:auto;margin:0" ${_p1.mode==="link"?"checked":""} onchange="p1SetMode('link')">
       Опубликовать расписание группе, которая в Alfa уже есть</label>
     <input class="cell" style="width:100%;margin-bottom:6px" placeholder="🔍 Найти среди всех групп Alfa (${(_pubAlfaGroups||[]).length})" value="${esc(_p1.q)}" oninput="p1Search(this.value)">
-    <div id="p1Cands" style="max-height:23vh;overflow:auto">${_p1CandsHtml()}</div></div>`;
+    <div id="p1Cands" style="max-height:23vh;overflow:auto">${_p1CandsHtml()}</div>
+    <div style="display:flex;gap:6px;align-items:center;margin-top:8px;padding-top:8px;border-top:1px solid var(--line)">
+      <span style="font-size:12px;color:var(--muted);white-space:nowrap">…или впишите id группы:</span>
+      <input class="cell" id="p1IdInp" style="width:110px" inputmode="numeric" placeholder="напр. 258"
+             onkeydown="if(event.key==='Enter')p1PickById(this.value)">
+      <button class="btn ghost sm" onclick="p1PickById(document.getElementById('p1IdInp').value)"
+        title="Найти группу в Alfa по её id — работает и для групп из другого филиала или архива">Связать по id</button>
+    </div>
+    <div style="font-size:11px;color:var(--muted);margin-top:4px">id виден в адресе карточки группы в Alfa (…/group/view?id=<b>258</b>).</div></div>`;
 
   h+=`<div style="border:1px solid var(--line);border-radius:10px;padding:8px 10px;margin-bottom:12px">
     <label style="display:flex;gap:8px;align-items:center;cursor:pointer;font-weight:600;margin:0">
@@ -8678,7 +8704,17 @@ function _p1PlanHtml(p){
       ${p.groupId?`Группа Alfa <b>id ${esc(p.groupId)}</b> — новую не создаём.`:`Будет создана <b>новая группа</b> «${esc((p.group||{}).name||"")}».`}
       Добавим занятий: <b>${nNew}</b>${nSkip?`, пропустим как уже существующие: <b>${nSkip}</b>`:""} · период ${esc(_pubDMY(_pubCfg().bDate))} … ${esc(_pubDMY(_pubCfg().eDate))}</div>
     <div style="border:1px solid var(--line);border-radius:8px;padding:6px 10px;line-height:1.6">${
-      add.concat(skip).join("")||`<span style="color:var(--muted)">нечего добавлять</span>`}</div>`;
+      add.concat(skip).join("")||`<span style="color:var(--muted)">нечего добавлять</span>`}</div>${_pubShapeHtml(p.shape)}`;
+}
+/* какие поля и в каком формате уходят в Alfa — чтобы это не было чёрным ящиком */
+function _pubShapeHtml(sh){
+  if(!sh) return "";
+  const d=sh.dateField==="v"?"b_date_v/e_date_v":"b_date/e_date";
+  const df=sh.dateFmt==="iso"?"ГГГГ-ММ-ДД":"ДД.ММ.ГГГГ";
+  const tf=sh.timeFmt==="hm"?"ЧЧ:ММ":"ЧЧ:ММ:СС";
+  const dd=sh.days==="array"?"days списком":"days числом";
+  const src=sh.from==="sample"?"сверено с существующим занятием в вашей Alfa":"по документации Alfa";
+  return `<div style="font-size:11px;color:var(--muted);margin-top:4px">Поля: ${esc(d)} (${df}) · время ${tf} · ${esc(dd)} · branch_id — ${esc(src)}.</div>`;
 }
 async function p1Dry(){
   if(!_p1||_p1.busy) return;

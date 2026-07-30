@@ -655,6 +655,34 @@ switch ($action) {
                   'count' => count($byId), 'groups' => array_values($byId), 'sample' => $sample]);
         break;
 
+    // --- ГРУППА ПО ID (READ). Связать нашу группу с альфовской можно по id, который Жанна видит
+    //     в адресе карточки. Ищем по всем филиалам: группа может лежать не в дефолтном, а также
+    //     не попасть в общую выгрузку (архив/другой филиал) — тогда по имени её не найти вовсе.
+    case 'groupById':
+        @set_time_limit(60);
+        $gid = (int)($in['groupId'] ?? 0);
+        if ($gid <= 0) json_out(['ok' => false, 'error' => 'Не передан id группы']);
+        $want = array_values(array_filter(array_map('intval', (array)($in['branches'] ?? []))));
+        $found = null;
+        foreach ($want ?: alfa_all_branch_ids() as $bid) {
+            $r = alfa_http('POST', 'https://' . alfa_host() . "/v2api/$bid/group/index",
+                           ['id' => $gid, 'page' => 0, 'count' => 5], alfa_token(), true, 12);
+            foreach (($r['items'] ?? []) as $row) {
+                if ((int)($row['id'] ?? 0) !== $gid) continue;      // Alfa может проигнорировать фильтр
+                $found = ['id' => $gid, 'name' => (string)($row['name'] ?? ''), 'branch' => (int)$bid,
+                          'subject_ids' => array_values(array_map('intval', (array)($row['subject_ids'] ?? []))),
+                          'teacher_ids' => array_values(array_map('intval', (array)($row['teacher_ids'] ?? ($row['teachers'] ?? [])))),
+                          'status_id' => $row['status_id'] ?? null, 'level_id' => $row['level_id'] ?? null,
+                          'limit' => $row['limit'] ?? null, 'note' => $row['note'] ?? null,
+                          'b_date' => $row['b_date'] ?? null, 'e_date' => $row['e_date'] ?? null,
+                          'is_archive' => (int)($row['is_archive'] ?? 0)];
+                break 2;
+            }
+        }
+        if (!$found) json_out(['ok' => false, 'error' => 'Группа с id ' . $gid . ' в Alfa не найдена (проверьте номер и филиалы)']);
+        json_out(['ok' => true, 'group' => $found]);
+        break;
+
     // --- РЕГУЛЯРНОЕ РАСПИСАНИЕ УЖЕ СУЩЕСТВУЮЩИХ ГРУПП (READ). Нужно, чтобы БЕЗ пробной записи
     //     сверить нумерацию дня недели в Alfa и реальные имена полей (day / time_from_v / ...). ---
     case 'regularLessons':
@@ -708,12 +736,17 @@ switch ($action) {
         // Филиал ВЫБИРАЕТ клиент: кабинеты branch-scoped, и группа обязана лечь в тот филиал,
         // которому принадлежит её кабинет. Раньше молча писали в авто-определённый филиал.
         $branch   = (int)($in['branch'] ?? 0) ?: alfa_branch();
-        // ⚠️ Alfa принимает даты только как ДД.ММ.ГГГГ — с ISO группа молча не создавалась
-        //    («AlfaCRM не вернула id группы»). Та же грабля, что была у createCustomer.
-        $bDate    = alfa_date((string)($in['b_date'] ?? '2026-09-02'));
-        $eDate    = alfa_date((string)($in['e_date'] ?? '2027-05-31'));
+        $bIso     = alfa_iso((string)($in['b_date'] ?? '2026-09-02'));
+        $eIso     = alfa_iso((string)($in['e_date'] ?? '2027-05-31'));
         $groupId  = (int)($in['groupId'] ?? 0);
         $updGroup = !empty($in['updateGroup']);   // прописать нашего педагога/даты в карточку существующей группы
+
+        // формат дат группы — по реальной группе этой CRM (документация Alfa: ДД.ММ.ГГГГ)
+        $gFmt  = alfa_group_date_fmt($branch);
+        $bDate = $gFmt === 'iso' ? $bIso : alfa_date($bIso);
+        $eDate = $gFmt === 'iso' ? $eIso : alfa_date($eIso);
+        // форма полей регулярного занятия — по реальной записи этой же CRM, иначе по документации
+        $rlShape = alfa_rl_shape(alfa_rl_sample($branch));
 
         $groupPayload = array_merge(
             ['name' => (string)($g['name'] ?? ''), 'branch_ids' => [$branch], 'b_date' => $bDate, 'e_date' => $eDate],
@@ -743,25 +776,21 @@ switch ($action) {
             $dup = null;
             foreach ($have as $h) { if ((string)$h['day'] === (string)$day && $h['time'] === $tf) { $dup = $h['id']; break; } }
             if ($dup !== null) { $plan['skipped'][] = ['day' => $day, 'time' => $tf, 'lesson_id' => $dup]; continue; }
-            $plan['schedule'][] = [
-                'related_class' => 'Group', 'related_id' => ($groupId ?: '<group_id>'),
-                'subject_id'    => $s['subject_id'] ?? null,
-                'room_id'       => $s['room_id'] ?? null,
-                'teacher_ids'   => $s['teacher_ids'] ?? ($g['teacher_ids'] ?? []),
-                'day'           => $day,
-                'time_from_v'   => $s['time_from'] ?? null,
-                'time_to_v'     => $s['time_to'] ?? null,
-                'lesson_type_id'=> $s['lesson_type_id'] ?? null,
-                'b_date' => $bDate, 'e_date' => $eDate, 'is_public' => true,
-            ];
+            $slot = ['day' => $day, 'subject_id' => $s['subject_id'] ?? null, 'room_id' => $s['room_id'] ?? null,
+                     'teacher_ids' => $s['teacher_ids'] ?? ($g['teacher_ids'] ?? []),
+                     'lesson_type_id' => $s['lesson_type_id'] ?? null,
+                     'time_from' => $s['time_from'] ?? '', 'time_to' => $s['time_to'] ?? ''];
+            $plan['schedule'][] = alfa_rl_body($slot, $rlShape, $bIso, $eIso, $branch, ($groupId ?: '<group_id>'));
         }
         foreach ($students as $cid) $plan['links'][] = ['customer_id' => $cid, 'group_id' => ($groupId ?: '<group_id>'), 'b_date' => $bDate, 'e_date' => $eDate];
 
+        $plan['shape'] = $rlShape; $plan['groupDateFmt'] = $gFmt;
         if ($dry) { json_out(['ok' => true, 'dryRun' => true, 'plan' => $plan]); }
 
         // ЖИВАЯ запись (только при явном dryRun:false) — строго в выбранном филиале
         $created = ['group_id' => (int)$groupId, 'branch' => $branch, 'createdGroup' => false,
-                    'lessons' => [], 'skipped' => count($plan['skipped']), 'links' => [], 'errors' => []];
+                    'lessons' => [], 'skipped' => count($plan['skipped']), 'links' => [], 'errors' => [],
+                    'shape' => $rlShape, 'groupDateFmt' => $gFmt];
         $gid = $groupId;
         if (!$gid) {
             $gr  = alfa_call_branch($branch, 'group', 'create', $groupPayload);

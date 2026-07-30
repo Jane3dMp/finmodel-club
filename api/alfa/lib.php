@@ -218,6 +218,91 @@ function alfa_date(string $d): string {
     return $d;
 }
 
+// Обратное преобразование: ДД.ММ.ГГГГ → ГГГГ-ММ-ДД (ISO). Уже-ISO оставляем как есть.
+function alfa_iso(string $d): string {
+    $d = trim($d);
+    if ($d === '') return '';
+    if (preg_match('#^(\d{2})\.(\d{2})\.(\d{4})#', $d, $m)) return "$m[3]-$m[2]-$m[1]";
+    if (preg_match('#^(\d{4})-(\d{2})-(\d{2})#', $d, $m)) return "$m[1]-$m[2]-$m[3]";
+    return $d;
+}
+
+// «ЧЧ:ММ» из любого вида времени (9:00, 09:00:00).
+function alfa_hm(string $t): string {
+    $p = explode(':', trim($t));
+    return sprintf('%02d:%02d', (int)($p[0] ?? 0), (int)($p[1] ?? 0));
+}
+
+/* --- ПОЛЯ REGULAR-LESSON ---
+   В модели Alfa у периода и времени есть ДВЕ формы: «сырая» (b_date/time_from — внутренние
+   числовые) и строковая с суффиксом _v (b_date_v/e_date_v, time_from_v/time_to_v). Писать надо
+   в строковые, иначе Alfa отвечает «Неверный формат значения "Начало периода"». День недели у
+   регулярного занятия — поле `days` (список), филиал обязателен отдельным `branch_id`.
+   Форматы (даты ДД.ММ.ГГГГ, время ЧЧ:ММ) — как в документации Alfa для уроков.
+   Чтобы не полагаться на документацию вслепую, форму СВЕРЯЕМ с реальной записью из этой же CRM. */
+function alfa_rl_sample(int $branch): ?array {
+    $r = alfa_http('POST', 'https://' . alfa_host() . "/v2api/$branch/regular-lesson/index",
+                   ['page' => 0, 'count' => 5], alfa_token(), true, 12);
+    if (isset($r['__err'])) return null;
+    $items = $r['items'] ?? [];
+    return (is_array($items) && $items) ? $items[0] : null;
+}
+// Разбираем образец: какие поля реально используются и в каком формате лежат значения.
+function alfa_rl_shape(?array $sample): array {
+    $shape = ['dateField' => 'v', 'dateFmt' => 'dmy', 'timeFmt' => 'hm', 'days' => 'array', 'from' => 'docs'];
+    if (!is_array($sample) || !$sample) return $shape;
+    $shape['from'] = 'sample';
+    $d = null;
+    if (isset($sample['b_date_v']) && $sample['b_date_v'] !== '')      { $shape['dateField'] = 'v';     $d = (string)$sample['b_date_v']; }
+    elseif (isset($sample['b_date']) && is_string($sample['b_date']) && $sample['b_date'] !== '')
+                                                                       { $shape['dateField'] = 'plain'; $d = (string)$sample['b_date']; }
+    if ($d !== null) $shape['dateFmt'] = preg_match('#^\d{4}-\d{2}-\d{2}#', $d) ? 'iso' : 'dmy';
+    $t = $sample['time_from_v'] ?? null;
+    if (is_string($t) && $t !== '') $shape['timeFmt'] = (substr_count($t, ':') >= 2) ? 'hms' : 'hm';
+    if (array_key_exists('days', $sample)) $shape['days'] = is_array($sample['days']) ? 'array' : 'scalar';
+    return $shape;
+}
+function alfa_rl_body(array $slot, array $shape, string $bIso, string $eIso, int $branch, $relId): array {
+    $day = $slot['day'];
+    $tf  = alfa_hm((string)($slot['time_from'] ?? ''));
+    // пустой «конец» дал бы 00:00 (занятие «до полуночи») — считаем час от начала
+    $ttRaw = trim((string)($slot['time_to'] ?? ''));
+    if ($ttRaw === '') {
+        $p  = explode(':', $tf);
+        $m  = ((int)$p[0]) * 60 + (int)($p[1] ?? 0) + 60;
+        $tt = sprintf('%02d:%02d', intdiv($m, 60) % 24, $m % 60);
+    } else $tt = alfa_hm($ttRaw);
+    $dB  = $shape['dateFmt'] === 'iso' ? alfa_iso($bIso) : alfa_date($bIso);
+    $dE  = $shape['dateFmt'] === 'iso' ? alfa_iso($eIso) : alfa_date($eIso);
+    $body = [
+        'related_class'  => 'Group',
+        'related_id'     => $relId,
+        'branch_id'      => $branch,                       // Alfa: «Необходимо заполнить "Филиал"»
+        'subject_id'     => $slot['subject_id'] ?? null,
+        'room_id'        => $slot['room_id'] ?? null,
+        'teacher_ids'    => $slot['teacher_ids'] ?? [],
+        'lesson_type_id' => $slot['lesson_type_id'] ?? null,
+        'day'            => $day,
+        'days'           => $shape['days'] === 'array' ? [$day] : $day,   // Alfa: «Необходимо заполнить "День недели"»
+        'time_from_v'    => $shape['timeFmt'] === 'hm' ? $tf : ($tf . ':00'),
+        'time_to_v'      => $shape['timeFmt'] === 'hm' ? $tt : ($tt . ':00'),
+        'is_public'      => true,
+    ];
+    if ($shape['dateField'] === 'v') { $body['b_date_v'] = $dB; $body['e_date_v'] = $dE; }
+    else                             { $body['b_date']   = $dB; $body['e_date']   = $dE; }
+    return $body;
+}
+// Формат дат у групп — сверяем с реальной группой этой CRM (b_date как её отдаёт Alfa).
+function alfa_group_date_fmt(int $branch): string {
+    $r = alfa_http('POST', 'https://' . alfa_host() . "/v2api/$branch/group/index",
+                   ['page' => 0, 'count' => 5], alfa_token(), true, 12);
+    foreach (($r['items'] ?? []) as $g) {
+        $d = $g['b_date'] ?? '';
+        if (is_string($d) && $d !== '') return preg_match('#^\d{4}-\d{2}-\d{2}#', $d) ? 'iso' : 'dmy';
+    }
+    return 'dmy';                                          // документация Alfa: даты ДД.ММ.ГГГГ
+}
+
 // Человекочитаемая причина отказа из ответа Alfa. Без неё «не вернула id» — загадка:
 // у Alfa текст лежит то в errors[поле][], то в error/message.
 function alfa_err_text($r): string {
