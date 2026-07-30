@@ -134,8 +134,9 @@ function require_firebase_user(): array {
     if (empty($payload['sub']))
         json_out(['ok' => false, 'error' => 'Токен без пользователя'], 401);
 
-    // Проверка подписи по сертификату с нужным kid
-    $kid = $header['kid'] ?? '';
+    // Проверка подписи по сертификату с нужным kid ($kid из чужого заголовка — приводим к строке,
+    // иначе массив в этом поле роняет обращение по ключу в 500 у неаутентифицированного запроса)
+    $kid = is_string($header['kid'] ?? null) ? $header['kid'] : '';
     $certs = google_secure_certs();
     $pem = $certs[$kid] ?? '';
     if ($pem === '') json_out(['ok' => false, 'error' => 'Ключ подписи не найден'], 401);
@@ -145,14 +146,32 @@ function require_firebase_user(): array {
     if ($ok !== 1) json_out(['ok' => false, 'error' => 'Подпись токена неверна'], 401);
 
     $email = strtolower((string)($payload['email'] ?? ''));
+    /* ⚠️ ДЫРА, КОТОРУЮ ЗАКРЫВАЕТ ЭТА ПРОВЕРКА: регистрация в Firebase открытая, а список
+       разрешённых почт виден в публичном index.html. Если у почты из списка ЕЩЁ НЕТ аккаунта,
+       посторонний может зарегистрировать её на себя и получить всю базу детей с телефонами.
+       Включается флагом в config.php — по умолчанию ВЫКЛЮЧЕНО, чтобы не заблокировать работу:
+       Firebase не считает почту подтверждённой, пока по ссылке из письма не перешли.
+       Порядок: в модели нажать «✉ Подтвердить почту» (кнопка появляется сама), перейти по
+       ссылке из письма — и только потом поставить здесь true. */
+    if (!empty(cfg()['require_verified_email']) && empty($payload['email_verified']))
+        json_out(['ok' => false, 'error' => 'Почта не подтверждена. Откройте модель → ☰ Меню → «✉ Подтвердить почту», перейдите по ссылке из письма и войдите заново.'], 403);
+
+    // ⚠️ Пустой список раньше означал «пускаем любого вошедшего» — опечатка в config.php открывала
+    //    выгрузку всех клиентов кому угодно. Теперь пусто = НИКОМУ (fail-closed).
     $allowed = cfg()['allowed_emails'] ?? [];
-    if (!empty($allowed)) {
-        $allowedLc = array_map('strtolower', $allowed);
-        if (!in_array($email, $allowedLc, true)) {
-            json_out(['ok' => false, 'error' => 'Нет доступа к контактам (email не в списке)'], 403);
-        }
-    }
-    return ['uid' => $payload['sub'], 'email' => $email];
+    if (empty($allowed))
+        json_out(['ok' => false, 'error' => 'Доступ не настроен: в config.php пуст allowed_emails'], 403);
+    $allowedLc = array_map('strtolower', $allowed);
+    if (!in_array($email, $allowedLc, true))
+        json_out(['ok' => false, 'error' => 'Нет доступа (email не в списке)'], 403);
+
+    // Кто может ПИСАТЬ в CRM. Раньше разделения не было вовсе: любой, чья почта попала в список
+    // ради вкладки «Клиенты», мог из консоли браузера архивировать и переименовывать клиентов,
+    // создавать группы и вписывать детей. Пусто = писать может только первый в allowed_emails.
+    $writers = cfg()['write_emails'] ?? [];
+    if (empty($writers)) $writers = [$allowedLc[0]];
+    $canWrite = in_array($email, array_map('strtolower', $writers), true);
+    return ['uid' => $payload['sub'], 'email' => $email, 'can_write' => $canWrite];
 }
 
 // =====================================================================
@@ -192,6 +211,7 @@ function alfa_http(string $method, string $url, array $body, ?string $token, boo
         CURLOPT_HTTPHEADER     => $headers,
         CURLOPT_POSTFIELDS     => json_encode($body, JSON_UNESCAPED_UNICODE),
         CURLOPT_TIMEOUT        => $timeout,
+        CURLOPT_CONNECTTIMEOUT => 6,
     ]);
     $raw  = curl_exec($ch);
     $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
@@ -205,6 +225,15 @@ function alfa_http(string $method, string $url, array $body, ?string $token, boo
     if (!is_array($data)) {
         if ($soft) return ['__err' => 'nonjson', 'code' => $code];
         json_out(['ok' => false, 'error' => 'AlfaCRM вернул не-JSON (код ' . $code . ')', 'raw' => mb_substr((string)$raw, 0, 300)], 502);
+    }
+    // ⚠️ КОД ОТВЕТА ПРОВЕРЯЕМ ОБЯЗАТЕЛЬНО. Раньше он не смотрелся вовсе: ответ 401/403/429/500
+    //    с JSON-телом возвращался как штатный, в нём нет ключа items → вызывающий получал пустой
+    //    список и понимал его как «данных нет». Для списка групп/состава это означало «в CRM
+    //    ничего нет» → создание дублей. Ошибку надо видеть, а не принимать за пустоту.
+    if ($code >= 400) {
+        if ($soft) return ['__err' => 'http', 'code' => $code, 'body' => $data];
+        json_out(['ok' => false, 'error' => 'AlfaCRM ответила ошибкой ' . $code . ': ' . alfa_err_text($data),
+                  'code' => $code, 'alfa' => $data], 502);
     }
     return $data;
 }
@@ -292,6 +321,23 @@ function alfa_rl_body(array $slot, array $shape, string $bIso, string $eIso, int
     else                             { $body['b_date']   = $dB; $body['e_date']   = $dE; }
     return $body;
 }
+/* Постраничное чтение списка Alfa (страница ≤50, обход «пока страница полная»).
+   Возвращает ['items'=>[], 'ok'=>bool]. ok=false означает «прочитать НЕ удалось» — это НЕ то же
+   самое, что «записей нет»: на пустом списке мы создаём записи, поэтому разница критична. */
+function alfa_index_all(int $branch, string $entity, array $filter = [], int $maxPages = 40, int $timeout = 15): array {
+    $out = []; $page = 0; $per = 50; $ok = true;
+    $host = 'https://' . alfa_host() . "/v2api/$branch/$entity/index";
+    do {
+        $r = alfa_http('POST', $host, array_merge($filter, ['page' => $page, 'count' => $per]), alfa_token(), true, $timeout);
+        if (isset($r['__err'])) { $ok = false; break; }
+        $items = $r['items'] ?? [];
+        if (!is_array($items)) { $ok = false; break; }
+        foreach ($items as $it) $out[] = $it;
+        $page++;
+    } while (count($items) === $per && $page < $maxPages);
+    return ['items' => $out, 'ok' => $ok, 'pages' => $page];
+}
+
 // В каком филиале лежит группа. Нужно, чтобы вызывающему (карточка занятия) не приходилось
 // это знать: cgi и расписание пишутся в контексте филиала группы. 0 — не нашли.
 function alfa_group_branch(int $gid): int {
@@ -365,15 +411,25 @@ function alfa_branch(): int {
 }
 
 // Вызов сущности Alfa: POST /v2api/{branch}/{entity}/{cmd}. $global=true → без branch.
+/* Пишущие вызовы (create/update) — МЯГКИЕ. Отказ Alfa по валидации (422) должен вернуться
+   вызывающему как обычный ответ с описанием ошибки, а не оборвать весь запрос: иначе публикация
+   упала бы посреди работы и клиент не узнал бы уже созданный group_id → при повторе дубль.
+   Тело ошибки отдаём как есть (в нём текст Alfa), добавляя __code для диагностики. */
+function alfa_soft_body(array $r): array {
+    if (isset($r['__err']) && $r['__err'] === 'http' && is_array($r['body'] ?? null)) {
+        return array_merge($r['body'], ['__code' => $r['code'] ?? 0]);
+    }
+    return $r;
+}
 function alfa_call(string $entity, string $cmd, array $body, bool $global = false): array {
     $token  = alfa_token();
     $path   = $global ? "/v2api/$entity/$cmd" : '/v2api/' . alfa_branch() . "/$entity/$cmd";
-    return alfa_http('POST', 'https://' . alfa_host() . $path, $body, $token);
+    return alfa_soft_body(alfa_http('POST', 'https://' . alfa_host() . $path, $body, $token, true));
 }
 
 // Вызов в контексте конкретного филиала.
 function alfa_call_branch(int $branch, string $entity, string $cmd, array $body): array {
-    return alfa_http('POST', 'https://' . alfa_host() . "/v2api/$branch/$entity/$cmd", $body, alfa_token());
+    return alfa_soft_body(alfa_http('POST', 'https://' . alfa_host() . "/v2api/$branch/$entity/$cmd", $body, alfa_token(), true));
 }
 
 // Создать сущность: POST /v2api/{branch}/{entity}/create с телом $data.

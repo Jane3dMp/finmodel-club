@@ -20,6 +20,17 @@ $in = [];
 $rawIn = file_get_contents('php://input');
 if ($rawIn) { $j = json_decode($rawIn, true); if (is_array($j)) $in = $j; }
 
+// ⚠️ ЗАПИСЬ В ЧУЖУЮ CRM — только тем, кому это разрешено в config.php (write_emails).
+//    Прятать кнопки на клиенте недостаточно: запрос легко повторить из консоли браузера,
+//    достаточно передать dryRun:false. Проверяем ДО обработки действия.
+$WRITE_ACTIONS = ['publish', 'addToGroup', 'createCustomer', 'archiveCustomer', 'renameCustomer'];
+if (in_array($action, $WRITE_ACTIONS, true)) {
+    $wantsLive = array_key_exists('dryRun', $in) && $in['dryRun'] === false;
+    if ($wantsLive && empty($user['can_write'])) {
+        json_out(['ok' => false, 'error' => 'Запись в AlfaCRM разрешена только администратору (см. write_emails в config.php)'], 403);
+    }
+}
+
 switch ($action) {
 
     // --- health-check ---
@@ -619,13 +630,16 @@ switch ($action) {
         $host  = 'https://' . alfa_host();
         $perPage = 50;      // максимум страницы в Alfa
         $maxPages = 100;    // предохранитель на филиал
-        $byId = []; $perBranch = []; $sample = null;
+        $byId = []; $perBranch = []; $sample = null; $failed = [];
         $want = array_values(array_filter(array_map('intval', (array)($in['branches'] ?? []))));
         foreach ($want ?: alfa_all_branch_ids() as $bid) {
             $page = 0; $before = count($byId); $items = [];
             do {
                 $r = alfa_http('POST', "$host/v2api/$bid/group/index", ['page' => $page, 'count' => $perPage], $token, true, 15);
-                $items = isset($r['__err']) ? [] : ($r['items'] ?? []);
+                // ⚠️ сбой чтения раньше молча превращался в «в филиале нет групп» → все наши
+                //    группы выглядели новыми → дубли в CRM. Теперь помечаем выгрузку неполной.
+                if (isset($r['__err'])) { $failed[] = ['branch' => (int)$bid, 'page' => $page, 'why' => $r['__err']]; break; }
+                $items = $r['items'] ?? [];
                 foreach ($items as $g) {
                     $gid = (int)($g['id'] ?? 0);
                     if (!$gid || isset($byId[$gid])) continue;   // одна группа может встретиться в нескольких филиалах
@@ -651,7 +665,7 @@ switch ($action) {
             $perBranch[$bid] = count($byId) - $before;
         }
         json_out(['ok' => true, 'branch' => alfa_branch(), 'branches' => $perBranch,
-                  'branchNames' => alfa_branch_names(),
+                  'branchNames' => alfa_branch_names(), 'incomplete' => !empty($failed), 'failed' => $failed,
                   'count' => count($byId), 'groups' => array_values($byId), 'sample' => $sample]);
         break;
 
@@ -702,18 +716,19 @@ switch ($action) {
         if ($gid <= 0) json_out(['ok' => false, 'error' => 'Не передан id группы']);
         // филиал можно не передавать — найдём сам по группе (членства branch-scoped)
         $bid = (int)($in['branch'] ?? 0) ?: (alfa_group_branch($gid) ?: alfa_branch());
-        $host  = 'https://' . alfa_host() . "/v2api/$bid";
-        $token = alfa_token();
         $today = date('Y-m-d');
-        $seen = []; $members = [];
+        // окно берём из запроса: период группы задаёт пользователь, жёсткая дата отсекала бы
+        // членства, начинающиеся позже, и мы сочли бы их отсутствующими
+        $winTo = alfa_iso((string)($in['e_date'] ?? '')) ?: '2027-08-31';
+        if ($winTo < $today) $winTo = '2027-08-31';
+        $seen = []; $members = []; $readOk = false;
         foreach ([
-            ['group_id' => $gid, 'page' => 0, 'count' => 200],
-            ['group_id' => $gid, 'date_from' => $today, 'date_to' => '2027-08-31',
-             'b_date' => $today, 'e_date' => '2027-08-31', 'page' => 0, 'count' => 200],
+            ['group_id' => $gid],
+            ['group_id' => $gid, 'date_from' => $today, 'date_to' => $winTo, 'b_date' => $today, 'e_date' => $winTo],
         ] as $q) {
-            $r = alfa_http('POST', "$host/cgi/index", $q, $token, true, 12);
-            if (isset($r['__err'])) continue;
-            foreach (($r['items'] ?? []) as $it) {
+            $r = alfa_index_all($bid, 'cgi', $q, 20, 12);
+            if ($r['ok']) $readOk = true;                                // хотя бы один заход удался
+            foreach ($r['items'] as $it) {
                 if ((int)($it['group_id'] ?? 0) !== $gid) continue;      // Alfa может проигнорировать фильтр
                 $cid = (int)($it['customer_id'] ?? 0);
                 if (!$cid || isset($seen[$cid])) continue;
@@ -722,6 +737,8 @@ switch ($action) {
                               'b_date' => $it['b_date'] ?? null, 'e_date' => $it['e_date'] ?? null];
             }
         }
+        // ⚠️ «не прочитали» ≠ «никого нет»: на пустом составе клиент предлагает добавить всех
+        if (!$readOk) json_out(['ok' => false, 'error' => 'Не удалось прочитать состав группы в Alfa — попробуйте ещё раз (добавлять вслепую нельзя: получатся дубли).'], 502);
         json_out(['ok' => true, 'groupId' => $gid, 'branch' => $bid, 'count' => count($members), 'members' => $members]);
         break;
 
@@ -828,7 +845,10 @@ switch ($action) {
                 ];
             }
             $page++;
-        } while ($gid <= 0 && count($items) === $perPage && $page < 40);
+            // ⚠️ раньше страницы листались ТОЛЬКО без groupId, то есть в боевом режиме читалась одна
+            //    страница. Если Alfa игнорит фильтр в теле, на ней лежат чужие занятия филиала, свои
+            //    отсекаются — и «нумерация дня» определялась по пустоте.
+        } while (count($items) === $perPage && $page < 40);
         json_out(['ok' => true, 'branch' => $bid, 'count' => count($out), 'lessons' => $out, 'sample' => $sample]);
         break;
 
@@ -862,17 +882,19 @@ switch ($action) {
             array_intersect_key($g, array_flip(['teacher_ids','level_id','status_id','limit','note','subject_ids']))
         );
 
-        // что у этой группы уже стоит в регулярном расписании Alfa
-        $have = [];
+        // Что у этой группы уже стоит в регулярном расписании Alfa. На этом держится обещание
+        // «повторная публикация не плодит дубли», поэтому читаем ЧЕСТНО: с пагинацией и с
+        // различением «занятий нет» и «прочитать не удалось». Раньше любая ошибка чтения давала
+        // пустой список → все занятия создавались заново.
+        $have = []; $haveOk = true;
         if ($groupId > 0) {
-            $rr = alfa_http('POST', 'https://' . alfa_host() . "/v2api/$branch/regular-lesson/index",
-                            ['related_class' => 'Group', 'related_id' => $groupId, 'count' => 50, 'page' => 0],
-                            alfa_token(), true, 12);
-            foreach (($rr['items'] ?? []) as $rl) {
+            $rr = alfa_index_all($branch, 'regular-lesson', ['related_class' => 'Group', 'related_id' => $groupId], 40, 12);
+            $haveOk = $rr['ok'];
+            foreach ($rr['items'] as $rl) {
                 if ((int)($rl['related_id'] ?? 0) !== $groupId) continue;   // Alfa может проигнорировать фильтр
                 $have[] = ['id'   => $rl['id'] ?? null,
                            'day'  => $rl['day'] ?? null,
-                           'time' => substr((string)($rl['time_from_v'] ?? ($rl['time_from'] ?? '')), 0, 5)];
+                           'time' => alfa_hm((string)($rl['time_from_v'] ?? ''))];   // «9:00» и «09:00:00» — одно и то же
             }
         }
 
@@ -881,7 +903,7 @@ switch ($action) {
                  'links' => [], 'have' => $have];
         foreach ($sched as $s) {
             $day = $s['day'] ?? null;
-            $tf  = substr((string)($s['time_from'] ?? ''), 0, 5);
+            $tf  = alfa_hm((string)($s['time_from'] ?? ''));
             $dup = null;
             foreach ($have as $h) { if ((string)$h['day'] === (string)$day && $h['time'] === $tf) { $dup = $h['id']; break; } }
             if ($dup !== null) { $plan['skipped'][] = ['day' => $day, 'time' => $tf, 'lesson_id' => $dup]; continue; }
@@ -893,8 +915,14 @@ switch ($action) {
         }
         foreach ($students as $cid) $plan['links'][] = ['customer_id' => $cid, 'group_id' => ($groupId ?: '<group_id>'), 'b_date' => $bDate, 'e_date' => $eDate];
 
-        $plan['shape'] = $rlShape; $plan['groupDateFmt'] = $gFmt;
+        $plan['shape'] = $rlShape; $plan['groupDateFmt'] = $gFmt; $plan['haveOk'] = $haveOk;
         if ($dry) { json_out(['ok' => true, 'dryRun' => true, 'plan' => $plan]); }
+
+        // Не смогли прочитать существующее расписание — значит не знаем, что уже стоит.
+        // Записывать вслепую нельзя: получим второй комплект занятий у той же группы.
+        if ($groupId > 0 && !$haveOk) {
+            json_out(['ok' => false, 'error' => 'Не удалось прочитать текущее расписание группы в Alfa — публикация отменена, чтобы не создать дубли занятий. Попробуйте ещё раз.'], 502);
+        }
 
         // ЖИВАЯ запись (только при явном dryRun:false) — строго в выбранном филиале
         $created = ['group_id' => (int)$groupId, 'branch' => $branch, 'createdGroup' => false,
@@ -925,10 +953,15 @@ switch ($action) {
         } elseif ($updGroup) {
             // Alfa update перезаписывает запись ЦЕЛИКОМ → читаем карточку и меняем только своё
             $cur = alfa_http('POST', 'https://' . alfa_host() . "/v2api/$branch/group/index",
-                             ['id' => $gid, 'count' => 1, 'page' => 0], alfa_token(), true, 12);
-            $row = $cur['items'][0] ?? null;
+                             ['id' => $gid, 'count' => 50, 'page' => 0], alfa_token(), true, 12);
+            // ⚠️ Alfa местами ИГНОРИРУЕТ фильтр в теле — брать items[0] вслепую нельзя: перезаписали
+            //    бы чужую группу её же полями. Ищем нужный id, не нашли — карточку не трогаем.
+            $row = null;
+            foreach (($cur['items'] ?? []) as $cand) {
+                if ((int)($cand['id'] ?? 0) === (int)$gid) { $row = $cand; break; }
+            }
             if (!is_array($row)) {
-                $created['errors'][] = ['step' => 'карточка группы', 'alfa' => $cur];
+                $created['errors'][] = ['step' => 'карточка группы (не удалось прочитать — не меняли)', 'alfa' => $cur];
             } else {
                 $keep = [];
                 foreach (['name','branch_ids','subject_ids','teacher_ids','level_id','status_id','limit','note','b_date','e_date','is_archive'] as $f) {

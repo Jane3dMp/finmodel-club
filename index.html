@@ -723,6 +723,7 @@ details.client .cli-cols .cc-bal{width:74px;font-weight:600}
      <span id="fbWhoami" class="menu-who"></span>
      <button class="btn ghost sm" id="fbAdminBtn" onclick="openAdminPanel()" title="Заявки на доступ и вкладки пользователей" style="display:none"><i data-ic="access"></i>Доступы<span id="fbAdminBadge"></span></button>
      <button class="btn ghost sm" id="histBtn" onclick="openHistory()" title="История версий — снимки на случай потери данных" style="display:none"><i data-ic="history"></i>История</button>
+     <button class="btn ghost sm" id="verifyBtn" onclick="sendEmailVerify(this)" title="Отправить письмо для подтверждения вашей почты — нужно, чтобы чужой человек не мог занять ваш адрес" style="display:none">✉ Подтвердить почту</button>
      <button class="btn ghost sm" id="logBtn" onclick="openLog()" title="Журнал действий — кто и что менял" style="display:none"><i data-ic="journal"></i>Журнал</button>
      <button class="btn ghost sm" id="mgrStatBtn" onclick="openMgrStat()" title="Статистика всех менеджеров за день" style="display:none"><i data-ic="report"></i>Статистика</button>
      <button class="btn ghost sm" onclick="showAchievements()" title="Мои итоги дня — инфографика">🏆 Мои итоги</button>
@@ -1591,7 +1592,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-07-30-08";
+const APP_VER="2026-07-31-01";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -1716,8 +1717,12 @@ function _applyRemote(remote){
     _fbLast={ grid: JSON.parse(JSON.stringify(remote.grid||{})), rest: remote.rest||"" };
     _persistLocalRaw();
     try{ _lastSnapHash=_snapSig(); }catch(e){}   // синхронизируем базу автоснимка с текущим состоянием
+    // ⚠️ Пришло чужое состояние — стек отмены обесценился. Он хранит СНИМКИ ВСЕЙ модели, снятые
+    // до прихода чужих правок; «↩ Отменить» откатывал бы к ним и рассылал всем, удаляя чужие
+    // занятия (fbPush шлёт grid/{id}=null для пропавших). Сбрасываем историю отмены.
+    if(typeof _resetHistory==="function") _resetHistory();
     if(typeof renderAll==="function") renderAll();
-  }catch(e){}
+  }catch(e){ console.error("Firebase: не удалось применить удалённое состояние —",e); }
   _fbApplying=false;
 }
 function fbSchedulePush(){ clearTimeout(_fbPushTimer); _fbPushTimer=setTimeout(fbPush, 700); }
@@ -2582,7 +2587,23 @@ function fbSignup(){
 }
 function fbLogout(){ const auth=_fbAuth(); if(auth) auth.signOut(); }
 /* --- админ-панель «Доступы» --- */
+/* Подтверждение почты. Пока адрес не подтверждён, его теоретически может занять посторонний
+   (регистрация в Firebase открытая), поэтому кнопка висит в меню, пока это не сделано. */
+async function sendEmailVerify(btn){
+  try{
+    const au=(typeof _fbAuth==="function")?_fbAuth():null; const u=au&&au.currentUser;
+    if(!u){ toast("Сначала войдите"); return; }
+    if(u.emailVerified){ toast("Почта уже подтверждена"); _fbUpdateAdminUI(); return; }
+    if(btn){ btn.disabled=true; btn.textContent="Отправляю…"; }
+    await u.sendEmailVerification();
+    toast("Письмо отправлено на "+u.email+" — перейдите по ссылке, затем войдите заново");
+  }catch(e){ toast("Не получилось: "+((e&&e.message)||e)); }
+  finally{ if(btn){ btn.disabled=false; btn.textContent="✉ Подтвердить почту"; } }
+}
 function _fbUpdateAdminUI(){
+  const vb=document.getElementById("verifyBtn");
+  if(vb){ const au=(typeof _fbAuth==="function")?_fbAuth():null; const u=au&&au.currentUser;
+    vb.style.display=(u&&!u.emailVerified)?"":"none"; }
   const btn=document.getElementById("fbAdminBtn");
   if(btn) btn.style.display=_fbIsAdmin?"":"none";
   const asy=document.getElementById("alfaSyncBtn");
@@ -4068,7 +4089,7 @@ function renderDash(){
 function courseMini(arr){
   if(!arr.length) return `<tbody><tr><td class="muted">Заполните группы и наполняемость на вкладке «Курсы»</td></tr></tbody>`;
   let h="<tbody>";
-  arr.forEach(({c,r})=>{ h+=`<tr><td>${c.name}</td>
+  arr.forEach(({c,r})=>{ h+=`<tr><td>${esc(c.name)}</td>
     <td class="num ${r.margin>=0?'pos':'neg'}">${fmt(r.margin)} р</td>
     <td class="num">${fmt1(r.marginPct)}%</td></tr>`; });
   return h+"</tbody>";
@@ -4130,7 +4151,7 @@ function renderBreak(){
   S.courses.forEach(c=>{ const r=applyScn(c);
     let st="—",cls="";
     if(c.groups>0&&c.fill>0){ if(r.fillN>=r.minFill){st="✓ ок";cls="g";}else{st="ниже порога";cls="r";} }
-    h+=`<tr><td>${c.name}</td><td class="num">${fmt(r.price)}</td><td class="num">${fmt(r.wage)}</td>
+    h+=`<tr><td>${esc(c.name)}</td><td class="num">${fmt(r.price)}</td><td class="num">${fmt(r.wage)}</td>
       <td class="num"><b>${r.minFill||"—"}</b></td><td class="num muted">${c.groupSize}</td>
       <td class="num">${r.fillN||"—"}</td><td><span class="sig ${cls}">${st}</span></td></tr>`; });
   document.getElementById("breakTable").innerHTML=h+"</tbody>";
@@ -4378,7 +4399,7 @@ function _printDayTableHTML(day){
         let span=Math.round(dur/SLOTMIN); if(span<1) span=1;
         if(si+span>TIME_SLOTS.length) span=TIME_SLOTS.length-si;
         for(let k=1;k<span;k++){ covered[(si+k)+"_"+room]=true; }
-        tds+=`<td class="pr-les" rowspan="${span}"><b>${esc(les.course)}</b><span>${les.start}–${les.end}</span><span class="pr-t">${esc(shortName(les.teacher))} · ${lesN(les)} чел.</span>${les.note?`<span class="pr-note">📝 ${esc(les.note)}</span>`:""}</td>`;
+        tds+=`<td class="pr-les" rowspan="${span}"><b>${esc(les.course)}</b><span>${esc(les.start)}–${esc(les.end)}</span><span class="pr-t">${esc(shortName(les.teacher))} · ${lesN(les)} чел.</span>${les.note?`<span class="pr-note">📝 ${esc(les.note)}</span>`:""}</td>`;
       } else {
         tds+=`<td class="pr-empty-cell"></td>`;
       }
@@ -4473,7 +4494,7 @@ function renderGrid(){
             </div>
             <b>${newintake?'<span class="ni-badge" title="Новый набор">🟠</span> ':''}${esc(les.course)}${les.note?` <span class="les-note" title="${esc(les.note)}">📝</span>`:""}</b>
             ${les.group?`<span class="les-grp">${esc(les.group)}</span>`:""}
-            <span>${les.start}–${les.end}</span>
+            <span>${esc(les.start)}–${esc(les.end)}</span>
             <span class="lt">${esc(shortName(les.teacher))} · ${lesN(les)}👤 · ${w}р</span>
             ${les.note?`<span class="les-notet" title="${esc(les.note)}">📝 ${esc(les.note)}</span>`:""}
             ${kidsOf(les).length?`<span class="les-kids">${kidsOf(les).map((k,ki)=>{
@@ -4496,7 +4517,7 @@ function renderGrid(){
   if(noRoom.length){
     let u=`<div class="callout"><b>Занятий без кабинета: ${noRoom.length}.</b> Перетащите карточку в нужную ячейку сетки (или кликните для выбора кабинета).</div><div class="chips" ondragover="dragOver(event)">`;
     noRoom.forEach(l=>{ const idx=S.grid.indexOf(l), lid=l.id||"";
-      u+=`<div class="chip" draggable="true" ondragstart="${lid?`dragStart(event,'${esc(lid)}')`:`dragStart(event,${idx})`}" ondragend="dragEnd(event)" onclick="${lid?`editLes(_lesIdx('${esc(lid)}'))`:`editLes(${idx})`}">${esc(l.course)} · ${l.start} · ${shortName(l.teacher)} · ${lesN(l)}👤</div>`; });
+      u+=`<div class="chip" draggable="true" ondragstart="${lid?`dragStart(event,'${esc(lid)}')`:`dragStart(event,${idx})`}" ondragend="dragEnd(event)" onclick="${lid?`editLes(_lesIdx('${esc(lid)}'))`:`editLes(${idx})`}">${esc(l.course)} · ${esc(l.start)} · ${esc(shortName(l.teacher))} · ${lesN(l)}👤</div>`; });
     box.innerHTML=u+"</div>";
   } else box.innerHTML="";
 
@@ -4507,7 +4528,7 @@ function renderGrid(){
     if(off.length){
       let o=`<div class="callout" style="border-left-color:var(--red)"><b style="color:var(--red)">⚠ Не помещаются в сетку: ${off.length}.</b> Эти занятия есть в данных и учитываются в конфликтах, но не отображаются — время не кратно 30 минутам или кабинет уже занят. Нажмите «🕐 Выровнять время» вверху или откройте занятие и поправьте время/кабинет.</div><div class="chips">`;
       off.forEach(l=>{ const idx=S.grid.indexOf(l);
-        o+=`<div class="chip" style="border-color:var(--red)" onclick="editLes(${idx})" title="Открыть и поправить">${esc(l.course)} · ${l.start}–${l.end} · ${esc(shortName(l.teacher))} · каб. ${esc(l.room)}</div>`; });
+        o+=`<div class="chip" style="border-color:var(--red)" onclick="editLes(${idx})" title="Открыть и поправить">${esc(l.course)} · ${esc(l.start)}–${esc(l.end)} · ${esc(shortName(l.teacher))} · каб. ${esc(l.room)}</div>`; });
       offBox.innerHTML=o+"</div>";
     } else offBox.innerHTML="";
   }
@@ -4854,17 +4875,20 @@ function _kidsFromDOM(){
   if(!rows.length) return;
   _editKids=rows.map((tr,i)=>{
     const prev=_editKids[i]||{};
-    const o=_blankKid(tr.querySelector(".k-in-name").value.trim());
+    // ⚠️ Ребёнка берём ЦЕЛИКОМ и накладываем сверху только то, что реально есть в строке.
+    // Раньше объект собирался заново из _blankKid, а «невидимые» поля перечислялись руками —
+    // и любое поле, добавленное позже (баланс и филиалы из Альфы, дата заведения, последнее
+    // посещение, связь с amo, дата попадания в ожидание), молча терялось при КАЖДОМ сохранении
+    // карточки. _blankKid здесь — только основа, гарантирующая наличие базовых ключей.
+    // ⚠️ prev берётся по НОМЕРУ строки. Если строку переписали на другого ребёнка (частый приём
+    // вместо «+ Ребёнок»), наследовать чужие телефон/alfaId/«внесён в Alfa» нельзя — иначе Viber
+    // уйдёт не тому родителю, а 👥 внесёт в группу CRM чужого. Другое имя = чистая карточка.
+    const nm=tr.querySelector(".k-in-name").value.trim();
+    const sameKid=!prev.n||!nm||_sameKid(prev.n,nm);
+    const o=sameKid?Object.assign(_blankKid(nm), prev):_blankKid(nm);
+    o.n=cleanKidName(nm);
     KID_FLAGS.forEach(f=>{ o[f.k]=tr.querySelector(".k-in-"+f.k).checked; });
     o.c=tr.querySelector(".k-in-c").value.trim();
-    o.phone=prev.phone||"";                              // поля из Альфы в строке не показаны —
-    o.alfaId=(prev.alfaId!==undefined?prev.alfaId:null); // переносим их из текущего состояния
-    o.dob=prev.dob||"";                                  // дата рождения из Альфы (для возраста)
-    o.evzz=prev.evzz||"";                                // ЭВ 26/27 (наше поле, редактируется в карточке ребёнка)
-    o.vbSent=!!prev.vbSent;                              // отметка «отправлено в Viber»
-    o.vbSentAt=prev.vbSentAt||"";
-    o.paySent=!!prev.paySent; o.paySentAt=prev.paySentAt||"";
-    o.alfaGrp=prev.alfaGrp||""; o.alfaGrpAt=prev.alfaGrpAt||"";   // внесён в группу AlfaCRM (id группы)
     const rep=tr.querySelector(".k-in-reply");           // ответ родителя (select в строке)
     o.vbReply = rep ? rep.value : (prev.vbReply||"");
     o.vbReplyAt = (o.vbReply!==(prev.vbReply||"")) ? (o.vbReply?new Date().toISOString():"") : (prev.vbReplyAt||"");
@@ -5244,9 +5268,17 @@ function delLes(){
   _newLesRef=null;                 // удаляем явно — пометку снять, чтобы closeLes не дублировал
   const idx=_modalLesIdx();
   if(idx<0||!S.grid[idx]){ closeLes(); return; }   // -1 → splice(-1,1) удалил бы последнее занятие
-  S.grid.splice(idx,1); _savedInModal=true; persistLocal();
+  // дети удаляемого занятия могут осиротеть — как и при удалении из сетки (delLesByIdx),
+  // иначе они пропадают совсем: ни в группе, ни в списке ожидания
+  const _cand=kidsOf(S.grid[idx]).map(k=>JSON.parse(JSON.stringify(k)));
+  S.grid.splice(idx,1); _savedInModal=true;
+  const _wlAdded=(typeof _reconcileWaitlist==="function")?_reconcileWaitlist(_cand):0;
+  if(typeof _cleanWaitlist==="function") _cleanWaitlist();
+  persistLocal();
   if(FB_ON && typeof fbPush==="function"){ try{ clearTimeout(_fbPushTimer); fbPush(); }catch(e){} }  // сразу в Firebase
   closeLes(); renderGrid(); renderStaff(); renderGroups(); renderMay();
+  if(typeof renderClients==="function") renderClients();
+  if(_wlAdded>0) toast(_wlAdded+" реб. без группы → список ожидания");
 }
 
 function togglePinModal(){
@@ -5421,7 +5453,7 @@ function renderStaff(){
     const lockBtn=`<span class="pin" onclick="lockStaff(${idx})" title="${lk?'Закреплено':'Закрепить педагога'}">${lk?'📌':(idx>=0?'📍':'')}</span>`;
     h+=`<tr class="${lk?'rowlocked':''}">
       <td style="white-space:nowrap">${idx>=0?lockBtn:''} ${idx>=0?`<input class="cell wide" style="width:170px" value="${esc(s.name)}" ${da} onchange="updStaff(${idx},this.value)">`:esc(s.name)+' <span class="muted">(из сетки)</span>'}</td>
-      <td style="font-size:11px;min-width:240px">${idx>=0?teacherCoursesCell(idx,[...s.courses],lk):`<span class="muted">${[...s.courses].join(", ")||"—"}</span>`}</td>
+      <td style="font-size:11px;min-width:240px">${idx>=0?teacherCoursesCell(idx,[...s.courses],lk):`<span class="muted">${[...s.courses].map(esc).join(", ")||"—"}</span>`}</td>
       <td class="num">${s.lessons}</td>
       <td class="num">${s.students}</td>
       <td class="num">${fmt(s.wageWeek)}</td>
@@ -7982,18 +8014,24 @@ function _pubModelGroups(){
   (S.grid||[]).forEach(l=>{
     if(!l.course) return;
     const gk=l.course+"||"+(l.group||("__"+l.day+"_"+l.start+"_"+l.room));
-    if(!map[gk]){ map[gk]={key:gk,course:l.course,group:l.group||"",teachers:[],rooms:[],slots:[],kids:new Set(),alfaKids:new Set(),cap:0,firstId:l.id||""}; order.push(gk); }
+    if(!map[gk]){ map[gk]={key:gk,course:l.course,group:l.group||"",teachers:[],rooms:[],slots:[],kids:new Set(),alfaKids:new Set(),refused:new Set(),kidIds:{},cap:0,firstId:l.id||""}; order.push(gk); }
     const g=map[gk];
     if(l.teacher && g.teachers.indexOf(l.teacher)<0) g.teachers.push(l.teacher);
     if(l.room && g.rooms.indexOf(l.room)<0) g.rooms.push(l.room);
     g.cap=Math.max(g.cap,+l.students||0);
     const sk=(+l.day||0)+"|"+(l.start||"")+"|"+(l.room||"");         // одна и та же пара день+время+каб — один слот
     if(!g.slots.some(s=>s._k===sk)) g.slots.push({_k:sk,day:+l.day||0,start:l.start||"",end:l.end||"",room:l.room||"",teacher:l.teacher||""});
-    kidsOf(l).forEach(k=>{ const n=_nameKey(k.n); if(!n) return; g.kids.add(n); if(k.alfaId) g.alfaKids.add(+k.alfaId); });
+    // Отказ считаем ПО РЕБЁНКУ, а не по записи: у группы 2×/нед ребёнок встречается в нескольких
+    // занятиях, и отказ, отмеченный в одном из них, должен исключать его целиком.
+    kidsOf(l).forEach(k=>{ const n=_nameKey(k.n); if(!n) return; g.kids.add(n);
+      if(k.no||k.vbReply==="no") g.refused.add(n);
+      if(k.alfaId) g.kidIds[n]=+k.alfaId; });
   });
   return order.map(k=>{ const g=map[k];
     g.slots.sort((a,b)=>(a.day-b.day)||String(a.start).localeCompare(String(b.start)));
     g.schedText=g.slots.map(s=>(DAY_NAMES[s.day]||"?")+" "+(s.start||"—")).join(", ");
+    // в CRM заводим только неотказавшихся, у кого есть связь с Альфой
+    g.alfaKids=new Set(Object.keys(g.kidIds).filter(n=>!g.refused.has(n)).map(n=>g.kidIds[n]));
     g.kidsN=g.kids.size; g.alfaKidsN=g.alfaKids.size;
     g.alfaId=+(((S.groupMeta||{})[k]||{}).alfaId||0)||0;
     return g;
@@ -8108,7 +8146,10 @@ function _pubBuildRows(){
 }
 function _pubOn(r){ if(!r.can) return false; const v=_pubSkip[r.key]; return v===undefined?!(r.exists||r.similar):!v; }
 function pubToggle(key){ const r=_pubRows.find(x=>x.key===key); if(!r||!r.can) return; _pubSkip[key]=_pubOn(r); _pubRender(); }
-function pubAll(on){ _pubRows.forEach(r=>{ if(r.can) _pubSkip[r.key]=!on; }); _pubRender(); }
+/* «Отметить все новые» = только ДЕЙСТВИТЕЛЬНО новые. Раньше кнопка ставила отметку всем строкам,
+   включая «уже есть в Alfa» и «похоже на …» (эти признаки в r.can не входят) — то есть одним
+   нажатием снимала защиту от дублей. Снятие отметки по-прежнему для всех. */
+function pubAll(on){ _pubRows.forEach(r=>{ if(!r.can) return; if(on&&(r.exists||r.similar)) return; _pubSkip[r.key]=!on; }); _pubRender(); }
 /* соответствия/настройки правятся из обеих модалок — обновляем ту, что открыта */
 function _pubRerender(){ _pubRender(); if(typeof _p1Render==="function") _p1Render(); }
 function pubSetCfg(f,v){ const c=_pubCfg(); c[f]=v; _pubSave(); _pubRerender(); }
@@ -8205,7 +8246,9 @@ function closePublish(){ document.getElementById("pubModal").classList.remove("s
 let _pubLoading=null;
 async function _pubEnsureLoaded(force){
   if(!force && _pubRefs && _pubAlfaGroups) return true;
-  if(_pubLoading) return _pubLoading;
+  // при force ждать уже идущий запрос нельзя: он мог стартовать со старым набором филиалов,
+  // а кабинеты у филиалов разные — вернули бы устаревшие справочники
+  if(_pubLoading && !force) return _pubLoading;
   _pubLoading=(async()=>{
     const br={branches:_pubCfg().branches||[]};
     const [refs,gl]=await Promise.all([_pubCall("refs",br), _pubCall("groupsList",br)]);
@@ -8527,7 +8570,7 @@ async function pubRun(live){
           done++;
         }else{
           const cr=j.created||{};
-          _pubMarkPublished(r.key,cr.group_id);
+          _pubMarkPublished(r.key,cr.group_id,{sched:true,les:(cr.lessons||[]).length,name:r.alfaName});
           const errs=(cr.errors||[]);
           if(errs.length){
             fail++;
@@ -8643,7 +8686,9 @@ async function pubOne(key){
   el.classList.add("show");
   const b=document.getElementById("pubOneBody");
   b.innerHTML=`<div style="padding:12px;color:var(--muted)">Читаю справочники и группы из Альфы… (до минуты)</div>`;
-  try{ await _pubEnsureLoaded(); }
+  // ⚠️ список групп Alfa читаем ЗАНОВО: страница живёт открытой весь день, а группу могли создать
+  // в самой Alfa или с другого компьютера — по кэшу мы бы её «не нашли» и создали дубль
+  try{ await _pubEnsureLoaded(true); }
   catch(e){ b.innerHTML=`<div class="callout" style="border-color:var(--red)">Не получилось связаться с Альфой: ${esc((e&&e.message)||e)}</div>
     <p style="font-size:12px;color:var(--muted)">Проверьте связь: «Клиенты» → «📞 Контакты из Альфы» → «🔌 Проверить связь».</p>`; return; }
   if(!_p1||_p1.key!==key) return;                                   // модалку успели закрыть/переоткрыть
@@ -9283,6 +9328,7 @@ function _gridStamp(){
 }
 function _cleanWaitlist(){   // убрать из ожидания тех, кто снова попал в расписание
   if(!Array.isArray(S.waitlist) || !S.waitlist.length) return false;
+  _gridBump();                        // отметка кэша не ловит «удалили одного, добавили другого»
   const inGrid=_gridNameSet();
   const before=S.waitlist.length;
   S.waitlist=S.waitlist.filter(w=>w&&w.n&&!inGrid.has(_nameKey(w.n)));
@@ -9291,6 +9337,10 @@ function _cleanWaitlist(){   // убрать из ожидания тех, кт�
 function _reconcileWaitlist(cands){   // кандидаты-осиротевшие: если больше нигде в гриде — в ожидание
   if(!Array.isArray(cands)||!cands.length) return 0;
   if(!Array.isArray(S.waitlist)) S.waitlist=[];
+  // ⚠️ кэш имён сетки инвалидируется по «число занятий + число детей». Замена одного ребёнка на
+  // другого этих чисел НЕ меняет — по устаревшему кэшу удалённый выглядел «ещё в расписании» и
+  // не попадал в ожидание, то есть исчезал совсем. Пересчитываем принудительно.
+  _gridBump();
   let added=0;
   cands.forEach(k=>{ if(!k||!k.n) return; const nk=_nameKey(k.n); if(!nk) return;
     if(_gridHasKid(nk)) return;                          // ещё где-то в расписании — не сирота
@@ -9371,7 +9421,7 @@ function renderClients(){
   // фильтр по ответу: показать детей, у кого есть ХОТЬ ОДНА группа в выбранном статусе
   if(_clientsStatus) shown=shown.filter(c=>({yes:c.sYes,no:c.sNo,maybe:c.sMaybe,none:c.sNone}[_clientsStatus]||0)>0);
   if(q.length>=2 || _ksDigits(_clientsQuery).length>=3) shown=shown.filter(c=>_ksMatch(c.name, c.phone, _clientsQuery));
-  const lbtn=(lab,val)=>`<button class="cli-lbtn${(_clientsLetter===val)?' on':''}" onclick="_clientsLetter=${val?`'${val}'`:"''"};renderClients()">${lab}</button>`;
+  const lbtn=(lab,val)=>`<button class="cli-lbtn${(_clientsLetter===val)?' on':''}" onclick="_clientsLetter=${val?`'${_jsStr(val)}'`:"''"};renderClients()">${esc(lab)}</button>`;
   let html=`<div class="callout" style="margin-bottom:10px">Детей в системе: <b>${clients.length}</b>${(q.length>=2||_clientsLetter||_cliHideAlt)?` · показано: <b>${shown.length}</b>`:''}${altAll?` · <span title="Дети, которые в Альфе числятся только в филиалах каникул/интенсивов — на образовательные программы не ходили">🏕 только каникулы/интенсивы: <b>${altAll}</b></span>`:''}</div>
     ${_cliBranchBarHTML(clients)}${_altFilterHTML(altAll)}
     <div class="cli-letters">${lbtn('Все','')}${letters.map(L=>lbtn(L,L)).join("")}</div>
