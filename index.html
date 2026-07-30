@@ -1591,7 +1591,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-07-30-04";
+const APP_VER="2026-07-30-05";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -8499,10 +8499,11 @@ let _p1=null;
 function _pubGrpStatus(g,aIdx){
   const gm=(S.groupMeta||{})[g.key]||{};
   const id=+(gm.alfaId||0)||0;
+  const kids=gm.kidsIn?(" · детей в Alfa: "+gm.kidsIn+(gm.kidsTot?("/"+gm.kidsTot):"")):"";
   if(id&&gm.alfaSched) return {k:"done",lab:"✓ в Alfa",rank:3,
-    t:"Расписание опубликовано в AlfaCRM · id "+id+(gm.alfaAt?(" · "+gm.alfaAt):"")+(gm.alfaLes?(" · занятий: "+gm.alfaLes):"")};
+    t:"Расписание опубликовано в AlfaCRM · id "+id+(gm.alfaAt?(" · "+gm.alfaAt):"")+(gm.alfaLes?(" · занятий: "+gm.alfaLes):"")+kids};
   if(id) return {k:"link",lab:"◐ связана",rank:2,
-    t:"Связана с группой Alfa id "+id+(gm.alfaName?(" «"+gm.alfaName+"»"):"")+", расписание ещё не опубликовано"};
+    t:"Связана с группой Alfa id "+id+(gm.alfaName?(" «"+gm.alfaName+"»"):"")+", расписание ещё не опубликовано"+kids};
   if(aIdx){
     const hit=_pubMatch(aIdx,_pubName(g));
     if(hit) return {k:"similar",lab:"≈ есть",rank:1,
@@ -8571,7 +8572,8 @@ function p1Unlink(){
 async function pubOne(key){
   if(!_fbIsAdmin){ toast("Публикует только админ"); return; }
   const el=document.getElementById("pubOneModal"); if(!el) return;
-  _p1={key,mode:"",sel:0,q:"",log:"",busy:false,upd:false,g:null};
+  _p1={key,mode:"",sel:0,q:"",log:"",busy:false,upd:false,g:null,
+       kidsOpen:false,kidsLog:"",kidSkip:{},members:null};
   el.classList.add("show");
   const b=document.getElementById("pubOneBody");
   b.innerHTML=`<div style="padding:12px;color:var(--muted)">Читаю справочники и группы из Альфы… (до минуты)</div>`;
@@ -8689,9 +8691,169 @@ function _p1Render(){
       <button class="btn sm" style="margin-left:auto" ${blocked?"disabled":""} onclick="p1Go()">📤 Опубликовать в Alfa</button>
     </div>
     <div id="p1Log" style="margin-top:10px;font-size:12px">${_p1.log||""}</div>`;
+
+  // --- 3 · состав: переносим детей группы в участники группы Alfa ---
+  const gm3=(S.groupMeta||{})[_p1.key]||{};
+  h+=`<div style="border-top:1px solid var(--line);margin-top:14px;padding-top:10px">
+    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+      <b>3 · Дети в группе</b>
+      ${gm3.kidsIn?`<span style="font-size:11px;color:var(--muted)">в Alfa: ${gm3.kidsIn}${gm3.kidsTot?("/"+gm3.kidsTot):""}${gm3.kidsAt?(" · "+gm3.kidsAt):""}</span>`:""}
+      <button class="btn ghost sm" style="margin-left:auto" onclick="p1KidsOpen()">${_p1.kidsOpen?"Свернуть":"👥 Перенести детей в Alfa"}</button>
+    </div>
+    <div style="margin-top:8px">${_p1KidsHtml()}</div></div>`;
   b.innerHTML=h;
 }
 function _p1Opts(){ const a=_p1Alfa(); return {groupId:a?+a.id:0, branch:_p1Branch(), updateGroup:!!(a&&_p1.upd), kids:false}; }
+
+/* ===== ПЕРЕНОС СОСТАВА: дети группы → участники группы в Alfa =====
+   Ребёнка ищем сначала по сохранённой связи (k.alfaId), иначе по ФИО среди клиентов Alfa —
+   и ТОЛЬКО при единственном совпадении: тёзкам чужую группу не подставляем.
+   Кто уже в группе — читаем из самой Alfa (cgi), поэтому повторное добавление не грозит. */
+let _pubCustomers=null, _pubCustIdx=null, _pubCustLoading=null;
+async function _pubEnsureCustomers(force){
+  if(!force && _pubCustIdx) return true;
+  if(_pubCustLoading) return _pubCustLoading;
+  _pubCustLoading=(async()=>{
+    const j=await _pubCall("customers",{});
+    _pubCustomers=j.customers||[];
+    _pubCustIdx=new Map();
+    _pubCustomers.forEach(c=>{ const k=_normName(c.name); if(!k) return;
+      if(!_pubCustIdx.has(k)) _pubCustIdx.set(k,[]); _pubCustIdx.get(k).push(c); });
+    console.log("👥 клиентов Alfa для сопоставления:",_pubCustomers.length);
+    return true;
+  })();
+  try{ return await _pubCustLoading; } finally { _pubCustLoading=null; }
+}
+function _pubFindCust(name){
+  if(!_pubCustIdx) return null;
+  const hits=(_pubCustIdx.get(_normName(name))||[]).filter(c=>_sameKid(c.name,name));
+  if(hits.length===1) return {c:hits[0]};
+  if(hits.length>1) return {many:hits};
+  return null;
+}
+/* строки блока «Дети»: наш ребёнок → его состояние в Alfa */
+function _p1Kids(){
+  const g=_p1.g, mem=_p1.members;                       // mem = Set customer_id из Alfa (null = ещё не читали)
+  const seen=new Set(), out=[];
+  (S.grid||[]).forEach(l=>{
+    if((l.course+"||"+(l.group||("__"+l.day+"_"+l.start+"_"+l.room)))!==g.key) return;
+    kidsOf(l).forEach(k=>{
+      const nk=_nameKey(k.n); if(!nk||seen.has(nk)) return; seen.add(nk);
+      const row={name:k.n, key:nk, no:!!k.no, may:!!k.may, reply:k.vbReply||"", alfaId:+(k.alfaId||0)||0, many:null};
+      if(!row.alfaId){ const f=_pubFindCust(k.n);
+        if(f&&f.c){ row.alfaId=+f.c.id; row.byName=f.c.name; } else if(f&&f.many) row.many=f.many; }
+      row.inAlfa=!!(row.alfaId&&mem&&mem.has(row.alfaId));
+      out.push(row);
+    });
+  });
+  out.sort((a,b)=>String(a.name).localeCompare(String(b.name),"ru"));
+  return out;
+}
+function _p1KidsHtml(){
+  if(!_p1.kidsOpen) return "";
+  const a=_p1Alfa();
+  if(!a) return `<div style="color:var(--muted);font-size:12px;padding:6px 0">Сначала выберите группу в Alfa (блок 1) — детей добавляем в неё.</div>`;
+  if(!_pubCustIdx) return `<div style="color:var(--muted);font-size:12px;padding:6px 0">⏳ Читаю клиентов Альфы…</div>`;
+  const rows=_p1Kids();
+  if(!rows.length) return `<div style="color:var(--muted);font-size:12px;padding:6px 0">В этой группе пока никто не вписан.</div>`;
+  const nIn=rows.filter(r=>r.inAlfa).length, nNo=rows.filter(r=>!r.alfaId).length;
+  const canAdd=rows.filter(r=>r.alfaId&&!r.inAlfa);
+  const sel=canAdd.filter(r=>_p1KidOn(r)).length;
+  let h=`<div style="font-size:12px;color:var(--muted);margin-bottom:6px">
+    Всего ${rows.length} · уже в группе Alfa: <b style="color:var(--green)">${nIn}</b> ·
+    можно добавить: <b>${canAdd.length}</b>${nNo?` · без связи с Альфой: <b style="color:var(--red)">${nNo}</b>`:""}
+    ${_p1.members?"":' · <span style="color:var(--terra)">состав Alfa ещё не прочитан</span>'}</div>
+    <div class="hd-actions" style="margin-bottom:6px">
+      <button class="btn ghost sm" onclick="p1KidsAll(1)">Отметить всех</button>
+      <button class="btn ghost sm" onclick="p1KidsAll(0)">Снять</button>
+      <span style="margin-left:auto;font-size:12px;color:var(--muted)">отмечено: <b style="color:var(--coal)">${sel}</b></span></div>
+    <div style="max-height:26vh;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:4px 8px">`;
+  rows.forEach(r=>{
+    const st=r.inAlfa?`<span style="color:var(--green)">✓ уже в группе</span>`
+      :r.alfaId?`<span style="color:var(--muted)">будет добавлен${r.byName?` · в Alfa «${esc(r.byName)}»`:""}</span>`
+      :r.many?`<span style="color:var(--red)">в Alfa несколько тёзок (${r.many.length}) — выберите в карточке ребёнка</span>`
+      :`<span style="color:var(--red)">не найден в Альфе</span>`;
+    const dis=!r.alfaId||r.inAlfa;
+    h+=`<label style="display:flex;gap:8px;align-items:center;padding:2px 0;font-size:13px;margin:0;${dis?"opacity:.65":"cursor:pointer"}">
+      <input type="checkbox" style="width:auto;margin:0" ${_p1KidOn(r)?"checked":""} ${dis?"disabled":""} onchange="p1KidToggle('${_jsStr(r.key)}')">
+      <span style="flex:1">${esc(r.name)}${r.no?' <span style="color:var(--red)" title="Не придёт">❌</span>':""}${r.may?' <span title="Купил майский">💰</span>':""}</span>
+      <span style="font-size:11px">${st}</span>
+      <span style="font-size:11px;color:var(--muted);width:60px;text-align:right">${r.alfaId?("id "+r.alfaId):""}</span></label>`;
+  });
+  h+=`</div>`;
+  h+=`<div style="font-size:11px;color:var(--muted);margin-top:4px">Период участия — как у группы: ${esc(_pubDMY(_pubCfg().bDate))} — ${esc(_pubDMY(_pubCfg().eDate))}. Отказавшиеся (❌) по умолчанию не отмечены.</div>`;
+  h+=`<div class="hd-actions les-foot" style="margin-top:8px">
+      <button class="btn ghost sm" onclick="p1KidsRefresh()" title="Перечитать состав группы из Alfa">⟳ Обновить состав из Alfa</button>
+      <button class="btn sm" style="margin-left:auto" ${sel&&!_p1.busy?"":"disabled"} onclick="p1KidsAdd()">👥 Добавить в группу Alfa (${sel})</button>
+    </div><div id="p1KidsLog" style="margin-top:8px;font-size:12px">${_p1.kidsLog||""}</div>`;
+  return h;
+}
+function _p1KidOn(r){
+  if(!r.alfaId||r.inAlfa) return false;
+  const v=_p1.kidSkip[r.key];
+  return v===undefined ? !r.no : !v;                    // «не придёт» по умолчанию не переносим
+}
+function p1KidToggle(key){ if(!_p1) return; const r=_p1Kids().find(x=>x.key===key); if(!r) return; _p1.kidSkip[key]=_p1KidOn(r); _p1Render(); }
+function p1KidsAll(on){ if(!_p1) return; _p1Kids().forEach(r=>{ if(r.alfaId&&!r.inAlfa) _p1.kidSkip[r.key]=!on; }); _p1Render(); }
+async function p1KidsOpen(){
+  if(!_p1) return;
+  _p1.kidsOpen=!_p1.kidsOpen; _p1Render();
+  if(!_p1.kidsOpen) return;
+  try{
+    if(!_pubCustIdx){ await _pubEnsureCustomers(); if(_p1) _p1Render(); }
+    if(_p1&&!_p1.members) await p1KidsRefresh();
+  }catch(e){ if(_p1){ _p1.kidsLog=_pubErrHtml(e,"клиенты Alfa"); _p1Render(); } }
+}
+async function p1KidsRefresh(){
+  if(!_p1) return;
+  const a=_p1Alfa(); if(!a) return;
+  _p1.kidsLog="⏳ Читаю состав группы в Alfa…"; _p1Render();
+  try{
+    const j=await _pubCall("groupMembers",{groupId:+a.id, branch:_p1Branch()});
+    _p1.members=new Set((j.members||[]).map(m=>+m.customer_id));
+    const rows=_p1Kids(), ours=new Set(rows.map(r=>r.alfaId).filter(Boolean));
+    const extra=[...(_p1.members)].filter(id=>!ours.has(id));
+    _pubMarkKids(_p1.key,rows.filter(r=>r.inAlfa).length,rows.length);
+    _p1.kidsLog=`<div class="callout" style="border-color:var(--green)">В группе Alfa сейчас <b>${_p1.members.size}</b> участник(ов), из наших — <b>${rows.filter(r=>r.inAlfa).length}</b>.${
+      extra.length?` Ещё ${extra.length} есть в Alfa, но нет в нашей группе (id: ${esc(extra.slice(0,10).join(", "))}${extra.length>10?"…":""}) — их не трогаем.`:""}</div>`;
+  }catch(e){ _p1.kidsLog=_pubErrHtml(e,"состав группы"); }
+  _p1Render();
+}
+async function p1KidsAdd(){
+  if(!_p1||_p1.busy) return;
+  const a=_p1Alfa(); if(!a){ toast("Сначала выберите группу в Alfa"); return; }
+  const c=_pubCfg();
+  const sel=_p1Kids().filter(r=>_p1KidOn(r));
+  if(!sel.length){ toast("Никто не отмечен"); return; }
+  if(!_p1.members && !confirm("Состав группы в Alfa ещё не прочитан — есть риск добавить тех, кто уже там.\n\nПродолжить всё равно?")) return;
+  const names=sel.slice(0,15).map(r=>"• "+r.name).join("\n")+(sel.length>15?("\n… и ещё "+(sel.length-15)):"");
+  if(!confirm("Добавить "+sel.length+" ребёнка(детей) в группу Alfa «"+a.name+"» (id "+a.id+")?\n\n"+names+
+    "\n\nПериод участия: "+_pubDMY(c.bDate)+" — "+_pubDMY(c.eDate)+"\n\nЭто живая запись в CRM.")) return;
+  _p1.busy=true; _p1.kidsLog="⏳ Добавляю…"; _p1Render();
+  try{
+    const j=await _pubCall("addToGroup",{dryRun:false, groupId:+a.id, branch:_p1Branch(),
+      customerIds:sel.map(r=>r.alfaId), b_date:c.bDate, e_date:c.eDate});
+    const ok=(j.added||[]).length, errs=j.errors||[];
+    if(_p1.members) (j.added||[]).forEach(x=>_p1.members.add(+x.customer_id));
+    // считаем ТОЛЬКО наших: в группе Alfa могут быть и чужие участники, их в «детей в Alfa» не пишем
+    const after=_p1Kids();
+    _pubMarkKids(_p1.key,after.filter(r=>r.inAlfa).length,after.length);
+    _p1.kidsLog=(errs.length
+      ? `<div class="callout" style="border-color:var(--terra)">Добавлено <b>${ok}</b>, не получилось <b>${errs.length}</b>:<br>${
+          esc(errs.slice(0,8).map(e=>"id "+e.customer_id+(e.why?(" — "+e.why):"")).join("; "))}<br><span style="color:var(--muted)">Полный ответ — в консоли (F12).</span></div>`
+      : `<div class="callout" style="border-color:var(--green)">✅ Добавлено в группу Alfa: <b>${ok}</b>. Период ${esc(_pubDMY(c.bDate))} — ${esc(_pubDMY(c.eDate))}.</div>`);
+    if(errs.length) console.warn("👥 addToGroup — ошибки:",errs);
+    toast(errs.length?("Добавлено "+ok+", с ошибками "+errs.length):("Добавлено в Alfa: "+ok));
+  }catch(e){ _p1.kidsLog=_pubErrHtml(e,"добавление детей"); }
+  _p1.busy=false; _p1Render();
+  if(typeof renderGroups==="function") renderGroups();
+}
+function _pubMarkKids(key,inAlfa,total){
+  if(!S.groupMeta) S.groupMeta={};
+  const m=S.groupMeta[key]||(S.groupMeta[key]={});
+  m.kidsIn=+inAlfa||0; m.kidsTot=+total||0; m.kidsAt=new Date().toISOString().slice(0,10);
+  _pubSave();
+}
 function _pubDMY(s){ const m=String(s||"").match(/^(\d{4})-(\d{2})-(\d{2})/); return m?(m[3]+"."+m[2]+"."+m[1]):String(s||""); }
 function _p1PlanHtml(p){
   p=p||{};

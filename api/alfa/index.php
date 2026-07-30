@@ -655,6 +655,76 @@ switch ($action) {
                   'count' => count($byId), 'groups' => array_values($byId), 'sample' => $sample]);
         break;
 
+    // --- СОСТАВ ГРУППЫ (READ): кто уже привязан к группе в Alfa (сущность cgi).
+    //     ⚠️ Дефолтный запрос отдаёт в основном ТЕКУЩИЕ членства. Наши — с 02.09.2026, т.е. БУДУЩИЕ,
+    //     и в дефолт не попадают: без второго запроса с диапазоном мы бы считали группу пустой
+    //     и добавляли одних и тех же детей повторно.
+    case 'groupMembers':
+        @set_time_limit(60);
+        $gid = (int)($in['groupId'] ?? 0);
+        $bid = (int)($in['branch'] ?? 0) ?: alfa_branch();
+        if ($gid <= 0) json_out(['ok' => false, 'error' => 'Не передан id группы']);
+        $host  = 'https://' . alfa_host() . "/v2api/$bid";
+        $token = alfa_token();
+        $today = date('Y-m-d');
+        $seen = []; $members = [];
+        foreach ([
+            ['group_id' => $gid, 'page' => 0, 'count' => 200],
+            ['group_id' => $gid, 'date_from' => $today, 'date_to' => '2027-08-31',
+             'b_date' => $today, 'e_date' => '2027-08-31', 'page' => 0, 'count' => 200],
+        ] as $q) {
+            $r = alfa_http('POST', "$host/cgi/index", $q, $token, true, 12);
+            if (isset($r['__err'])) continue;
+            foreach (($r['items'] ?? []) as $it) {
+                if ((int)($it['group_id'] ?? 0) !== $gid) continue;      // Alfa может проигнорировать фильтр
+                $cid = (int)($it['customer_id'] ?? 0);
+                if (!$cid || isset($seen[$cid])) continue;
+                $seen[$cid] = 1;
+                $members[] = ['id' => $it['id'] ?? null, 'customer_id' => $cid,
+                              'b_date' => $it['b_date'] ?? null, 'e_date' => $it['e_date'] ?? null];
+            }
+        }
+        json_out(['ok' => true, 'groupId' => $gid, 'branch' => $bid, 'count' => count($members), 'members' => $members]);
+        break;
+
+    // --- ДОБАВИТЬ ДЕТЕЙ В ГРУППУ (WRITE, dryRun по умолчанию). Сущность cgi = членство:
+    //     customer_id, group_id, b_date, e_date — и всё. Период участия задаём как у группы.
+    case 'addToGroup':
+        @set_time_limit(180);
+        $gid  = (int)($in['groupId'] ?? 0);
+        $bid  = (int)($in['branch'] ?? 0) ?: alfa_branch();
+        $ids  = array_values(array_unique(array_filter(array_map('intval', (array)($in['customerIds'] ?? [])))));
+        $bIso = alfa_iso((string)($in['b_date'] ?? '2026-09-02'));
+        $eIso = alfa_iso((string)($in['e_date'] ?? '2027-05-31'));
+        if ($gid <= 0) json_out(['ok' => false, 'error' => 'Не передан id группы']);
+        if (!$ids)     json_out(['ok' => false, 'error' => 'Не переданы дети']);
+
+        $live = array_key_exists('dryRun', $in) && $in['dryRun'] === false;
+        if (!$live) {
+            json_out(['ok' => true, 'dryRun' => true, 'groupId' => $gid, 'branch' => $bid, 'count' => count($ids),
+                      'sample' => ['customer_id' => $ids[0], 'group_id' => $gid,
+                                   'b_date' => alfa_date($bIso), 'e_date' => alfa_date($eIso)]]);
+        }
+        // Формат дат на ЗАПИСЬ у Alfa — ДД.ММ.ГГГГ (документация), но читает она их как ISO.
+        // Поэтому на первом ребёнке пробуем оба и фиксируем сработавший на всю пачку.
+        $fmt = null; $added = []; $errors = [];
+        foreach ($ids as $cid) {
+            $ok = false; $lastWhy = ''; $lastSent = null; $lastRaw = null;
+            foreach (($fmt ? [$fmt] : ['dmy', 'iso']) as $f) {
+                $body = ['customer_id' => $cid, 'group_id' => $gid,
+                         'b_date' => $f === 'iso' ? $bIso : alfa_date($bIso),
+                         'e_date' => $f === 'iso' ? $eIso : alfa_date($eIso)];
+                $res = alfa_call_branch($bid, 'cgi', 'create', $body);
+                $nid = $res['id'] ?? ($res['model']['id'] ?? null);
+                if ($nid) { $fmt = $f; $ok = true; $added[] = ['customer_id' => $cid, 'cgi_id' => (int)$nid]; break; }
+                $lastWhy = alfa_err_text($res); $lastSent = $body; $lastRaw = $res;
+            }
+            if (!$ok) $errors[] = ['customer_id' => $cid, 'why' => $lastWhy, 'sent' => $lastSent, 'alfa' => $lastRaw];
+        }
+        json_out(['ok' => true, 'dryRun' => false, 'groupId' => $gid, 'branch' => $bid, 'dateFormat' => $fmt,
+                  'added' => $added, 'errors' => $errors]);
+        break;
+
     // --- ГРУППА ПО ID (READ). Связать нашу группу с альфовской можно по id, который Жанна видит
     //     в адресе карточки. Ищем по всем филиалам: группа может лежать не в дефолтном, а также
     //     не попасть в общую выгрузку (архив/другой филиал) — тогда по имени её не найти вовсе.
@@ -793,13 +863,24 @@ switch ($action) {
                     'shape' => $rlShape, 'groupDateFmt' => $gFmt];
         $gid = $groupId;
         if (!$gid) {
-            $gr  = alfa_call_branch($branch, 'group', 'create', $groupPayload);
-            $gid = $gr['id'] ?? ($gr['model']['id'] ?? null);
+            // формат дат определяли по тому, как Alfa их ОТДАЁТ; на запись он может отличаться —
+            // если не приняла, пробуем второй, а не сдаёмся с невнятным «не вернула id»
+            $tries = [];
+            foreach ([$gFmt, ($gFmt === 'iso' ? 'dmy' : 'iso')] as $f) {
+                $p = $groupPayload;
+                $p['b_date'] = $f === 'iso' ? $bIso : alfa_date($bIso);
+                $p['e_date'] = $f === 'iso' ? $eIso : alfa_date($eIso);
+                $gr  = alfa_call_branch($branch, 'group', 'create', $p);
+                $gid = $gr['id'] ?? ($gr['model']['id'] ?? null);
+                if ($gid) { $created['groupDateFmt'] = $f; break; }
+                $tries[] = ['format' => $f, 'why' => alfa_err_text($gr), 'sent' => $p, 'alfa' => $gr];
+            }
             if (!$gid) {
-                $det = alfa_err_text($gr);
-                json_out(['ok' => false,
-                          'error'  => 'AlfaCRM не создала группу' . ($det !== '' ? (': ' . $det) : ' — ответ без id и без описания ошибки (см. поле alfa)'),
-                          'branch' => $branch, 'sent' => $groupPayload, 'alfa' => $gr], 502);
+                $det = [];
+                foreach ($tries as $t) $det[] = $t['format'] . ' → ' . ($t['why'] !== '' ? $t['why'] : 'ответ без описания');
+                json_out(['ok' => false, 'error' => 'AlfaCRM не создала группу: ' . implode(' | ', $det),
+                          'branch' => $branch, 'sent' => $tries ? $tries[0]['sent'] : $groupPayload,
+                          'alfa' => $tries ? $tries[0]['alfa'] : null, 'tries' => $tries], 502);
             }
             $created['group_id'] = (int)$gid; $created['createdGroup'] = true;
         } elseif ($updGroup) {
