@@ -1592,7 +1592,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-07-31-01";
+const APP_VER="2026-07-31-02";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -1835,7 +1835,7 @@ function _logDescribe(oldG,newG,oldRest,newRest){
 function _fbUserEmail(){ try{ const au=_fbAuth(); return (au&&au.currentUser&&au.currentUser.email)||"—"; }catch(e){ return "—"; } }
 function _fbUid(){ try{ const au=_fbAuth(); return (au&&au.currentUser&&au.currentUser.uid)||""; }catch(e){ return ""; } }
 function _dayKeyOf(ts){ const d=ts?new Date(ts):new Date(), p=n=>String(n).padStart(2,"0"); return d.getFullYear()+"-"+p(d.getMonth()+1)+"-"+p(d.getDate()); }
-const STAT_KEYS=["enrolled","sent","replies","paid","refusal","confirms","maybes","moved","removed","lesAdd","lesDel","edits"];
+const STAT_KEYS=["enrolled","sent","replies","paid","refusal","confirms","maybes","moved","removed","lesAdd","lesDel","edits","crm"];
 /* Сбой записи журнала виден сразу: иначе человек работает, а его действий в статистике нет,
    и понять это можно только сравнив «на глаз» (так и всплыло — «действий: 8» за полдня). */
 let _logFailN=0, _logFailMsg="", _logFailShown=false;
@@ -1846,6 +1846,13 @@ function _logWriteFailed(e){
     _logFailShown=true;
     toast("⚠ Журнал действий не пишется ("+_logFailMsg+"). Работа сохраняется, но статистика будет неполной — скажите администратору.");
   }
+}
+/* Запись в ЧУЖУЮ CRM — самое необратимое, что делает система, и до сих пор она не оставляла в
+   журнале никакого следа: _pushLog вызывается только из fbPush (по диффу модели), а поля
+   k.alfaGrp/groupMeta.alfaId в разбор диффа не входят. Пишем явно, ПОСЛЕ ответа Альфы. */
+function logCrm(text){
+  try{ _pushLog(["🏫 Alfa: "+text]); }catch(e){}
+  console.log("🏫 Alfa:",text);
 }
 function _pushLog(parts){
   if(!_fbDb || !FB_ON || _fbSeeding) return;
@@ -1959,7 +1966,8 @@ function _mgrCount(t){
   const inN=nm(/вписан\(а\) ([^;·\n]+)/g), outN=nm(/убран\(а\) ([^;·\n]+)/g);
   const outSet=new Set(outN);
   const movedKids=inN.filter(n=>outSet.has(n)).length;
-  return { enrolled:Math.max(0,inN.length-movedKids), removed:Math.max(0,outN.length-movedKids),
+  const crm=c(/Alfa: /g);                  // живые записи в чужую CRM — отдельная метрика
+  return { crm:crm, enrolled:Math.max(0,inN.length-movedKids), removed:Math.max(0,outN.length-movedKids),
     sent:c(/✅ Viber отправлен/g),
     replies:c(/ответ \(/g), paid:Math.max(0,paidMarks-paidRm), refusal:refusal,
     confirms:confirms, maybes:maybes,
@@ -2170,7 +2178,8 @@ const ACH_METR=[
   {k:"confirms",lab:"🟢 Согласий",col:"#4F9E63"},
   {k:"refusal",lab:"Отказов ❌",col:"#B0493D"},
   {k:"moved",lab:"Переводов",col:"#6B7078"},
-  {k:"removed",lab:"Убрал детей",col:"#6B7078"}
+  {k:"removed",lab:"Убрал детей",col:"#6B7078"},
+  {k:"crm",lab:"Записей в Alfa",col:"#1F5BC0"}
 ];
 function closeAchieve(){ const m=document.getElementById("achieveModal"); if(m) m.classList.remove("show"); }
 function _achDS(k){ const d=new Date(k+"T00:00:00"),z=n=>String(n).padStart(2,"0"); return z(d.getDate())+"."+z(d.getMonth()+1); }
@@ -4732,10 +4741,12 @@ function dropLes(e,slot,room){
   if(!l) return;
   // длительность сохраняем, сдвигаем начало и конец
   const dur=minDiff(l.start,l.end);
+  const keyBefore=_grpKeyOf(l);       // у группы без номера ключ содержит день/время/кабинет
   l.start=slot;
   l.end=addMin(slot,dur||90);
   l.room=room;
   l.day=curDay;
+  _migrateGroupKey(keyBefore,_grpKeyOf(l));   // иначе связь с Alfa повиснет на мёртвом ключе
   _dragId=null;
   persistLocal(); renderGrid(); renderStaff();
 }
@@ -5131,6 +5142,7 @@ async function kidToAlfaGroup(i){
       return;
     }
     k.alfaGrp=String(g.id); k.alfaGrpAt=new Date().toISOString().slice(0,10);
+    logCrm("«"+k.n+"» внесён(а) в группу id "+g.id+(g.name?(" «"+g.name+"»"):"")+" · "+_pubDMY(c.bDate)+"–"+_pubDMY(c.eDate));
     if(les){ _commitEditKids(les); _syncGroupKids(les); }   // у группы 2×/нед отметка нужна во всех занятиях
     persistLocal(); _flushCardEdit();
     renderKidsEditor();
@@ -5166,12 +5178,32 @@ function kidPasteList(){
   toast("Добавлено: "+added+(dup?(" · пропущено дублей: "+dup):""));
 }
 
+/* Метки группы (возраст, класс, «готово» и — главное — связь с группой AlfaCRM) живут по ключу
+   «курс||номер», а у группы без номера в ключ входят день/время/кабинет. Раньше ключ мигрировал
+   ТОЛЬКО при переименовании курса: стоило дописать номер группы или перенести занятие, как связь
+   с Alfa повисала на мёртвом ключе — группа снова показывалась неопубликованной, и следующая
+   публикация создавала в CRM дубль. Переносим метки вместе с ключом. */
+function _migrateGroupKey(oldKey,newKey){
+  if(!oldKey||!newKey||oldKey===newKey) return;
+  ["groupMeta","groupsDone"].forEach(store=>{
+    const m=S[store]; if(!m||!m[oldKey]) return;
+    if(m[newKey]&&store==="groupMeta"){
+      // на новом ключе уже что-то есть (слияние групп) — не теряем связь с Alfa
+      const a=m[newKey], b=m[oldKey];
+      for(const f in b) if(a[f]===undefined||a[f]==="") a[f]=b[f];
+    } else if(m[newKey]===undefined) m[newKey]=m[oldKey];
+    delete m[oldKey];
+  });
+  const c=(S.alfaPub&&S.alfaPub.names)?S.alfaPub.names:null;   // ручное имя группы в Alfa
+  if(c&&c[oldKey]!==undefined&&c[newKey]===undefined){ c[newKey]=c[oldKey]; delete c[oldKey]; }
+}
 function saveLes(){
   _newLesRef=null;                 // занятие подтверждено — при закрытии не удалять
   const idx=_modalLesIdx();
   const l=S.grid[idx];
   if(!l){ toast("Занятие не найдено — обновите страницу"); closeLes(); return; }
   _kidsFromDOM();
+  const _keyBefore=_grpKeyOf(l);   // ключ группы до правки — по нему живут возраст/класс/связь с Alfa
   l.course=document.getElementById("mCourse").value;
   l.teacher=document.getElementById("mTeacher").value;
   { const dEl=document.getElementById("mDay"); if(dEl) l.day=+dEl.value||l.day; }
@@ -5181,6 +5213,7 @@ function saveLes(){
   { const gEl=document.getElementById("mGroup"); if(gEl) l.group=(gEl.value||"").trim(); }
   l.students=+document.getElementById("mStud").value||0;
   l.note=(document.getElementById("mNote").value||"").trim();
+  _migrateGroupKey(_keyBefore,_grpKeyOf(l));   // сменили номер/курс/время — переносим метки группы
   // снимок состава ДО записи — чтобы удалённых из группы (осиротевших) отправить в список ожидания
   const _wlCand=[];
   { const grp=(l.group&&String(l.group).trim()), gk=(l.course||"")+"||"+String(l.group||"").trim();
@@ -8571,6 +8604,8 @@ async function pubRun(live){
         }else{
           const cr=j.created||{};
           _pubMarkPublished(r.key,cr.group_id,{sched:true,les:(cr.lessons||[]).length,name:r.alfaName});
+          logCrm("создана группа id "+cr.group_id+" «"+r.alfaName+"» · занятий: "+(cr.lessons||[]).length+
+            (( cr.links||[]).length?(", детей: "+(cr.links||[]).length):"")+" · "+(r.schedText||"—"));
           const errs=(cr.errors||[]);
           if(errs.length){
             fail++;
@@ -9058,6 +9093,9 @@ async function p1KidsAdd(){
     if(_p1.members) (j.added||[]).forEach(x=>_p1.members.add(+x.customer_id));
     // отметка живёт на ребёнке — чтобы «✓» был виден и в карточке занятия, а не только здесь
     const addedIds=new Set((j.added||[]).map(x=>+x.customer_id));
+    if(addedIds.size) logCrm("в группу id "+a.id+" «"+a.name+"» внесено детей: "+addedIds.size+
+      " ("+sel.filter(r=>addedIds.has(r.alfaId)).slice(0,8).map(r=>r.name).join(", ")+(addedIds.size>8?" …":"")+")");
+    if(errs.length) logCrm("⛔ не внесены в группу id "+a.id+": "+errs.length+" — "+esc(errs.slice(0,3).map(e=>e.why||("id "+e.customer_id)).join("; ")));
     _pubMarkKidsInGrid(_p1.key, sel.filter(r=>addedIds.has(r.alfaId)), +a.id);
     // считаем ТОЛЬКО наших: в группе Alfa могут быть и чужие участники, их в «детей в Alfa» не пишем
     const after=_p1Kids();
@@ -9149,6 +9187,9 @@ async function p1Go(){
     if(cr.createdGroup&&cr.group_id&&_pubAlfaGroups)
       _pubAlfaGroups.push({id:+cr.group_id,name:g.alfaName,branch:+cr.branch||_p1Branch(),teacher_ids:[],is_archive:0});
     _pubMarkPublished(_p1.key,cr.group_id,{sched:true,les:nLes,name:a?a.name:g.alfaName});
+    logCrm((cr.createdGroup?"создана группа ":"расписание группе ")+"id "+cr.group_id+" «"+(a?a.name:g.alfaName)+"»"+
+      " · занятий: "+nLes+(cr.skipped?(", пропущено "+cr.skipped):"")+" · "+(g.schedText||"—")+
+      " · "+_pubDMY(c.bDate)+"–"+_pubDMY(c.eDate)+(errs.length?(" · ОШИБОК: "+errs.length):""));
     _p1.mode="link"; _p1.sel=+cr.group_id||_p1.sel;
     _p1.log=errs.length
       ? `<div class="callout" style="border-color:var(--terra)">⚠ Группа id ${esc(cr.group_id)}: добавлено занятий ${nLes}, но ${errs.length} шаг(ов) с ошибкой.<br>${
