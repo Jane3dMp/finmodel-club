@@ -655,6 +655,43 @@ switch ($action) {
                   'count' => count($byId), 'groups' => array_values($byId), 'sample' => $sample]);
         break;
 
+    // --- ТАРИФЫ = ШАБЛОНЫ АБОНЕМЕНТОВ (READ). В Alfa «абонемент» — это ДВА объекта:
+    //     tariff (шаблон: название, тип, цена, число уроков) и customer-tariff (выданный ученику).
+    //     Здесь читаем шаблоны, чтобы сопоставить их с ценами из конструктора.
+    case 'tariffs':
+        @set_time_limit(90);
+        $token = alfa_token();
+        $host  = 'https://' . alfa_host();
+        $want  = array_values(array_filter(array_map('intval', (array)($in['branches'] ?? []))));
+        $byId = []; $sample = null;
+        foreach ($want ?: alfa_all_branch_ids() as $bid) {
+            $page = 0; $items = [];
+            do {
+                $r = alfa_http('POST', "$host/v2api/$bid/tariff/index", ['page' => $page, 'count' => 50], $token, true, 12);
+                $items = isset($r['__err']) ? [] : ($r['items'] ?? []);
+                foreach ($items as $t) {
+                    $tid = (int)($t['id'] ?? 0);
+                    if (!$tid || isset($byId[$tid])) continue;
+                    if ($sample === null) $sample = $t;
+                    $byId[$tid] = [
+                        'id'           => $tid,
+                        'name'         => (string)($t['name'] ?? ''),
+                        'type'         => $t['type'] ?? ($t['tariff_type'] ?? null),   // 1 поурочный, 2 помесячный, 3 недельный
+                        'price'        => $t['price'] ?? null,
+                        'lesson_count' => $t['lesson_count'] ?? null,
+                        'duration'     => $t['duration'] ?? null,
+                        'branch'       => (int)$bid,
+                        'branch_ids'   => array_values(array_map('intval', (array)($t['branch_ids'] ?? []))),
+                        'subject_ids'  => array_values(array_map('intval', (array)($t['subject_ids'] ?? []))),
+                        'is_archive'   => (int)($t['is_archive'] ?? 0),
+                    ];
+                }
+                $page++;
+            } while (count($items) === 50 && $page < 40);
+        }
+        json_out(['ok' => true, 'count' => count($byId), 'tariffs' => array_values($byId), 'sample' => $sample]);
+        break;
+
     // --- СОСТАВ ГРУППЫ (READ): кто уже привязан к группе в Alfa (сущность cgi).
     //     ⚠️ Дефолтный запрос отдаёт в основном ТЕКУЩИЕ членства. Наши — с 02.09.2026, т.е. БУДУЩИЕ,
     //     и в дефолт не попадают: без второго запроса с диапазоном мы бы считали группу пустой

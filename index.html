@@ -1591,7 +1591,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-07-30-06";
+const APP_VER="2026-07-30-07";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -8870,6 +8870,7 @@ function _p1KidsHtml(){
   h+=`</div>`;
   h+=`<div style="font-size:11px;color:var(--muted);margin-top:4px">Период участия — как у группы: ${esc(_pubDMY(_pubCfg().bDate))} — ${esc(_pubDMY(_pubCfg().eDate))}. Отказавшиеся (🔴) по умолчанию не отмечены. Те же значки — в карточке занятия, там же кнопка 👥 у каждого ребёнка.</div>`;
   h+=`<div class="hd-actions les-foot" style="margin-top:8px">
+      <button class="btn ghost sm" onclick="p1Tariffs()" title="Посмотреть, какие шаблоны абонементов заведены в вашей AlfaCRM">🎫 Абонементы Альфы</button>
       <button class="btn ghost sm" onclick="p1KidsRefresh()" title="Перечитать состав группы из Alfa">⟳ Обновить состав из Alfa</button>
       <button class="btn sm" style="margin-left:auto" ${sel&&!_p1.busy?"":"disabled"} onclick="p1KidsAdd()">👥 Добавить в группу Alfa (${sel})</button>
     </div><div id="p1KidsLog" style="margin-top:8px;font-size:12px">${_p1.kidsLog||""}</div>`;
@@ -8901,6 +8902,34 @@ async function p1KidsOpen(){
     if(!_pubCustIdx){ await _pubEnsureCustomers(); if(_p1) _p1Render(); }
     if(_p1&&!_p1.members) await p1KidsRefresh();
   }catch(e){ if(_p1){ _p1.kidsLog=_pubErrHtml(e,"клиенты Alfa"); _p1Render(); } }
+}
+/* Что за шаблоны абонементов уже заведены в Alfa. Читаем, ничего не создавая: цена и правила
+   списания живут в тарифе, поэтому сначала надо увидеть, с чем работаем. */
+const PUB_TARIFF_TYPE={1:"поурочный",2:"помесячный",3:"недельный"};
+async function p1Tariffs(){
+  if(!_p1) return;
+  _p1.kidsLog="⏳ Читаю абонементы из Альфы…"; _p1Render();
+  try{
+    const j=await _pubCall("tariffs",{branches:_pubCfg().branches||[]});
+    const list=(j.tariffs||[]).filter(t=>!t.is_archive);
+    console.log("🎫 тарифы Alfa:",j.tariffs,"· образец полей:",j.sample);
+    if(!list.length){
+      _p1.kidsLog=`<div class="callout" style="border-color:var(--terra)">В Альфе не нашлось ни одного шаблона абонемента. Их заводят в Alfa: Настройки → Абонементы. Без шаблона выдать абонемент ученику нельзя — цена и правила списания хранятся именно в нём.</div>`;
+    }else{
+      const rows=list.slice(0,60).map(t=>`<tr><td style="text-align:left">${esc(t.name)}</td>
+        <td style="text-align:left">${esc(PUB_TARIFF_TYPE[+t.type]||("тип "+(t.type==null?"—":t.type)))}</td>
+        <td style="text-align:right">${t.price==null?"—":esc(t.price)}</td>
+        <td style="text-align:center">${t.lesson_count==null?"—":esc(t.lesson_count)}</td>
+        <td style="text-align:center;color:var(--muted)">${esc(t.id)}</td></tr>`).join("");
+      _p1.kidsLog=`<div class="callout" style="border-color:var(--green);margin-bottom:6px">Шаблонов абонементов в Альфе: <b>${list.length}</b>. Сопоставим их с ценами конструктора — тогда сможем выдавать абонемент вместе с внесением в группу.</div>
+        <div style="max-height:30vh;overflow:auto"><table style="width:100%"><thead><tr>
+          <th style="text-align:left">Название</th><th style="text-align:left">Тип</th>
+          <th style="text-align:right">Цена</th><th style="text-align:center">Уроков</th><th style="text-align:center">id</th>
+        </tr></thead><tbody>${rows}</tbody></table></div>
+        ${list.length>60?`<div style="font-size:11px;color:var(--muted)">…показаны первые 60 из ${list.length}, полный список — в консоли (F12)</div>`:""}`;
+    }
+  }catch(e){ _p1.kidsLog=_pubErrHtml(e,"тарифы"); }
+  _p1Render();
 }
 async function p1KidsRefresh(){
   if(!_p1) return;
