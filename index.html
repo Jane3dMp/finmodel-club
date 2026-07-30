@@ -1591,7 +1591,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-07-30-05";
+const APP_VER="2026-07-30-06";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -4808,11 +4808,13 @@ function editLes(idx,focusKi){
       <input type="checkbox" id="mNewIntake" ${l.newIntake?"checked":""} style="width:auto">
       <span>🟠 Новый набор (подсветить оранжевым)</span></label>
     <div class="callout">ЗП за это занятие: <b id="mWage">${wageForLesson(l.course,lesN(l),l)} р</b> <span id="mWageLbl">${S._wageMode==="fix"?"(фикс-ставка)":("(по ставке для "+lesN(l)+(kidsOf(l).length>0?" детей — по списку":" детей — поле «Ученики», список пуст")+")")}</span></div>`;
+  // ⚠️ dataset ставим ДО первой отрисовки списка детей: строки уже спрашивают «какое занятие
+  // открыто» (кнопка «внести в группу Alfa»), а с прежним порядком там был ещё старый lesId
+  document.getElementById("lesModal").dataset.idx=idx;
+  document.getElementById("lesModal").dataset.lesId=l.id||"";   // все действия модалки — по стабильному id
   renderKidsEditor();
   if(typeof _paintIcons==="function") _paintIcons(document.getElementById("lesModal"));
   document.getElementById("lesModal").classList.add("show");
-  document.getElementById("lesModal").dataset.idx=idx;
-  document.getElementById("lesModal").dataset.lesId=l.id||"";   // все действия модалки — по стабильному id
   document.getElementById("mCourse").onchange=refreshLesWage;
   document.getElementById("mStud").oninput=refreshLesWage;
   if(document.getElementById("mTeacher")) document.getElementById("mTeacher").onchange=refreshLesWage;
@@ -4861,6 +4863,8 @@ function _kidsFromDOM(){
     o.evzz=prev.evzz||"";                                // ЭВ 26/27 (наше поле, редактируется в карточке ребёнка)
     o.vbSent=!!prev.vbSent;                              // отметка «отправлено в Viber»
     o.vbSentAt=prev.vbSentAt||"";
+    o.paySent=!!prev.paySent; o.paySentAt=prev.paySentAt||"";
+    o.alfaGrp=prev.alfaGrp||""; o.alfaGrpAt=prev.alfaGrpAt||"";   // внесён в группу AlfaCRM (id группы)
     const rep=tr.querySelector(".k-in-reply");           // ответ родителя (select в строке)
     o.vbReply = rep ? rep.value : (prev.vbReply||"");
     o.vbReplyAt = (o.vbReply!==(prev.vbReply||"")) ? (o.vbReply?new Date().toISOString():"") : (prev.vbReplyAt||"");
@@ -5050,7 +5054,7 @@ function renderKidsEditor(){
       <td class="k-name"><div style="display:flex;align-items:center;gap:5px"><input type="text" class="k-in-name" style="flex:1;min-width:0;width:auto" value="${esc(k.n)}" placeholder="Фамилия Имя" oninput="refreshLesWage()">${k.dob?`<span style="font-size:11px;color:var(--blue);white-space:nowrap" title="${esc(_ageStrFull(k.dob))} · ДР ${esc(String(k.dob).slice(0,10).split("-").reverse().join("."))}">${esc(_ageStr(k.dob))}</span>`:''}${_fbIsAdmin?`<button type="button" class="btn ghost sm" style="padding:0 5px;font-size:11px" title="Подтянуть возраст и связь этого ребёнка из Альфы (по ФИО)" onclick="kidAlfaUpdate(${i})">⟳</button>`:''}</div></td>
       ${KID_FLAGS.map(f=>`<td><input type="checkbox" class="k-in-${f.k}" ${k[f.k]?"checked":""} title="${f.lab}" onchange="kidFlagChanged()"></td>`).join("")}
       <td><input type="text" class="k-in-c" value="${esc(k.c||"")}" placeholder="—"></td>
-      <td><div style="display:inline-flex;gap:3px;align-items:center;white-space:nowrap"><button type="button" class="btn ghost sm" style="padding:1px 6px${k.vbSent?';background:#e6f4ea;border-color:#66bb6a':''}" ${k.phone?"":"disabled"} title="${k.phone?(k.vbSent?('Отправлено'+(k.vbSentAt?' '+_vbDate(k.vbSentAt):'')+' · клик — отправить снова, правый клик — снять отметку'):('Viber → '+esc(k.phone))):'Нет телефона — сначала «Контакты из Альфы»'}" onclick="kidViber(${i})" oncontextmenu="event.preventDefault();kidViberReset(${i});return false">${k.vbSent?ic('check'):ic('send')}</button><button type="button" class="btn ghost sm" style="padding:1px 5px${k.paySent?';background:#fdf3d6;border-color:#e0a02e':''}" ${k.phone?"":"disabled"} title="${k.phone?(k.paySent?('Путь оплаты отправлен'+(k.paySentAt?' '+_vbDate(k.paySentAt):'')+' · клик — отправить снова, правый клик — снять отметку'):'Путь оплаты (реквизиты ЕРИП) родителю в Viber'):'Нет телефона'}" onclick="kidPay(${i})" oncontextmenu="event.preventDefault();kidPayReset(${i});return false">💳</button>${k.alfaId?`<button type="button" class="btn ghost sm" style="padding:1px 5px" title="История ребёнка в Альфе — куда ходил, баланс" onclick="kidHist(${i})">${ic('user')}</button>`:''}${_fbIsAdmin?(function(){const ez=kidEvzz(k);return `<button type="button" class="btn ghost sm" style="padding:1px 5px${ez?';background:#eef3ee;border-color:#66bb6a':''}" title="Карточка ребёнка — ЭВ, телефон, активные/архивные абонементы из Альфы${ez?(' · ЭВ 26/27: '+esc(ez)):''}" onclick="kidCard(${i})">${ic('idcard')}</button>`;})():''}</div></td>
+      <td><div style="display:inline-flex;gap:3px;align-items:center;white-space:nowrap"><button type="button" class="btn ghost sm" style="padding:1px 6px${k.vbSent?';background:#e6f4ea;border-color:#66bb6a':''}" ${k.phone?"":"disabled"} title="${k.phone?(k.vbSent?('Отправлено'+(k.vbSentAt?' '+_vbDate(k.vbSentAt):'')+' · клик — отправить снова, правый клик — снять отметку'):('Viber → '+esc(k.phone))):'Нет телефона — сначала «Контакты из Альфы»'}" onclick="kidViber(${i})" oncontextmenu="event.preventDefault();kidViberReset(${i});return false">${k.vbSent?ic('check'):ic('send')}</button><button type="button" class="btn ghost sm" style="padding:1px 5px${k.paySent?';background:#fdf3d6;border-color:#e0a02e':''}" ${k.phone?"":"disabled"} title="${k.phone?(k.paySent?('Путь оплаты отправлен'+(k.paySentAt?' '+_vbDate(k.paySentAt):'')+' · клик — отправить снова, правый клик — снять отметку'):'Путь оплаты (реквизиты ЕРИП) родителю в Viber'):'Нет телефона'}" onclick="kidPay(${i})" oncontextmenu="event.preventDefault();kidPayReset(${i});return false">💳</button>${k.alfaId?`<button type="button" class="btn ghost sm" style="padding:1px 5px" title="История ребёнка в Альфе — куда ходил, баланс" onclick="kidHist(${i})">${ic('user')}</button>`:''}${_fbIsAdmin?_kidAlfaGrpBtn(k,i):''}${_fbIsAdmin?(function(){const ez=kidEvzz(k);return `<button type="button" class="btn ghost sm" style="padding:1px 5px${ez?';background:#eef3ee;border-color:#66bb6a':''}" title="Карточка ребёнка — ЭВ, телефон, активные/архивные абонементы из Альфы${ez?(' · ЭВ 26/27: '+esc(ez)):''}" onclick="kidCard(${i})">${ic('idcard')}</button>`;})():''}</div></td>
       <td><select class="k-in-reply cell" style="font-size:11px;padding:3px 2px;min-width:96px" onchange="kidFlagChanged()">${VB_REPLY.map(r=>`<option value="${r[0]}" ${k.vbReply===r[0]?'selected':''}>${r[1]}</option>`).join("")}</select></td>
       <td style="text-align:center"><details class="kid-move"><summary title="Перевести в другую группу">↔</summary><div><select class="cell kmv-sel">${moveOpts}</select><button type="button" class="btn sm" onclick="kidMoveToGroup(${i}, this.previousElementSibling.value)">Перевести</button></div></details></td>
       <td><span class="k-del" title="Удалить" onclick="kidDel(${i})">×</span></td>
@@ -5059,6 +5063,68 @@ function renderKidsEditor(){
   refreshLesWage();
 }
 function kidFlagChanged(){ _kidsFromDOM(); renderKidsEditor(); }
+
+/* ===== ВНЕСТИ ОДНОГО РЕБЁНКА В ГРУППУ ALFACRM — прямо из карточки занятия =====
+   Рядом с 📨/💳 виден ответ родителя, поэтому отсюда удобно отправлять ИЗБРАННЫХ
+   (подтвердивших, оплативших), а не весь список. Отметка живёт на ребёнке (k.alfaGrp),
+   поэтому одинаково видна и в карточке занятия, и в «Группах». */
+function _grpKeyOf(l){ return l.course+"||"+(l.group||("__"+l.day+"_"+l.start+"_"+l.room)); }
+function _modalAlfaGroup(){
+  const idx=_modalLesIdx(); const l=(idx>=0)?S.grid[idx]:null;
+  if(!l||!l.course) return null;
+  const key=_grpKeyOf(l), gm=(S.groupMeta||{})[key]||{};
+  return {key, l, id:+(gm.alfaId||0)||0, name:gm.alfaName||""};
+}
+function _kidAlfaGrpBtn(k,i){
+  const g=_modalAlfaGroup(); if(!g) return "";
+  const inG=!!(g.id&&String(k.alfaGrp||"")===String(g.id));
+  const t=inG ? ("Внесён в группу AlfaCRM"+(k.alfaGrpAt?(" · "+k.alfaGrpAt):"")+" · правый клик — снять отметку")
+    : (!g.id ? "Группа ещё не связана с AlfaCRM. Вкладка «Группы» → столбец «Alfa»"
+      : (!k.alfaId ? "Нет связи с Альфой — нажмите «⟳» в строке ребёнка"
+        : "Внести этого ребёнка в группу Alfa «"+(g.name||("id "+g.id))+"»"));
+  const dis=!g.id||(!k.alfaId&&!inG);
+  return `<button type="button" class="btn ghost sm" style="padding:1px 5px${inG?';background:#e6f4ea;border-color:#66bb6a':''}" ${dis?"disabled":""} title="${esc(t)}" onclick="kidToAlfaGroup(${i})" oncontextmenu="event.preventDefault();kidAlfaGrpReset(${i});return false">${inG?"✓👥":"👥"}</button>`;
+}
+async function kidToAlfaGroup(i){
+  if(!_fbIsAdmin){ toast("Только для админа"); return; }
+  _kidsFromDOM();
+  const k=_editKids[i], g=_modalAlfaGroup();
+  if(!k||!g) return;
+  if(!g.id){ toast("Сначала свяжите группу с Alfa: вкладка «Группы» → столбец «Alfa»"); return; }
+  if(!k.alfaId){ toast("У ребёнка нет связи с Альфой — нажмите «⟳» в его строке"); return; }
+  if(String(k.alfaGrp||"")===String(g.id)){ toast("Уже внесён в эту группу"); return; }
+  const c=_pubCfg();
+  if(!confirm("Внести «"+k.n+"» в группу AlfaCRM «"+(g.name||("id "+g.id))+"»?\n\n"+
+    "Период участия: "+_pubDMY(c.bDate)+" — "+_pubDMY(c.eDate)+"\n\nЭто живая запись в CRM.")) return;
+  const les=S.grid[_modalLesIdx()];
+  try{
+    const j=await _pubCall("addToGroup",{dryRun:false, groupId:g.id, branch:0,
+      customerIds:[+k.alfaId], b_date:c.bDate, e_date:c.eDate});
+    const errs=j.errors||[];
+    if(errs.length){
+      console.warn("👥 addToGroup —",k.n,errs);
+      toast("Не получилось: "+(errs[0].why||"Alfa отказала, подробности в консоли (F12)"));
+      return;
+    }
+    k.alfaGrp=String(g.id); k.alfaGrpAt=new Date().toISOString().slice(0,10);
+    if(les){ _commitEditKids(les); _syncGroupKids(les); }   // у группы 2×/нед отметка нужна во всех занятиях
+    persistLocal(); _flushCardEdit();
+    renderKidsEditor();
+    toast("«"+shortName(k.n)+"» внесён(а) в группу Alfa ✓");
+  }catch(e){
+    console.warn("👥 addToGroup — отказ:",(e&&e.data)||e);
+    toast("Не получилось: "+((e&&e.message)||e));
+  }
+}
+/* снять отметку — В САМОЙ ALFA НИЧЕГО НЕ УДАЛЯЕТ, только наша пометка */
+function kidAlfaGrpReset(i){
+  _kidsFromDOM();
+  const k=_editKids[i]; if(!k||!k.alfaGrp) return;
+  if(!confirm("Снять отметку «внесён в группу Alfa» у «"+k.n+"»?\n\nВ самой Альфе участие НЕ удаляется — убрать его нужно там вручную.")) return;
+  k.alfaGrp=""; k.alfaGrpAt="";
+  const les=S.grid[_modalLesIdx()]; if(les){ _commitEditKids(les); _syncGroupKids(les); }
+  persistLocal(); _flushCardEdit(); renderKidsEditor();
+}
 function kidAdd(){ openAddKid(null,'lesson'); }   // единое окно (ФИО+телефон+ДР обязательны)
 function kidDel(i){ _kidsFromDOM(); _editKids.splice(i,1); renderKidsEditor(); }
 function kidPasteList(){
@@ -8736,13 +8802,16 @@ function _p1Kids(){
   const g=_p1.g, mem=_p1.members;                       // mem = Set customer_id из Alfa (null = ещё не читали)
   const seen=new Set(), out=[];
   (S.grid||[]).forEach(l=>{
-    if((l.course+"||"+(l.group||("__"+l.day+"_"+l.start+"_"+l.room)))!==g.key) return;
+    if(!l.course||_grpKeyOf(l)!==g.key) return;
     kidsOf(l).forEach(k=>{
       const nk=_nameKey(k.n); if(!nk||seen.has(nk)) return; seen.add(nk);
-      const row={name:k.n, key:nk, no:!!k.no, may:!!k.may, reply:k.vbReply||"", alfaId:+(k.alfaId||0)||0, many:null};
+      const row={name:k.n, key:nk, no:!!k.no, may:!!k.may, reply:k.vbReply||"", sent:!!k.vbSent,
+                 paid:!!k.paySent, alfaId:+(k.alfaId||0)||0, many:null, mark:String(k.alfaGrp||"")};
       if(!row.alfaId){ const f=_pubFindCust(k.n);
         if(f&&f.c){ row.alfaId=+f.c.id; row.byName=f.c.name; } else if(f&&f.many) row.many=f.many; }
-      row.inAlfa=!!(row.alfaId&&mem&&mem.has(row.alfaId));
+      // живой состав из Alfa — истина; пока не прочитали, опираемся на нашу отметку (k.alfaGrp)
+      const a=_p1Alfa();
+      row.inAlfa = mem ? !!(row.alfaId&&mem.has(row.alfaId)) : !!(a&&row.mark===String(a.id));
       out.push(row);
     });
   });
@@ -8759,13 +8828,23 @@ function _p1KidsHtml(){
   const nIn=rows.filter(r=>r.inAlfa).length, nNo=rows.filter(r=>!r.alfaId).length;
   const canAdd=rows.filter(r=>r.alfaId&&!r.inAlfa);
   const sel=canAdd.filter(r=>_p1KidOn(r)).length;
+  const cy=rows.filter(r=>!r.no&&r.reply==="yes").length, cm=rows.filter(r=>!r.no&&r.reply==="maybe").length,
+        cn=rows.filter(r=>r.no||r.reply==="no").length, cp=rows.filter(r=>r.may).length,
+        cs=rows.filter(r=>!r.no&&!r.reply).length;
   let h=`<div style="font-size:12px;color:var(--muted);margin-bottom:6px">
     Всего ${rows.length} · уже в группе Alfa: <b style="color:var(--green)">${nIn}</b> ·
     можно добавить: <b>${canAdd.length}</b>${nNo?` · без связи с Альфой: <b style="color:var(--red)">${nNo}</b>`:""}
     ${_p1.members?"":' · <span style="color:var(--terra)">состав Alfa ещё не прочитан</span>'}</div>
+    <div style="font-size:12px;margin-bottom:6px;display:flex;gap:12px;flex-wrap:wrap">
+      <span>🟢 подтвердили: <b>${cy}</b></span><span>🔴 отказ: <b>${cn}</b></span>
+      <span>🟡 думают: <b>${cm}</b></span><span style="color:var(--muted)">молчат: <b>${cs}</b></span>
+      <span>💰 оплатили: <b>${cp}</b></span></div>
     <div class="hd-actions" style="margin-bottom:6px">
-      <button class="btn ghost sm" onclick="p1KidsAll(1)">Отметить всех</button>
-      <button class="btn ghost sm" onclick="p1KidsAll(0)">Снять</button>
+      <span style="font-size:12px;color:var(--muted)">Отметить:</span>
+      <button class="btn ghost sm" onclick="p1KidsPick('yes')" title="Только тех, чей родитель подтвердил участие">🟢 подтвердивших</button>
+      <button class="btn ghost sm" onclick="p1KidsPick('may')" title="Только тех, кто купил майский">💰 оплативших</button>
+      <button class="btn ghost sm" onclick="p1KidsPick('all')">всех</button>
+      <button class="btn ghost sm" onclick="p1KidsAll(0)">снять</button>
       <span style="margin-left:auto;font-size:12px;color:var(--muted)">отмечено: <b style="color:var(--coal)">${sel}</b></span></div>
     <div style="max-height:26vh;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:4px 8px">`;
   rows.forEach(r=>{
@@ -8774,27 +8853,46 @@ function _p1KidsHtml(){
       :r.many?`<span style="color:var(--red)">в Alfa несколько тёзок (${r.many.length}) — выберите в карточке ребёнка</span>`
       :`<span style="color:var(--red)">не найден в Альфе</span>`;
     const dis=!r.alfaId||r.inAlfa;
+    // те же значки, что в карточке занятия: ответ родителя, 💰, ❌, 📨
+    const rep=(r.no||r.reply==="no")?'<span style="color:var(--red)" title="Отказ / не придёт">🔴</span>'
+      :r.reply==="yes"?'<span title="Подтвердили участие">🟢</span>'
+      :r.reply==="maybe"?'<span title="Думают">🟡</span>'
+      :'<span style="color:#cfc8bd" title="Молчат — ответа нет">○</span>';
     h+=`<label style="display:flex;gap:8px;align-items:center;padding:2px 0;font-size:13px;margin:0;${dis?"opacity:.65":"cursor:pointer"}">
       <input type="checkbox" style="width:auto;margin:0" ${_p1KidOn(r)?"checked":""} ${dis?"disabled":""} onchange="p1KidToggle('${_jsStr(r.key)}')">
-      <span style="flex:1">${esc(r.name)}${r.no?' <span style="color:var(--red)" title="Не придёт">❌</span>':""}${r.may?' <span title="Купил майский">💰</span>':""}</span>
+      <span style="width:16px;text-align:center">${rep}</span>
+      <span style="width:16px;text-align:center">${r.may?'<span title="Купил майский">💰</span>':''}</span>
+      <span style="width:16px;text-align:center;font-size:11px">${r.sent?'<span style="color:var(--green)" title="Viber отправлен">📨</span>':''}</span>
+      <span style="flex:1;min-width:0">${esc(r.name)}</span>
       <span style="font-size:11px">${st}</span>
       <span style="font-size:11px;color:var(--muted);width:60px;text-align:right">${r.alfaId?("id "+r.alfaId):""}</span></label>`;
   });
   h+=`</div>`;
-  h+=`<div style="font-size:11px;color:var(--muted);margin-top:4px">Период участия — как у группы: ${esc(_pubDMY(_pubCfg().bDate))} — ${esc(_pubDMY(_pubCfg().eDate))}. Отказавшиеся (❌) по умолчанию не отмечены.</div>`;
+  h+=`<div style="font-size:11px;color:var(--muted);margin-top:4px">Период участия — как у группы: ${esc(_pubDMY(_pubCfg().bDate))} — ${esc(_pubDMY(_pubCfg().eDate))}. Отказавшиеся (🔴) по умолчанию не отмечены. Те же значки — в карточке занятия, там же кнопка 👥 у каждого ребёнка.</div>`;
   h+=`<div class="hd-actions les-foot" style="margin-top:8px">
       <button class="btn ghost sm" onclick="p1KidsRefresh()" title="Перечитать состав группы из Alfa">⟳ Обновить состав из Alfa</button>
       <button class="btn sm" style="margin-left:auto" ${sel&&!_p1.busy?"":"disabled"} onclick="p1KidsAdd()">👥 Добавить в группу Alfa (${sel})</button>
     </div><div id="p1KidsLog" style="margin-top:8px;font-size:12px">${_p1.kidsLog||""}</div>`;
   return h;
 }
+/* отказ = галочка «❌ не придёт» ИЛИ ответ родителя «Отказ» — как везде в модели */
+function _p1Refused(r){ return !!(r.no||r.reply==="no"); }
 function _p1KidOn(r){
   if(!r.alfaId||r.inAlfa) return false;
   const v=_p1.kidSkip[r.key];
-  return v===undefined ? !r.no : !v;                    // «не придёт» по умолчанию не переносим
+  return v===undefined ? !_p1Refused(r) : !v;           // отказавшихся по умолчанию не переносим
 }
 function p1KidToggle(key){ if(!_p1) return; const r=_p1Kids().find(x=>x.key===key); if(!r) return; _p1.kidSkip[key]=_p1KidOn(r); _p1Render(); }
 function p1KidsAll(on){ if(!_p1) return; _p1Kids().forEach(r=>{ if(r.alfaId&&!r.inAlfa) _p1.kidSkip[r.key]=!on; }); _p1Render(); }
+/* быстрый выбор «избранных»: подтвердившие / оплатившие / все (отказавшихся не берём) */
+function p1KidsPick(what){
+  if(!_p1) return;
+  const ok=r=> what==="yes" ? (!_p1Refused(r)&&r.reply==="yes")
+            : what==="may" ? (!!r.may&&!_p1Refused(r))
+            : !_p1Refused(r);
+  _p1Kids().forEach(r=>{ if(r.alfaId&&!r.inAlfa) _p1.kidSkip[r.key]=!ok(r); });
+  _p1Render();
+}
 async function p1KidsOpen(){
   if(!_p1) return;
   _p1.kidsOpen=!_p1.kidsOpen; _p1Render();
@@ -8835,6 +8933,9 @@ async function p1KidsAdd(){
       customerIds:sel.map(r=>r.alfaId), b_date:c.bDate, e_date:c.eDate});
     const ok=(j.added||[]).length, errs=j.errors||[];
     if(_p1.members) (j.added||[]).forEach(x=>_p1.members.add(+x.customer_id));
+    // отметка живёт на ребёнке — чтобы «✓» был виден и в карточке занятия, а не только здесь
+    const addedIds=new Set((j.added||[]).map(x=>+x.customer_id));
+    _pubMarkKidsInGrid(_p1.key, sel.filter(r=>addedIds.has(r.alfaId)), +a.id);
     // считаем ТОЛЬКО наших: в группе Alfa могут быть и чужие участники, их в «детей в Alfa» не пишем
     const after=_p1Kids();
     _pubMarkKids(_p1.key,after.filter(r=>r.inAlfa).length,after.length);
@@ -8847,6 +8948,23 @@ async function p1KidsAdd(){
   }catch(e){ _p1.kidsLog=_pubErrHtml(e,"добавление детей"); }
   _p1.busy=false; _p1Render();
   if(typeof renderGroups==="function") renderGroups();
+}
+/* проставить детям группы отметку «внесён в группу Alfa» (и сохранить найденную по ФИО связь) */
+function _pubMarkKidsInGrid(key,rows,groupId){
+  const byKey=new Map((rows||[]).map(r=>[r.key,r]));
+  if(!byKey.size) return 0;
+  const today=new Date().toISOString().slice(0,10);
+  let n=0;
+  (S.grid||[]).forEach(l=>{
+    if(!l.course||_grpKeyOf(l)!==key) return;
+    kidsOf(l).forEach(k=>{
+      const r=byKey.get(_nameKey(k.n)); if(!r) return;
+      if(!k.alfaId&&r.alfaId) k.alfaId=r.alfaId;      // связь нашлась по ФИО — сохраняем, чтобы не искать заново
+      k.alfaGrp=String(groupId); k.alfaGrpAt=today; n++;
+    });
+  });
+  if(n){ persistLocal(); if(typeof fbSchedulePush==="function") fbSchedulePush(); }
+  return n;
 }
 function _pubMarkKids(key,inAlfa,total){
   if(!S.groupMeta) S.groupMeta={};

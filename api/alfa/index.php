@@ -662,8 +662,9 @@ switch ($action) {
     case 'groupMembers':
         @set_time_limit(60);
         $gid = (int)($in['groupId'] ?? 0);
-        $bid = (int)($in['branch'] ?? 0) ?: alfa_branch();
         if ($gid <= 0) json_out(['ok' => false, 'error' => 'Не передан id группы']);
+        // филиал можно не передавать — найдём сам по группе (членства branch-scoped)
+        $bid = (int)($in['branch'] ?? 0) ?: (alfa_group_branch($gid) ?: alfa_branch());
         $host  = 'https://' . alfa_host() . "/v2api/$bid";
         $token = alfa_token();
         $today = date('Y-m-d');
@@ -692,7 +693,8 @@ switch ($action) {
     case 'addToGroup':
         @set_time_limit(180);
         $gid  = (int)($in['groupId'] ?? 0);
-        $bid  = (int)($in['branch'] ?? 0) ?: alfa_branch();
+        // филиал можно не передавать (из карточки занятия он неизвестен) — определяем по группе
+        $bid  = (int)($in['branch'] ?? 0) ?: (alfa_group_branch($gid) ?: alfa_branch());
         $ids  = array_values(array_unique(array_filter(array_map('intval', (array)($in['customerIds'] ?? [])))));
         $bIso = alfa_iso((string)($in['b_date'] ?? '2026-09-02'));
         $eIso = alfa_iso((string)($in['e_date'] ?? '2027-05-31'));

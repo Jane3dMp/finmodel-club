@@ -292,6 +292,23 @@ function alfa_rl_body(array $slot, array $shape, string $bIso, string $eIso, int
     else                             { $body['b_date']   = $dB; $body['e_date']   = $dE; }
     return $body;
 }
+// В каком филиале лежит группа. Нужно, чтобы вызывающему (карточка занятия) не приходилось
+// это знать: cgi и расписание пишутся в контексте филиала группы. 0 — не нашли.
+function alfa_group_branch(int $gid): int {
+    static $memo = [];
+    if ($gid <= 0) return 0;
+    if (isset($memo[$gid])) return $memo[$gid];
+    foreach (alfa_all_branch_ids() as $bid) {
+        $r = alfa_http('POST', 'https://' . alfa_host() . "/v2api/$bid/group/index",
+                       ['id' => $gid, 'page' => 0, 'count' => 5], alfa_token(), true, 10);
+        foreach (($r['items'] ?? []) as $row) {
+            if ((int)($row['id'] ?? 0) === $gid) { $memo[$gid] = (int)$bid; return $memo[$gid]; }
+        }
+    }
+    $memo[$gid] = 0;
+    return 0;
+}
+
 // Формат дат у групп — сверяем с реальной группой этой CRM (b_date как её отдаёт Alfa).
 function alfa_group_date_fmt(int $branch): string {
     $r = alfa_http('POST', 'https://' . alfa_host() . "/v2api/$branch/group/index",
