@@ -276,6 +276,13 @@ details.cwarn .cwarn-body{padding:0 14px 12px}
 .grp-pin{cursor:pointer;opacity:.3;filter:grayscale(1);font-size:14px}
 .grp-pin.on{opacity:1;filter:none}
 .grp-pin:hover{opacity:.75}
+/* столбец «Alfa» — опубликована ли группа в расписании CRM; клик открывает публикацию */
+.grp-alfa{display:inline-block;cursor:pointer;font-size:11px;font-weight:600;white-space:nowrap;
+  padding:2px 7px;border-radius:20px;border:1px solid var(--line);background:#fff;color:var(--muted)}
+.grp-alfa:hover{border-color:var(--graphite);color:var(--coal)}
+.grp-alfa.a-done{background:#E8F5EC;border-color:#9BC9AB;color:#2F6B44}
+.grp-alfa.a-link{background:#FBF2CE;border-color:#DCC98A;color:#6B5411}
+.grp-alfa.a-similar{background:#F3F1EC;border-color:#C9C2B8;color:#5C574F}
 #groupsTable tr.grp-done td{opacity:.55}
 #groupsTable tr.grp-done .grp-name b{text-decoration:line-through}
 /* редактор детей в модалке занятия */
@@ -1299,6 +1306,21 @@ details.client .cli-cols .cc-bal{width:74px;font-weight:600}
  </div>
 </div>
 
+<div class="modal-bg" id="pubOneModal">
+ <div class="modal" style="max-width:760px">
+  <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
+   <h3 style="margin:0">📤 Опубликовать группу в расписание AlfaCRM</h3>
+   <button class="btn ghost sm" style="margin-left:auto" onclick="p1Close()">Закрыть</button>
+  </div>
+  <p style="font-size:12px;color:var(--muted);margin:0 0 10px;line-height:1.45">
+   Ставим <b>регулярное расписание</b> (день, время, кабинет, педагог — как в конструкторе).
+   Если такая группа в Альфе уже есть — выберите её, новую создавать не будем. Детей не трогаем.
+   Публиковать одну и ту же группу можно повторно: занятия, которые в Альфе уже стоят, пропускаются.
+  </p>
+  <div id="pubOneBody" style="font-size:13px">Загрузка…</div>
+ </div>
+</div>
+
 <div class="modal-bg" id="achieveModal" style="z-index:96">
  <div class="modal"><div id="achieveBody"></div></div>
 </div>
@@ -1569,7 +1591,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-07-28-37";
+const APP_VER="2026-07-30-01";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -7748,6 +7770,8 @@ function renderGroups(){
     g.sched.push({day:l.day,start:l.start});
     g.idxs.push(idx);
   });
+  // индекс имён групп Alfa строим один раз на отрисовку (и только если список уже выгружен)
+  const aIdx=(_pubAlfaGroups&&_pubAlfaGroups.length)?_pubAlfaByName():null;
   const groups=order.map(k=>{ const g=map[k];
     g.key=k; g.done=!!(S.groupsDone||{})[k];
     const gm=(S.groupMeta||{})[k]||{}; g.age=gm.age||""; g.klass=gm.klass||"";   // рукописные возраст/класс группы
@@ -7770,11 +7794,13 @@ function renderGroups(){
     g.teacherText=[...g.teachers].map(shortName).join(", ");
     g.roomText=[...g.rooms].join(", ");
     g.name=g.group || ([...g.teachers][0]?shortName([...g.teachers][0]):"без номера");
+    g.slots=g.sched;                                       // для _pubName (шаблон имени с днём/временем)
+    g.pub=_pubGrpStatus(g,aIdx);                           // опубликована ли в Alfa
     return g;
   });
   const _gsVal={name:g=>g.name,age:g=>g.age,klass:g=>g.klass,course:g=>g.course,teacher:g=>g.teacherText,sched:g=>g.schedKey,room:g=>g.roomText,kids:g=>g.kids,paid:g=>g.paid,
-    ryes:g=>g.rYes,rno:g=>g.rNo,rmaybe:g=>g.rMaybe,rnone:g=>g.rNone};
-  const _gsNum={sched:1,kids:1,paid:1,ryes:1,rno:1,rmaybe:1,rnone:1};
+    ryes:g=>g.rYes,rno:g=>g.rNo,rmaybe:g=>g.rMaybe,rnone:g=>g.rNone,alfa:g=>g.pub.rank};
+  const _gsNum={sched:1,kids:1,paid:1,ryes:1,rno:1,rmaybe:1,rnone:1,alfa:1};
   const _gv=_gsVal[_groupsSort.col]||_gsVal.course;
   groups.sort((a,b)=>{
     let r=_gsNum[_groupsSort.col]?(_gv(a)-_gv(b)):String(_gv(a)).localeCompare(String(_gv(b)),"ru",{numeric:true});
@@ -7796,15 +7822,17 @@ function renderGroups(){
       <span class="hd-sep"></span>
       <span class="hd-grp"><button class="btn ${_groupsHideDone?'':'ghost'} sm" onclick="_groupsHideDone=!_groupsHideDone;renderGroups()" title="Спрятать/показать закреплённые (готовые) группы">${_groupsHideDone?'👁 Показать готовые':'📌 Скрыть готовые'} (${doneCount})</button></span>
       <span class="hd-grp"><button class="btn sm" onclick="openAddKid()" title="Создать нового ребёнка и вписать в группу">➕ Новый ребёнок</button></span>
-      ${_fbIsAdmin?`<span class="hd-grp"><button class="btn sm" onclick="openPublish()" title="Создать эти группы и их расписание в AlfaCRM (сначала сухой прогон)">📤 Опубликовать в Alfa</button></span>`:""}
+      ${_fbIsAdmin?`<span class="hd-grp"><button class="btn ghost sm" onclick="pubSyncGroups(this)" title="Прочитать список групп AlfaCRM и показать в столбце «Alfa», какие из наших там уже есть">⟳ Сверить с Alfa</button>
+        <button class="btn sm" onclick="openPublish()" title="Массовое создание групп и расписания в AlfaCRM (сначала сухой прогон)">📤 Опубликовать в Alfa</button></span>`:""}
     </div>
     <div class="tscroll"><table id="groupsTable"><thead><tr>
-      <th style="width:30px" title="Закреп (готово)">📌</th>${_grpTh("name","Группа","left")}${_grpTh("age","Возраст","center")}${_grpTh("klass","Класс","center")}${_grpTh("kids","Детей","center")}${_grpTh("ryes",'<span style="color:#7CE0A0">🟢</span>',"center")}${_grpTh("rno",'<span style="color:#F0A0A0">🔴</span>',"center")}${_grpTh("rmaybe",'<span style="color:#F2D06B">🟡</span>',"center")}${_grpTh("rnone","Молчат","center")}${_grpTh("paid","💰","center")}${_grpTh("course","Курс","left")}${_grpTh("teacher","Педагог","left")}${_grpTh("sched","Расписание","left")}${_grpTh("room","Каб.","center")}<th></th>
+      <th style="width:30px" title="Закреп (готово)">📌</th>${_grpTh("alfa",'<span title="Опубликована ли группа в расписании AlfaCRM">Alfa</span>',"center")}${_grpTh("name","Группа","left")}${_grpTh("age","Возраст","center")}${_grpTh("klass","Класс","center")}${_grpTh("kids","Детей","center")}${_grpTh("ryes",'<span style="color:#7CE0A0">🟢</span>',"center")}${_grpTh("rno",'<span style="color:#F0A0A0">🔴</span>',"center")}${_grpTh("rmaybe",'<span style="color:#F2D06B">🟡</span>',"center")}${_grpTh("rnone","Молчат","center")}${_grpTh("paid","💰","center")}${_grpTh("course","Курс","left")}${_grpTh("teacher","Педагог","left")}${_grpTh("sched","Расписание","left")}${_grpTh("room","Каб.","center")}<th></th>
     </tr></thead><tbody>`;
   shown.forEach((g,i)=>{
     html+=`<tr class="${g.done?'grp-done':''}">
       <td style="text-align:center"><span class="grp-pin${g.done?' on':''}" title="${g.done?'Готова — снять закреп':'Отметить готовой (закрепить)'}" onclick="grpToggleDone(${i})">📌</span></td>
-      <td style="text-align:left"><span class="grp-name" title="Открыть карточку занятия" onclick="${g.firstId?`editLes(_lesIdx('${esc(g.firstId)}'))`:`editLes(${g.firstIdx})`}"><b>${esc(g.name)}</b></span>${g.newIntake?' <span class="ni-tag" title="Группа с новым набором">NEW</span>':''}${g.alfaId?` <span class="ni-tag" style="background:var(--graphite);color:#fff;border-color:var(--graphite)" title="Опубликована в AlfaCRM · id ${g.alfaId}">Alfa</span>`:''}</td>
+      <td style="text-align:center"><span class="grp-alfa a-${g.pub.k}" title="${esc(g.pub.t)}${_fbIsAdmin?' · нажмите, чтобы опубликовать расписание в Alfa':''}" ${_fbIsAdmin?`onclick="pubOne('${_jsStr(g.key)}')"`:'style="cursor:default"'}>${g.pub.lab}</span></td>
+      <td style="text-align:left"><span class="grp-name" title="Открыть карточку занятия" onclick="${g.firstId?`editLes(_lesIdx('${esc(g.firstId)}'))`:`editLes(${g.firstIdx})`}"><b>${esc(g.name)}</b></span>${g.newIntake?' <span class="ni-tag" title="Группа с новым набором">NEW</span>':''}</td>
       <td style="text-align:center"><input class="cell grp-meta" value="${esc(g.age)}" placeholder="—" title="Возраст группы — впишите вручную (напр. 7–9)" onchange="setGroupMeta('${_jsStr(g.key)}','age',this.value)"></td>
       <td style="text-align:center"><input class="cell grp-meta" value="${esc(g.klass)}" placeholder="—" title="Класс — впишите вручную (напр. 1–3)" onchange="setGroupMeta('${_jsStr(g.key)}','klass',this.value)"></td>
       <td style="text-align:center">${g.kids}${g.cap?(" / "+g.cap):""}</td>
@@ -7820,7 +7848,7 @@ function renderGroups(){
       <td style="text-align:center"><button class="btn ghost sm" onclick="${g.firstId?`gotoKidLessonId('${esc(g.firstId)}')`:`gotoKidLesson(${g.firstIdx})`}" title="Открыть группу в сетке">→</button></td>
     </tr>`;
   });
-  if(!shown.length) html+=`<tr><td colspan="15" style="padding:12px;color:var(--muted)">${_groupsHideDone&&doneCount?'Все группы под фильтром закреплены (готовы). Нажмите «Показать готовые».':'Групп не найдено.'}</td></tr>`;
+  if(!shown.length) html+=`<tr><td colspan="16" style="padding:12px;color:var(--muted)">${_groupsHideDone&&doneCount?'Все группы под фильтром закреплены (готовы). Нажмите «Показать готовые».':'Групп не найдено.'}</td></tr>`;
   html+=`</tbody></table></div>`;
   box.innerHTML=html;
 }
@@ -8015,12 +8043,14 @@ function _pubBuildRows(){
 function _pubOn(r){ if(!r.can) return false; const v=_pubSkip[r.key]; return v===undefined?!(r.exists||r.similar):!v; }
 function pubToggle(key){ const r=_pubRows.find(x=>x.key===key); if(!r||!r.can) return; _pubSkip[key]=_pubOn(r); _pubRender(); }
 function pubAll(on){ _pubRows.forEach(r=>{ if(r.can) _pubSkip[r.key]=!on; }); _pubRender(); }
-function pubSetCfg(f,v){ const c=_pubCfg(); c[f]=v; _pubSave(); _pubRender(); }
+/* соответствия/настройки правятся из обеих модалок — обновляем ту, что открыта */
+function _pubRerender(){ _pubRender(); if(typeof _p1Render==="function") _p1Render(); }
+function pubSetCfg(f,v){ const c=_pubCfg(); c[f]=v; _pubSave(); _pubRerender(); }
 function pubSetMap(kind,key,v){
   const m=_pubMap();
   v=String(v||"").trim();
   if(!v) delete m[kind][key]; else m[kind][key]=(/^\d+$/.test(v)?+v:v);
-  _pubSave(); _pubRender();
+  _pubSave(); _pubRerender();
 }
 function pubSetName(key,v){
   const c=_pubCfg(); v=String(v||"").trim();
@@ -8036,15 +8066,32 @@ function pubResetMap(){
   _pubAutoMap(); _pubRender();
   toast("Соответствия подобраны заново");
 }
-function _pubMarkPublished(key,id){
+function _pubMarkPublished(key,id,extra){
   if(!S.groupMeta) S.groupMeta={};
   const m=S.groupMeta[key]||(S.groupMeta[key]={});
-  m.alfaId=String(id);
+  if(id) m.alfaId=String(id);
+  if(extra){
+    if(extra.name) m.alfaName=String(extra.name);
+    if(extra.sched){ m.alfaSched=1; m.alfaAt=new Date().toISOString().slice(0,10); }
+    if(extra.les!=null) m.alfaLes=+extra.les||0;
+  }
+  _pubSave();
+}
+/* связь с группой Alfa без публикации расписания (или её снятие) */
+function _pubLinkGroup(key,id,name){
+  if(!S.groupMeta) S.groupMeta={};
+  const m=S.groupMeta[key]||(S.groupMeta[key]={});
+  if(id){ m.alfaId=String(id); if(name) m.alfaName=String(name); }
+  else { delete m.alfaId; delete m.alfaName; delete m.alfaSched; delete m.alfaAt; delete m.alfaLes;
+         if(!Object.keys(m).length) delete S.groupMeta[key]; }
   _pubSave();
 }
 
-/* --- payload одной группы (то же, что уйдёт на сервер) --- */
-function _pubPlan(g){
+/* --- payload одной группы (то же, что уйдёт на сервер) ---
+   opt.groupId — публикуем расписание УЖЕ существующей группы Alfa (новую не создаём);
+   opt.branch  — филиал (у связанной группы берём её собственный, кабинеты branch-scoped). */
+function _pubPlan(g,opt){
+  opt=opt||{};
   const c=_pubCfg(), m=_pubMap();
   const subj=m.subj[g.course]?+m.subj[g.course]:null;
   const tIds=g.teachers.map(t=>m.teacher[t]).filter(x=>x).map(Number);
@@ -8061,8 +8108,10 @@ function _pubPlan(g){
       time_from:_pubTime(s.start), time_to:_pubTime(s.end||_pubAddMin(s.start,60)),
       lesson_type_id:c.lessonTypeId?+c.lessonTypeId:null};
   });
-  return {branch:(g.branchInfo?g.branchInfo.branch:0)||undefined, group, schedule,
-    studentAlfaIds:_pubKids?[...g.alfaKids]:[], b_date:c.bDate, e_date:c.eDate};
+  const kids=(opt.kids===undefined)?_pubKids:opt.kids;
+  return {groupId:opt.groupId||undefined, updateGroup:!!opt.updateGroup,
+    branch:(opt.branch||(g.branchInfo?g.branchInfo.branch:0))||undefined, group, schedule,
+    studentAlfaIds:kids?[...g.alfaKids]:[], b_date:c.bDate, e_date:c.eDate};
 }
 
 async function _pubCall(action,payload){
@@ -8074,12 +8123,13 @@ async function _pubCall(action,payload){
   return j;
 }
 function closePublish(){ document.getElementById("pubModal").classList.remove("show"); }
-async function openPublish(){
-  if(!_fbIsAdmin){ toast("Только для админа"); return; }
-  document.getElementById("pubModal").classList.add("show");
-  const body=document.getElementById("pubBody");
-  body.innerHTML="Тяну справочники и список групп из Альфы… (до минуты)";
-  try{
+/* Справочники и список групп Alfa тянем ОДИН раз на сессию — их просят и массовая модалка,
+   и публикация по одной группе из таблицы «Группы». Параллельные вызовы ждут один запрос. */
+let _pubLoading=null;
+async function _pubEnsureLoaded(force){
+  if(!force && _pubRefs && _pubAlfaGroups) return true;
+  if(_pubLoading) return _pubLoading;
+  _pubLoading=(async()=>{
     const br={branches:_pubCfg().branches||[]};
     const [refs,gl]=await Promise.all([_pubCall("refs",br), _pubCall("groupsList",br)]);
     _pubRefs=refs.refs||{}; _pubAlfaGroups=gl.groups||[];
@@ -8087,11 +8137,34 @@ async function openPublish(){
     _pubBranchNames=refs.branchNames||gl.branchNames||{};
     console.log("📤 Alfa refs:",_pubRefs,"· групп в Alfa:",_pubAlfaGroups.length,"· по филиалам:",_pubBranches,"· образец группы:",gl.sample);
     _pubAutoMap();
+    return true;
+  })();
+  try{ return await _pubLoading; } finally { _pubLoading=null; }
+}
+async function openPublish(){
+  if(!_fbIsAdmin){ toast("Только для админа"); return; }
+  document.getElementById("pubModal").classList.add("show");
+  const body=document.getElementById("pubBody");
+  body.innerHTML="Тяну справочники и список групп из Альфы… (до минуты)";
+  try{
+    await _pubEnsureLoaded(true);
     _pubRender();
   }catch(e){
     body.innerHTML=`<div class="callout" style="border-color:var(--red)">Не получилось: ${esc((e&&e.message)||e)}</div>
       <p style="font-size:12px;color:var(--muted)">Проверьте связь: «📞 Контакты из Альфы» → «🔌 Проверить связь с Альфой».</p>`;
   }
+}
+/* Кнопка «⟳ Сверить с Alfa» на вкладке «Группы»: подтянуть список групп Alfa, чтобы в столбце
+   было видно не только «мы публиковали», но и «такая группа в Alfa уже есть». */
+async function pubSyncGroups(btn){
+  if(!_fbIsAdmin){ toast("Только для админа"); return; }
+  const old=btn?btn.innerHTML:"";
+  if(btn){ btn.disabled=true; btn.innerHTML="⏳ Читаю Alfa…"; }
+  try{
+    await _pubEnsureLoaded(true);
+    toast("Из Alfa: групп "+((_pubAlfaGroups||[]).length));
+  }catch(e){ toast("Не получилось: "+((e&&e.message)||e)); }
+  finally{ if(btn){ btn.disabled=false; btn.innerHTML=old; } renderGroups(); }
 }
 let _pubBranch=0, _pubBranches={}, _pubBranchNames={}, _pubAlfaQ="";
 /* Филиалы, с которыми работаем: пусто = все. Смена состава требует перечитать справочники —
@@ -8395,6 +8468,232 @@ async function pubRun(live){
   }
   const b=document.getElementById("pubLog");
   if(b) b.innerHTML=(live?`<div class="callout" style="border-color:${fail?"var(--terra)":"var(--green)"};margin-bottom:6px">Готово: создано <b>${done}</b>${fail?(", с ошибками <b>"+fail+"</b>"):""}. Проверьте группы в AlfaCRM.</div>`:"")+_pubLogHTML(lines);
+}
+
+/* ===== ПУБЛИКАЦИЯ ПО ОДНОЙ ГРУППЕ (кнопка-статус в таблице «Группы») =====
+   Массовая модалка умеет только СОЗДАВАТЬ группы. Здесь главное другое: нашу группу можно
+   связать с УЖЕ СУЩЕСТВУЮЩЕЙ группой Alfa и опубликовать ей расписание (день/время/кабинет/
+   педагог — из конструктора, период 02.09.2026–31.05.2027). Повтор безопасен: прокси
+   пропускает слоты, которые в расписании Alfa уже стоят. */
+let _p1=null;
+/* статус публикации для столбца «Alfa». aIdx — индекс имён групп Alfa (если уже выгружены) */
+function _pubGrpStatus(g,aIdx){
+  const gm=(S.groupMeta||{})[g.key]||{};
+  const id=+(gm.alfaId||0)||0;
+  if(id&&gm.alfaSched) return {k:"done",lab:"✓ в Alfa",rank:3,
+    t:"Расписание опубликовано в AlfaCRM · id "+id+(gm.alfaAt?(" · "+gm.alfaAt):"")+(gm.alfaLes?(" · занятий: "+gm.alfaLes):"")};
+  if(id) return {k:"link",lab:"◐ связана",rank:2,
+    t:"Связана с группой Alfa id "+id+(gm.alfaName?(" «"+gm.alfaName+"»"):"")+", расписание ещё не опубликовано"};
+  if(aIdx){
+    const hit=_pubMatch(aIdx,_pubName(g));
+    if(hit) return {k:"similar",lab:"≈ есть",rank:1,
+      t:(hit.kind==="exists"?"В Alfa есть группа с таким именем":"В Alfa есть похожая группа")+" «"+hit.g.name+"» (id "+hit.g.id+") — свяжите и опубликуйте ей расписание"};
+  }
+  return {k:"none",lab:"— нет",rank:0,
+    t:"В Alfa не опубликована"+(aIdx?"; похожей группы в Alfa не нашлось":"; нажмите «⟳ Сверить с Alfa», чтобы увидеть существующие")};
+}
+function _pubRefName(kind,id){ const o=_pubRefList(kind).find(x=>+x.id===+id); return o?o.name:("id "+id); }
+function _p1Alfa(){ return (_p1&&_p1.mode==="link"&&_p1.sel)?((_pubAlfaGroups||[]).find(a=>+a.id===+_p1.sel)||null):null; }
+function _p1Branch(){ const a=_p1Alfa(); return a?(+a.branch||0):((((_p1||{}).g||{}).branchInfo||{}).branch||0); }
+/* кандидаты в Alfa: точное имя → та же база имени → база курса → просто содержит курс */
+function _p1Cands(){
+  const g=_p1.g, all=_pubAlfaGroups||[], q=_normCourse(_p1.q||"");
+  if(q) return all.filter(a=>_normCourse(a.name).indexOf(q)>=0).slice(0,50);
+  const nm=_normCourse(g.alfaName), base=_courseBase(g.alfaName), cbase=_courseBase(g.course), cn=_normCourse(g.course);
+  const sc=a=>{ const n=_normCourse(a.name), b=_courseBase(a.name);
+    if(n&&n===nm) return 100;
+    if(base&&b===base) return 80;
+    if(cbase&&b===cbase) return 60;
+    if(cn&&n.indexOf(cn)>=0) return 40;
+    return 0; };
+  return all.map(a=>[sc(a),a]).filter(x=>x[0]>0)
+    .sort((x,y)=>y[0]-x[0]||String(x[1].name).localeCompare(String(y[1].name),"ru",{numeric:true}))
+    .slice(0,25).map(x=>x[1]);
+}
+function _p1CandsHtml(){
+  const list=_p1Cands();
+  if(!list.length) return `<div style="color:var(--muted);font-size:12px;padding:4px 0">Похожих групп в Alfa не нашлось. Поищите по названию выше — или создайте новую группу (ниже).</div>`;
+  return list.map(a=>`<label style="display:flex;gap:8px;align-items:flex-start;padding:3px 0;cursor:pointer;font-size:13px;margin:0">
+    <input type="radio" name="p1cand" style="width:auto;margin:3px 0 0" ${(_p1.mode==="link"&&+_p1.sel===+a.id)?"checked":""} onchange="p1Pick(${+a.id})">
+    <span>${esc(a.name)} <span style="color:var(--muted)">· id ${esc(a.id)} · ${esc(_pubBrName(+a.branch||0))}${a.is_archive?" · архив":""}</span></span></label>`).join("");
+}
+function p1Close(){ const el=document.getElementById("pubOneModal"); if(el) el.classList.remove("show"); _p1=null; if(typeof renderGroups==="function") renderGroups(); }
+function p1SetMode(mode){ if(!_p1) return; _p1.mode=mode; _p1.log="";
+  if(mode==="new") _p1.sel=0; else if(!_p1.sel){ const c=_p1Cands()[0]; if(c) p1Pick(+c.id); }
+  _p1Render(); }
+function p1Pick(id){ if(!_p1) return; _p1.mode="link"; _p1.sel=+id; _p1.log="";
+  const a=_p1Alfa(); _p1.upd=!!(a&&!(a.teacher_ids||[]).length);   // педагога дописываем сами, только если в Alfa его нет
+  _p1Render(); }
+function p1Search(v){ if(!_p1) return; _p1.q=String(v||""); const el=document.getElementById("p1Cands"); if(el) el.innerHTML=_p1CandsHtml(); }
+function p1SetName(v){ if(!_p1) return; pubSetName(_p1.key,v); _p1.g.alfaName=_pubName(_p1.g); _p1Render(); }
+function p1Unlink(){
+  if(!_p1) return;
+  if(!confirm("Снять связь с группой Alfa?\n\nВ самой Alfa ничего не изменится — мы просто перестанем считать эту группу опубликованной.")) return;
+  _pubLinkGroup(_p1.key,0); _p1.mode="new"; _p1.sel=0; _p1.log=""; _p1Render();
+}
+async function pubOne(key){
+  if(!_fbIsAdmin){ toast("Публикует только админ"); return; }
+  const el=document.getElementById("pubOneModal"); if(!el) return;
+  _p1={key,mode:"",sel:0,q:"",log:"",busy:false,upd:false,g:null};
+  el.classList.add("show");
+  const b=document.getElementById("pubOneBody");
+  b.innerHTML=`<div style="padding:12px;color:var(--muted)">Читаю справочники и группы из Альфы… (до минуты)</div>`;
+  try{ await _pubEnsureLoaded(); }
+  catch(e){ b.innerHTML=`<div class="callout" style="border-color:var(--red)">Не получилось связаться с Альфой: ${esc((e&&e.message)||e)}</div>
+    <p style="font-size:12px;color:var(--muted)">Проверьте связь: «Клиенты» → «📞 Контакты из Альфы» → «🔌 Проверить связь».</p>`; return; }
+  if(!_p1||_p1.key!==key) return;                                   // модалку успели закрыть/переоткрыть
+  const g=(_pubModelGroups()||[]).find(x=>x.key===key);
+  if(!g){ b.innerHTML=`<div class="callout">Такой группы в расписании больше нет.</div>`; return; }
+  g.alfaName=_pubName(g); g.branchInfo=_pubGroupBranch(g); g.issues=_pubIssues(g);
+  _p1.g=g;
+  const saved=+(((S.groupMeta||{})[key]||{}).alfaId||0)||0;
+  if(saved) p1Pick(saved);
+  else{
+    const hit=_pubMatch(_pubAlfaByName(),g.alfaName);
+    if(hit) p1Pick(+hit.g.id); else { _p1.mode="new"; _p1Render(); }
+  }
+}
+function _p1Render(){
+  if(!_p1||!_p1.g) return;
+  const b=document.getElementById("pubOneBody"); if(!b) return;
+  const g=_p1.g, c=_pubCfg(), m=_pubMap();
+  g.alfaName=_pubName(g);                       // соответствия могли поменяться прямо здесь —
+  g.branchInfo=_pubGroupBranch(g);              // филиал и список «чего не хватает» пересчитываем
+  g.issues=_pubIssues(g);                       // на каждой перерисовке, иначе ⛔ не гаснет
+  const a=_p1Alfa(), br=_p1Branch();
+  // у связанной группы филиал берём из Alfa — наши «филиальные» претензии тут не блокируют
+  const hard=g.issues.filter(i=>i.hard&&!(a&&/филиал/.test(i.t)));
+  const saved=+(((S.groupMeta||{})[_p1.key]||{}).alfaId||0)||0;
+
+  let h=`<div class="callout" style="margin-bottom:10px">
+    <b style="font-size:14px">${esc(g.course)}${g.group?(" · "+esc(g.group)):""}</b><br>
+    Педагог: <b>${esc(g.teachers.join(", ")||"— не указан —")}</b> · Расписание: <b>${esc(g.schedText||"—")}</b>
+    · Кабинет: ${esc(g.rooms.join(", ")||"—")} · детей вписано: ${g.kidsN}</div>`;
+
+  h+=`<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:end;margin-bottom:12px">
+    <label style="font-size:12px;color:var(--muted)">Начало действия группы<br><input type="date" class="cell" value="${esc(c.bDate)}" onchange="pubSetCfg('bDate',this.value)"></label>
+    <label style="font-size:12px;color:var(--muted)">Окончание<br><input type="date" class="cell" value="${esc(c.eDate)}" onchange="pubSetCfg('eDate',this.value)"></label>
+    <span style="font-size:11px;color:var(--muted);padding-bottom:6px">этот период уйдёт и в карточку группы, и в расписание</span></div>`;
+
+  h+=`<div style="font-weight:700;margin-bottom:6px">1 · Какая это группа в AlfaCRM</div>`;
+  if(saved&&a) h+=`<div class="callout" style="border-color:var(--green);margin-bottom:8px;font-size:12px">
+    Связана с «<b>${esc(a.name)}</b>» (id ${esc(a.id)}) · ${esc(_pubBrName(+a.branch||0))}
+    <button class="btn ghost sm" style="margin-left:8px" onclick="p1Unlink()">Снять связь</button></div>`;
+
+  h+=`<div style="border:1px solid var(--line);border-radius:10px;padding:8px 10px;margin-bottom:8px">
+    <label style="display:flex;gap:8px;align-items:center;cursor:pointer;font-weight:600;margin:0 0 6px">
+      <input type="radio" name="p1mode" style="width:auto;margin:0" ${_p1.mode==="link"?"checked":""} onchange="p1SetMode('link')">
+      Опубликовать расписание группе, которая в Alfa уже есть</label>
+    <input class="cell" style="width:100%;margin-bottom:6px" placeholder="🔍 Найти среди всех групп Alfa (${(_pubAlfaGroups||[]).length})" value="${esc(_p1.q)}" oninput="p1Search(this.value)">
+    <div id="p1Cands" style="max-height:23vh;overflow:auto">${_p1CandsHtml()}</div></div>`;
+
+  h+=`<div style="border:1px solid var(--line);border-radius:10px;padding:8px 10px;margin-bottom:12px">
+    <label style="display:flex;gap:8px;align-items:center;cursor:pointer;font-weight:600;margin:0">
+      <input type="radio" name="p1mode" style="width:auto;margin:0" ${_p1.mode==="new"?"checked":""} onchange="p1SetMode('new')">
+      Такой группы в Alfa нет — создать новую</label>
+    ${_p1.mode==="new"?`<div style="margin-top:6px">
+      <label style="font-size:12px;color:var(--muted)">Имя новой группы в Alfa<br>
+        <input class="cell" style="width:100%" value="${esc(g.alfaName)}" onchange="p1SetName(this.value)"></label>
+      <div style="font-size:11px;color:var(--muted);margin-top:4px">Ляжет в филиал <b>${esc(_pubBrName(br))}</b> ${(g.branchInfo||{}).fromRoom?"(определён по кабинету)":"(по умолчанию)"}</div></div>`:""}</div>`;
+
+  h+=`<div style="font-weight:700;margin-bottom:6px">2 · Что уйдёт в расписание</div>`;
+  const need=[];
+  if(m.subj[g.course]==null) need.push(["subj",g.course,"subjects","предмет курса"]);
+  g.rooms.forEach(r=>{ if(m.room[r]==null) need.push(["room",r,"rooms","кабинет"]); });
+  g.teachers.forEach(t=>{ if(m.teacher[t]==null) need.push(["teacher",t,"teachers","педагог"]); });
+  if(need.length) h+=`<div class="callout" style="border-color:var(--terra);margin-bottom:8px">
+    <div style="font-size:12px;margin-bottom:6px">Не хватает соответствий — выберите, что это в Alfa:</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 10px;align-items:center">`+
+    need.map(([kind,val,ref,lab])=>`<div style="font-size:12px"><b>${esc(val)}</b> <span style="color:var(--muted)">— ${esc(lab)}</span></div>
+      <select class="cell" onchange="pubSetMap('${_jsStr(kind)}','${_jsStr(val)}',this.value)">${
+        _pubOpts(ref==="rooms"?_pubRefList("rooms").map(o=>({id:o.id,name:o.name+(o.branch?(" · "+_pubBrName(o.branch)):"")})):_pubRefList(ref),"","— выбрать —")}</select>`).join("")+
+    `</div></div>`;
+
+  h+=`<div class="tscroll"><table style="width:100%"><thead><tr>
+    <th style="text-align:left">День</th><th style="text-align:left">Время</th>
+    <th style="text-align:left">Кабинет</th><th style="text-align:left">Педагог</th></tr></thead><tbody>`;
+  g.slots.forEach(s=>{
+    const rid=s.room?m.room[s.room]:null, tid=s.teacher?m.teacher[s.teacher]:null;
+    h+=`<tr><td style="text-align:left">${esc(DAY_NAMES[s.day]||"?")}</td>
+      <td style="text-align:left">${esc(s.start||"—")}–${esc(s.end||_pubAddMin(s.start,60))}</td>
+      <td style="text-align:left">${s.room?esc(s.room)+(rid?` <span style="color:var(--muted)">→ ${esc(_pubRefName("rooms",rid))}</span>`:` <b style="color:var(--red)">не сопоставлен</b>`):'<span style="color:var(--muted)">—</span>'}</td>
+      <td style="text-align:left">${s.teacher?esc(shortName(s.teacher))+(tid?` <span style="color:var(--muted)">→ ${esc(_pubRefName("teachers",tid))}</span>`:` <b style="color:var(--red)">не сопоставлен</b>`):'<span style="color:var(--muted)">—</span>'}</td></tr>`;
+  });
+  h+=`</tbody></table></div>`;
+
+  if(a&&(g.branchInfo||{}).branch&&+a.branch&&+a.branch!==+g.branchInfo.branch)
+    h+=`<div class="callout" style="border-color:var(--terra);font-size:12px;margin-top:8px">⚠ Группа «${esc(a.name)}» в Alfa лежит в филиале <b>${esc(_pubBrName(+a.branch))}</b>, а кабинет нашей группы — из <b>${esc(_pubBrName(g.branchInfo.branch))}</b>. Расписание уйдёт в филиал группы, и кабинет из чужого филиала Alfa может не принять.</div>`;
+
+  if(a){
+    const theirs=(a.teacher_ids||[]).map(id=>_pubRefName("teachers",id)).join(", ");
+    h+=`<label style="display:flex;gap:8px;align-items:flex-start;margin-top:8px;font-size:12px;cursor:pointer">
+      <input type="checkbox" style="width:auto;margin:2px 0 0" ${_p1.upd?"checked":""} onchange="_p1.upd=this.checked;_p1Render()">
+      <span>Прописать нашего педагога (<b>${esc(g.teachers.map(shortName).join(", ")||"—")}</b>) и период в саму карточку группы Alfa
+      <span style="color:var(--muted)">${theirs?("— сейчас там: "+esc(theirs)):"— сейчас педагог там не указан"}</span></span></label>`;
+  }
+
+  const blocked=hard.length>0||(_p1.mode==="link"&&!a)||_p1.busy;
+  h+=`<div class="hd-actions les-foot" style="margin-top:10px">
+      ${hard.length?`<span style="color:var(--red);font-size:12px">⛔ ${esc(hard.map(i=>i.t).join(" · "))}</span>`:""}
+      <button class="btn ghost sm" ${blocked?"disabled":""} onclick="p1Dry()" title="Показать, что уйдёт в Alfa — ничего не записывая">👁 Проверить</button>
+      <button class="btn sm" style="margin-left:auto" ${blocked?"disabled":""} onclick="p1Go()">📤 Опубликовать в Alfa</button>
+    </div>
+    <div id="p1Log" style="margin-top:10px;font-size:12px">${_p1.log||""}</div>`;
+  b.innerHTML=h;
+}
+function _p1Opts(){ const a=_p1Alfa(); return {groupId:a?+a.id:0, branch:_p1Branch(), updateGroup:!!(a&&_p1.upd), kids:false}; }
+function _p1PlanHtml(p){
+  p=p||{};
+  const nNew=(p.schedule||[]).length, nSkip=(p.skipped||[]).length;
+  const add=(p.schedule||[]).map(s=>`<div>➕ день ${esc(s.day)} · ${esc(String(s.time_from_v||"").slice(0,5))}–${esc(String(s.time_to_v||"").slice(0,5))}`+
+    `${s.room_id?" · "+esc(_pubRefName("rooms",s.room_id)):""}`+
+    `${(s.teacher_ids||[]).length?" · "+esc((s.teacher_ids||[]).map(t=>_pubRefName("teachers",t)).join(", ")):' · <span style="color:var(--red)">без педагога</span>'}</div>`);
+  const skip=(p.skipped||[]).map(s=>`<div style="color:var(--muted)">= день ${esc(s.day)} · ${esc(s.time)} — в Alfa уже стоит, пропустим</div>`);
+  return `<div class="callout" style="border-color:${nNew?"var(--green)":"var(--terra)"};margin-bottom:6px">
+      ${p.groupId?`Группа Alfa <b>id ${esc(p.groupId)}</b> — новую не создаём.`:`Будет создана <b>новая группа</b> «${esc((p.group||{}).name||"")}».`}
+      Добавим занятий: <b>${nNew}</b>${nSkip?`, пропустим как уже существующие: <b>${nSkip}</b>`:""} · период ${esc(_pubCfg().bDate)} … ${esc(_pubCfg().eDate)}</div>
+    <div style="border:1px solid var(--line);border-radius:8px;padding:6px 10px;line-height:1.6">${
+      add.concat(skip).join("")||`<span style="color:var(--muted)">нечего добавлять</span>`}</div>`;
+}
+async function p1Dry(){
+  if(!_p1||_p1.busy) return;
+  _p1.busy=true; _p1Render();
+  const box=document.getElementById("p1Log"); if(box) box.innerHTML="⏳ Проверяю…";
+  try{
+    const j=await _pubCall("publish",Object.assign({dryRun:true},_pubPlan(_p1.g,_p1Opts())));
+    console.log("👁 publish dryRun:",_p1.key,j.plan);
+    _p1.log=_p1PlanHtml(j.plan);
+  }catch(e){ _p1.log=`<div class="callout" style="border-color:var(--red)">Не получилось: ${esc((e&&e.message)||e)}</div>`; }
+  _p1.busy=false; _p1Render();
+}
+async function p1Go(){
+  if(!_p1||_p1.busy) return;
+  const g=_p1.g, a=_p1Alfa(), c=_pubCfg();
+  if(_p1.mode==="link"&&!a){ toast("Выберите группу в Alfa"); return; }
+  const head=a?`Опубликовать расписание группе Alfa «${a.name}» (id ${a.id})?`
+             :`СОЗДАТЬ в Alfa новую группу «${g.alfaName}» и её расписание?`;
+  if(!confirm(head+"\n\nРасписание: "+(g.schedText||"—")+"\nПедагог: "+(g.teachers.join(", ")||"— не указан —")+
+    "\nПериод: "+c.bDate+" … "+c.eDate+"\nФилиал: "+_pubBrName(_p1Branch())+
+    (a&&_p1.upd?"\n\nТакже обновим карточку группы (педагог + период).":"")+
+    "\n\nЭто живая запись в CRM — отменить кнопкой нельзя.")) return;
+  _p1.busy=true; _p1Render();
+  const box=document.getElementById("p1Log"); if(box) box.innerHTML="⏳ Публикую…";
+  try{
+    const j=await _pubCall("publish",Object.assign({dryRun:false},_pubPlan(g,_p1Opts())));
+    const cr=j.created||{}, errs=cr.errors||[], nLes=(cr.lessons||[]).length;
+    // созданной группы ещё нет в выгрузке — добавляем, иначе экран потеряет связь
+    if(cr.createdGroup&&cr.group_id&&_pubAlfaGroups)
+      _pubAlfaGroups.push({id:+cr.group_id,name:g.alfaName,branch:+cr.branch||_p1Branch(),teacher_ids:[],is_archive:0});
+    _pubMarkPublished(_p1.key,cr.group_id,{sched:true,les:nLes,name:a?a.name:g.alfaName});
+    _p1.mode="link"; _p1.sel=+cr.group_id||_p1.sel;
+    _p1.log=errs.length
+      ? `<div class="callout" style="border-color:var(--terra)">⚠ Группа id ${esc(cr.group_id)}: добавлено занятий ${nLes}, но ${errs.length} шаг(ов) с ошибкой — ${esc(errs.map(e=>e.step).join(", "))}. Подробности в консоли (F12).</div>`
+      : `<div class="callout" style="border-color:var(--green)">✅ Готово. Группа Alfa id ${esc(cr.group_id)}${cr.createdGroup?" (создана)":""} · добавлено занятий: <b>${nLes}</b>${cr.skipped?(", пропущено как уже существующие: "+cr.skipped):""}${cr.groupUpdated?" · карточка группы обновлена":""}.</div>`;
+    if(errs.length) console.warn("📤 publish — ошибки шагов:",_p1.key,errs);
+    toast(errs.length?"Опубликовано с замечаниями":"Опубликовано в Alfa");
+  }catch(e){ _p1.log=`<div class="callout" style="border-color:var(--red)">Не получилось: ${esc((e&&e.message)||e)}</div>`; }
+  _p1.busy=false; _p1Render();
+  if(typeof renderGroups==="function") renderGroups();
 }
 
 /* ===== ВКЛАДКА «КЛИЕНТЫ» — все дети + на какие курсы/группы вписаны и статус ===== */

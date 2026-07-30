@@ -696,6 +696,9 @@ switch ($action) {
         break;
 
     // --- публикация ОДНОЙ группы: dryRun=true по умолчанию (ничего не создаёт) ---
+    //  groupId > 0  → группа в Alfa УЖЕ ЕСТЬ: новую НЕ создаём, только дописываем ей расписание.
+    //  Повтор безопасен: слоты, которые в расписании Alfa уже стоят (день+время), пропускаем —
+    //  иначе вторая публикация той же группы дала бы дубли занятий.
     case 'publish':
         @set_time_limit(120);
         $dry      = !isset($in['dryRun']) || $in['dryRun'] !== false;
@@ -707,37 +710,85 @@ switch ($action) {
         $branch   = (int)($in['branch'] ?? 0) ?: alfa_branch();
         $bDate    = (string)($in['b_date'] ?? '2026-09-02');
         $eDate    = (string)($in['e_date'] ?? '2027-05-31');
+        $groupId  = (int)($in['groupId'] ?? 0);
+        $updGroup = !empty($in['updateGroup']);   // прописать нашего педагога/даты в карточку существующей группы
 
         $groupPayload = array_merge(
             ['name' => (string)($g['name'] ?? ''), 'branch_ids' => [$branch], 'b_date' => $bDate, 'e_date' => $eDate],
             array_intersect_key($g, array_flip(['teacher_ids','level_id','status_id','limit','note','subject_ids']))
         );
 
-        $plan = ['branch' => $branch, 'group' => $groupPayload, 'schedule' => [], 'links' => []];
+        // что у этой группы уже стоит в регулярном расписании Alfa
+        $have = [];
+        if ($groupId > 0) {
+            $rr = alfa_http('POST', 'https://' . alfa_host() . "/v2api/$branch/regular-lesson/index",
+                            ['related_class' => 'Group', 'related_id' => $groupId, 'count' => 50, 'page' => 0],
+                            alfa_token(), true, 12);
+            foreach (($rr['items'] ?? []) as $rl) {
+                if ((int)($rl['related_id'] ?? 0) !== $groupId) continue;   // Alfa может проигнорировать фильтр
+                $have[] = ['id'   => $rl['id'] ?? null,
+                           'day'  => $rl['day'] ?? null,
+                           'time' => substr((string)($rl['time_from_v'] ?? ($rl['time_from'] ?? '')), 0, 5)];
+            }
+        }
+
+        $plan = ['branch' => $branch, 'groupId' => $groupId ?: null, 'mode' => ($groupId ? 'schedule' : 'create'),
+                 'group' => ($groupId ? null : $groupPayload), 'schedule' => [], 'skipped' => [],
+                 'links' => [], 'have' => $have];
         foreach ($sched as $s) {
+            $day = $s['day'] ?? null;
+            $tf  = substr((string)($s['time_from'] ?? ''), 0, 5);
+            $dup = null;
+            foreach ($have as $h) { if ((string)$h['day'] === (string)$day && $h['time'] === $tf) { $dup = $h['id']; break; } }
+            if ($dup !== null) { $plan['skipped'][] = ['day' => $day, 'time' => $tf, 'lesson_id' => $dup]; continue; }
             $plan['schedule'][] = [
-                'related_class' => 'Group', 'related_id' => '<group_id>',
+                'related_class' => 'Group', 'related_id' => ($groupId ?: '<group_id>'),
                 'subject_id'    => $s['subject_id'] ?? null,
                 'room_id'       => $s['room_id'] ?? null,
                 'teacher_ids'   => $s['teacher_ids'] ?? ($g['teacher_ids'] ?? []),
-                'day'           => $s['day'] ?? null,
+                'day'           => $day,
                 'time_from_v'   => $s['time_from'] ?? null,
                 'time_to_v'     => $s['time_to'] ?? null,
                 'lesson_type_id'=> $s['lesson_type_id'] ?? null,
                 'b_date' => $bDate, 'e_date' => $eDate, 'is_public' => true,
             ];
         }
-        foreach ($students as $cid) $plan['links'][] = ['customer_id' => $cid, 'group_id' => '<group_id>', 'b_date' => $bDate, 'e_date' => $eDate];
+        foreach ($students as $cid) $plan['links'][] = ['customer_id' => $cid, 'group_id' => ($groupId ?: '<group_id>'), 'b_date' => $bDate, 'e_date' => $eDate];
 
         if ($dry) { json_out(['ok' => true, 'dryRun' => true, 'plan' => $plan]); }
 
-        // ЖИВОЕ создание (только при явном dryRun:false) — строго в выбранном филиале
-        $gr  = alfa_call_branch($branch, 'group', 'create', $groupPayload);
-        $gid = $gr['id'] ?? ($gr['model']['id'] ?? null);
-        if (!$gid) json_out(['ok' => false, 'error' => 'AlfaCRM не вернула id группы', 'branch' => $branch, 'sent' => $groupPayload, 'alfa' => $gr], 502);
-        // Группа уже создана — дальше ошибки НЕ обрываем, а собираем: клиенту важно записать
-        // group_id (иначе при повторе создастся дубль), а недоделанное показать списком.
-        $created = ['group_id' => (int)$gid, 'branch' => $branch, 'lessons' => [], 'links' => [], 'errors' => []];
+        // ЖИВАЯ запись (только при явном dryRun:false) — строго в выбранном филиале
+        $created = ['group_id' => (int)$groupId, 'branch' => $branch, 'createdGroup' => false,
+                    'lessons' => [], 'skipped' => count($plan['skipped']), 'links' => [], 'errors' => []];
+        $gid = $groupId;
+        if (!$gid) {
+            $gr  = alfa_call_branch($branch, 'group', 'create', $groupPayload);
+            $gid = $gr['id'] ?? ($gr['model']['id'] ?? null);
+            if (!$gid) json_out(['ok' => false, 'error' => 'AlfaCRM не вернула id группы', 'branch' => $branch, 'sent' => $groupPayload, 'alfa' => $gr], 502);
+            $created['group_id'] = (int)$gid; $created['createdGroup'] = true;
+        } elseif ($updGroup) {
+            // Alfa update перезаписывает запись ЦЕЛИКОМ → читаем карточку и меняем только своё
+            $cur = alfa_http('POST', 'https://' . alfa_host() . "/v2api/$branch/group/index",
+                             ['id' => $gid, 'count' => 1, 'page' => 0], alfa_token(), true, 12);
+            $row = $cur['items'][0] ?? null;
+            if (!is_array($row)) {
+                $created['errors'][] = ['step' => 'карточка группы', 'alfa' => $cur];
+            } else {
+                $keep = [];
+                foreach (['name','branch_ids','subject_ids','teacher_ids','level_id','status_id','limit','note','b_date','e_date','is_archive'] as $f) {
+                    if (isset($row[$f]) && $row[$f] !== '' && $row[$f] !== null) $keep[$f] = $row[$f];
+                }
+                if (!empty($g['teacher_ids'])) $keep['teacher_ids'] = $g['teacher_ids'];
+                $keep['b_date'] = $bDate; $keep['e_date'] = $eDate;
+                if (empty($keep['branch_ids'])) $keep['branch_ids'] = [$branch];
+                $res = alfa_http('POST', 'https://' . alfa_host() . "/v2api/$branch/group/update?id=" . (int)$gid,
+                                 $keep, alfa_token(), true, 15);
+                if (empty($res['id']) && empty($res['model']['id'])) $created['errors'][] = ['step' => 'карточка группы', 'sent' => $keep, 'alfa' => $res];
+                else $created['groupUpdated'] = true;
+            }
+        }
+        // Дальше ошибки НЕ обрываем, а собираем: клиенту важно записать group_id (иначе при
+        // повторе создастся дубль), а недоделанное показать списком.
         foreach ($plan['schedule'] as $i => $rl) {
             $rl['related_id'] = (int)$gid;
             $res = alfa_call_branch($branch, 'regular-lesson', 'create', $rl);
