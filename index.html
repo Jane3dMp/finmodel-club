@@ -1592,7 +1592,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-07-31-04";
+const APP_VER="2026-07-31-05";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -1739,8 +1739,35 @@ function onRemoteModel(snap){
   const remote=_normalizeRemote(val);
   if(JSON.stringify(remote)===JSON.stringify(_fbLast)) return; // наше же эхо
   const modal=document.getElementById("lesModal");
-  if(modal && modal.classList.contains("show")){ _fbPending=remote; return; } // не рвать открытую карточку
+  if(modal && modal.classList.contains("show")){
+    // Карточку рвёт только ГРИД — его откладываем. А всё остальное (rest: связи групп с Alfa,
+    // список ожидания, курсы, майские, сопоставления) применяем сразу.
+    // ⚠️ Раньше откладывалось ВСЁ: наш _fbLast.rest оставался старым, и «Сохранить» отправляло
+    // в облако устаревший блоб целиком — правки коллег за это время (например, связь четырёх
+    // групп с AlfaCRM) молча затирались, а потом публикация создавала дубли в CRM.
+    _applyRemoteRest(remote);
+    _fbPending=remote;
+    return;
+  }
   _applyRemote(remote);
+}
+/* Применить из удалённого состояния ТОЛЬКО не-грид часть. Грид не трогаем — карточка открыта. */
+function _applyRemoteRest(remote){
+  if(!remote || !remote.rest || remote.rest===(_fbLast&&_fbLast.rest)) return;
+  _fbApplying=true;
+  try{
+    let rest={}; try{ rest=JSON.parse(remote.rest); }catch(e){ _fbApplying=false; return; }
+    for(const k in rest){ if(k==="gasUrl"||k==="grid") continue; S[k]=rest[k]; }
+    _fbLast.rest=remote.rest;                 // база диффа теперь актуальна — свой пуш не затрёт чужое
+    _persistLocalRaw();
+    try{ _lastSnapHash=_snapSig(); }catch(e){}
+    if(typeof _resetHistory==="function") _resetHistory();   // стек отмены обесценился
+    // перерисовываем то, что не мешает открытой карточке
+    ["renderGroups","renderClients","renderMay","renderCourses"].forEach(fn=>{
+      if(typeof window[fn]==="function"){ try{ window[fn](); }catch(e){} }
+    });
+  }catch(e){ console.error("Firebase: не удалось применить не-грид часть —",e); }
+  _fbApplying=false;
 }
 function _applyRemote(remote){
   _fbApplying=true;
