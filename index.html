@@ -1411,9 +1411,8 @@ details.client .cli-cols .cc-bal{width:74px;font-weight:600}
    <button class="btn ghost sm" style="margin-left:auto" onclick="p1Close()">Закрыть</button>
   </div>
   <p style="font-size:12px;color:var(--muted);margin:0 0 10px;line-height:1.45">
-   Ставим <b>регулярное расписание</b> (день, время, кабинет, педагог — как в конструкторе).
-   Если такая группа в Альфе уже есть — выберите её, новую создавать не будем. Детей не трогаем.
-   Публиковать одну и ту же группу можно повторно: занятия, которые в Альфе уже стоят, пропускаются.
+   День, время, кабинет и педагог уходят в Alfa как регулярное расписание.
+   Повторная публикация безопасна: занятия, которые там уже стоят, пропускаются.
   </p>
   <div id="pubOneBody" style="font-size:13px">Загрузка…</div>
  </div>
@@ -1689,7 +1688,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-07-31-13";
+const APP_VER="2026-07-31-14";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -9144,9 +9143,27 @@ async function pubOne(key){
     if(hit) p1Pick(+hit.g.id); else { _p1.mode="new"; _p1Render(); }
   }
 }
+/* Окно перерисовывается целиком на каждый чих (галочка у ребёнка, выбор шаблона), поэтому
+   прокрутку и фокус сохраняем руками — иначе после отметки в списке человека выбрасывает
+   к самой первой фамилии. Тот же приём, что в массовой модалке (_pubSnapshot/_pubRestore). */
+function _p1Snapshot(){
+  const b=document.getElementById("pubOneBody"); if(!b) return null;
+  const list=document.getElementById("p1KidsList"), modal=b.closest(".modal"), ae=document.activeElement;
+  return {list:list?list.scrollTop:0, modal:modal?modal.scrollTop:0,
+          focus:(ae&&b.contains(ae)&&ae.getAttribute("data-f"))||""};
+}
+function _p1Restore(s){
+  if(!s) return;
+  const b=document.getElementById("pubOneBody"); if(!b) return;
+  const list=document.getElementById("p1KidsList"); if(list) list.scrollTop=s.list;
+  const modal=b.closest(".modal"); if(modal) modal.scrollTop=s.modal;
+  if(s.focus){ const el=[...b.querySelectorAll("[data-f]")].find(x=>x.getAttribute("data-f")===s.focus);
+    if(el){ try{ el.focus({preventScroll:true}); }catch(e){} } }
+}
 function _p1Render(){
   if(!_p1||!_p1.g) return;
   const b=document.getElementById("pubOneBody"); if(!b) return;
+  const _snap=_p1Snapshot();
   const g=_p1.g, c=_pubCfg(), m=_pubMap();
   g.alfaName=_pubName(g);                       // соответствия могли поменяться прямо здесь —
   g.branchInfo=_pubGroupBranch(g);              // филиал и список «чего не хватает» пересчитываем
@@ -9164,7 +9181,7 @@ function _p1Render(){
   h+=`<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:end;margin-bottom:12px">
     <label style="font-size:12px;color:var(--muted)">Начало действия группы<br><input type="date" class="cell" value="${esc(c.bDate)}" onchange="pubSetCfg('bDate',this.value)"></label>
     <label style="font-size:12px;color:var(--muted)">Окончание<br><input type="date" class="cell" value="${esc(c.eDate)}" onchange="pubSetCfg('eDate',this.value)"></label>
-    <span style="font-size:11px;color:var(--muted);padding-bottom:6px">этот период уйдёт и в карточку группы, и в расписание</span></div>`;
+    </div>`;
 
   h+=`<div style="font-weight:700;margin-bottom:6px">1 · Какая это группа в AlfaCRM</div>`;
   if(saved&&a) h+=`<div class="callout" style="border-color:var(--green);margin-bottom:8px;font-size:12px">
@@ -9179,12 +9196,12 @@ function _p1Render(){
     <div id="p1Cands" style="max-height:23vh;overflow:auto">${_p1CandsHtml()}</div>
     <div style="display:flex;gap:6px;align-items:center;margin-top:8px;padding-top:8px;border-top:1px solid var(--line)">
       <span style="font-size:12px;color:var(--muted);white-space:nowrap">…или впишите id группы:</span>
-      <input class="cell" id="p1IdInp" style="width:110px" inputmode="numeric" placeholder="напр. 258"
+      <input class="cell" id="p1IdInp" style="width:110px" inputmode="numeric" placeholder="напр. 258" title="id виден в адресе карточки группы в Alfa: …/group/view?id=258"
              onkeydown="if(event.key==='Enter')p1PickById(this.value)">
       <button class="btn ghost sm" onclick="p1PickById(document.getElementById('p1IdInp').value)"
         title="Найти группу в Alfa по её id — работает и для групп из другого филиала или архива">Связать по id</button>
     </div>
-    <div style="font-size:11px;color:var(--muted);margin-top:4px">id виден в адресе карточки группы в Alfa (…/group/view?id=<b>258</b>).</div></div>`;
+    </div>`;
 
   h+=`<div style="border:1px solid var(--line);border-radius:10px;padding:8px 10px;margin-bottom:12px">
     <label style="display:flex;gap:8px;align-items:center;cursor:pointer;font-weight:600;margin:0">
@@ -9222,8 +9239,8 @@ function _p1Render(){
 
   // нумерация дня недели в Alfa не документирована: ошибись — и всё ляжет не в тот день
   h+=`<div style="font-size:11px;color:var(--muted);margin-top:6px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-    День недели уходит в Alfa как «${esc(((PUB_DAY_MODES.find(x=>x[0]===c.dayBase)||[])[1])||c.dayBase)}».
-    <button class="btn ghost sm" onclick="pubDetectDay()" title="Прочитать расписание уже существующей группы Alfa и понять, как там нумеруются дни">🔎 Проверить нумерацию</button></div>`;
+    Дни недели: ${esc(((PUB_DAY_MODES.find(x=>x[0]===c.dayBase)||[])[1])||c.dayBase)}
+    <button class="btn ghost sm" onclick="pubDetectDay()" title="Прочитать расписание существующей группы Alfa и понять, как там нумеруются дни">🔎 Проверить</button></div>`;
 
   if(a&&(g.branchInfo||{}).branch&&+a.branch&&+a.branch!==+g.branchInfo.branch)
     h+=`<div class="callout" style="border-color:var(--terra);font-size:12px;margin-top:8px">⚠ Группа «${esc(a.name)}» в Alfa лежит в филиале <b>${esc(_pubBrName(+a.branch))}</b>, а кабинет нашей группы — из <b>${esc(_pubBrName(g.branchInfo.branch))}</b>. Расписание уйдёт в филиал группы, и кабинет из чужого филиала Alfa может не принять.</div>`;
@@ -9254,6 +9271,7 @@ function _p1Render(){
     </div>
     <div style="margin-top:8px">${_p1KidsHtml()}</div></div>`;
   b.innerHTML=h;
+  _p1Restore(_snap);
 }
 function _p1Opts(){ const a=_p1Alfa(); return {groupId:a?+a.id:0, branch:_p1Branch(), updateGroup:!!(a&&_p1.upd), kids:false}; }
 
@@ -9349,21 +9367,18 @@ function _p1KidsHtml(){
         cn=rows.filter(r=>r.no||r.reply==="no").length, cp=rows.filter(r=>r.may).length,
         cs=rows.filter(r=>!r.no&&!r.reply).length;
   let h=`<div style="font-size:12px;color:var(--muted);margin-bottom:6px">
-    Всего ${rows.length} · уже в группе Alfa: <b style="color:var(--green)">${nIn}</b> ·
-    можно добавить: <b>${canAdd.length}</b>${nNo?` · без связи с Альфой: <b style="color:var(--red)">${nNo}</b>`:""}
-    ${_p1.members?"":' · <span style="color:var(--terra)">состав Alfa ещё не прочитан</span>'}</div>
-    <div style="font-size:12px;margin-bottom:6px;display:flex;gap:12px;flex-wrap:wrap">
-      <span>🟢 подтвердили: <b>${cy}</b></span><span>🔴 отказ: <b>${cn}</b></span>
-      <span>🟡 думают: <b>${cm}</b></span><span style="color:var(--muted)">молчат: <b>${cs}</b></span>
-      <span>💰 оплатили: <b>${cp}</b></span></div>
+    Всего <b style="color:var(--coal)">${rows.length}</b> · в Alfa <b style="color:var(--green)">${nIn}</b> ·
+    добавим <b style="color:var(--coal)">${canAdd.length}</b>${nNo?` · <span style="color:var(--red)">без связи ${nNo}</span>`:""}
+    &nbsp; 🟢${cy} 🔴${cn} 🟡${cm} ○${cs} 💰${cp}
+    ${_p1.members?"":' · <span style="color:var(--terra)">состав Alfa не прочитан</span>'}</div>
     <div class="hd-actions" style="margin-bottom:6px">
-      <span style="font-size:12px;color:var(--muted)">Отметить:</span>
-      <button class="btn ghost sm" onclick="p1KidsPick('yes')" title="Только тех, чей родитель подтвердил участие">🟢 подтвердивших</button>
-      <button class="btn ghost sm" onclick="p1KidsPick('may')" title="Только тех, кто купил майский">💰 оплативших</button>
-      <button class="btn ghost sm" onclick="p1KidsPick('all')">всех</button>
-      <button class="btn ghost sm" onclick="p1KidsAll(0)">снять</button>
+      <button class="btn ghost sm" onclick="p1KidsAll(1)" title="Отметить всех, кого можно добавить">✓ Все</button>
+      <button class="btn ghost sm" onclick="p1KidsAll(0)" title="Снять все отметки">✕ Снять все</button>
+      <span class="hd-sep"></span>
+      <button class="btn ghost sm" onclick="p1KidsPick('yes')" title="Только те, чей родитель подтвердил участие">🟢 подтвердившие</button>
+      <button class="btn ghost sm" onclick="p1KidsPick('may')" title="Только те, кто купил майский">💰 оплатившие</button>
       <span style="margin-left:auto;font-size:12px;color:var(--muted)">отмечено: <b style="color:var(--coal)">${sel}</b></span></div>
-    <div style="max-height:26vh;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:4px 8px">`;
+    <div id="p1KidsList" style="max-height:30vh;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:4px 8px">`;
   rows.forEach(r=>{
     const st=r.inAlfa?`<span style="color:var(--green)">✓ уже в группе</span>`
       :r.alfaId?`<span style="color:var(--muted)">будет добавлен${r.byName?` · в Alfa «${esc(r.byName)}»`:""}</span>`
@@ -9385,32 +9400,26 @@ function _p1KidsHtml(){
       <span style="font-size:11px;color:var(--muted);width:60px;text-align:right">${r.alfaId?("id "+r.alfaId):""}</span></label>`;
   });
   h+=`</div>`;
-  h+=`<div style="font-size:11px;color:var(--muted);margin-top:4px">Период участия — как у группы: ${esc(_pubDMY(_pubCfg().bDate))} — ${esc(_pubDMY(_pubCfg().eDate))}. Отказавшиеся (🔴) по умолчанию не отмечены. Те же значки — в карточке занятия, там же кнопка 👥 у каждого ребёнка.</div>`;
-  // абонемент: у майских он в Alfa уже есть, остальным выдаём шаблон по цене занятия
+  h+=`<div style="font-size:11px;color:var(--muted);margin-top:4px">Период участия ${esc(_pubDMY(_pubCfg().bDate))} — ${esc(_pubDMY(_pubCfg().eDate))} · отказавшиеся не отмечены</div>`;
+  // Абонемент. У майских он в Alfa уже есть, остальным выдаём шаблон по цене занятия.
+  // Шаблон запоминается на курс, поэтому строка короткая: галочка, сколько человек и выпадашка
+  // с уже выбранным — искать в списке каждый раз не нужно.
   {
     const P=_tariffPlanFor(_p1.g.course, rows.filter(r=>_p1KidOn(r)));
-    const cr=(S.courses||[]).find(o=>o.name===_p1.g.course);
-    h+=`<label style="display:flex;gap:8px;align-items:flex-start;margin-top:8px;font-size:12px;cursor:pointer">
-      <input type="checkbox" style="width:auto;margin:2px 0 0" ${_pubGiveOn()?"checked":""} onchange="pubSetGive(this.checked)">
-      <span>Заодно выдать абонемент тем, у кого нет 💰 майского${
-        P.why?` — <span style="color:var(--terra)">${esc(P.why)}</span>`
-             :` (${P.rows.length} чел., шаблон «${esc((P.tariff&&P.tariff.name)||"?")}»${cr&&cr.price?(", цена "+cr.price+" р/занятие"):""}, до ${esc(_pubDMY(_pubCfg().eDate))})`}
-        ${!P.why&&P.tariff&&P.tariff.byPrice?`<span style="color:var(--muted)"> · подобран по цене</span>`:""}
-        ${!P.why&&P.tariff&&P.tariff.manual?`<span style="color:var(--muted)"> · выбран вручную</span>`:""}</span></label>`;
-    // Ручной выбор шаблона — надёжнее подбора: цены в Alfa приходят строкой и в разных
-    // форматах, а у клуба бывает по нескольку похожих шаблонов на одну цену.
+    const cur=_pubTarMap()[_p1.g.course]||"";
+    let pick="";
     if(_pubTariffs&&_pubTariffs.length){
-      const cur=_pubTarMap()[_p1.g.course]||"";
-      const opts=_pubTariffs.slice()
+      pick=`<select class="cell" data-f="tariff" style="max-width:230px" onchange="pubSetTariff('${_jsStr(_p1.g.course)}',this.value)">
+        <option value="">— по цене —</option>`+_pubTariffs.slice()
         .sort((a,b)=>_pubNum(a.price)-_pubNum(b.price)||String(a.name).localeCompare(String(b.name),"ru"))
-        .map(t=>`<option value="${esc(t.id)}"${String(cur)===String(t.id)?" selected":""}>${esc(t.name)} · ${_pubNum(t.price)} р${(_pubNum(t.lesson_count)||1)!==1?(" · "+_pubNum(t.lesson_count)+" ур."):""}</option>`).join("");
-      h+=`<div style="display:flex;gap:6px;align-items:center;margin-top:6px;font-size:12px;flex-wrap:wrap">
-        <span style="color:var(--muted)">Шаблон для «${esc(_p1.g.course)}»:</span>
-        <select class="cell" style="max-width:320px" onchange="pubSetTariff('${_jsStr(_p1.g.course)}',this.value)">
-          <option value="">— подобрать по цене —</option>${opts}</select></div>`;
-    } else {
-      h+=`<div style="font-size:11px;color:var(--muted);margin-top:4px">Шаблоны Alfa ещё не прочитаны — нажмите «🎫 Абонементы Альфы», чтобы выбрать вручную.</div>`;
+        .map(t=>`<option value="${esc(t.id)}"${String(cur)===String(t.id)?" selected":""}>${esc(t.name)} · ${_pubNum(t.price)} р</option>`).join("")+`</select>`;
     }
+    h+=`<div style="display:flex;gap:8px;align-items:center;margin-top:8px;font-size:12px;flex-wrap:wrap">
+      <label style="display:flex;gap:6px;align-items:center;margin:0;cursor:pointer;white-space:nowrap">
+        <input type="checkbox" style="width:auto;margin:0" ${_pubGiveOn()?"checked":""} onchange="pubSetGive(this.checked)">
+        Абонемент без 💰${P.why?"":` <b>${P.rows.length}</b>`}</label>
+      ${pick}
+      ${P.why?`<span style="color:var(--terra)">${esc(P.why)}</span>`:""}</div>`;
   }
   h+=`<div class="hd-actions les-foot" style="margin-top:8px">
       <button class="btn ghost sm" onclick="p1TariffNeeds()" title="Посчитать по конструктору, какие шаблоны абонементов нужно завести в Alfa">📋 Какие абонементы нужны</button>
@@ -9446,7 +9455,14 @@ async function p1KidsOpen(){
     if(!_pubCustIdx){ await _pubEnsureCustomers(); if(_p1) _p1Render(); }
     // шаблоны абонементов нужны сразу: без них строка про абонемент показывала бы «нет шаблона»,
     // хотя он есть — просто ещё не прочитан
-    if(!_pubTariffs){ try{ await _pubEnsureTariffs(); if(_p1) _p1Render(); }catch(e){} }
+    if(!_pubTariffs){ try{ await _pubEnsureTariffs(); }catch(e){} }
+    // Шаблон, подобранный по цене, СРАЗУ запоминаем за курсом: дальше он уже выбран в выпадашке
+    // и искать его в длинном списке не нужно. Ручной выбор это перезапишет.
+    if(_p1&&_pubTariffs&&!_pubTarMap()[_p1.g.course]){
+      const t=_pubTariffFor(_p1.g.course);
+      if(t&&t.byPrice&&t.id){ _pubTarMap()[_p1.g.course]=+t.id; _pubSave(); }
+    }
+    if(_p1) _p1Render();
     if(_p1&&!_p1.members) await p1KidsRefresh();
   }catch(e){ if(_p1){ _p1.kidsLog=_pubErrHtml(e,"клиенты Alfa"); _p1Render(); } }
 }
