@@ -143,7 +143,7 @@ small.note{font-size:11px;color:var(--muted)}
 .gridbar{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:14px}
 .ecofilt{display:inline-flex;gap:3px;background:#fff;border:1px solid var(--line);border-radius:11px;padding:4px}
 .ecofilt button{border:0;background:transparent;color:var(--muted);font:inherit;font-size:13px;font-weight:600;padding:6px 14px;border-radius:8px;cursor:pointer}
-@media(pointer:coarse){.ecofilt button,.dayTabs .dayb{min-height:44px;padding:11px 16px}}
+.touchui .ecofilt button,.touchui .dayTabs .dayb{min-height:44px;padding:11px 16px}
 .ecofilt button:hover{background:var(--sand-l)}
 .ecofilt button.on{background:var(--graphite);color:#fff}
 .gridlegend{display:flex;gap:14px;font-size:12px;color:var(--muted);margin-left:auto;flex-wrap:wrap;align-items:center}
@@ -710,40 +710,40 @@ details.client .cli-cols .cc-bal{width:74px;font-weight:600}
 /* ==========================================================================
    АДАПТИВНОСТЬ И СЕНСОРНЫЙ ВВОД
    Два независимых слоя, и это важно:
-   • @media(pointer:coarse) — увеличенные цели нажатия. Срабатывает по типу ввода,
-     а не по ширине: телефон и планшет получают 44px даже в альбомной ориентации,
-     а мышь на узком окне сохраняет привычную плотную вёрстку.
+   • класс .touchui на <html> — увеличенные цели нажатия (44px).
+     ⚠️ Раньше здесь стоял медиазапрос pointer:coarse, и браузеры разошлись в том, что
+     считать сенсорным устройством: на одном и том же ноутбуке с тачскрином Яндекс.Браузер
+     объявлял указатель «грубым» и раздувал плотные таблицы, а Chrome — «точным». Поэтому
+     класс ставится из JS (_applyTouchUI): по устройству, но с ручным переключателем в меню.
    • @media(max-width:...) — перестроение раскладки под узкий экран.
    Десктопный вид намеренно НЕ трогаем: с ним работают каждый день.
    ========================================================================== */
 
 /* --- цели нажатия: рекомендация 44×44 (Apple HIG / WCAG 2.5.5) --- */
-@media(pointer:coarse){
-  .btn,.btn.sm{min-height:44px;padding:10px 16px;font-size:14px}
-  .btn.sm{padding:9px 13px}
-  .tab{min-height:46px;padding:12px 16px;font-size:15px}
-  .navmode .nm{min-height:44px;padding:10px 18px;font-size:14px}
-  .dayb{min-height:44px;min-width:52px;padding:11px 16px;font-size:14px}
-  .cli-lbtn{min-height:44px;min-width:44px;padding:10px;font-size:15px}
-  .chip{min-height:44px;padding:12px 14px;font-size:13px;display:inline-flex;align-items:center}
-  .grp-alfa{min-height:44px;padding:12px;font-size:12px;display:inline-flex;align-items:center}
-  .grp-pin{font-size:20px;padding:10px;display:inline-block}
-  .k-del{font-size:20px;padding:10px 12px;display:inline-block}
-  .more-menu button.btn{min-height:46px;padding:12px 14px;font-size:14px}
+  .touchui .btn,.touchui .btn.sm{min-height:44px;padding:10px 16px;font-size:14px}
+  .touchui .btn.sm{padding:9px 13px}
+  .touchui .tab{min-height:46px;padding:12px 16px;font-size:15px}
+  .touchui .navmode .nm{min-height:44px;padding:10px 18px;font-size:14px}
+  .touchui .dayb{min-height:44px;min-width:52px;padding:11px 16px;font-size:14px}
+  .touchui .cli-lbtn{min-height:44px;min-width:44px;padding:10px;font-size:15px}
+  .touchui .chip{min-height:44px;padding:12px 14px;font-size:13px;display:inline-flex;align-items:center}
+  .touchui .grp-alfa{min-height:44px;padding:12px;font-size:12px;display:inline-flex;align-items:center}
+  .touchui .grp-pin{font-size:20px;padding:10px;display:inline-block}
+  .touchui .k-del{font-size:20px;padding:10px 12px;display:inline-block}
+  .touchui .more-menu button.btn{min-height:46px;padding:12px 14px;font-size:14px}
   /* поля ввода: 16px — иначе iOS сам зумит страницу при фокусе */
   input.cell,select.cell,.modal input,input[type=search],input[type=text],input[type=number],
-  input[type=date],select,textarea{min-height:44px;font-size:16px;padding:9px 10px}
-  input.cell{width:auto;min-width:74px}
-  select.cell{min-width:120px}
+  .touchui input[type=date],.touchui select,.touchui textarea{min-height:44px;font-size:16px;padding:9px 10px}
+  .touchui input.cell{width:auto;min-width:74px}
+  .touchui select.cell{min-width:120px}
   /* флажки: сам квадратик и запас вокруг него */
-  input[type=checkbox],input[type=radio]{width:24px;height:24px;margin:6px}
-  #kidsTable td,#groupsTable td{padding:10px 8px}
-  th{padding:12px 10px}
-  td{padding:10px 9px}
+  .touchui input[type=checkbox],.touchui input[type=radio]{width:24px;height:24px;margin:6px}
+  .touchui #kidsTable td,.touchui #groupsTable td{padding:10px 8px}
+  .touchui th{padding:12px 10px}
+  .touchui td{padding:10px 9px}
   /* мелкие кнопки-иконки в строке ребёнка (📨 💳 👤 🪪 👥) — растим, строка уедет в горизонтальную прокрутку */
-  #kidsTable .btn.sm{min-width:44px;min-height:44px;padding:8px !important;font-size:15px}
-  details.kid-move>summary{min-height:44px;min-width:44px;display:inline-flex;align-items:center;justify-content:center}
-}
+  .touchui #kidsTable .btn.sm{min-width:44px;min-height:44px;padding:8px !important;font-size:15px}
+  .touchui details.kid-move>summary{min-height:44px;min-width:44px;display:inline-flex;align-items:center;justify-content:center}
 
 /* --- мобильный навбар: одна прокручиваемая лента вместо «стены» из 16 вкладок --- */
 @media(max-width:860px){
@@ -821,6 +821,7 @@ details.client .cli-cols .cc-bal{width:74px;font-weight:600}
      <button class="btn ghost sm" id="logBtn" onclick="openLog()" title="Журнал действий — кто и что менял" style="display:none"><i data-ic="journal"></i>Журнал</button>
      <button class="btn ghost sm" id="mgrStatBtn" onclick="openMgrStat()" title="Статистика всех менеджеров за день" style="display:none"><i data-ic="report"></i>Статистика</button>
      <button class="btn ghost sm" onclick="showAchievements()" title="Мои итоги дня — инфографика">🏆 Мои итоги</button>
+     <button class="btn ghost sm" id="touchBtn" onclick="cycleTouchUI()" title="Крупные кнопки для пальца. «Авто» — по устройству; если браузер определяет неверно, поставьте вручную">👆 Крупные кнопки: авто</button>
      <div class="menu-sep"></div>
      <button class="btn ghost sm" onclick="openScnMenu()" title="Отдельные модели: годы и сценарии «что если»">⋮ Версии модели</button>
      <button class="btn ghost sm" onclick="openSync()" title="Резервная Google-таблица">Хранилище</button>
@@ -1688,7 +1689,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-07-31-08";
+const APP_VER="2026-07-31-09";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -11523,6 +11524,26 @@ function updateNavHeight(){
   }
 }
 function updateNavHeightDelayed(){ updateNavHeight(); setTimeout(updateNavHeight,160); setTimeout(updateNavHeight,500); }
+/* ===== КРУПНЫЕ ЦЕЛИ НАЖАТИЯ (44px) =====
+   Раньше это был чистый медиазапрос pointer:coarse — и на одном ноутбуке с сенсорным экраном
+   Яндекс.Браузер считал указатель «грубым» (карточка занятия распухала и уезжала в прокрутку),
+   а Chrome — «точным». Браузерам верить нельзя, поэтому режим ставится классом и переключается
+   руками: авто (по устройству) / всегда / никогда. Настройка личная — храним в браузере. */
+function _touchMode(){ try{ return localStorage.getItem("touch_ui")||"auto"; }catch(e){ return "auto"; } }
+function _touchAuto(){ try{ return matchMedia("(hover:none) and (pointer:coarse)").matches; }catch(e){ return false; } }
+function _applyTouchUI(){
+  const m=_touchMode(), on=(m==="on")||(m==="auto"&&_touchAuto());
+  document.documentElement.classList.toggle("touchui",on);
+  const b=document.getElementById("touchBtn");
+  if(b) b.textContent="👆 Крупные кнопки: "+(m==="auto"?("авто ("+(on?"вкл":"выкл")+")"):(m==="on"?"всегда":"никогда"));
+}
+function cycleTouchUI(){
+  const next={auto:"on",on:"off",off:"auto"}[_touchMode()]||"auto";
+  try{ localStorage.setItem("touch_ui",next); }catch(e){}
+  _applyTouchUI();
+  toast(next==="auto"?"Крупные кнопки: по устройству":(next==="on"?"Крупные кнопки включены":"Крупные кнопки выключены"));
+}
+_applyTouchUI();
 /* Поворот телефона меняет высоту навбара (лента вкладок то в одну строку, то в две) — без
    пересчёта липкие шапки таблиц уезжают под навигацию. Заодно возвращаем активную вкладку в вид. */
 let _rzT=null;
