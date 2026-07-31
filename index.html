@@ -1688,7 +1688,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-07-31-06";
+const APP_VER="2026-07-31-07";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -7448,6 +7448,156 @@ async function vbTodoSend(li,ki){
   toast(copied?"Текст в буфере — вставьте в Viber (Ctrl+V). Отмечено ✅":"Открываю Viber. Отмечено ✅");
 }
 /* ===== ОТЧЁТ ДЛЯ ВЛАДЕЛЬЦА: воронка подтверждений + прогноз оборота ===== */
+/* ===== ПЛАНИРУЕМЫЙ ОБОРОТ ПО УЧЕБНЫМ ПЕРИОДАМ =====
+   Отличие от карточек выше: там «×4 недели», здесь — по ФАКТИЧЕСКИМ датам занятий. У каждой
+   группы свой день недели, и понедельников в сентябре может быть 4, а в марте 5; нерабочие дни
+   (Пасха, Радуница и прочие) вычитаются поимённо. Цена: у ребёнка с 💰 «майский» действует
+   майская цена ДО даты перехода (01.01.2027), после неё — полная, у остальных полная всегда.
+   Цены в модели заданы ЗА ОДНО ЗАНЯТИЕ (см. _realRows: revReal = цена × визиты × недели). */
+const PLAN_MON=["январь","февраль","март","апрель","май","июнь","июль","август","сентябрь","октябрь","ноябрь","декабрь"];
+const PLAN_DEF={
+  p1b:"2026-09-02", p1e:"2026-12-29",          // осенний период
+  p2b:"2027-01-04", p2e:"2027-05-31",          // весенний период
+  full:"2027-01-01",                            // с этой даты майские платят полную цену
+  // нерабочие дни РБ, попадающие в периоды. Пасха (православная) 02.05.2027 и Радуница
+  // 11.05.2027 — по просьбе клуба; остальные официальные — чтобы счёт занятий был честным.
+  hol:"07.11.2026, 25.12.2026, 07.01.2027, 08.03.2027, 28.03.2027, 01.05.2027, 02.05.2027, 09.05.2027, 11.05.2027"
+};
+function _planCfg(){
+  if(!S.plan||typeof S.plan!=="object") S.plan={};
+  const c=S.plan;
+  for(const k in PLAN_DEF) if(c[k]==null||c[k]==="") c[k]=PLAN_DEF[k];
+  return c;
+}
+function planSet(f,v){
+  const c=_planCfg(); c[f]=String(v||"").trim()||PLAN_DEF[f];
+  persistLocal(); if(typeof fbSchedulePush==="function") fbSchedulePush();
+  if(typeof renderReport==="function") renderReport();
+}
+function _planHolSet(str){
+  const set=new Set();
+  String(str||"").split(/[,;\n]+/).forEach(s=>{
+    s=s.trim(); if(!s) return;
+    const m=s.match(/^(\d{1,2})[.\-/](\d{1,2})[.\-/](\d{4})$/);
+    if(m) set.add(m[3]+"-"+String(m[2]).padStart(2,"0")+"-"+String(m[1]).padStart(2,"0"));
+    else if(/^\d{4}-\d{2}-\d{2}$/.test(s)) set.add(s);
+  });
+  return set;
+}
+/* Сколько раз каждый день недели встречается в периоде, по месяцам. Дату собираем вручную:
+   toISOString() переводит в UTC и на нашем поясе сдвинул бы день назад. */
+function _planDays(bIso,eIso,hol){
+  const byMonth={};
+  const d=new Date(bIso+"T12:00:00"), end=new Date(eIso+"T12:00:00");
+  if(isNaN(d)||isNaN(end)||d>end) return byMonth;
+  let guard=0;
+  while(d<=end && guard++<800){
+    const iso=d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");
+    if(!hol.has(iso)){
+      const wd=d.getDay()===0?7:d.getDay();          // 1=Пн … 7=Вс, как в модели
+      const ym=iso.slice(0,7);
+      if(!byMonth[ym]) byMonth[ym]=[0,0,0,0,0,0,0,0];
+      byMonth[ym][wd]++;
+    }
+    d.setDate(d.getDate()+1);
+  }
+  return byMonth;
+}
+function _planPrice(course){
+  const c=(S.courses||[]).find(o=>o.name===course);
+  const p=+(c&&c.price)||0;
+  const m=(c&&c.mayPrice!=null&&c.mayPrice!==""&&+c.mayPrice>0)?+c.mayPrice:p;
+  return {p,m,known:!!c};
+}
+function _planCalc(){
+  const c=_planCfg(), hol=_planHolSet(c.hol);
+  const periods=[{b:c.p1b,e:c.p1e},{b:c.p2b,e:c.p2e}].map(p=>({b:p.b,e:p.e,months:[],revConf:0,revAll:0,lessons:0}));
+  const noPrice=new Set();
+  periods.forEach(P=>{
+    const byMonth=_planDays(P.b,P.e,hol);
+    Object.keys(byMonth).sort().forEach(ym=>{
+      const wd=byMonth[ym];
+      const mayOn = (ym+"-01") < c.full;              // месяц целиком раньше перехода на полную цену
+      let revConf=0, revAll=0, lessons=0, kidsConf=0;
+      (S.grid||[]).forEach(l=>{
+        if(!l.course) return;
+        const n=wd[+l.day||0]||0; if(!n) return;      // занятий этого слота в месяце
+        const pr=_planPrice(l.course);
+        if(!pr.p) noPrice.add(l.course);
+        const seen=new Set(); let sConf=0,sAll=0,nConf=0;
+        kidsOf(l).forEach(k=>{
+          const nk=_nameKey(k.n); if(!nk||seen.has(nk)) return; seen.add(nk);
+          if(k.no||k.vbReply==="no") return;          // отказ — в план не берём
+          const cost=(mayOn&&k.may)?pr.m:pr.p;
+          sAll+=cost;
+          if(k.may||k.vbReply==="yes"){ sConf+=cost; nConf++; }   // «подтвердили» = оплатил ИЛИ ответил «да»
+        });
+        revConf+=sConf*n; revAll+=sAll*n; lessons+=n; kidsConf+=nConf*n;
+      });
+      P.months.push({ym,mayOn,revConf:Math.round(revConf),revAll:Math.round(revAll),lessons,visits:kidsConf});
+      P.revConf+=revConf; P.revAll+=revAll; P.lessons+=lessons;
+    });
+    P.revConf=Math.round(P.revConf); P.revAll=Math.round(P.revAll);
+  });
+  return {periods, noPrice:[...noPrice], cfg:c, holN:hol.size};
+}
+function _planLabel(ym){ const p=ym.split("-"); return (PLAN_MON[+p[1]-1]||ym)+" "+p[0]; }
+function _planDMY(iso){ const p=String(iso||"").split("-"); return p.length===3?(p[2]+"."+p[1]+"."+p[0]):iso; }
+function _planHTML(){
+  const R=_planCalc(), c=R.cfg;
+  const totConf=R.periods.reduce((a,p)=>a+p.revConf,0), totAll=R.periods.reduce((a,p)=>a+p.revAll,0);
+  const card=(P,lab)=>`<div class="gs">
+      <span class="gs-lab">${esc(lab)}</span>
+      <span class="gs-val" style="color:var(--green)">${fmt(P.revConf)} р</span>
+      <span class="gs-sub">${_planDMY(P.b)} — ${_planDMY(P.e)} · занятий ${P.lessons} · потенциал ${fmt(P.revAll)} р</span>
+    </div>`;
+  let h=`<h3 style="margin:22px 0 8px">Планируемый оборот за учебный год</h3>
+    <div class="goalstats">
+      ${card(R.periods[0],"Осень (по майской цене)")}
+      ${card(R.periods[1],"Весна (полная цена)")}
+      <div class="gs"><span class="gs-lab">Всего за год</span>
+        <span class="gs-val" style="color:var(--green)">${fmt(totConf)} р</span>
+        <span class="gs-sub">по подтвердившим · потенциал ${fmt(totAll)} р</span></div>
+    </div>`;
+
+  h+=`<div class="tscroll" style="margin-top:10px"><table><thead><tr>
+      <th style="text-align:left">Месяц</th><th style="text-align:center">Занятий</th>
+      <th style="text-align:center">Цена</th><th class="num">Оборот (подтв.)</th><th class="num">Потенциал</th>
+    </tr></thead><tbody>`;
+  R.periods.forEach((P,pi)=>{
+    P.months.forEach(m=>{
+      h+=`<tr><td style="text-align:left">${esc(_planLabel(m.ym))}</td>
+        <td style="text-align:center">${m.lessons}</td>
+        <td style="text-align:center">${m.mayOn?'<span style="color:var(--green)">майская</span>':'полная'}</td>
+        <td class="num"><b>${fmt(m.revConf)} р</b></td>
+        <td class="num" style="color:var(--muted)">${fmt(m.revAll)} р</td></tr>`;
+    });
+    h+=`<tr style="background:var(--sand-l)"><td style="text-align:left"><b>Итого ${pi===0?"осень":"весна"}</b></td>
+      <td style="text-align:center"><b>${P.lessons}</b></td><td></td>
+      <td class="num"><b>${fmt(P.revConf)} р</b></td>
+      <td class="num" style="color:var(--muted)"><b>${fmt(P.revAll)} р</b></td></tr>`;
+  });
+  h+=`</tbody></table></div>`;
+
+  h+=`<details style="margin-top:8px"><summary style="cursor:pointer;font-weight:600;font-size:13px">⚙ Периоды, выходные и переход на полную цену</summary>
+    <div style="padding:8px 2px 0;display:flex;flex-wrap:wrap;gap:10px;align-items:end">
+      <label style="font-size:12px;color:var(--muted)">Осень с<br><input type="date" class="cell" value="${esc(c.p1b)}" onchange="planSet('p1b',this.value)"></label>
+      <label style="font-size:12px;color:var(--muted)">по<br><input type="date" class="cell" value="${esc(c.p1e)}" onchange="planSet('p1e',this.value)"></label>
+      <label style="font-size:12px;color:var(--muted)">Весна с<br><input type="date" class="cell" value="${esc(c.p2b)}" onchange="planSet('p2b',this.value)"></label>
+      <label style="font-size:12px;color:var(--muted)">по<br><input type="date" class="cell" value="${esc(c.p2e)}" onchange="planSet('p2e',this.value)"></label>
+      <label style="font-size:12px;color:var(--muted)">Полная цена с<br><input type="date" class="cell" value="${esc(c.full)}" onchange="planSet('full',this.value)"></label>
+    </div>
+    <label style="display:block;margin-top:8px;font-size:12px;color:var(--muted)">Нерабочие дни (${R.holN}) — через запятую, ДД.ММ.ГГГГ
+      <input class="cell" style="width:100%;text-align:left" value="${esc(c.hol)}" onchange="planSet('hol',this.value)"></label>
+    <div style="font-size:11px;color:var(--muted);margin-top:6px;line-height:1.5">
+      Считаем по реальным датам: сколько раз день недели группы выпадает в месяце, минус нерабочие дни.
+      «Подтвердили» = оплатил майский <b>или</b> ответил «да»; отказавшиеся не считаются.
+      До ${_planDMY(c.full)} у оплативших майский действует «Майская цена» с вкладки «Курсы», дальше — обычная.
+      ${R.noPrice.length?`<br><span style="color:var(--red)">Без цены (в план не попали): ${esc(R.noPrice.slice(0,6).join(", "))}${R.noPrice.length>6?" и ещё "+(R.noPrice.length-6):""}</span>`:""}
+    </div></details>`;
+  return h;
+}
+
 function _ownerReport(){
   const wpm=(S.assume&&S.assume.weeksPerMonth)||4;
   const groups={};
@@ -7974,6 +8124,7 @@ function _goalsDashHTML(opts){
     </div>`;
   h+=_oldNewHTML();
   // финансовые показатели — только в «Отчёте» (в «Работе»/«Наборе» их нет)
+  if(opts.finance) h+=_planHTML();
   if(opts.finance){
     const wpm=T.wpm||4;
     h+=`<div class="goalstats">
