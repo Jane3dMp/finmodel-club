@@ -1688,7 +1688,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-07-31-07";
+const APP_VER="2026-07-31-08";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -7466,14 +7466,19 @@ const PLAN_DEF={
 function _planCfg(){
   if(!S.plan||typeof S.plan!=="object") S.plan={};
   const c=S.plan;
-  for(const k in PLAN_DEF) if(c[k]==null||c[k]==="") c[k]=PLAN_DEF[k];
+  // ⚠️ подставляем умолчание только если значения НЕТ ВООБЩЕ. Раньше пустая строка тоже
+  // считалась «не задано» — и очищенный список выходных молча возвращался к девяти датам,
+  // то есть убрать их все было невозможно.
+  for(const k in PLAN_DEF) if(c[k]===undefined||c[k]===null) c[k]=PLAN_DEF[k];
   return c;
 }
 function planSet(f,v){
-  const c=_planCfg(); c[f]=String(v||"").trim()||PLAN_DEF[f];
+  const c=_planCfg(); v=String(v==null?"":v).trim();
+  c[f]=(f==="hol")?v:(v||PLAN_DEF[f]);      // даты обязаны быть валидными, список выходных — может быть пустым
   persistLocal(); if(typeof fbSchedulePush==="function") fbSchedulePush();
   if(typeof renderReport==="function") renderReport();
 }
+function planResetHol(){ planSet("hol",PLAN_DEF.hol); toast("Праздники возвращены по умолчанию"); }
 function _planHolSet(str){
   const set=new Set();
   String(str||"").split(/[,;\n]+/).forEach(s=>{
@@ -7551,8 +7556,13 @@ function _planHTML(){
       <span class="gs-val" style="color:var(--green)">${fmt(P.revConf)} р</span>
       <span class="gs-sub">${_planDMY(P.b)} — ${_planDMY(P.e)} · занятий ${P.lessons} · потенциал ${fmt(P.revAll)} р</span>
     </div>`;
-  let h=`<h3 style="margin:22px 0 8px">Планируемый оборот за учебный год</h3>
-    <div class="goalstats">
+  let h=`<div style="border-top:2px solid var(--line);margin-top:26px;padding-top:16px">
+    <h3 style="margin:0 0 2px">Планируемый оборот за учебный год</h3>
+    <div class="sec-desc" style="margin-bottom:10px">По фактическим датам занятий, а не «×4 недели»: сколько раз день недели группы выпадает в месяце, минус нерабочие дни. Карточки выше — недельные, от праздников не зависят.</div>`;
+  if(R.noPrice.length) h+=`<div class="callout" style="border-color:var(--red);margin-bottom:10px;font-size:12px">
+    <b style="color:var(--red)">В план не попали курсы без цены:</b> ${esc(R.noPrice.join(", "))}.
+    Проставьте «Цену» на вкладке «Курсы и маржа» — иначе их дети считаются бесплатными.</div>`;
+  h+=`<div class="goalstats">
       ${card(R.periods[0],"Осень (по майской цене)")}
       ${card(R.periods[1],"Весна (полная цена)")}
       <div class="gs"><span class="gs-lab">Всего за год</span>
@@ -7587,14 +7597,14 @@ function _planHTML(){
       <label style="font-size:12px;color:var(--muted)">по<br><input type="date" class="cell" value="${esc(c.p2e)}" onchange="planSet('p2e',this.value)"></label>
       <label style="font-size:12px;color:var(--muted)">Полная цена с<br><input type="date" class="cell" value="${esc(c.full)}" onchange="planSet('full',this.value)"></label>
     </div>
-    <label style="display:block;margin-top:8px;font-size:12px;color:var(--muted)">Нерабочие дни (${R.holN}) — через запятую, ДД.ММ.ГГГГ
+    <label style="display:block;margin-top:8px;font-size:12px;color:var(--muted)">Нерабочие дни (${R.holN}) — через запятую, ДД.ММ.ГГГГ. Можно очистить полностью.
       <input class="cell" style="width:100%;text-align:left" value="${esc(c.hol)}" onchange="planSet('hol',this.value)"></label>
+    <button class="btn ghost sm" style="margin-top:6px" onclick="planResetHol()" title="Вернуть Пасху, Радуницу и остальные официальные нерабочие дни РБ">↺ Праздники по умолчанию</button>
     <div style="font-size:11px;color:var(--muted);margin-top:6px;line-height:1.5">
       Считаем по реальным датам: сколько раз день недели группы выпадает в месяце, минус нерабочие дни.
       «Подтвердили» = оплатил майский <b>или</b> ответил «да»; отказавшиеся не считаются.
       До ${_planDMY(c.full)} у оплативших майский действует «Майская цена» с вкладки «Курсы», дальше — обычная.
-      ${R.noPrice.length?`<br><span style="color:var(--red)">Без цены (в план не попали): ${esc(R.noPrice.slice(0,6).join(", "))}${R.noPrice.length>6?" и ещё "+(R.noPrice.length-6):""}</span>`:""}
-    </div></details>`;
+    </div></details></div>`;
   return h;
 }
 
@@ -8124,7 +8134,6 @@ function _goalsDashHTML(opts){
     </div>`;
   h+=_oldNewHTML();
   // финансовые показатели — только в «Отчёте» (в «Работе»/«Наборе» их нет)
-  if(opts.finance) h+=_planHTML();
   if(opts.finance){
     const wpm=T.wpm||4;
     h+=`<div class="goalstats">
@@ -8132,6 +8141,9 @@ function _goalsDashHTML(opts){
       <div class="gs"><span class="gs-lab">Оборот / мес (подтв.)</span><span class="gs-val" style="color:var(--green)">${fmt(Math.round(T.revWeekYes*wpm))} р</span><span class="gs-sub">×${wpm} недель</span></div>
       <div class="gs"><span class="gs-lab">Потенциал / нед</span><span class="gs-val" style="color:var(--g-muted,#8C8677)">${fmt(T.revWeekAll)} р</span><span class="gs-sub">если подтвердят все</span></div>
     </div>`;
+    // план на учебный год — ПОСЛЕ недельных карточек: иначе настройки периодов оказывались
+    // прямо над ними и читались как их настройки
+    h+=_planHTML();
   }
   // движение по группам — с фильтром по бренду и сортировкой; клик по названию открывает карточку занятия
   const dn=["","Пн","Вт","Ср","Чт","Пт","Сб","Вс"];
