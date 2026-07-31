@@ -772,9 +772,11 @@ switch ($action) {
         $sh = alfa_cgi_shape($bid);
         $added = []; $extended = []; $errors = [];
         foreach ($ids as $cid) {
-            $cur = alfa_cgi_find($bid, $cid, $gid);
+            $findDbg = null;
+            $cur = alfa_cgi_find($bid, $cid, $gid, $findDbg);
             if ($cur) {
-                $res = alfa_cgi_extend($bid, $cur, $eIso, $sh);
+                // членство могло найтись в другом филиале — продлевать надо там же
+                $res = alfa_cgi_extend((int)($cur['__branch'] ?? $bid), $cur, $eIso, $sh);
                 $okUpd = !empty($res['id']) || !empty($res['model']['id']);
                 if ($okUpd) $extended[] = ['customer_id' => $cid, 'cgi_id' => (int)($cur['id'] ?? 0)];
                 else $errors[] = ['customer_id' => $cid, 'step' => 'продление', 'why' => alfa_err_text($res),
@@ -787,15 +789,17 @@ switch ($action) {
             if ($nid) { $added[] = ['customer_id' => $cid, 'cgi_id' => (int)$nid]; continue; }
             // Alfa всё-таки нашла членство, которого не отдал поиск — пробуем продлить
             if (preg_match('/уже состоит/ui', alfa_err_text($res))) {
-                $cur2 = alfa_cgi_find($bid, $cid, $gid);
+                $dbg2 = null;
+                $cur2 = alfa_cgi_find($bid, $cid, $gid, $dbg2);
                 if ($cur2) {
-                    $res2 = alfa_cgi_extend($bid, $cur2, $eIso, $sh);
+                    $res2 = alfa_cgi_extend((int)($cur2['__branch'] ?? $bid), $cur2, $eIso, $sh);
                     if (!empty($res2['id']) || !empty($res2['model']['id'])) { $extended[] = ['customer_id' => $cid, 'cgi_id' => (int)($cur2['id'] ?? 0)]; continue; }
                     $errors[] = ['customer_id' => $cid, 'step' => 'продление', 'why' => alfa_err_text($res2), 'alfa' => $res2];
                     continue;
                 }
                 $errors[] = ['customer_id' => $cid, 'step' => 'создание',
-                             'why' => 'Alfa says «уже состоит в этой группе», но саму запись найти не удалось — откройте группу в Alfa и продлите срок вручную', 'alfa' => $res];
+                             'why' => 'Ребёнок числится в этой группе, но Alfa не отдаёт саму запись ни одним из запросов (архивные членства она скрывает). Пока продлите срок вручную в карточке группы — диагностика в консоли (F12)',
+                             'find' => $dbg2 ?: $findDbg, 'alfa' => $res];
                 continue;
             }
             $errors[] = ['customer_id' => $cid, 'step' => 'создание', 'why' => alfa_err_text($res), 'sent' => $body,

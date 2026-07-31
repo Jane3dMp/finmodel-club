@@ -365,19 +365,57 @@ function alfa_cgi_dates(array $sh, string $bIso, string $eIso): array {
     return $sh['field'] === 'v' ? ['b_date_v' => $b, 'e_date_v' => $e] : ['b_date' => $b, 'e_date' => $e];
 }
 /* Найти членство ребёнка в конкретной группе — в том числе АРХИВНОЕ (прошлогоднее).
-   Спрашиваем по клиенту: по группе архивные записи Alfa отдаёт не всегда. */
-function alfa_cgi_find(int $branch, int $customerId, int $groupId): ?array {
-    foreach ([
-        ['customer_id' => $customerId, 'page' => 0, 'count' => 200],
-        ['customer_id' => $customerId, 'date_from' => '2015-01-01', 'date_to' => '2030-12-31',
-         'b_date' => '2015-01-01', 'e_date' => '2030-12-31', 'page' => 0, 'count' => 200],
-    ] as $q) {
-        $url = 'https://' . alfa_host() . "/v2api/$branch/cgi/index?customer_id=" . $customerId;
-        $r = alfa_http('POST', $url, $q, alfa_token(), true, 12);
-        if (isset($r['__err'])) continue;
-        foreach (($r['items'] ?? []) as $it) {
-            if ((int)($it['group_id'] ?? 0) === $groupId && (int)($it['customer_id'] ?? 0) === $customerId) return $it;
+   ⚠️ Известная особенность Alfa (уже ловили её в «истории ребёнка»): cgi/index по умолчанию
+   отдаёт в основном ДЕЙСТВУЮЩИЕ членства, а прошлогоднее — нет. Какой фильтр показывает
+   архивные, документация не описывает, поэтому перебираем разумный набор вариантов: по клиенту
+   и по группе, с диапазоном дат и с признаком «архивные», параметры и в теле, и в адресе
+   (на cgi/create Alfa читает их именно из адреса). Что вернул каждый вариант — пишем в $dbg,
+   чтобы при неудаче было видно, где искать, а не гадать заново. */
+function alfa_cgi_find(int $branch, int $customerId, int $groupId, ?array &$dbg = null): ?array {
+    $host = 'https://' . alfa_host() . "/v2api/$branch/cgi/index";
+    $wide = ['date_from' => '2015-01-01', 'date_to' => '2030-12-31'];
+    $variants = [
+        ['?customer_id=' . $customerId, ['customer_id' => $customerId]],
+        ['?customer_id=' . $customerId, array_merge(['customer_id' => $customerId], $wide)],
+        ['?customer_id=' . $customerId . '&date_from=2015-01-01&date_to=2030-12-31', ['customer_id' => $customerId]],
+        ['?customer_id=' . $customerId . '&removed=1', ['customer_id' => $customerId, 'removed' => 1]],
+        ['?customer_id=' . $customerId . '&dead=1',    ['customer_id' => $customerId, 'dead' => true]],
+        ['?group_id=' . $groupId,                      ['group_id' => $groupId]],
+        ['?group_id=' . $groupId . '&removed=1',       ['group_id' => $groupId, 'removed' => 1]],
+    ];
+    $dbg = [];
+    foreach ($variants as $i => $v) {
+        $r = alfa_http('POST', $host . $v[0], array_merge($v[1], ['page' => 0, 'count' => 200]), alfa_token(), true, 12);
+        if (isset($r['__err'])) { $dbg[] = ['v' => $i, 'q' => $v[0], 'err' => $r['__err']]; continue; }
+        $items = $r['items'] ?? [];
+        $seen = [];
+        foreach ($items as $it) {
+            $g = (int)($it['group_id'] ?? 0); $c = (int)($it['customer_id'] ?? 0);
+            if (count($seen) < 25) $seen[] = $g . ($c === $customerId ? '' : '/c' . $c);
+            if ($g === $groupId && $c === $customerId) {
+                $dbg[] = ['v' => $i, 'q' => $v[0], 'n' => count($items), 'hit' => true];
+                return $it;
+            }
         }
+        $dbg[] = ['v' => $i, 'q' => $v[0], 'n' => count($items), 'groups' => $seen,
+                  'keys' => $items ? array_keys($items[0]) : []];
+    }
+    // Не нашли в этом филиале — членство могло быть заведено в контексте другого.
+    // Alfa проверяет «уже состоит» шире, чем отдаёт списком, поэтому обходим остальные.
+    foreach (alfa_all_branch_ids() as $bb) {
+        if ((int)$bb === $branch) continue;
+        $r = alfa_http('POST', 'https://' . alfa_host() . "/v2api/$bb/cgi/index?customer_id=" . $customerId,
+                       ['customer_id' => $customerId, 'page' => 0, 'count' => 200], alfa_token(), true, 12);
+        if (isset($r['__err'])) { $dbg[] = ['branch' => (int)$bb, 'err' => $r['__err']]; continue; }
+        $items = $r['items'] ?? [];
+        foreach ($items as $it) {
+            if ((int)($it['group_id'] ?? 0) === $groupId && (int)($it['customer_id'] ?? 0) === $customerId) {
+                $dbg[] = ['branch' => (int)$bb, 'n' => count($items), 'hit' => true];
+                $it['__branch'] = (int)$bb;         // продлевать надо в том же филиале
+                return $it;
+            }
+        }
+        $dbg[] = ['branch' => (int)$bb, 'n' => count($items)];
     }
     return null;
 }

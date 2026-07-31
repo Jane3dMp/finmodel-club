@@ -1689,7 +1689,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-07-31-10";
+const APP_VER="2026-07-31-11";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -5343,6 +5343,8 @@ async function kidToAlfaGroup(i){
     const errs=j.errors||[];
     if(errs.length){
       console.warn("👥 addToGroup —",k.n,errs);
+      // как именно искали существующее членство — это и есть диагностика «уже состоит, а записи нет»
+      if(errs[0].find) console.warn("👥 поиск членства в Alfa (что вернул каждый запрос):",errs[0].find);
       toast("Не получилось: "+(errs[0].why||"Alfa отказала, подробности в консоли (F12)"));
       return;
     }
