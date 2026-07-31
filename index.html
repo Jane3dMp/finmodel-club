@@ -1592,7 +1592,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-07-31-02";
+const APP_VER="2026-07-31-03";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -1619,7 +1619,41 @@ function load(){
   try{ const r=localStorage.getItem(LS_KEY); if(r) return Object.assign(JSON.parse(JSON.stringify(DEFAULT_STATE)),JSON.parse(r)); }catch(e){}
   return JSON.parse(JSON.stringify(DEFAULT_STATE));
 }
-function _persistLocalRaw(){ try{ localStorage.setItem(LS_KEY, JSON.stringify(S)); }catch(e){} }
+/* ⚠️ Переполнение localStorage раньше глоталось молча: браузер бросал QuotaExceededError на каждом
+   сохранении, индикатор синхронизации не менялся, и человек продолжал работать «в никуда» — при
+   F5 терялось всё, что накопилось с последней удачной записи. Особенно опасно без Firebase
+   (локальный режим), где localStorage — единственная копия. Теперь честно говорим и пробуем
+   освободить место, выбрасывая самые старые сохранённые версии модели. */
+let _lsFull=false;
+function _lsWarn(where){
+  if(_lsFull) return;                                   // не мигаем на каждом сохранении
+  _lsFull=true;
+  try{ setSync("err","⚠ Память браузера заполнена"); }catch(e){}
+  try{ toast("Память браузера переполнена — локальная копия не сохраняется. Удалите лишние версии модели (☰ Меню → «⋮ Версии модели») или закройте вкладку и откройте заново."); }catch(e){}
+  console.error("localStorage переполнен при записи:",where);
+}
+function _lsTrimScenarios(){
+  // освобождаем место: самые старые версии модели (кроме текущей) — под нож
+  try{
+    if(typeof loadScenarioList!=="function") return false;
+    const list=loadScenarioList(), cur=currentScenarioName();
+    const names=Object.keys(list).filter(n=>n!==cur);
+    if(!names.length) return false;
+    delete list[names[0]];
+    localStorage.setItem(SCN_KEY, JSON.stringify(list));
+    console.warn("localStorage: удалена старая версия модели «"+names[0]+"», чтобы освободить место");
+    return true;
+  }catch(e){ return false; }
+}
+function _persistLocalRaw(){
+  try{ localStorage.setItem(LS_KEY, JSON.stringify(S)); _lsFull=false; return true; }
+  catch(e){
+    if(_lsTrimScenarios()){                             // попробовали освободить — вторая попытка
+      try{ localStorage.setItem(LS_KEY, JSON.stringify(S)); _lsFull=false; return true; }catch(e2){}
+    }
+    _lsWarn("состояние модели"); return false;
+  }
+}
 /* ===== ИСТОРИЯ ОТМЕНЫ ===== */
 let _undoStack = [];      // снимки прошлых состояний (JSON-строки)
 let _lastSnap = null;     // последнее сохранённое состояние S (для отката на шаг назад)
@@ -10947,7 +10981,13 @@ function loadScenarioList(){
   try{ const r=localStorage.getItem(SCN_KEY); if(r) return JSON.parse(r); }catch(e){}
   return {};  // {name: stateSnapshot}
 }
-function saveScenarioList(obj){ try{ localStorage.setItem(SCN_KEY, JSON.stringify(obj)); }catch(e){} }
+function saveScenarioList(obj){
+  try{ localStorage.setItem(SCN_KEY, JSON.stringify(obj)); return true; }
+  catch(e){
+    if(_lsTrimScenarios()){ try{ localStorage.setItem(SCN_KEY, JSON.stringify(obj)); return true; }catch(e2){} }
+    _lsWarn("список версий модели"); return false;
+  }
+}
 
 function currentScenarioName(){ return (S.meta&&S.meta.name)||"Основной"; }
 function ensureCurrentInList(){

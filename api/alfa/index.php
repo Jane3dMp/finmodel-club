@@ -193,18 +193,21 @@ switch ($action) {
             if (($bb && $bb > $to) || ($ee && $ee < $from)) continue;   // не пересекается с окном прошлого года
             $note($gid, $gidc, $ee ?: $bb);
         }
-        // 2) уроки в окне с ПАГИНАЦИЕЙ (Alfa отдаёт ≤50 на страницу; у активного ребёнка за год >150 уроков —
-        //    без пагинации терялись ранние группы/расписание). Лимит 20 страниц = 1000 уроков.
-        $lesItems = [];
+        // 2) уроки в окне с ПАГИНАЦИЕЙ (Alfa отдаёт ≤50 на страницу; у активного ребёнка за год >150
+        //    уроков — без пагинации терялись ранние группы/расписание). Лимит 20 страниц = 1000.
+        //    ⚠️ Выход по `total` был ловушкой: Alfa возвращает это поле НЕ всегда, при его отсутствии
+        //    $total=0 и условие `count >= 0` срывалось на первой же странице — то есть у активного
+        //    ребёнка история обрывалась, ранние группы «исчезали», и он выглядел новым. Идём, пока
+        //    страница ПОЛНАЯ (тот же приём, что в customers/groupsList).
+        $lesItems = []; $lesPer = 50;
         for ($lp = 0; $lp < 20; $lp++) {
             $les = alfa_http('POST', "$host/lesson/index",
-                ['customer_id' => $cid, 'date_from' => $from, 'date_to' => $to, 'b_date' => $from, 'e_date' => $to, 'page' => $lp, 'count' => 100],
+                ['customer_id' => $cid, 'date_from' => $from, 'date_to' => $to, 'b_date' => $from, 'e_date' => $to, 'page' => $lp, 'count' => $lesPer],
                 $token, true, 14);
             if (isset($les['__err'])) break;
             $batch = $les['items'] ?? [];
             foreach ($batch as $ls) $lesItems[] = $ls;
-            $total = (int)($les['total'] ?? 0);
-            if (count($batch) === 0 || count($lesItems) >= $total) break;
+            if (count($batch) < $lesPer) break;          // страница неполная — она последняя
         }
         $gsched = [];   // group_id => набор слотов "деньНедели|начало|конец" (из фактических уроков)
         $hm = function ($v) { return preg_match('/(\d{1,2}:\d{2})/', (string)$v, $m) ? $m[1] : ''; };
@@ -1021,8 +1024,11 @@ switch ($action) {
                     if (is_string($dog)) $dog = ($dog === '') ? [] : [$dog];
                     $custMap[$id] = ['name' => trim((string)($c['name'] ?? '')), 'dogovora' => array_values((array)$dog)];
                 }
-                $total = (int)($r['total'] ?? 0); $page++;
-            } while (count($items) === $perPage && ($page * $perPage) < $total && $page < $maxPages);
+                $page++;
+                // ⚠️ выход по `total` был ловушкой: Alfa отдаёт это поле НЕ всегда, а при его отсутствии
+                //    $total=0 и условие `0 < 0` ложно — читалась только ПЕРВАЯ страница (50 клиентов
+                //    на филиал), и у большинства майских не находилось ни имени, ни курса по договору.
+            } while (count($items) === $perPage && $page < $maxPages);
         }
 
         // 2) honorит ли Alfa фильтр дат pay? (чтобы не сканировать все платежи за годы)
@@ -1054,9 +1060,10 @@ switch ($action) {
                         $byCust[$cid] = ['count' => 0, 'note' => (string)($p['note'] ?? ''), 'date' => (string)($p['document_date'] ?? ''), 'income' => (string)($p['income'] ?? '')];
                     $byCust[$cid]['count']++;   // сколько майских оплат у ребёнка (обычно = число курсов)
                 }
-                $total = (int)($r['total'] ?? 0); $page++;
+                $page++;
                 if ($scanned >= $maxScan) { $capped = true; break; }
-            } while (count($items) === $perPage && ($page * $perPage) < $total && $page < $maxPages);
+                // тот же фикс, что и выше: идём, пока страница ПОЛНАЯ, а не по ненадёжному total
+            } while (count($items) === $perPage && $page < $maxPages);
             if ($capped) break;
         }
 
