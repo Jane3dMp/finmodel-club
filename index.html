@@ -47,6 +47,9 @@ header .wrap{padding:0 16px}
 
 nav.tabs{display:flex;background:var(--sand);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:30}
 nav.tabs .wrap{display:flex;gap:1px 2px;flex-wrap:wrap;width:100%;max-width:96vw;padding:0 20px}
+/* лента вкладок: на десктопе — обычный перенос по строкам, на узком экране (см. блок
+   адаптивности внизу) превращается в горизонтальную прокрутку */
+nav.tabs .tabstrip{display:flex;flex-wrap:wrap;gap:1px 2px;flex:1 1 auto;min-width:0}
 .tab{padding:9px 15px;font-size:14px;font-weight:600;color:var(--muted);cursor:pointer;
   border:none;background:none;border-bottom:3px solid transparent;white-space:nowrap;line-height:1.2}
 .tab:hover{color:var(--coal)}
@@ -140,6 +143,7 @@ small.note{font-size:11px;color:var(--muted)}
 .gridbar{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:14px}
 .ecofilt{display:inline-flex;gap:3px;background:#fff;border:1px solid var(--line);border-radius:11px;padding:4px}
 .ecofilt button{border:0;background:transparent;color:var(--muted);font:inherit;font-size:13px;font-weight:600;padding:6px 14px;border-radius:8px;cursor:pointer}
+@media(pointer:coarse){.ecofilt button,.dayTabs .dayb{min-height:44px;padding:11px 16px}}
 .ecofilt button:hover{background:var(--sand-l)}
 .ecofilt button.on{background:var(--graphite);color:#fff}
 .gridlegend{display:flex;gap:14px;font-size:12px;color:var(--muted);margin-left:auto;flex-wrap:wrap;align-items:center}
@@ -702,6 +706,96 @@ details.client .cli-cols .cc-bal{width:74px;font-weight:600}
 .cli-meta{color:var(--muted)}
 .cli-st{text-align:right}
 @media(max-width:760px){.cli-enr{grid-template-columns:1fr;gap:2px}.cli-st{text-align:left}}
+
+/* ==========================================================================
+   АДАПТИВНОСТЬ И СЕНСОРНЫЙ ВВОД
+   Два независимых слоя, и это важно:
+   • @media(pointer:coarse) — увеличенные цели нажатия. Срабатывает по типу ввода,
+     а не по ширине: телефон и планшет получают 44px даже в альбомной ориентации,
+     а мышь на узком окне сохраняет привычную плотную вёрстку.
+   • @media(max-width:...) — перестроение раскладки под узкий экран.
+   Десктопный вид намеренно НЕ трогаем: с ним работают каждый день.
+   ========================================================================== */
+
+/* --- цели нажатия: рекомендация 44×44 (Apple HIG / WCAG 2.5.5) --- */
+@media(pointer:coarse){
+  .btn,.btn.sm{min-height:44px;padding:10px 16px;font-size:14px}
+  .btn.sm{padding:9px 13px}
+  .tab{min-height:46px;padding:12px 16px;font-size:15px}
+  .navmode .nm{min-height:44px;padding:10px 18px;font-size:14px}
+  .dayb{min-height:44px;min-width:52px;padding:11px 16px;font-size:14px}
+  .cli-lbtn{min-height:44px;min-width:44px;padding:10px;font-size:15px}
+  .chip{min-height:44px;padding:12px 14px;font-size:13px;display:inline-flex;align-items:center}
+  .grp-alfa{min-height:44px;padding:12px;font-size:12px;display:inline-flex;align-items:center}
+  .grp-pin{font-size:20px;padding:10px;display:inline-block}
+  .k-del{font-size:20px;padding:10px 12px;display:inline-block}
+  .more-menu button.btn{min-height:46px;padding:12px 14px;font-size:14px}
+  /* поля ввода: 16px — иначе iOS сам зумит страницу при фокусе */
+  input.cell,select.cell,.modal input,input[type=search],input[type=text],input[type=number],
+  input[type=date],select,textarea{min-height:44px;font-size:16px;padding:9px 10px}
+  input.cell{width:auto;min-width:74px}
+  select.cell{min-width:120px}
+  /* флажки: сам квадратик и запас вокруг него */
+  input[type=checkbox],input[type=radio]{width:24px;height:24px;margin:6px}
+  #kidsTable td,#groupsTable td{padding:10px 8px}
+  th{padding:12px 10px}
+  td{padding:10px 9px}
+  /* мелкие кнопки-иконки в строке ребёнка (📨 💳 👤 🪪 👥) — растим, строка уедет в горизонтальную прокрутку */
+  #kidsTable .btn.sm{min-width:44px;min-height:44px;padding:8px !important;font-size:15px}
+  details.kid-move>summary{min-height:44px;min-width:44px;display:inline-flex;align-items:center;justify-content:center}
+}
+
+/* --- мобильный навбар: одна прокручиваемая лента вместо «стены» из 16 вкладок --- */
+@media(max-width:860px){
+  .wrap{max-width:100vw;padding:0 12px 90px}
+  nav.tabs .wrap{max-width:100vw;padding:0;flex-wrap:nowrap;flex-direction:column;gap:0}
+  /* режим (Работа / Финмодель) — отдельной строкой во всю ширину, две крупные цели */
+  .navmode{width:100%;margin:0;padding:6px 12px;border-right:none;border-bottom:1px solid var(--line);gap:8px}
+  .navmode .nm{flex:1;text-align:center}
+  /* сами вкладки — горизонтальная лента с прилипанием и обрезанной полосой прокрутки */
+  nav.tabs .tabstrip{display:flex;gap:4px;width:100%;overflow-x:auto;overflow-y:hidden;
+    flex-wrap:nowrap;scroll-snap-type:x proximity;-webkit-overflow-scrolling:touch;
+    scrollbar-width:none;padding:4px 12px;-ms-overflow-style:none}
+  nav.tabs .tabstrip::-webkit-scrollbar{display:none}
+  .tab{scroll-snap-align:center;flex:0 0 auto;border-radius:9px;border-bottom:none}
+  .tab.active{border-radius:9px}
+  /* подсказка, что лента прокручивается: мягкое затухание у правого края */
+  nav.tabs{position:sticky;top:0;box-shadow:0 1px 0 var(--line)}
+  nav.tabs::after{content:"";position:absolute;right:0;bottom:0;width:26px;height:100%;
+    background:linear-gradient(90deg,rgba(244,241,235,0),var(--sand));pointer-events:none}
+  header .sub{display:none}
+  header{padding:9px 0}
+  .htop{gap:8px}
+  .syncbox{flex-wrap:wrap;gap:6px}
+}
+
+/* --- узкий экран: модалки как «шторка» снизу, таблицы прокручиваются --- */
+@media(max-width:640px){
+  .modal-bg{padding:0;align-items:flex-end}
+  .modal{width:100%;max-width:100%;border-radius:16px 16px 0 0;padding:16px 14px 22px;
+    max-height:92vh;margin:0}
+  .modal h3{font-size:17px}
+  .hd-actions{gap:8px}
+  .hd-actions .btn{flex:1 1 auto}
+  .dayTabs{width:100%;justify-content:space-between;gap:2px;padding:4px}
+  .dayb{flex:1;min-width:0;padding:11px 4px}
+  /* длинные таблицы не ломаем — даём им горизонтальную прокрутку с инерцией */
+  .tscroll{-webkit-overflow-scrolling:touch}
+  table{font-size:13px}
+  /* пилюли-фильтры (бренды, дни, буквы) — жёсткий inline-flex не помещался и растягивал
+     страницу вбок: на телефоне это выглядит как «съехавшая вёрстка» */
+  .ecofilt{max-width:100%;flex-wrap:wrap}
+  .dayTabs{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none}
+  .dayTabs::-webkit-scrollbar{display:none}
+  .callout{padding:10px 12px}
+  .modal .tscroll{max-width:100%}
+}
+
+/* --- подсказка о свайпе по дням (показывается один раз) --- */
+.swipe-hint{position:fixed;left:50%;transform:translateX(-50%);bottom:22px;z-index:70;
+  background:var(--graphite);color:#fff;padding:10px 16px;border-radius:22px;font-size:13px;
+  box-shadow:0 6px 20px rgba(0,0,0,.25);opacity:0;transition:opacity .25s;pointer-events:none}
+.swipe-hint.on{opacity:.95}
 </style>
 </head>
 <body>
@@ -743,6 +837,7 @@ details.client .cli-cols .cc-bal{width:74px;font-weight:600}
   <button class="nm" data-m="work" onclick="setNavMode('work')">Работа</button>
   <button class="nm" data-m="fin" onclick="setNavMode('fin')">Финмодель</button>
  </div>
+ <div class="tabstrip" id="tabStrip">
  <button class="tab active" data-t="dash">Дашборд</button>
  <button class="tab" data-t="report"><i data-ic="report"></i>Отчёт по набору</button>
  <button class="tab" data-t="courses">Курсы и маржа</button>
@@ -761,6 +856,7 @@ details.client .cli-cols .cc-bal{width:74px;font-weight:600}
  <button class="tab" data-t="break">Точка безубыточности</button>
  <button class="tab" data-t="scenario">Сценарии</button>
  <button class="tab" data-t="settings">Параметры</button>
+ </div>
 </div></nav>
 
 <div class="wrap">
@@ -1592,7 +1688,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-07-31-05";
+const APP_VER="2026-07-31-06";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -4443,6 +4539,49 @@ function wageForLesson(course, students, lesson){
 /* ====== РЕНДЕР СЕТКИ ====== */
 function shortName(n){ if(!n) return "—"; const p=String(n).split(" "); return p.length>=2?p[0]+" "+p[1][0]+".":n; }
 function setDay(d){ curDay=d; renderGrid(); }
+/* ===== СВАЙПЫ =====
+   Горизонтальный свайп по сетке расписания листает дни. Ловушек здесь больше, чем кажется,
+   поэтому жест отбрасывается, если:
+   • он вертикальный (обычная прокрутка страницы) или слишком короткий/медленный;
+   • начат внутри того, что само прокручивается вбок (.tscroll, лента вкладок) — иначе
+     пролистывание широкой таблицы превращалось бы в смену дня;
+   • начат на поле ввода, кнопке или ссылке — там свои жесты (выделение текста, drag).
+   Работаем на touch-событиях: мышиный drag&drop занятий трогать нельзя. */
+function attachSwipe(el,onLeft,onRight){
+  if(!el||el._swipeOn) return; el._swipeOn=true;
+  let x0=0,y0=0,t0=0,ok=false;
+  const skip=t=>!!(t&&t.closest&&t.closest("input,select,textarea,button,a,.tscroll,.tabstrip,.modal,[draggable='true']"));
+  el.addEventListener("touchstart",e=>{
+    if(e.touches.length!==1||skip(e.target)){ ok=false; return; }
+    const t=e.touches[0]; x0=t.clientX; y0=t.clientY; t0=Date.now(); ok=true;
+  },{passive:true});
+  el.addEventListener("touchend",e=>{
+    if(!ok) return; ok=false;
+    const t=e.changedTouches&&e.changedTouches[0]; if(!t) return;
+    const dx=t.clientX-x0, dy=t.clientY-y0, dt=Date.now()-t0;
+    if(dt>700) return;                                   // не свайп, а долгое перетаскивание
+    if(Math.abs(dx)<60) return;                          // слишком короткий
+    if(Math.abs(dx)<Math.abs(dy)*1.6) return;            // скорее вертикальный — это прокрутка
+    if(dx<0) onLeft(); else onRight();
+  },{passive:true});
+}
+/* один раз подсказываем, что дни листаются пальцем */
+function _swipeHint(txt){
+  let el=document.getElementById("swipeHint");
+  if(!el){ el=document.createElement("div"); el.id="swipeHint"; el.className="swipe-hint"; document.body.appendChild(el); }
+  el.textContent=txt; el.classList.add("on");
+  clearTimeout(el._t); el._t=setTimeout(()=>el.classList.remove("on"),1100);
+}
+function swipeDay(dir){
+  const d=curDay+dir;
+  if(d<1||d>7) return;                                   // за неделю не выходим
+  setDay(d);
+  _swipeHint(DAY_FULL[d]||("День "+d));
+}
+function _initSwipes(){
+  const g=document.getElementById("grid");
+  if(g) attachSwipe(g,()=>swipeDay(1),()=>swipeDay(-1));  // влево = следующий день
+}
 /* фильтр сетки по бренду: "" (все) | "Прознание" | "CODDY". Детали отдельной кнопки нет — видны в «Все». */
 let _gridEco="";
 function setGridEco(v){ _gridEco=v||""; renderGrid(); }
@@ -11221,6 +11360,16 @@ function updateNavHeight(){
   }
 }
 function updateNavHeightDelayed(){ updateNavHeight(); setTimeout(updateNavHeight,160); setTimeout(updateNavHeight,500); }
+/* Поворот телефона меняет высоту навбара (лента вкладок то в одну строку, то в две) — без
+   пересчёта липкие шапки таблиц уезжают под навигацию. Заодно возвращаем активную вкладку в вид. */
+let _rzT=null;
+window.addEventListener("resize",()=>{
+  clearTimeout(_rzT);
+  _rzT=setTimeout(()=>{
+    updateNavHeight();
+    const a=document.querySelector(".tab.active"); if(a&&typeof _scrollTabIntoView==="function") _scrollTabIntoView(a);
+  },180);
+});
 window.addEventListener("resize", updateNavHeightDelayed);
 window.addEventListener("load", updateNavHeightDelayed);
 
@@ -11233,11 +11382,23 @@ document.querySelectorAll(".tab").forEach(tb=>tb.onclick=()=>{
   if(tb.dataset.t==="report" && typeof renderReport==="function") renderReport();
   if(tb.dataset.t==="goals" && typeof renderGoals==="function") renderGoals();
   if(tb.dataset.t==="cards" && typeof renderCards==="function") renderCards();
+  _scrollTabIntoView(tb);
   updateNavHeightDelayed();
 });
+/* На узком экране вкладки — горизонтальная лента. Активная должна быть видна, иначе после
+   переключения (в т.ч. программного) человек смотрит на ленту и не понимает, где он. */
+function _scrollTabIntoView(tb){
+  const strip=document.getElementById("tabStrip");
+  if(!strip||!tb||strip.scrollWidth<=strip.clientWidth+4) return;   // на десктопе прокрутки нет
+  try{ tb.scrollIntoView({inline:"center",block:"nearest",behavior:"smooth"}); }
+  catch(e){ strip.scrollLeft=tb.offsetLeft-(strip.clientWidth-tb.offsetWidth)/2; }
+}
 /* стартовый режим навигации («Работа» по умолчанию, запоминается в браузере) */
 _updateTabVisibility();
 _paintIcons();   // проставить линейные иконки в статичных вкладках/кнопках (data-ic)
+_initSwipes();   // свайп по сетке расписания = смена дня (только сенсорный ввод)
+/* активная вкладка может оказаться за краем ленты после загрузки/смены режима */
+setTimeout(()=>{ const a=document.querySelector(".tab.active"); if(a) _scrollTabIntoView(a); },300);
 
 /* старт */
 if(S.gasUrl){
