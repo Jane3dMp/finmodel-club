@@ -1592,7 +1592,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-07-31-03";
+const APP_VER="2026-07-31-04";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -4835,6 +4835,9 @@ function editLes(idx,focusKi){
   if(!l){ toast("Занятие не найдено — обновите страницу"); return; }
   migrateLessonKids(l);
   _editKids=kidsOf(l).map(k=>Object.assign(_blankKid(),k));
+  // снимок состава НА МОМЕНТ ОТКРЫТИЯ — база для слияния с правками, сделанными в это же время
+  // в других занятиях группы (💰 с «Майского», баланс из Альфы, «внесён в группу Alfa»)
+  _editKidsBase={}; _editKids.forEach(k=>{ const nk=_nameKey(k&&k.n); if(nk) _editKidsBase[nk]=JSON.parse(JSON.stringify(k)); });
   let courseOpts=S.courses.map(c=>`<option ${c.name===l.course?"selected":""}>${esc(c.name)}</option>`).join("");
   if(l.course && !S.courses.some(c=>c.name===l.course)) courseOpts=`<option selected>${esc(l.course)}</option>`+courseOpts;
   let teacherOpts=`<option value="">— педагог —</option>`+S.staff.map(s=>`<option ${s.name===l.teacher?"selected":""}>${esc(s.name)}</option>`).join("");
@@ -4915,6 +4918,7 @@ function refreshLesWage(){
 
 /* ---- редактор списка детей ---- */
 let _editKids=[];
+let _editKidsBase={};   // состав карточки на момент открытия — база трёхстороннего слияния
 function _kidsFromDOM(){
   const rows=[...document.querySelectorAll("#kidsTable tbody tr")];
   if(!rows.length) return;
@@ -5177,7 +5181,7 @@ async function kidToAlfaGroup(i){
     }
     k.alfaGrp=String(g.id); k.alfaGrpAt=new Date().toISOString().slice(0,10);
     logCrm("«"+k.n+"» внесён(а) в группу id "+g.id+(g.name?(" «"+g.name+"»"):"")+" · "+_pubDMY(c.bDate)+"–"+_pubDMY(c.eDate));
-    if(les){ _commitEditKids(les); _syncGroupKids(les); }   // у группы 2×/нед отметка нужна во всех занятиях
+    if(les){ _commitEditKids(les); _syncGroupKids(les,_editKidsBase); }   // у группы 2×/нед отметка нужна во всех занятиях
     persistLocal(); _flushCardEdit();
     renderKidsEditor();
     toast("«"+shortName(k.n)+"» внесён(а) в группу Alfa ✓");
@@ -5192,7 +5196,7 @@ function kidAlfaGrpReset(i){
   const k=_editKids[i]; if(!k||!k.alfaGrp) return;
   if(!confirm("Снять отметку «внесён в группу Alfa» у «"+k.n+"»?\n\nВ самой Альфе участие НЕ удаляется — убрать его нужно там вручную.")) return;
   k.alfaGrp=""; k.alfaGrpAt="";
-  const les=S.grid[_modalLesIdx()]; if(les){ _commitEditKids(les); _syncGroupKids(les); }
+  const les=S.grid[_modalLesIdx()]; if(les){ _commitEditKids(les); _syncGroupKids(les,_editKidsBase); }
   persistLocal(); _flushCardEdit(); renderKidsEditor();
 }
 function kidAdd(){ openAddKid(null,'lesson'); }   // единое окно (ФИО+телефон+ДР обязательны)
@@ -5259,7 +5263,7 @@ function saveLes(){
   _radd.forEach(k=>{ if(!_editKids.some(x=>_nameKey(x.n)===_nameKey(k.n))) _editKids.push(k); });
   l.kids=_editKids.filter(k=>k.n);
   l.newIntake=!!document.getElementById("mNewIntake")?.checked;
-  const synced=_syncGroupKids(l);   // одна группа (курс+№) = один состав во всех её занятиях
+  const synced=_syncGroupKids(l,_editKidsBase);   // одна группа (курс+№) = один состав во всех её занятиях
   const _wlAdded=_reconcileWaitlist(_wlCand); _cleanWaitlist();   // удалённые из последней группы → в ожидание
   _savedInModal=true;               // наша правка новее — closeLes не должен откатить её отложенным remote
   persistLocal();
@@ -5289,17 +5293,42 @@ function _remoteAddedForGroup(l){
   }
   return add;
 }
+/* Слияние одного ребёнка: theirs — что сейчас в другом занятии группы (там могли поменять поле,
+   пока карточка была открыта: 💰 с вкладки «Майский», баланс из Альфы, отметка «внесён в Alfa»);
+   mine — версия из карточки; base — та же версия НА МОМЕНТ ОТКРЫТИЯ карточки.
+   Правило: берём theirs и накладываем только те поля, которые пользователь РЕАЛЬНО изменил
+   (mine ≠ base). Так чужая свежая правка не затирается, а своя не теряется. */
+function _mergeKid(mine, base, theirs){
+  if(!theirs) return JSON.parse(JSON.stringify(mine));
+  const out=JSON.parse(JSON.stringify(theirs)), b=base||{}, noBase=!base;
+  Object.keys(mine).forEach(f=>{
+    if(noBase || JSON.stringify(mine[f])!==JSON.stringify(b[f])) out[f]=mine[f];
+  });
+  Object.keys(b).forEach(f=>{ if(!(f in mine) && (f in out)) delete out[f]; });   // поле убрали в карточке
+  return out;
+}
 /* Синхронизировать состав детей по всем занятиям одной группы (тот же курс + тот же номер группы).
-   Возвращает, во сколько ДРУГИХ занятий скопирован состав. Без номера группы не синхронизируем. */
-function _syncGroupKids(l){
+   Возвращает, во сколько ДРУГИХ занятий применён состав. Без номера группы не синхронизируем.
+   ⚠️ Раньше состав копировался ЦЕЛИКОМ (o.kids = копия l.kids) — и всё, что успели поменять в
+   других занятиях этой группы, пока карточка была открыта, молча пропадало. */
+function _syncGroupKids(l, base){
   if(!l || !l.group || !String(l.group).trim()) return 0;
   const key=(l.course||"")+"||"+String(l.group).trim();
+  const hasBase=!!(base && typeof base==="object");
+  const mineKeys=new Set((l.kids||[]).map(k=>_nameKey(k&&k.n)).filter(Boolean));
   let n=0;
   (S.grid||[]).forEach(o=>{ if(o===l || !o) return;
-    if((o.course||"")+"||"+String(o.group||"").trim()===key){
-      o.kids=JSON.parse(JSON.stringify(l.kids||[]));   // копия (свои объекты, не общие ссылки)
-      n++;
-    }
+    if((o.course||"")+"||"+String(o.group||"").trim()!==key) return;
+    const theirs={}; kidsOf(o).forEach(k=>{ const nk=_nameKey(k&&k.n); if(nk) theirs[nk]=k; });
+    const merged=(l.kids||[]).map(k=>{ const nk=_nameKey(k&&k.n); return _mergeKid(k, hasBase?base[nk]:null, theirs[nk]); });
+    // Ребёнок есть в другом занятии, но нет в нашем составе. Убран у нас намеренно — убираем
+    // везде. Появился уже после открытия карточки (чужое добавление) — сохраняем.
+    Object.keys(theirs).forEach(nk=>{
+      if(mineKeys.has(nk)) return;
+      if(!hasBase || base[nk]!==undefined) return;                 // был при открытии → убран намеренно
+      merged.push(JSON.parse(JSON.stringify(theirs[nk])));
+    });
+    o.kids=merged; n++;
   });
   return n;
 }
