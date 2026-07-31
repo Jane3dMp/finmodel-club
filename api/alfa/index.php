@@ -773,12 +773,17 @@ switch ($action) {
                 $body = ['customer_id' => $cid, 'group_id' => $gid,
                          'b_date' => $f === 'iso' ? $bIso : alfa_date($bIso),
                          'e_date' => $f === 'iso' ? $eIso : alfa_date($eIso)];
-                $res = alfa_call_branch($bid, 'cgi', 'create', $body);
+                // ⚠️ Alfa на этом эндпоинте берёт ключевые параметры ИЗ АДРЕСА, а тело для них
+                //    игнорирует — и отвечает «Отсутствуют обязательные параметры: group_id»,
+                //    хотя group_id в теле есть. Та же грабля, что с customer-tariff/index.
+                //    Дублируем в query, тело оставляем (там даты).
+                $res = alfa_cgi_create($bid, $cid, $gid, $body);
                 $nid = $res['id'] ?? ($res['model']['id'] ?? null);
                 if ($nid) { $fmt = $f; $ok = true; $added[] = ['customer_id' => $cid, 'cgi_id' => (int)$nid]; break; }
                 $lastWhy = alfa_err_text($res); $lastSent = $body; $lastRaw = $res;
             }
-            if (!$ok) $errors[] = ['customer_id' => $cid, 'why' => $lastWhy, 'sent' => $lastSent, 'alfa' => $lastRaw];
+            if (!$ok) $errors[] = ['customer_id' => $cid, 'why' => $lastWhy, 'sent' => $lastSent,
+                                   'url' => "/v2api/$bid/cgi/create?customer_id=$cid&group_id=$gid", 'alfa' => $lastRaw];
         }
         json_out(['ok' => true, 'dryRun' => false, 'groupId' => $gid, 'branch' => $bid, 'dateFormat' => $fmt,
                   'added' => $added, 'errors' => $errors]);
@@ -989,7 +994,9 @@ switch ($action) {
             else      $created['errors'][] = ['step' => 'расписание #' . ($i + 1), 'why' => alfa_err_text($res), 'sent' => $rl, 'alfa' => $res];
         }
         foreach ($students as $cid) {
-            $res = alfa_call_branch($branch, 'cgi', 'create', ['customer_id' => (int)$cid, 'group_id' => (int)$gid, 'b_date' => $bDate, 'e_date' => $eDate]);
+            // id — и в адрес, и в тело: Alfa на cgi/create читает их из адреса (см. alfa_cgi_create)
+            $res = alfa_cgi_create($branch, (int)$cid, (int)$gid,
+                     ['customer_id' => (int)$cid, 'group_id' => (int)$gid, 'b_date' => $bDate, 'e_date' => $eDate]);
             $lid = $res['id'] ?? ($res['model']['id'] ?? null);
             if ($lid) $created['links'][] = (int)$cid;
             else      $created['errors'][] = ['step' => 'ученик ' . $cid, 'why' => alfa_err_text($res), 'alfa' => $res];

@@ -338,6 +338,17 @@ function alfa_index_all(int $branch, string $entity, array $filter = [], int $ma
     return ['items' => $out, 'ok' => $ok, 'pages' => $page];
 }
 
+/* Привязка ученика к группе (cgi/create).
+   ⚠️ Alfa на этом эндпоинте читает ключевые параметры ИЗ СТРОКИ АДРЕСА, а не из тела: с телом
+   вида {customer_id, group_id, …} она отвечает «Отсутствуют обязательные параметры: group_id».
+   Ровно та же особенность, что у customer-tariff/index (там понадобился ?customer_id= в URL).
+   Поэтому дублируем id и в адрес, и в тело — лишнее Alfa игнорирует. */
+function alfa_cgi_create(int $branch, int $customerId, int $groupId, array $body): array {
+    $url = 'https://' . alfa_host() . "/v2api/$branch/cgi/create"
+         . '?customer_id=' . $customerId . '&group_id=' . $groupId;
+    return alfa_soft_body(alfa_http('POST', $url, $body, alfa_token(), true));
+}
+
 // В каком филиале лежит группа. Нужно, чтобы вызывающему (карточка занятия) не приходилось
 // это знать: cgi и расписание пишутся в контексте филиала группы. 0 — не нашли.
 function alfa_group_branch(int $gid): int {
