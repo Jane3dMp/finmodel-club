@@ -23,7 +23,7 @@ if ($rawIn) { $j = json_decode($rawIn, true); if (is_array($j)) $in = $j; }
 // ⚠️ ЗАПИСЬ В ЧУЖУЮ CRM — только тем, кому это разрешено в config.php (write_emails).
 //    Прятать кнопки на клиенте недостаточно: запрос легко повторить из консоли браузера,
 //    достаточно передать dryRun:false. Проверяем ДО обработки действия.
-$WRITE_ACTIONS = ['publish', 'addToGroup', 'createCustomer', 'archiveCustomer', 'renameCustomer'];
+$WRITE_ACTIONS = ['publish', 'addToGroup', 'giveTariff', 'createCustomer', 'archiveCustomer', 'renameCustomer'];
 if (in_array($action, $WRITE_ACTIONS, true)) {
     $wantsLive = array_key_exists('dryRun', $in) && $in['dryRun'] === false;
     if ($wantsLive && empty($user['can_write'])) {
@@ -707,6 +707,84 @@ switch ($action) {
             } while (count($items) === 50 && $page < 40);
         }
         json_out(['ok' => true, 'count' => count($byId), 'tariffs' => array_values($byId), 'sample' => $sample]);
+        break;
+
+    // --- АБОНЕМЕНТЫ РЕБЁНКА (READ): что у него уже выдано, чтобы не выдать второй раз ---
+    case 'customerTariffs':
+        @set_time_limit(60);
+        $cid = (int)($in['customerId'] ?? 0);
+        if ($cid <= 0) json_out(['ok' => false, 'error' => 'Не передан id клиента']);
+        $bid = (int)($in['branch'] ?? 0) ?: alfa_branch();
+        $r = alfa_customer_tariffs($bid, $cid);
+        $rows = [];
+        foreach ($r['items'] as $it) {
+            $rows[] = ['id' => $it['id'] ?? null, 'tariff_id' => $it['tariff_id'] ?? null,
+                       'subject_ids' => array_values(array_map('intval', (array)($it['subject_ids'] ?? []))),
+                       'b_date' => $it['b_date_v'] ?? ($it['b_date'] ?? null),
+                       'e_date' => $it['e_date_v'] ?? ($it['e_date'] ?? null),
+                       'balance' => $it['balance'] ?? null, 'note' => $it['note'] ?? null];
+        }
+        json_out(['ok' => true, 'customerId' => $cid, 'branch' => $bid, 'count' => count($rows),
+                  'subs' => $rows, 'sample' => $r['items'][0] ?? null]);
+        break;
+
+    // --- ВЫДАТЬ АБОНЕМЕНТ (WRITE, dryRun по умолчанию) ---
+    //     Шаблон (tariff) заводится в самой Alfa — через API его создание не описано. Мы только
+    //     ВЫДАЁМ уже существующий шаблон ребёнку: предмет = курс, период = учебный год.
+    case 'giveTariff':
+        @set_time_limit(180);
+        $bid   = (int)($in['branch'] ?? 0) ?: alfa_branch();
+        $items = is_array($in['items'] ?? null) ? $in['items'] : [];
+        $bIso  = alfa_iso((string)($in['b_date'] ?? '2026-09-02'));
+        $eIso  = alfa_iso((string)($in['e_date'] ?? '2027-05-31'));
+        $sep   = !empty($in['separate']);              // раздельный счёт; по умолчанию базовый
+        $note  = (string)($in['note'] ?? '');
+        if (!$items) json_out(['ok' => false, 'error' => 'Некому выдавать']);
+
+        $live = array_key_exists('dryRun', $in) && $in['dryRun'] === false;
+        // Форму дат берём с РЕАЛЬНОГО абонемента (у майских он есть) — не угадываем.
+        $shape = null; $existing = [];
+        foreach ($items as $it) {
+            $cid = (int)($it['customerId'] ?? 0); if (!$cid) continue;
+            $ct = alfa_customer_tariffs($bid, $cid);
+            $existing[$cid] = $ct['items'];
+            if ($shape === null && $ct['items']) $shape = alfa_date_shape($ct['items'][0]);
+        }
+        if ($shape === null) $shape = ['field' => 'plain', 'fmt' => 'dmy', 'from' => 'docs'];
+
+        $plan = []; $skipped = [];
+        foreach ($items as $it) {
+            $cid  = (int)($it['customerId'] ?? 0);
+            $tid  = (int)($it['tariffId'] ?? 0);
+            $subj = array_values(array_filter(array_map('intval', (array)($it['subjectIds'] ?? []))));
+            $lt   = array_values(array_filter(array_map('intval', (array)($it['lessonTypeIds'] ?? []))));
+            if (!$cid || !$tid || !$subj) { $skipped[] = ['customer_id' => $cid, 'why' => 'не хватает данных (клиент, шаблон или предмет)']; continue; }
+            // уже есть абонемент по этому предмету — второй не выдаём
+            $dup = false;
+            foreach (($existing[$cid] ?? []) as $ex) {
+                $exs = array_map('intval', (array)($ex['subject_ids'] ?? []));
+                if (array_intersect($exs, $subj)) { $dup = true; break; }
+            }
+            if ($dup) { $skipped[] = ['customer_id' => $cid, 'why' => 'абонемент по этому курсу уже есть']; continue; }
+            $body = array_merge(['customer_id' => $cid, 'tariff_id' => $tid, 'subject_ids' => $subj,
+                                 'is_separate_balance' => $sep ? 1 : 0],
+                                $lt ? ['lesson_type_ids' => $lt] : [],
+                                $note !== '' ? ['note' => $note] : [],
+                                alfa_shape_dates($shape, $bIso, $eIso));
+            $plan[] = ['customer_id' => $cid, 'body' => $body];
+        }
+        if (!$live) json_out(['ok' => true, 'dryRun' => true, 'branch' => $bid, 'shape' => $shape,
+                              'plan' => $plan, 'skipped' => $skipped]);
+
+        $given = []; $errors = [];
+        foreach ($plan as $p) {
+            $res = alfa_tariff_give($bid, (int)$p['customer_id'], $p['body']);
+            $nid = $res['id'] ?? ($res['model']['id'] ?? null);
+            if ($nid) { $given[] = ['customer_id' => $p['customer_id'], 'tariff_row' => (int)$nid]; continue; }
+            $errors[] = ['customer_id' => $p['customer_id'], 'why' => alfa_err_text($res), 'sent' => $p['body'], 'alfa' => $res];
+        }
+        json_out(['ok' => true, 'dryRun' => false, 'branch' => $bid, 'shape' => $shape,
+                  'given' => $given, 'skipped' => $skipped, 'errors' => $errors]);
         break;
 
     // --- СОСТАВ ГРУППЫ (READ): кто уже привязан к группе в Alfa (сущность cgi).

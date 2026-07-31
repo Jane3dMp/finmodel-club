@@ -1689,7 +1689,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-07-31-11";
+const APP_VER="2026-07-31-12";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -5356,6 +5356,13 @@ async function kidToAlfaGroup(i){
     if(les){ _commitEditKids(les); _syncGroupKids(les,_editKidsBase); }   // у группы 2×/нед отметка нужна во всех занятиях
     persistLocal(); _flushCardEdit();
     renderKidsEditor();
+    // абонемент — только тем, у кого нет майского (у них он в Alfa уже есть)
+    if(!k.may && les){
+      const R=await _giveTariffs(les.course,[{alfaId:k.alfaId,may:k.may,name:k.n}],0);
+      if(R&&R.why) toast("В группу внесён(а), но абонемент не выдан: "+R.why);
+      else if(R&&R.given) { toast("Абонемент выдан до "+_pubDMY(c.eDate)); logCrm("«"+k.n+"» — выдан абонемент по курсу «"+les.course+"» до "+_pubDMY(c.eDate)); }
+      else if(R&&R.errors&&R.errors.length){ console.warn("🎫 giveTariff —",k.n,R.errors); toast("Абонемент не выдан: "+(R.errors[0].why||"см. консоль (F12)")); }
+    }
     toast(wasExt?("«"+shortName(k.n)+"» уже был(а) в этой группе — продлили участие до "+_pubDMY(c.eDate)+" ✓")
                 :("«"+shortName(k.n)+"» внесён(а) в группу Alfa ✓"));
   }catch(e){
@@ -9250,6 +9257,38 @@ function _p1Render(){
 }
 function _p1Opts(){ const a=_p1Alfa(); return {groupId:a?+a.id:0, branch:_p1Branch(), updateGroup:!!(a&&_p1.upd), kids:false}; }
 
+/* ===== ВЫДАЧА АБОНЕМЕНТА ПРИ ПЕРЕНОСЕ =====
+   У купивших майский абонемент в Alfa уже есть — второй не нужен. Всем остальным выдаём шаблон
+   по цене занятия из «Курсов», период — учебный год (до 31.05.2027), тип расчётов базовый.
+   Сам шаблон в Alfa заводится руками (Настройки → Абонементы): создание тарифа через API не
+   описано, мы только назначаем существующий. Прокси дополнительно пропускает тех, у кого
+   абонемент по этому курсу уже есть. */
+function _pubGiveOn(){ const c=_pubCfg(); return c.giveTariff!==false; }
+function pubSetGive(v){ const c=_pubCfg(); c.giveTariff=!!v; _pubSave(); if(typeof _p1Render==="function") _p1Render(); }
+/* кому и что выдадим: возвращает {rows,tariff,subj,why} — why непусто, если выдать нельзя */
+function _tariffPlanFor(course, kids){
+  const m=_pubMap(), subj=m.subj[course]?+m.subj[course]:0;
+  if(!subj) return {rows:[],why:"курс «"+course+"» не сопоставлен с предметом Alfa"};
+  const t=_pubTariffFor(course);
+  const c=(S.courses||[]).find(o=>o.name===course), price=+(c&&c.price)||0;
+  if(!t) return {rows:[],why:price?("нет шаблона абонемента на "+price+" р за занятие — заведите его в Alfa: Настройки → Абонементы"):("у курса «"+course+"» не указана цена")};
+  const lt=_pubCfg().lessonTypeId?[+_pubCfg().lessonTypeId]:[];
+  const rows=kids.filter(k=>k.alfaId&&!k.may)          // у майских абонемент уже есть
+    .map(k=>({customerId:+k.alfaId, tariffId:+t.id, subjectIds:[subj], lessonTypeIds:lt, _name:k.name||k.n}));
+  return {rows,tariff:t,subj,price};
+}
+async function _giveTariffs(course, kids, branch){
+  if(!_pubGiveOn()) return null;
+  try{ await _pubEnsureTariffs(); }catch(e){ return {why:"не удалось прочитать шаблоны абонементов: "+((e&&e.message)||e)}; }
+  const P=_tariffPlanFor(course,kids);
+  if(P.why) return {why:P.why};
+  if(!P.rows.length) return {none:true};
+  const c=_pubCfg();
+  const j=await _pubCall("giveTariff",{dryRun:false, branch:branch||0, items:P.rows,
+    b_date:c.bDate, e_date:c.eDate, separate:false, note:"учебный год 26/27"});
+  return {given:(j.given||[]).length, skipped:(j.skipped||[]).length, errors:j.errors||[], tariff:P.tariff, rows:P.rows};
+}
+
 /* ===== ПЕРЕНОС СОСТАВА: дети группы → участники группы в Alfa =====
    Ребёнка ищем сначала по сохранённой связи (k.alfaId), иначе по ФИО среди клиентов Alfa —
    и ТОЛЬКО при единственном совпадении: тёзкам чужую группу не подставляем.
@@ -9348,6 +9387,18 @@ function _p1KidsHtml(){
   });
   h+=`</div>`;
   h+=`<div style="font-size:11px;color:var(--muted);margin-top:4px">Период участия — как у группы: ${esc(_pubDMY(_pubCfg().bDate))} — ${esc(_pubDMY(_pubCfg().eDate))}. Отказавшиеся (🔴) по умолчанию не отмечены. Те же значки — в карточке занятия, там же кнопка 👥 у каждого ребёнка.</div>`;
+  // абонемент: у майских он в Alfa уже есть, остальным выдаём шаблон по цене занятия
+  {
+    const P=_tariffPlanFor(_p1.g.course, rows.filter(r=>_p1KidOn(r)));
+    const cr=(S.courses||[]).find(o=>o.name===_p1.g.course);
+    h+=`<label style="display:flex;gap:8px;align-items:flex-start;margin-top:8px;font-size:12px;cursor:pointer">
+      <input type="checkbox" style="width:auto;margin:2px 0 0" ${_pubGiveOn()?"checked":""} onchange="pubSetGive(this.checked)">
+      <span>Заодно выдать абонемент тем, у кого нет 💰 майского${
+        P.why?` — <span style="color:var(--terra)">${esc(P.why)}</span>`
+             :` (${P.rows.length} чел., шаблон «${esc((P.tariff&&P.tariff.name)||"?")}»${cr&&cr.price?(", цена "+cr.price+" р/занятие"):""}, до ${esc(_pubDMY(_pubCfg().eDate))})`}
+        ${!P.why&&P.tariff&&P.tariff.byPrice?`<span style="color:var(--muted)"> · подобран по цене</span>`:""}</span></label>`;
+    if(!_pubTariffs) h+=`<div style="font-size:11px;color:var(--muted)">Шаблоны Alfa ещё не прочитаны — нажмите «🎫 Абонементы Альфы», чтобы увидеть подбор.</div>`;
+  }
   h+=`<div class="hd-actions les-foot" style="margin-top:8px">
       <button class="btn ghost sm" onclick="p1TariffNeeds()" title="Посчитать по конструктору, какие шаблоны абонементов нужно завести в Alfa">📋 Какие абонементы нужны</button>
       <button class="btn ghost sm" onclick="p1Tariffs()" title="Посмотреть, какие шаблоны абонементов заведены в вашей AlfaCRM">🎫 Абонементы Альфы</button>
@@ -9383,6 +9434,36 @@ async function p1KidsOpen(){
     if(_p1&&!_p1.members) await p1KidsRefresh();
   }catch(e){ if(_p1){ _p1.kidsLog=_pubErrHtml(e,"клиенты Alfa"); _p1Render(); } }
 }
+/* ===== АБОНЕМЕНТЫ: подбор шаблона под цену курса =====
+   В Alfa шаблон («тариф») заводится руками: Настройки → Абонементы. Через API его создание не
+   описано, поэтому мы только ВЫДАЁМ существующий. Подбираем по цене занятия из «Курсов»:
+   у клуба шаблоны вида «Регулярное (32,00 за 1 шт)» — цена 32, один урок.
+   Ручная привязка курса к шаблону хранится в S.alfaMap.tariff и всегда важнее подбора. */
+let _pubTariffs=null, _pubTarLoading=null;
+async function _pubEnsureTariffs(force){
+  if(!force && _pubTariffs) return _pubTariffs;
+  if(_pubTarLoading) return _pubTarLoading;
+  _pubTarLoading=(async()=>{
+    const j=await _pubCall("tariffs",{branches:_pubCfg().branches||[]});
+    _pubTariffs=(j.tariffs||[]).filter(t=>!t.is_archive);
+    console.log("🎫 шаблоны абонементов Alfa:",_pubTariffs);
+    return _pubTariffs;
+  })();
+  try{ return await _pubTarLoading; } finally { _pubTarLoading=null; }
+}
+function _pubTarMap(){ const m=_pubMap(); if(!m.tariff) m.tariff={}; return m.tariff; }
+/* Шаблон для курса: сначала ручная привязка, потом подбор по цене (поурочный, 1 урок) */
+function _pubTariffFor(course){
+  const man=_pubTarMap()[course];
+  if(man){ const t=(_pubTariffs||[]).find(x=>+x.id===+man); return t||{id:+man,name:"id "+man,manual:true}; }
+  const c=(S.courses||[]).find(o=>o.name===course), price=+(c&&c.price)||0;
+  if(!price||!_pubTariffs) return null;
+  const near=_pubTariffs.filter(t=>Math.abs((+t.price||0)-price)<0.01);
+  const one=near.filter(t=>(+t.lesson_count||1)===1);
+  const pick=(one.length===1?one[0]:(near.length===1?near[0]:null));
+  return pick?Object.assign({},pick,{byPrice:true}):null;
+}
+
 /* Сколько РАЗНЫХ шаблонов абонементов нужно завести в Alfa. Шаблон нужен на КАЖДУЮ ЦЕНУ,
    а не на каждый курс: у нескольких курсов цена часто совпадает — им хватит одного.
    Цена берётся так же, как в «Пути оплаты» (ЕРИП): майский → «Майская цена»,
@@ -9440,6 +9521,7 @@ async function p1Tariffs(){
   try{
     const j=await _pubCall("tariffs",{branches:_pubCfg().branches||[]});
     const list=(j.tariffs||[]).filter(t=>!t.is_archive);
+    _pubTariffs=list;                       // тот же список нужен для подбора шаблона под цену курса
     console.log("🎫 тарифы Alfa:",j.tariffs,"· образец полей:",j.sample);
     if(!list.length){
       _p1.kidsLog=`<div class="callout" style="border-color:var(--terra)">В Альфе не нашлось ни одного шаблона абонемента. Их заводят в Alfa: Настройки → Абонементы. Без шаблона выдать абонемент ученику нельзя — цена и правила списания хранятся именно в нём.</div>`;
@@ -9501,6 +9583,17 @@ async function p1KidsAdd(){
       " ("+nmOf(new Set(ext.map(x=>+x.customer_id)))+(okExt>8?" …":"")+")");
     if(errs.length) logCrm("⛔ не внесены в группу id "+a.id+": "+errs.length+" — "+esc(errs.slice(0,3).map(e=>e.why||("id "+e.customer_id)).join("; ")));
     _pubMarkKidsInGrid(_p1.key, sel.filter(r=>doneIds.has(r.alfaId)), +a.id);
+    // абонементы тем, у кого нет майского
+    let tarNote="";
+    if(doneIds.size){
+      const R=await _giveTariffs(_p1.g.course, sel.filter(r=>doneIds.has(r.alfaId)), _p1Branch());
+      if(R&&R.why) tarNote=`<br><span style="color:var(--terra)">Абонементы не выданы: ${esc(R.why)}</span>`;
+      else if(R&&R.given!=null){
+        tarNote=`<br>Абонементов выдано: <b>${R.given}</b>${R.skipped?(" · уже были: "+R.skipped):""}${R.errors.length?(` · <span style="color:var(--red)">ошибок: ${R.errors.length}</span>`):""}`;
+        if(R.given) logCrm("выданы абонементы («"+(R.tariff&&R.tariff.name||"шаблон")+"») по курсу «"+_p1.g.course+"»: "+R.given+" до "+_pubDMY(c.eDate));
+        if(R.errors.length) console.warn("🎫 giveTariff — ошибки:",R.errors);
+      }
+    }
     // считаем ТОЛЬКО наших: в группе Alfa могут быть и чужие участники, их в «детей в Alfa» не пишем
     const after=_p1Kids();
     _pubMarkKids(_p1.key,after.filter(r=>r.inAlfa).length,after.length);
@@ -9508,7 +9601,7 @@ async function p1KidsAdd(){
       ? `<div class="callout" style="border-color:var(--terra)">Добавлено <b>${ok}</b>, не получилось <b>${errs.length}</b>:<br>${
           esc(errs.slice(0,8).map(e=>"id "+e.customer_id+(e.why?(" — "+e.why):"")).join("; "))}<br><span style="color:var(--muted)">Полный ответ — в консоли (F12).</span></div>`
       : `<div class="callout" style="border-color:var(--green)">✅ Готово: <b>${ok}</b> в группе Alfa${
-          okExt?` — из них <b>${okExt}</b> уже состояли в ней (архивная запись), им продлили участие`:""}. Период до ${esc(_pubDMY(c.eDate))}.</div>`);
+          okExt?` — из них <b>${okExt}</b> уже состояли в ней (архивная запись), им продлили участие`:""}. Период до ${esc(_pubDMY(c.eDate))}.${tarNote}</div>`);
     if(errs.length) console.warn("👥 addToGroup — ошибки:",errs);
     toast(errs.length?("Готово "+ok+", с ошибками "+errs.length)
                      :("В группе Alfa: "+ok+(okExt?(" (продлено "+okExt+")"):"")));

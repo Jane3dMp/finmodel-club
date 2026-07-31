@@ -338,6 +338,43 @@ function alfa_index_all(int $branch, string $entity, array $filter = [], int $ma
     return ['items' => $out, 'ok' => $ok, 'pages' => $page];
 }
 
+/* Форма полей периода по РЕАЛЬНОЙ записи: у части сущностей Alfa строковая дата лежит в
+   b_date_v, а в b_date — внутреннее число (так у regular-lesson). Определяем по образцу. */
+function alfa_date_shape(?array $item): array {
+    $sh = ['field' => 'plain', 'fmt' => 'dmy', 'from' => 'docs'];
+    if (!is_array($item) || !$item) return $sh;
+    $sh['from'] = 'sample'; $d = '';
+    if (isset($item['b_date_v']) && $item['b_date_v'] !== '') { $sh['field'] = 'v'; $d = (string)$item['b_date_v']; }
+    elseif (isset($item['b_date']) && is_string($item['b_date'])) { $d = (string)$item['b_date']; }
+    if ($d !== '') $sh['fmt'] = preg_match('#^\d{4}-\d{2}-\d{2}#', $d) ? 'iso' : 'dmy';
+    return $sh;
+}
+function alfa_shape_dates(array $sh, string $bIso, string $eIso): array {
+    $b = $sh['fmt'] === 'iso' ? $bIso : alfa_date($bIso);
+    $e = $sh['fmt'] === 'iso' ? $eIso : alfa_date($eIso);
+    return $sh['field'] === 'v' ? ['b_date_v' => $b, 'e_date_v' => $e] : ['b_date' => $b, 'e_date' => $e];
+}
+/* Абонементы клиента. 🔑 customer-tariff/index требует customer_id именно В АДРЕСЕ —
+   в теле Alfa его игнорирует и отдаёт пусто (долго ловили это раньше). */
+function alfa_customer_tariffs(int $branch, int $customerId): array {
+    $url = 'https://' . alfa_host() . "/v2api/$branch/customer-tariff/index?customer_id=" . $customerId;
+    $r = alfa_http('POST', $url, ['customer_id' => $customerId, 'page' => 0, 'count' => 200], alfa_token(), true, 12);
+    if (isset($r['__err'])) return ['ok' => false, 'items' => []];
+    $out = []; $seen = [];
+    foreach (($r['items'] ?? []) as $it) {
+        $id = (string)($it['id'] ?? '');
+        if ($id === '' || isset($seen[$id])) continue;   // тот же абонемент приходит по разу на филиал
+        $seen[$id] = 1; $out[] = $it;
+    }
+    return ['ok' => true, 'items' => $out];
+}
+/* Выдать абонемент. Поля — по модели Alfa: tariff_id, subject_ids, lesson_type_ids,
+   is_separate_balance, период, комментарий. customer_id дублируем в адрес. */
+function alfa_tariff_give(int $branch, int $customerId, array $body): array {
+    $url = 'https://' . alfa_host() . "/v2api/$branch/customer-tariff/create?customer_id=" . $customerId;
+    return alfa_soft_body(alfa_http('POST', $url, $body, alfa_token(), true, 15));
+}
+
 /* Формат полей периода у членства (cgi). Alfa отвергла и ДД.ММ.ГГГГ, и ISO с ответом
    «Неверный формат значения "Начало действия"» — значит писать надо не в b_date/e_date.
    Не гадаем: смотрим РЕАЛЬНУЮ запись этой же CRM. Если у неё есть b_date_v — строковая форма
