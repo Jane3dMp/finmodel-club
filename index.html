@@ -135,6 +135,15 @@ small.note{font-size:11px;color:var(--muted)}
 .modal-bg.show{display:flex}
 .modal{background:#fff;border-radius:12px;padding:22px;max-width:480px;width:90%;max-height:calc(100vh - 40px);overflow-y:auto;overscroll-behavior:contain;margin:auto}
 .modal h3{margin-bottom:12px}
+/* Окна публикации в Alfa шире обычных: в них таблицы, списки групп и детей — на 480px
+   всё переносилось и «ехало». */
+#pubOneModal .modal{max-width:880px}
+/* input.cell выровнен ВПРАВО — он задуман для чисел в таблицах. В этих окнах поля текстовые
+   (поиск, имя группы, id), и текст, прижатый к правому краю, читался как ошибка вёрстки. */
+#pubOneModal input.cell,#pubModal input.cell{text-align:left}
+/* строка кандидата: кружок ровно по центру первой строки текста, что бы ни делали крупные цели */
+#p1Cands label{align-items:center}
+#p1Cands input[type=radio]{flex:0 0 auto;margin:0}
 .modal input{width:100%;border:1px solid var(--line);border-radius:7px;padding:9px;margin:6px 0;font-size:13px}
 .dayTabs{display:flex;gap:5px;margin-bottom:12px;flex-wrap:wrap;background:#fff;border:1px solid var(--line);border-radius:12px;padding:5px;width:fit-content}
 .dayb{padding:8px 15px;border:1px solid transparent;background:transparent;border-radius:9px;cursor:pointer;font-weight:600;font-size:13px;position:relative;color:var(--coal)}
@@ -731,13 +740,17 @@ details.client .cli-cols .cc-bal{width:74px;font-weight:600}
   .touchui .grp-pin{font-size:20px;padding:10px;display:inline-block}
   .touchui .k-del{font-size:20px;padding:10px 12px;display:inline-block}
   .touchui .more-menu button.btn{min-height:46px;padding:12px 14px;font-size:14px}
-  /* поля ввода: 16px — иначе iOS сам зумит страницу при фокусе */
-  input.cell,select.cell,.modal input,input[type=search],input[type=text],input[type=number],
+  /* Поля ввода: 16px — иначе iOS сам зумит страницу при фокусе.
+     ⚠️ Флажки и радиокнопки СЮДА НЕ ВХОДЯТ: раздутые до 44px, они в строке с текстом уезжают
+     вниз и разметка «едет». Им — отдельное правило ниже. */
+  .touchui input.cell,.touchui select.cell,
+  .touchui .modal input:not([type=checkbox]):not([type=radio]),
+  .touchui input[type=search],.touchui input[type=text],.touchui input[type=number],
   .touchui input[type=date],.touchui select,.touchui textarea{min-height:44px;font-size:16px;padding:9px 10px}
   .touchui input.cell{width:auto;min-width:74px}
   .touchui select.cell{min-width:120px}
-  /* флажки: сам квадратик и запас вокруг него */
-  .touchui input[type=checkbox],.touchui input[type=radio]{width:24px;height:24px;margin:6px}
+  /* флажки и радио: увеличиваем сам квадратик, но не высоту строки */
+  .touchui input[type=checkbox],.touchui input[type=radio]{width:22px;height:22px;min-height:0;margin:0}
   .touchui #kidsTable td,.touchui #groupsTable td{padding:10px 8px}
   .touchui th{padding:12px 10px}
   .touchui td{padding:10px 9px}
@@ -1405,7 +1418,7 @@ details.client .cli-cols .cc-bal{width:74px;font-weight:600}
 </div>
 
 <div class="modal-bg" id="pubOneModal">
- <div class="modal" style="max-width:760px">
+ <div class="modal" style="max-width:880px">
   <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
    <h3 style="margin:0">📤 Опубликовать группу в расписание AlfaCRM</h3>
    <button class="btn ghost sm" style="margin-left:auto" onclick="p1Close()">Закрыть</button>
@@ -1688,7 +1701,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-07-31-14";
+const APP_VER="2026-07-31-15";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
