@@ -1689,7 +1689,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-07-31-09";
+const APP_VER="2026-07-31-10";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -5346,12 +5346,16 @@ async function kidToAlfaGroup(i){
       toast("Не получилось: "+(errs[0].why||"Alfa отказала, подробности в консоли (F12)"));
       return;
     }
+    // ребёнок мог УЖЕ состоять в этой группе прошлым годом (архивная запись) — второе членство
+    // Alfa не создаёт, поэтому мы продлили срок существующего; для нас это тот же результат
+    const wasExt=(j.extended||[]).length>0;
     k.alfaGrp=String(g.id); k.alfaGrpAt=new Date().toISOString().slice(0,10);
-    logCrm("«"+k.n+"» внесён(а) в группу id "+g.id+(g.name?(" «"+g.name+"»"):"")+" · "+_pubDMY(c.bDate)+"–"+_pubDMY(c.eDate));
+    logCrm("«"+k.n+"» "+(wasExt?"продлён(а) в группе id ":"внесён(а) в группу id ")+g.id+(g.name?(" «"+g.name+"»"):"")+" · до "+_pubDMY(c.eDate));
     if(les){ _commitEditKids(les); _syncGroupKids(les,_editKidsBase); }   // у группы 2×/нед отметка нужна во всех занятиях
     persistLocal(); _flushCardEdit();
     renderKidsEditor();
-    toast("«"+shortName(k.n)+"» внесён(а) в группу Alfa ✓");
+    toast(wasExt?("«"+shortName(k.n)+"» уже был(а) в этой группе — продлили участие до "+_pubDMY(c.eDate)+" ✓")
+                :("«"+shortName(k.n)+"» внесён(а) в группу Alfa ✓"));
   }catch(e){
     console.warn("👥 addToGroup — отказ:",(e&&e.data)||e);
     toast("Не получилось: "+((e&&e.message)||e));
@@ -9482,23 +9486,30 @@ async function p1KidsAdd(){
   try{
     const j=await _pubCall("addToGroup",{dryRun:false, groupId:+a.id, branch:_p1Branch(),
       customerIds:sel.map(r=>r.alfaId), b_date:c.bDate, e_date:c.eDate});
-    const ok=(j.added||[]).length, errs=j.errors||[];
-    if(_p1.members) (j.added||[]).forEach(x=>_p1.members.add(+x.customer_id));
-    // отметка живёт на ребёнке — чтобы «✓» был виден и в карточке занятия, а не только здесь
-    const addedIds=new Set((j.added||[]).map(x=>+x.customer_id));
-    if(addedIds.size) logCrm("в группу id "+a.id+" «"+a.name+"» внесено детей: "+addedIds.size+
-      " ("+sel.filter(r=>addedIds.has(r.alfaId)).slice(0,8).map(r=>r.name).join(", ")+(addedIds.size>8?" …":"")+")");
+    // «продлён» — ребёнок уже состоял в этой группе прошлым годом (архивная запись): Alfa второе
+    // членство не создаёт, поэтому мы продлеваем срок существующего. Для нас результат тот же.
+    const ext=(j.extended||[]), errs=j.errors||[];
+    const okAdd=(j.added||[]).length, okExt=ext.length, ok=okAdd+okExt;
+    const doneIds=new Set([...(j.added||[]),...ext].map(x=>+x.customer_id));
+    if(_p1.members) doneIds.forEach(id=>_p1.members.add(id));
+    const nmOf=ids=>sel.filter(r=>ids.has(r.alfaId)).slice(0,8).map(r=>r.name).join(", ");
+    if(okAdd) logCrm("в группу id "+a.id+" «"+a.name+"» внесено детей: "+okAdd+
+      " ("+nmOf(new Set((j.added||[]).map(x=>+x.customer_id)))+(okAdd>8?" …":"")+")");
+    if(okExt) logCrm("в группе id "+a.id+" «"+a.name+"» продлено участие до "+_pubDMY(c.eDate)+": "+okExt+
+      " ("+nmOf(new Set(ext.map(x=>+x.customer_id)))+(okExt>8?" …":"")+")");
     if(errs.length) logCrm("⛔ не внесены в группу id "+a.id+": "+errs.length+" — "+esc(errs.slice(0,3).map(e=>e.why||("id "+e.customer_id)).join("; ")));
-    _pubMarkKidsInGrid(_p1.key, sel.filter(r=>addedIds.has(r.alfaId)), +a.id);
+    _pubMarkKidsInGrid(_p1.key, sel.filter(r=>doneIds.has(r.alfaId)), +a.id);
     // считаем ТОЛЬКО наших: в группе Alfa могут быть и чужие участники, их в «детей в Alfa» не пишем
     const after=_p1Kids();
     _pubMarkKids(_p1.key,after.filter(r=>r.inAlfa).length,after.length);
     _p1.kidsLog=(errs.length
       ? `<div class="callout" style="border-color:var(--terra)">Добавлено <b>${ok}</b>, не получилось <b>${errs.length}</b>:<br>${
           esc(errs.slice(0,8).map(e=>"id "+e.customer_id+(e.why?(" — "+e.why):"")).join("; "))}<br><span style="color:var(--muted)">Полный ответ — в консоли (F12).</span></div>`
-      : `<div class="callout" style="border-color:var(--green)">✅ Добавлено в группу Alfa: <b>${ok}</b>. Период ${esc(_pubDMY(c.bDate))} — ${esc(_pubDMY(c.eDate))}.</div>`);
+      : `<div class="callout" style="border-color:var(--green)">✅ Готово: <b>${ok}</b> в группе Alfa${
+          okExt?` — из них <b>${okExt}</b> уже состояли в ней (архивная запись), им продлили участие`:""}. Период до ${esc(_pubDMY(c.eDate))}.</div>`);
     if(errs.length) console.warn("👥 addToGroup — ошибки:",errs);
-    toast(errs.length?("Добавлено "+ok+", с ошибками "+errs.length):("Добавлено в Alfa: "+ok));
+    toast(errs.length?("Готово "+ok+", с ошибками "+errs.length)
+                     :("В группе Alfa: "+ok+(okExt?(" (продлено "+okExt+")"):"")));
   }catch(e){ _p1.kidsLog=_pubErrHtml(e,"добавление детей"); }
   _p1.busy=false; _p1Render();
   if(typeof renderGroups==="function") renderGroups();

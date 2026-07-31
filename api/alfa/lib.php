@@ -338,6 +338,64 @@ function alfa_index_all(int $branch, string $entity, array $filter = [], int $ma
     return ['items' => $out, 'ok' => $ok, 'pages' => $page];
 }
 
+/* Формат полей периода у членства (cgi). Alfa отвергла и ДД.ММ.ГГГГ, и ISO с ответом
+   «Неверный формат значения "Начало действия"» — значит писать надо не в b_date/e_date.
+   Не гадаем: смотрим РЕАЛЬНУЮ запись этой же CRM. Если у неё есть b_date_v — строковая форма
+   лежит там (как у regular-lesson), а b_date внутри числовая. */
+function alfa_cgi_shape(int $branch): array {
+    static $memo = null;
+    if ($memo !== null) return $memo;
+    $sh = ['field' => 'plain', 'fmt' => 'dmy', 'from' => 'docs', 'keys' => []];
+    $r = alfa_http('POST', 'https://' . alfa_host() . "/v2api/$branch/cgi/index",
+                   ['page' => 0, 'count' => 5], alfa_token(), true, 12);
+    $it = $r['items'][0] ?? null;
+    if (is_array($it)) {
+        $sh['from'] = 'sample';
+        $sh['keys'] = array_keys($it);
+        $d = '';
+        if (isset($it['b_date_v']) && $it['b_date_v'] !== '') { $sh['field'] = 'v'; $d = (string)$it['b_date_v']; }
+        elseif (isset($it['b_date']) && is_string($it['b_date'])) { $d = (string)$it['b_date']; }
+        if ($d !== '') $sh['fmt'] = preg_match('#^\d{4}-\d{2}-\d{2}#', $d) ? 'iso' : 'dmy';
+    }
+    return $memo = $sh;
+}
+function alfa_cgi_dates(array $sh, string $bIso, string $eIso): array {
+    $b = $sh['fmt'] === 'iso' ? $bIso : alfa_date($bIso);
+    $e = $sh['fmt'] === 'iso' ? $eIso : alfa_date($eIso);
+    return $sh['field'] === 'v' ? ['b_date_v' => $b, 'e_date_v' => $e] : ['b_date' => $b, 'e_date' => $e];
+}
+/* Найти членство ребёнка в конкретной группе — в том числе АРХИВНОЕ (прошлогоднее).
+   Спрашиваем по клиенту: по группе архивные записи Alfa отдаёт не всегда. */
+function alfa_cgi_find(int $branch, int $customerId, int $groupId): ?array {
+    foreach ([
+        ['customer_id' => $customerId, 'page' => 0, 'count' => 200],
+        ['customer_id' => $customerId, 'date_from' => '2015-01-01', 'date_to' => '2030-12-31',
+         'b_date' => '2015-01-01', 'e_date' => '2030-12-31', 'page' => 0, 'count' => 200],
+    ] as $q) {
+        $url = 'https://' . alfa_host() . "/v2api/$branch/cgi/index?customer_id=" . $customerId;
+        $r = alfa_http('POST', $url, $q, alfa_token(), true, 12);
+        if (isset($r['__err'])) continue;
+        foreach (($r['items'] ?? []) as $it) {
+            if ((int)($it['group_id'] ?? 0) === $groupId && (int)($it['customer_id'] ?? 0) === $customerId) return $it;
+        }
+    }
+    return null;
+}
+/* Продлить существующее членство: меняем только КОНЕЦ периода, начало не трогаем — иначе
+   затрём историю («ходит с 02.09.2025»). Alfa update перезаписывает запись целиком,
+   поэтому переносим её поля как есть. */
+function alfa_cgi_extend(int $branch, array $cur, string $eIso, array $sh): array {
+    $id = (int)($cur['id'] ?? 0);
+    $body = [];
+    foreach (['customer_id','group_id','b_date','e_date','b_date_v','e_date_v'] as $f)
+        if (isset($cur[$f]) && $cur[$f] !== '' && $cur[$f] !== null) $body[$f] = $cur[$f];
+    $e = $sh['fmt'] === 'iso' ? $eIso : alfa_date($eIso);
+    if ($sh['field'] === 'v') $body['e_date_v'] = $e; else $body['e_date'] = $e;
+    $url = 'https://' . alfa_host() . "/v2api/$branch/cgi/update?id=" . $id
+         . '&customer_id=' . (int)($cur['customer_id'] ?? 0) . '&group_id=' . (int)($cur['group_id'] ?? 0);
+    return alfa_soft_body(alfa_http('POST', $url, $body, alfa_token(), true, 15));
+}
+
 /* Привязка ученика к группе (cgi/create).
    ⚠️ Alfa на этом эндпоинте читает ключевые параметры ИЗ СТРОКИ АДРЕСА, а не из тела: с телом
    вида {customer_id, group_id, …} она отвечает «Отсутствуют обязательные параметры: group_id».

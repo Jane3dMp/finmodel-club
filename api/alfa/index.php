@@ -764,29 +764,45 @@ switch ($action) {
                       'sample' => ['customer_id' => $ids[0], 'group_id' => $gid,
                                    'b_date' => alfa_date($bIso), 'e_date' => alfa_date($eIso)]]);
         }
-        // Формат дат на ЗАПИСЬ у Alfa — ДД.ММ.ГГГГ (документация), но читает она их как ISO.
-        // Поэтому на первом ребёнке пробуем оба и фиксируем сработавший на всю пачку.
-        $fmt = null; $added = []; $errors = [];
+        /* Ребёнок может УЖЕ состоять в этой группе — прошлым учебным годом, запись архивная
+           (в карточке группы она зачёркнута). Alfa второе членство создать не даёт:
+           «Данный клиент уже состоит в этой группе». Поэтому: нашли существующее — ПРОДЛЕВАЕМ
+           срок до нового конца (начало не трогаем, чтобы не стереть «ходит с 2025 года»),
+           не нашли — создаём. Формат полей периода берём по реальной записи этой CRM. */
+        $sh = alfa_cgi_shape($bid);
+        $added = []; $extended = []; $errors = [];
         foreach ($ids as $cid) {
-            $ok = false; $lastWhy = ''; $lastSent = null; $lastRaw = null;
-            foreach (($fmt ? [$fmt] : ['dmy', 'iso']) as $f) {
-                $body = ['customer_id' => $cid, 'group_id' => $gid,
-                         'b_date' => $f === 'iso' ? $bIso : alfa_date($bIso),
-                         'e_date' => $f === 'iso' ? $eIso : alfa_date($eIso)];
-                // ⚠️ Alfa на этом эндпоинте берёт ключевые параметры ИЗ АДРЕСА, а тело для них
-                //    игнорирует — и отвечает «Отсутствуют обязательные параметры: group_id»,
-                //    хотя group_id в теле есть. Та же грабля, что с customer-tariff/index.
-                //    Дублируем в query, тело оставляем (там даты).
-                $res = alfa_cgi_create($bid, $cid, $gid, $body);
-                $nid = $res['id'] ?? ($res['model']['id'] ?? null);
-                if ($nid) { $fmt = $f; $ok = true; $added[] = ['customer_id' => $cid, 'cgi_id' => (int)$nid]; break; }
-                $lastWhy = alfa_err_text($res); $lastSent = $body; $lastRaw = $res;
+            $cur = alfa_cgi_find($bid, $cid, $gid);
+            if ($cur) {
+                $res = alfa_cgi_extend($bid, $cur, $eIso, $sh);
+                $okUpd = !empty($res['id']) || !empty($res['model']['id']);
+                if ($okUpd) $extended[] = ['customer_id' => $cid, 'cgi_id' => (int)($cur['id'] ?? 0)];
+                else $errors[] = ['customer_id' => $cid, 'step' => 'продление', 'why' => alfa_err_text($res),
+                                  'was' => ['b' => $cur['b_date'] ?? null, 'e' => $cur['e_date'] ?? null], 'alfa' => $res];
+                continue;
             }
-            if (!$ok) $errors[] = ['customer_id' => $cid, 'why' => $lastWhy, 'sent' => $lastSent,
-                                   'url' => "/v2api/$bid/cgi/create?customer_id=$cid&group_id=$gid", 'alfa' => $lastRaw];
+            $body = array_merge(['customer_id' => $cid, 'group_id' => $gid], alfa_cgi_dates($sh, $bIso, $eIso));
+            $res = alfa_cgi_create($bid, $cid, $gid, $body);
+            $nid = $res['id'] ?? ($res['model']['id'] ?? null);
+            if ($nid) { $added[] = ['customer_id' => $cid, 'cgi_id' => (int)$nid]; continue; }
+            // Alfa всё-таки нашла членство, которого не отдал поиск — пробуем продлить
+            if (preg_match('/уже состоит/ui', alfa_err_text($res))) {
+                $cur2 = alfa_cgi_find($bid, $cid, $gid);
+                if ($cur2) {
+                    $res2 = alfa_cgi_extend($bid, $cur2, $eIso, $sh);
+                    if (!empty($res2['id']) || !empty($res2['model']['id'])) { $extended[] = ['customer_id' => $cid, 'cgi_id' => (int)($cur2['id'] ?? 0)]; continue; }
+                    $errors[] = ['customer_id' => $cid, 'step' => 'продление', 'why' => alfa_err_text($res2), 'alfa' => $res2];
+                    continue;
+                }
+                $errors[] = ['customer_id' => $cid, 'step' => 'создание',
+                             'why' => 'Alfa says «уже состоит в этой группе», но саму запись найти не удалось — откройте группу в Alfa и продлите срок вручную', 'alfa' => $res];
+                continue;
+            }
+            $errors[] = ['customer_id' => $cid, 'step' => 'создание', 'why' => alfa_err_text($res), 'sent' => $body,
+                         'url' => "/v2api/$bid/cgi/create?customer_id=$cid&group_id=$gid", 'alfa' => $res];
         }
-        json_out(['ok' => true, 'dryRun' => false, 'groupId' => $gid, 'branch' => $bid, 'dateFormat' => $fmt,
-                  'added' => $added, 'errors' => $errors]);
+        json_out(['ok' => true, 'dryRun' => false, 'groupId' => $gid, 'branch' => $bid, 'shape' => $sh,
+                  'added' => $added, 'extended' => $extended, 'errors' => $errors]);
         break;
 
     // --- ГРУППА ПО ID (READ). Связать нашу группу с альфовской можно по id, который Жанна видит
