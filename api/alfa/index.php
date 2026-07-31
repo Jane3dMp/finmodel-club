@@ -694,8 +694,10 @@ switch ($action) {
                         'id'           => $tid,
                         'name'         => (string)($t['name'] ?? ''),
                         'type'         => $t['type'] ?? ($t['tariff_type'] ?? null),   // 1 поурочный, 2 помесячный, 3 недельный
-                        'price'        => $t['price'] ?? null,
-                        'lesson_count' => $t['lesson_count'] ?? null,
+                        // имя поля цены в v2api не описано — отдаём первое непустое из вероятных,
+                        // а разбирает значение уже клиент (Alfa шлёт строкой, бывает с запятой)
+                        'price'        => $t['price'] ?? ($t['cost'] ?? ($t['amount'] ?? ($t['sum'] ?? null))),
+                        'lesson_count' => $t['lesson_count'] ?? ($t['lessons_count'] ?? ($t['count'] ?? null)),
                         'duration'     => $t['duration'] ?? null,
                         'branch'       => (int)$bid,
                         'branch_ids'   => array_values(array_map('intval', (array)($t['branch_ids'] ?? []))),

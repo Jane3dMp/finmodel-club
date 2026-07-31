@@ -1689,7 +1689,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-07-31-12";
+const APP_VER="2026-07-31-13";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -9270,8 +9270,7 @@ function _tariffPlanFor(course, kids){
   const m=_pubMap(), subj=m.subj[course]?+m.subj[course]:0;
   if(!subj) return {rows:[],why:"курс «"+course+"» не сопоставлен с предметом Alfa"};
   const t=_pubTariffFor(course);
-  const c=(S.courses||[]).find(o=>o.name===course), price=+(c&&c.price)||0;
-  if(!t) return {rows:[],why:price?("нет шаблона абонемента на "+price+" р за занятие — заведите его в Alfa: Настройки → Абонементы"):("у курса «"+course+"» не указана цена")};
+  if(!t) return {rows:[],why:_pubTariffWhy(course)};
   const lt=_pubCfg().lessonTypeId?[+_pubCfg().lessonTypeId]:[];
   const rows=kids.filter(k=>k.alfaId&&!k.may)          // у майских абонемент уже есть
     .map(k=>({customerId:+k.alfaId, tariffId:+t.id, subjectIds:[subj], lessonTypeIds:lt, _name:k.name||k.n}));
@@ -9396,8 +9395,22 @@ function _p1KidsHtml(){
       <span>Заодно выдать абонемент тем, у кого нет 💰 майского${
         P.why?` — <span style="color:var(--terra)">${esc(P.why)}</span>`
              :` (${P.rows.length} чел., шаблон «${esc((P.tariff&&P.tariff.name)||"?")}»${cr&&cr.price?(", цена "+cr.price+" р/занятие"):""}, до ${esc(_pubDMY(_pubCfg().eDate))})`}
-        ${!P.why&&P.tariff&&P.tariff.byPrice?`<span style="color:var(--muted)"> · подобран по цене</span>`:""}</span></label>`;
-    if(!_pubTariffs) h+=`<div style="font-size:11px;color:var(--muted)">Шаблоны Alfa ещё не прочитаны — нажмите «🎫 Абонементы Альфы», чтобы увидеть подбор.</div>`;
+        ${!P.why&&P.tariff&&P.tariff.byPrice?`<span style="color:var(--muted)"> · подобран по цене</span>`:""}
+        ${!P.why&&P.tariff&&P.tariff.manual?`<span style="color:var(--muted)"> · выбран вручную</span>`:""}</span></label>`;
+    // Ручной выбор шаблона — надёжнее подбора: цены в Alfa приходят строкой и в разных
+    // форматах, а у клуба бывает по нескольку похожих шаблонов на одну цену.
+    if(_pubTariffs&&_pubTariffs.length){
+      const cur=_pubTarMap()[_p1.g.course]||"";
+      const opts=_pubTariffs.slice()
+        .sort((a,b)=>_pubNum(a.price)-_pubNum(b.price)||String(a.name).localeCompare(String(b.name),"ru"))
+        .map(t=>`<option value="${esc(t.id)}"${String(cur)===String(t.id)?" selected":""}>${esc(t.name)} · ${_pubNum(t.price)} р${(_pubNum(t.lesson_count)||1)!==1?(" · "+_pubNum(t.lesson_count)+" ур."):""}</option>`).join("");
+      h+=`<div style="display:flex;gap:6px;align-items:center;margin-top:6px;font-size:12px;flex-wrap:wrap">
+        <span style="color:var(--muted)">Шаблон для «${esc(_p1.g.course)}»:</span>
+        <select class="cell" style="max-width:320px" onchange="pubSetTariff('${_jsStr(_p1.g.course)}',this.value)">
+          <option value="">— подобрать по цене —</option>${opts}</select></div>`;
+    } else {
+      h+=`<div style="font-size:11px;color:var(--muted);margin-top:4px">Шаблоны Alfa ещё не прочитаны — нажмите «🎫 Абонементы Альфы», чтобы выбрать вручную.</div>`;
+    }
   }
   h+=`<div class="hd-actions les-foot" style="margin-top:8px">
       <button class="btn ghost sm" onclick="p1TariffNeeds()" title="Посчитать по конструктору, какие шаблоны абонементов нужно завести в Alfa">📋 Какие абонементы нужны</button>
@@ -9431,6 +9444,9 @@ async function p1KidsOpen(){
   if(!_p1.kidsOpen) return;
   try{
     if(!_pubCustIdx){ await _pubEnsureCustomers(); if(_p1) _p1Render(); }
+    // шаблоны абонементов нужны сразу: без них строка про абонемент показывала бы «нет шаблона»,
+    // хотя он есть — просто ещё не прочитан
+    if(!_pubTariffs){ try{ await _pubEnsureTariffs(); if(_p1) _p1Render(); }catch(e){} }
     if(_p1&&!_p1.members) await p1KidsRefresh();
   }catch(e){ if(_p1){ _p1.kidsLog=_pubErrHtml(e,"клиенты Alfa"); _p1Render(); } }
 }
@@ -9452,16 +9468,41 @@ async function _pubEnsureTariffs(force){
   try{ return await _pubTarLoading; } finally { _pubTarLoading=null; }
 }
 function _pubTarMap(){ const m=_pubMap(); if(!m.tariff) m.tariff={}; return m.tariff; }
+function pubSetTariff(course,id){
+  const m=_pubTarMap(); id=String(id||"").trim();
+  if(id) m[course]=+id; else delete m[course];
+  _pubSave(); if(typeof _p1Render==="function") _p1Render();
+}
+/* ⚠️ Цена от Alfa приходит строкой и может быть с запятой («32,00») или с пробелами —
+   обычное +"32,00" даёт NaN, и шаблон «не находился», хотя он есть. Разбираем аккуратно. */
+function _pubNum(v){
+  if(typeof v==="number") return v;
+  const s=String(v==null?"":v).replace(/\s| /g,"").replace(",",".");
+  const n=parseFloat(s);
+  return isFinite(n)?n:0;
+}
 /* Шаблон для курса: сначала ручная привязка, потом подбор по цене (поурочный, 1 урок) */
 function _pubTariffFor(course){
   const man=_pubTarMap()[course];
-  if(man){ const t=(_pubTariffs||[]).find(x=>+x.id===+man); return t||{id:+man,name:"id "+man,manual:true}; }
-  const c=(S.courses||[]).find(o=>o.name===course), price=+(c&&c.price)||0;
+  if(man){ const t=(_pubTariffs||[]).find(x=>+x.id===+man); return t?Object.assign({},t,{manual:true}):{id:+man,name:"id "+man,manual:true}; }
+  const c=(S.courses||[]).find(o=>o.name===course), price=_pubNum(c&&c.price);
   if(!price||!_pubTariffs) return null;
-  const near=_pubTariffs.filter(t=>Math.abs((+t.price||0)-price)<0.01);
-  const one=near.filter(t=>(+t.lesson_count||1)===1);
+  const near=_pubTariffs.filter(t=>Math.abs(_pubNum(t.price)-price)<0.01);
+  const one=near.filter(t=>(_pubNum(t.lesson_count)||1)===1);
   const pick=(one.length===1?one[0]:(near.length===1?near[0]:null));
   return pick?Object.assign({},pick,{byPrice:true}):null;
+}
+/* Почему шаблон не подобрался — чтобы вместо «нет шаблона» было видно, что мы вообще видим */
+function _pubTariffWhy(course){
+  const c=(S.courses||[]).find(o=>o.name===course), price=_pubNum(c&&c.price);
+  if(!price) return "у курса «"+course+"» не указана цена занятия";
+  if(!_pubTariffs) return "шаблоны Alfa ещё не прочитаны";
+  const near=_pubTariffs.filter(t=>Math.abs(_pubNum(t.price)-price)<0.01);
+  if(near.length>1) return "под цену "+price+" р подходит несколько шаблонов ("+near.length+") — выберите нужный";
+  const close=_pubTariffs.slice().sort((a,b)=>Math.abs(_pubNum(a.price)-price)-Math.abs(_pubNum(b.price)-price))
+    .slice(0,3).map(t=>t.name+" ("+_pubNum(t.price)+")").join(", ");
+  return "нет шаблона на "+price+" р за занятие. Видим шаблонов: "+_pubTariffs.length+
+         (close?("; ближайшие: "+close):"")+" — выберите вручную или заведите в Alfa";
 }
 
 /* Сколько РАЗНЫХ шаблонов абонементов нужно завести в Alfa. Шаблон нужен на КАЖДУЮ ЦЕНУ,
