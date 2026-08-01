@@ -1701,7 +1701,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-07-31-15";
+const APP_VER="2026-07-31-16";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -8088,8 +8088,7 @@ function _oldNewHTML(){
     ? `Возврат — посещал занятия до ${_dmy(cut)} или заведён в Альфе раньше. Новый — всё остальное: заведён с ${_dmy(cut)}, из amo, или следов прошлого в клубе нет.`
       +(G.newUnver?` · <span style="color:#8A6412" title="В новых, но связь с Альфой не подтверждена (нет ID/amo) — возможно, вернувшиеся с другим написанием ФИО. Сверьте через «💰 Балансы и возраст»">из новых не подтверждены Альфой: ${G.newUnver}</span>`:"")
       +` · Чтобы не спутать возвратных, важно последнее посещение из Альфы — нажмите «💰 Балансы и возраст».`
-    : `Разделение «возврат / новый набор» — по данным из AlfaCRM (последнее посещение, дата внесения) и приходу из amo. Приходят из выгрузки «💰 Балансы и возраст» на вкладке «Клиенты». `
-      +(_fbIsAdmin?"Нажмите её, и цифры появятся здесь.":"Попросите администратора нажать «💰 Балансы и возраст».");
+    : `Разделение «возврат / новый набор» — по данным из AlfaCRM (последнее посещение, дата внесения) и приходу из amo. Приходят из выгрузки «💰 Балансы и возраст» на вкладке «Клиенты» — нажмите её, и цифры появятся здесь.`;
   const lists=st.has?_goalsKidLists():{newKids:[],oldKids:[],unknownKids:[]};
   const body = st.has
     ? `<div class="on-row">
@@ -10043,11 +10042,13 @@ function renderClients(){
       <!-- подтяжка детей из CRM — ежедневная работа, доступна всем менеджерам -->
       <button class="btn ghost sm" onclick="openAmoNew()" title="Дети с оплаченного этапа amoCRM — распределить в группы">📥 Новые из amoCRM${_amoBadgeN?` <b style="color:var(--red)">${_amoBadgeN}</b>`:''}</button>
       <button class="btn ghost sm" onclick="openAlfaNew()" title="Найти в Альфе детей, которых ещё нет у вас, и добавить в список ожидания">🔽 Новые дети из Альфы</button>
+      <!-- Поправили возраст или баланс в Альфе — обновить у себя должен уметь и менеджер,
+           иначе он ждёт админа. Действие только ЧИТАЕТ из CRM, писать в неё не может. -->
+      <button class="btn ghost sm" id="balBtn" onclick="pullBalances()" title="Одна выгрузка из Альфы на всех детей (группы + ожидание): баланс, возраст, филиалы, последнее посещение">💰 Балансы и возраст</button>
+      ${S.balancesAt?`<span style="font-size:11px;color:var(--muted)">балансы от ${esc(new Date(S.balancesAt).toLocaleString("ru-RU",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"}))}</span>`:''}
       ${_fbIsAdmin?`
-      <button class="btn ghost sm" id="balBtn" onclick="pullBalances()" title="Одна выгрузка из Альфы на всех детей (группы + ожидание): баланс, филиалы и возраст">💰 Балансы и возраст</button>
       <button class="btn ghost sm" onclick="openArchProbe()" title="Сверить на боевой Альфе, каким полем помечается архив">🔍 Поля архива</button>
-      <button class="btn ghost sm" onclick="alfaDiagDates()" title="Проверить, отдаёт ли Альфа дату создания записи (dt_add) — по ней делим новый/возврат">🔬 Поля дат из Альфы</button>
-      ${S.balancesAt?`<span style="font-size:11px;color:var(--muted)">балансы от ${esc(new Date(S.balancesAt).toLocaleString("ru-RU",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"}))}</span>`:''}`:''}
+      <button class="btn ghost sm" onclick="alfaDiagDates()" title="Проверить, отдаёт ли Альфа дату создания записи (dt_add) — по ней делим новый/возврат">🔬 Поля дат из Альфы</button>`:''}
     </div>`;
   if(!shown.length){ box.innerHTML=html+`<div style="color:var(--muted);padding:10px 2px">${clients.length?'Никого не найдено.':'В расписании пока нет детей.'}</div>`; return; }
   // фильтр по ответу родителя: у скольких детей есть группа в этом статусе
@@ -10329,7 +10330,13 @@ async function pullBalances(){
       +(dobN?(" · 🎂 возраст +"+dobN):"")+(parN?(" · 👪 родителей +"+parN):"")
       +(ambig?(" · тёзки "+ambig):"")+(miss?(" · нет в Альфе "+miss):"")+srvCreated);
     try{ console.log("💰 выгрузка:", {поСвязи:byIdN,поФИО:byNameN,датаВнесения:createdN,последнееПосещение:attendN,серверДат:j.with_created,всегоКлиентов:j.count}); }catch(e){}
-  }catch(e){ toast("Не удалось обновить балансы: "+((e&&e.message)||e)); }
+  }catch(e){
+    const msg=(e&&e.message)||String(e);
+    // менеджеру нужен доступ к прокси на ЧТЕНИЕ — иначе он не поймёт, почему кнопка не работает
+    toast(/список|доступ/i.test(msg)
+      ? "Нет доступа к Альфе: попросите добавить вашу почту в allowed_emails на сервере (это только чтение)"
+      : ("Не удалось обновить балансы: "+msg));
+  }
   if(btn){ btn.disabled=false; btn.textContent="💰 Балансы и возраст"; }
 }
 /* ===== 📥 НОВЫЕ ИЗ amoCRM — сделки выбранного этапа воронки → список ожидания =====
