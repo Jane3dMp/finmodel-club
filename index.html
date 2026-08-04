@@ -197,7 +197,7 @@ details.cwarn .cwarn-body{padding:0 14px 12px}
 .chip:hover{background:#E7E5DF}
 .modal label{font-size:11px;color:var(--muted);font-weight:600;display:block;margin-top:8px}
 .modal .cell.wide{width:100%}
-#lesModal .modal{max-width:820px}
+#lesModal .modal{max-width:960px}
 #lesModal #mNote{min-height:70px;resize:vertical;font-size:13px;line-height:1.4}
 #lesModal .les-foot{position:sticky;bottom:-22px;background:#fff;padding:10px 0 0;border-top:1px solid var(--line);z-index:2}
 #kidsTable thead th{position:sticky;top:0;z-index:1}
@@ -1701,7 +1701,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-07-31-16";
+const APP_VER="2026-07-31-17";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -5283,7 +5283,7 @@ function renderKidsEditor(){
     refreshLesWage();
     return;
   }
-  const th=KID_FLAGS.map(f=>`<th title="${f.lab}">${f.ic}<br>${f.lab.split(" ")[0]}</th>`).join("");
+  const th=KID_FLAGS.map(f=>`<th title="${f.lab}">${f.ic}<br>${f.short||f.lab.split(" ")[0]}</th>`).join("");
   const moveOpts=_gridGroupOptsHtml();   // список групп для «перевести» (строится один раз)
   // сводка по группе: «❌ не придёт» считаем ОТКАЗОМ (ребёнок остаётся в общем числе записанных),
   // отказ = галочка ❌ ИЛИ ответ «Отказ». Остальные счётчики — только по неотказавшимся.
@@ -6040,13 +6040,17 @@ function closeImport(){ document.getElementById("impModal").classList.remove("sh
 /* ====== ВЫГРУЗКА ДЕТЕЙ ПО ДНЯМ (Excel со статусами) ====== */
 const KID_STATUSES=["точно придет","ждет расписание в школе","думают","нет денег (не придет точно)","ждет расписание другого кружка","уговаривает ребенка","в комментах"];
 /* ===== ДЕТИ В ЗАНЯТИИ: структура l.kids=[{n,may,sched,no,call,c}] ===== */
+/* Столбцы-галочки в карточке занятия. short — короткая подпись в шапке: без неё бралось
+   первое слово из lab, и «Абонемент» распирал таблицу. */
 const KID_FLAGS=[
-  {k:"may",   ic:"💰", lab:"Купил майский"},
-  {k:"sched", ic:"🗓", lab:"Подходит расписание"},
-  {k:"no",    ic:"❌", lab:"Не придёт"},
-  {k:"call",  ic:"📵", lab:"Недозвон"}
+  {k:"may",    ic:"💰", lab:"Купил майский",       short:"Купил"},
+  {k:"sched",  ic:"🗓", lab:"Подходит расписание", short:"Подх."},
+  {k:"no",     ic:"❌", lab:"Не придёт",           short:"Не"},
+  {k:"call",   ic:"📵", lab:"Недозвон",            short:"Недозв."},
+  {k:"single", ic:"1️⃣", lab:"Платит разово",       short:"Разово"},
+  {k:"sub",    ic:"🎫", lab:"Платит абонементом",  short:"Абон."}
 ];
-function _blankKid(n){ return {n:cleanKidName(n), may:false, sched:false, no:false, call:false, c:"", phone:"", alfaId:null, dob:"", evzz:"", vbSent:false, vbSentAt:"", vbReply:"", vbReplyAt:"" }; }
+function _blankKid(n){ return {n:cleanKidName(n), may:false, sched:false, no:false, call:false, single:false, sub:false, c:"", phone:"", alfaId:null, dob:"", evzz:"", vbSent:false, vbSentAt:"", vbReply:"", vbReplyAt:"" }; }
 /* ===== НАШИ ПОЛЯ РЕБЁНКА по alfaId (узел S.children) — один на ребёнка, а не на группу ===== */
 function _childRec(alfaId, create){
   const k=(alfaId!=null&&alfaId!=="")?String(alfaId):""; if(!k) return null;
