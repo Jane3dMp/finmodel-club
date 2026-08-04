@@ -1701,7 +1701,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-07-31-17";
+const APP_VER="2026-07-31-18";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -7202,13 +7202,38 @@ async function kidAlfaUpdate(i){
   toast("Ищу в Альфе: "+shortName(nm)+"…");
   try{
     const token=await _alfaIdToken();
+    // Если связь с Альфой уже есть — спрашиваем ПО ID: это точный ответ про нужного ребёнка.
+    // Поиск по имени Alfa делает нестрого и легко возвращает однофамильца.
+    const hasId=(k.alfaId!=null&&k.alfaId!=="");
     const r=await fetch(ALFA_PROXY+"?action=history",{method:"POST",
       headers:{"Content-Type":"application/json","Authorization":"Bearer "+token},
-      body:JSON.stringify({name:nm})});
+      body:JSON.stringify(hasId?{customerId:k.alfaId}:{name:nm})});
     const j=await r.json().catch(()=>({ok:false,error:"ответ не JSON (код "+r.status+")"}));
     if(!r.ok||!j.ok) throw new Error(j.error||("Ошибка "+r.status));
     if(j.notFound || !j.customerId){ toast("В Альфе не найден: "+shortName(nm)); return; }
     const s=j.summary||{};
+    /* ⚠️ Здесь не хватало сверки ФИО — и это подставляло чужой возраст. Поиск по имени Alfa делает
+       нестрого: у брата с сестрой одна фамилия, и «Павлюкович Гордей» получал дату рождения
+       «Павлюкович Арины» — в списке у обоих был один возраст. В соседней «🎂 Возраст всем» такая
+       сверка есть, здесь её забыли. Берём данные, только если Alfa вернула ТОГО ЖЕ ребёнка. */
+    if(s.name && !_sameKid(s.name, nm)){
+      console.warn("⟳ kidAlfaUpdate: искали «"+nm+"», Альфа вернула «"+s.name+"» (id "+j.customerId+") — данные не применены");
+      if(hasId){
+        // сохранённая связь ведёт на другого человека — она и есть источник неверного возраста
+        if(confirm("Связь с Альфой у «"+nm+"» ведёт на другого человека: «"+s.name+"» (id "+k.alfaId+").\n\n"+
+                   "Скорее всего, отсюда и неверный возраст.\n\nУбрать неправильную связь и поискать по имени?")){
+          _kidsFromDOM();
+          const kx=_editKids.find(x=>_nameKey(x.n)===_nameKey(nm))||_editKids[i];
+          if(kx){ kx.alfaId=null; kx.dob=""; const les0=S.grid[_modalLesIdx()];
+            if(les0){ _commitEditKids(les0); _syncGroupKids(les0,_editKidsBase); }
+            persistLocal(); _flushCardEdit(); renderKidsEditor(); }
+          return kidAlfaUpdate(i);          // повторяем уже поиском по имени
+        }
+        return;
+      }
+      toast("Альфа вернула другого человека: «"+s.name+"». Возраст и связь не меняли — свяжите вручную в карточке 🪪");
+      return;
+    }
     _kidsFromDOM();   // пока шёл запрос, пользователь мог править строки — берём свежий снимок и ищем ребёнка по имени, не по индексу
     const kk=_editKids.find(x=>_nameKey(x.n)===_nameKey(nm)) || _editKids[i];
     if(!kk){ toast("Строка ребёнка изменилась — повторите ⟳"); return; }
