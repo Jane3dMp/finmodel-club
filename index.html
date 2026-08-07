@@ -1545,6 +1545,27 @@ details.client .cli-cols .cc-bal{width:74px;font-weight:600}
  </div>
 </div>
 
+<div class="modal-bg" id="rosterPrnModal">
+ <div class="modal" style="max-width:680px">
+  <h3>🖨 Составы групп по педагогам</h3>
+  <p style="font-size:13px;color:var(--muted);margin-bottom:10px">Кому печатаем и что показать в списке. Выбор запоминается.</p>
+  <div style="font-weight:600;font-size:13px;margin-bottom:4px">Педагоги</div>
+  <div class="hd-actions" style="margin-bottom:6px">
+   <button class="btn ghost sm" onclick="rprnAllT(1)">✓ Все</button>
+   <button class="btn ghost sm" onclick="rprnAllT(0)">✕ Снять все</button>
+   <span style="margin-left:auto;font-size:12px;color:var(--muted)" id="rprnCnt"></span>
+  </div>
+  <div id="rprnTeachers" style="display:grid;grid-template-columns:1fr 1fr;gap:4px 14px;max-height:34vh;overflow:auto;
+       border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin-bottom:12px"></div>
+  <div style="font-weight:600;font-size:13px;margin-bottom:4px">Столбцы списка детей</div>
+  <div id="rprnCols" style="display:grid;grid-template-columns:1fr 1fr;gap:4px 14px;margin-bottom:12px"></div>
+  <div class="hd-actions" style="margin-top:14px">
+   <button class="btn sm" onclick="printTeacherRosters()"><i data-ic="print"></i>Печать</button>
+   <button class="btn gray sm" onclick="closeRosterPrint()">Отмена</button>
+  </div>
+ </div>
+</div>
+
 <div class="modal-bg" id="prnColModal">
  <div class="modal" style="max-width:560px">
   <h3>Печать таблицы курсов</h3>
@@ -1701,7 +1722,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-07-31-19";
+const APP_VER="2026-07-31-21";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -8399,7 +8420,7 @@ function renderGroups(){
       <span class="hd-sep"></span>
       <span class="hd-grp"><button class="btn ${_groupsHideDone?'':'ghost'} sm" onclick="_groupsHideDone=!_groupsHideDone;renderGroups()" title="Спрятать/показать закреплённые (готовые) группы">${_groupsHideDone?'👁 Показать готовые':'📌 Скрыть готовые'} (${doneCount})</button></span>
       <span class="hd-grp"><button class="btn sm" onclick="openAddKid()" title="Создать нового ребёнка и вписать в группу">➕ Новый ребёнок</button>
-        <button class="btn ghost sm" onclick="printTeacherRosters()" title="Списки детей по педагогам: у каждого свой лист с его группами, расписанием и составом">🖨 Составы по педагогам</button></span>
+        <button class="btn ghost sm" onclick="openRosterPrint()" title="Списки детей по педагогам: выбрать педагогов и столбцы, у каждого свой лист">🖨 Составы по педагогам</button></span>
       ${_fbIsAdmin?`<span class="hd-grp"><button class="btn ghost sm" onclick="pubSyncGroups(this)" title="Прочитать список групп AlfaCRM и показать в столбце «Alfa», какие из наших там уже есть">⟳ Сверить с Alfa</button>
         <button class="btn sm" onclick="openPublish()" title="Массовое создание групп и расписания в AlfaCRM (сначала сухой прогон)">📤 Опубликовать в Alfa</button></span>`:""}
     </div>
@@ -9119,12 +9140,72 @@ function _prnTeacherData(){
     return T;
   }).sort((a,b)=>String(a.name).localeCompare(String(b.name),"ru"));
 }
-function printTeacherRosters(){
+/* Выбор педагогов и столбцов. Столбцы описаны одним списком: и галочки в окне, и шапка таблицы,
+   и ячейки строятся из него — иначе они разъезжаются при любой правке. */
+const ROSTER_COLS=[
+  {k:"num",  lab:"№",                 w:26,  c:1, th:"№",       get:(k,i)=>String(i+1)},
+  {k:"name", lab:"ФИО ребёнка",       w:0,   c:0, th:"Ребёнок", get:k=>esc(k.n)},
+  {k:"age",  lab:"Возраст",           w:44,  c:1, th:"Возраст", get:k=>k.dob?esc(_ageStr(k.dob)):""},
+  {k:"dob",  lab:"Дата рождения",     w:70,  c:1, th:"ДР",      get:k=>k.dob?esc(String(k.dob).slice(0,10).split("-").reverse().join(".")):""},
+  {k:"phone",lab:"Телефон родителя",  w:120, c:0, th:"Телефон", get:k=>esc(k.phone||"")},
+  {k:"may",  lab:"💰 майский",        w:30,  c:1, th:"💰",      get:k=>k.may?"💰":""},
+  {k:"reply",lab:"Ответ родителя",    w:56,  c:1, th:"Ответ",   get:k=>esc(k.reply==="yes"?"да":k.reply==="no"?"отказ":k.reply==="maybe"?"думает":"")},
+  {k:"note", lab:"Пустая графа для отметок", w:90, c:0, th:"Отметки", get:()=>""}
+];
+const ROSTER_COLS_DEF=["num","name","age","phone","may","reply","note"];
+function _rprnCols(){
+  try{ const v=JSON.parse(localStorage.getItem("fm_roster_cols")||"null");
+    if(Array.isArray(v)&&v.length) return v; }catch(e){}
+  return ROSTER_COLS_DEF.slice();
+}
+function _rprnSkipT(){
+  try{ const v=JSON.parse(localStorage.getItem("fm_roster_skip")||"null"); return Array.isArray(v)?v:[]; }catch(e){ return []; }
+}
+function _rprnSave(){
+  const cols=[...document.querySelectorAll(".rprn-col:checked")].map(x=>x.value);
+  const skip=[...document.querySelectorAll(".rprn-t:not(:checked)")].map(x=>x.value);
+  try{ localStorage.setItem("fm_roster_cols",JSON.stringify(cols));
+       localStorage.setItem("fm_roster_skip",JSON.stringify(skip)); }catch(e){}
+  const n=document.querySelectorAll(".rprn-t:checked").length, all=document.querySelectorAll(".rprn-t").length;
+  const c=document.getElementById("rprnCnt"); if(c) c.textContent="отмечено: "+n+" из "+all;
+}
+function rprnAllT(on){ document.querySelectorAll(".rprn-t").forEach(x=>{ x.checked=!!on; }); _rprnSave(); }
+function openRosterPrint(){
   const data=_prnTeacherData();
   if(!data.length){ toast("В расписании нет занятий"); return; }
+  const skip=_rprnSkipT(), cols=_rprnCols();
+  document.getElementById("rprnTeachers").innerHTML=data.map(T=>
+    `<label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--coal);font-weight:500;margin:0">
+      <input type="checkbox" class="rprn-t" value="${esc(T.name)}" style="width:auto;margin:0" ${skip.includes(T.name)?"":"checked"} onchange="_rprnSave()">
+      <span style="flex:1;min-width:0">${esc(T.name)}</span>
+      <span style="color:var(--muted);white-space:nowrap">${T.list.length} гр · ${T.kidsN}</span></label>`).join("");
+  document.getElementById("rprnCols").innerHTML=ROSTER_COLS.map(c=>
+    `<label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--coal);font-weight:500;margin:0">
+      <input type="checkbox" class="rprn-col" value="${c.k}" style="width:auto;margin:0" ${cols.includes(c.k)?"checked":""} onchange="_rprnSave()"> ${esc(c.lab)}
+    </label>`).join("");
+  _rprnSave();
+  document.getElementById("rosterPrnModal").classList.add("show");
+}
+function closeRosterPrint(){ document.getElementById("rosterPrnModal").classList.remove("show"); }
+function printTeacherRosters(){
+  let data=_prnTeacherData();
+  if(!data.length){ toast("В расписании нет занятий"); return; }
+  // окно открыто — берём отметки из него; вызвали напрямую — из сохранённых
+  const open=document.getElementById("rosterPrnModal").classList.contains("show");
+  if(open) _rprnSave();
+  const skip=_rprnSkipT();
+  data=data.filter(T=>!skip.includes(T.name));
+  if(!data.length){ toast("Не выбран ни один педагог"); return; }
+  // ⚠️ Пустой сохранённый список означает «ещё не выбирали» и подменяется набором по умолчанию —
+  // иначе печать была бы пустой. Но если окно ОТКРЫТО и человек снял все галочки, это осознанный
+  // выбор: подставлять умолчание нельзя, надо сказать.
+  const keys=open?[...document.querySelectorAll(".rprn-col:checked")].map(x=>x.value):_rprnCols();
+  const cols=ROSTER_COLS.filter(c=>keys.includes(c.k));
+  if(!cols.length){ toast("Не выбран ни один столбец"); return; }
+  closeRosterPrint();
   const d=new Date(), z=n=>String(n).padStart(2,"0");
   const dd=z(d.getDate())+"."+z(d.getMonth()+1)+"."+d.getFullYear();
-  const rep=r=>r==="yes"?"да":r==="no"?"отказ":r==="maybe"?"думает":"";
+  const thead=`<tr>${cols.map(c=>`<th class="${c.c?"c":""}"${c.w?` style="width:${c.w}px"`:""}>${c.th}</th>`).join("")}</tr>`;
   const css=`
     @page{size:portrait;margin:12mm}
     *{box-sizing:border-box;font-family:Arial,Helvetica,sans-serif}
@@ -9146,21 +9227,11 @@ function printTeacherRosters(){
   `;
   const body=data.map(T=>{
     const groups=T.list.map(g=>{
-      const rows=g.kidsArr.map((k,i)=>`<tr class="${k.no?'off':''}">
-        <td class="c">${i+1}</td>
-        <td>${esc(k.n)}</td>
-        <td class="c">${k.dob?esc(_ageStr(k.dob)):""}</td>
-        <td>${esc(k.phone||"")}</td>
-        <td class="c">${k.may?"💰":""}</td>
-        <td class="c">${esc(rep(k.reply))}</td>
-        <td></td></tr>`).join("");
+      const rows=g.kidsArr.map((k,i)=>`<tr class="${k.no?'off':''}">${
+        cols.map(c=>`<td class="${c.c?"c":""}">${c.get(k,i)}</td>`).join("")}</tr>`).join("");
       return `<h2>${esc(g.title)}${g.group&&g.group!==g.course?` <span style="font-weight:400;font-size:11px">· ${esc(g.course)}</span>`:""}</h2>
         <div class="when">${esc(g.when||"расписание не задано")}${g.rooms?(" · каб. "+esc(g.rooms)):""} · детей: ${g.kidsArr.length}${g.cap?(" из "+g.cap):""}</div>
-        ${g.kidsArr.length?`<table><thead><tr>
-            <th class="c" style="width:26px">№</th><th>Ребёнок</th><th class="c" style="width:44px">Возраст</th>
-            <th style="width:120px">Телефон родителя</th><th class="c" style="width:30px">💰</th>
-            <th class="c" style="width:56px">Ответ</th><th style="width:90px">Отметки</th>
-          </tr></thead><tbody>${rows}</tbody></table>`:`<div class="empty">Детей пока нет.</div>`}`;
+        ${g.kidsArr.length?`<table><thead>${thead}</thead><tbody>${rows}</tbody></table>`:`<div class="empty">Детей пока нет.</div>`}`;
     }).join("");
     return `<div class="t"><h1>${esc(T.name)}</h1>
       <div class="sub">Прознание + CODDY · учебный год 2026/2027 · групп: ${T.list.length} · детей: ${T.kidsN} · напечатано ${dd}</div>
