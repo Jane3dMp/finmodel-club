@@ -1701,7 +1701,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-07-31-18";
+const APP_VER="2026-07-31-19";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -8398,7 +8398,8 @@ function renderGroups(){
       <span class="hd-grp"><select id="grpCourse" class="cell" style="max-width:230px" title="Показать только выбранный курс" onchange="_groupsCourse=this.value;renderGroups()"><option value="">📚 Все курсы (${courseList.length})</option>${courseList.map(c=>`<option ${c===_groupsCourse?"selected":""}>${esc(c)}</option>`).join("")}</select></span>
       <span class="hd-sep"></span>
       <span class="hd-grp"><button class="btn ${_groupsHideDone?'':'ghost'} sm" onclick="_groupsHideDone=!_groupsHideDone;renderGroups()" title="Спрятать/показать закреплённые (готовые) группы">${_groupsHideDone?'👁 Показать готовые':'📌 Скрыть готовые'} (${doneCount})</button></span>
-      <span class="hd-grp"><button class="btn sm" onclick="openAddKid()" title="Создать нового ребёнка и вписать в группу">➕ Новый ребёнок</button></span>
+      <span class="hd-grp"><button class="btn sm" onclick="openAddKid()" title="Создать нового ребёнка и вписать в группу">➕ Новый ребёнок</button>
+        <button class="btn ghost sm" onclick="printTeacherRosters()" title="Списки детей по педагогам: у каждого свой лист с его группами, расписанием и составом">🖨 Составы по педагогам</button></span>
       ${_fbIsAdmin?`<span class="hd-grp"><button class="btn ghost sm" onclick="pubSyncGroups(this)" title="Прочитать список групп AlfaCRM и показать в столбце «Alfa», какие из наших там уже есть">⟳ Сверить с Alfa</button>
         <button class="btn sm" onclick="openPublish()" title="Массовое создание групп и расписания в AlfaCRM (сначала сухой прогон)">📤 Опубликовать в Alfa</button></span>`:""}
     </div>
@@ -9077,6 +9078,100 @@ async function pubRun(live){
   }
   const b=document.getElementById("pubLog");
   if(b) b.innerHTML=(live?`<div class="callout" style="border-color:${fail?"var(--terra)":"var(--green)"};margin-bottom:6px">Готово: создано <b>${done}</b>${fail?(", с ошибками <b>"+fail+"</b>"):""}. Проверьте группы в AlfaCRM.</div>`:"")+_pubLogHTML(lines);
+}
+
+/* ===== ПЕЧАТЬ СОСТАВОВ ПО ПЕДАГОГАМ =====
+   Каждому педагогу — свой лист: его группы с расписанием и поимённым составом. Нужно на бумаге
+   в кабинете, поэтому печатаем то, что реально нужно вести занятие: ФИО, возраст, телефон
+   родителя и отметки (💰 оплатил майский, ответ родителя). Деньги и ФОТ не печатаем. */
+function _prnTeacherData(){
+  const byTeacher={};
+  (S.grid||[]).forEach(l=>{
+    if(!l.course) return;
+    const t=(l.teacher||"").trim()||"— без педагога —";
+    const gk=_grpKeyOf(l);
+    const T=byTeacher[t]||(byTeacher[t]={name:t, groups:{}});
+    const g=T.groups[gk]||(T.groups[gk]={course:l.course, group:l.group||"", slots:[], kids:{}, cap:0});
+    g.cap=Math.max(g.cap,+l.students||0);
+    const sk=(+l.day||0)+"|"+(l.start||"")+"|"+(l.room||"");
+    if(!g.slots.some(s=>s._k===sk)) g.slots.push({_k:sk,day:+l.day||0,start:l.start||"",end:l.end||"",room:l.room||""});
+    kidsOf(l).forEach(k=>{
+      const nk=_nameKey(k.n); if(!nk) return;             // тёзки = разные дети
+      const p=g.kids[nk]||(g.kids[nk]={n:k.n, dob:k.dob||"", phone:k.phone||"", may:false, no:false, reply:""});
+      if(k.may) p.may=true; if(k.no) p.no=true;
+      if(!p.dob&&k.dob) p.dob=k.dob; if(!p.phone&&k.phone) p.phone=k.phone;
+      const rank=r=>r==="yes"?3:r==="no"?2:r==="maybe"?1:0;
+      if(rank(k.vbReply)>rank(p.reply)) p.reply=k.vbReply;
+      if(String(p.n).split(" ").length<String(k.n).trim().split(" ").length) p.n=k.n;   // самое полное написание
+    });
+  });
+  return Object.values(byTeacher).map(T=>{
+    T.list=Object.values(T.groups).map(g=>{
+      g.slots.sort((a,b)=>(a.day-b.day)||String(a.start).localeCompare(String(b.start)));
+      g.when=g.slots.map(s=>(DAY_NAMES[s.day]||"?")+" "+(s.start||"—")+(s.end?("–"+s.end):"")).join(", ");
+      g.rooms=[...new Set(g.slots.map(s=>s.room).filter(Boolean))].join(", ");
+      g.kidsArr=Object.values(g.kids).sort((a,b)=>String(a.n).localeCompare(String(b.n),"ru"));
+      g.title=g.group||g.course;
+      g.sortKey=(g.slots[0]?g.slots[0].day:9)*10000+(()=>{const p=String((g.slots[0]||{}).start||"").split(":");return (+p[0]||0)*60+(+p[1]||0);})();
+      return g;
+    }).sort((a,b)=>a.sortKey-b.sortKey||String(a.title).localeCompare(String(b.title),"ru"));
+    T.kidsN=T.list.reduce((a,g)=>a+g.kidsArr.length,0);
+    return T;
+  }).sort((a,b)=>String(a.name).localeCompare(String(b.name),"ru"));
+}
+function printTeacherRosters(){
+  const data=_prnTeacherData();
+  if(!data.length){ toast("В расписании нет занятий"); return; }
+  const d=new Date(), z=n=>String(n).padStart(2,"0");
+  const dd=z(d.getDate())+"."+z(d.getMonth()+1)+"."+d.getFullYear();
+  const rep=r=>r==="yes"?"да":r==="no"?"отказ":r==="maybe"?"думает":"";
+  const css=`
+    @page{size:portrait;margin:12mm}
+    *{box-sizing:border-box;font-family:Arial,Helvetica,sans-serif}
+    body{margin:0;color:#1c1410}
+    /* каждый педагог с новой страницы — листы раздаются по кабинетам */
+    .t{page-break-after:always}
+    .t:last-child{page-break-after:auto}
+    h1{font-size:16px;margin:0 0 2px;border-bottom:2px solid #b5532a;padding-bottom:4px}
+    .sub{font-size:10px;color:#666;margin:0 0 10px}
+    h2{font-size:13px;margin:12px 0 2px}
+    .when{font-size:10px;color:#444;margin:0 0 4px}
+    table{border-collapse:collapse;width:100%;margin-bottom:6px}
+    th,td{border:1px solid #ccc;font-size:10px;padding:3px 6px;text-align:left}
+    th{background:#2a211b;color:#fff}
+    td.c,th.c{text-align:center}
+    tbody tr:nth-child(even) td{background:#faf7f3}
+    .off td{color:#999;text-decoration:line-through}
+    .empty{font-size:10px;color:#777;padding:4px 0}
+  `;
+  const body=data.map(T=>{
+    const groups=T.list.map(g=>{
+      const rows=g.kidsArr.map((k,i)=>`<tr class="${k.no?'off':''}">
+        <td class="c">${i+1}</td>
+        <td>${esc(k.n)}</td>
+        <td class="c">${k.dob?esc(_ageStr(k.dob)):""}</td>
+        <td>${esc(k.phone||"")}</td>
+        <td class="c">${k.may?"💰":""}</td>
+        <td class="c">${esc(rep(k.reply))}</td>
+        <td></td></tr>`).join("");
+      return `<h2>${esc(g.title)}${g.group&&g.group!==g.course?` <span style="font-weight:400;font-size:11px">· ${esc(g.course)}</span>`:""}</h2>
+        <div class="when">${esc(g.when||"расписание не задано")}${g.rooms?(" · каб. "+esc(g.rooms)):""} · детей: ${g.kidsArr.length}${g.cap?(" из "+g.cap):""}</div>
+        ${g.kidsArr.length?`<table><thead><tr>
+            <th class="c" style="width:26px">№</th><th>Ребёнок</th><th class="c" style="width:44px">Возраст</th>
+            <th style="width:120px">Телефон родителя</th><th class="c" style="width:30px">💰</th>
+            <th class="c" style="width:56px">Ответ</th><th style="width:90px">Отметки</th>
+          </tr></thead><tbody>${rows}</tbody></table>`:`<div class="empty">Детей пока нет.</div>`}`;
+    }).join("");
+    return `<div class="t"><h1>${esc(T.name)}</h1>
+      <div class="sub">Прознание + CODDY · учебный год 2026/2027 · групп: ${T.list.length} · детей: ${T.kidsN} · напечатано ${dd}</div>
+      ${groups}</div>`;
+  }).join("");
+  const w=window.open("","_printRosters");
+  if(!w){ toast("Разрешите всплывающие окна для печати"); return; }
+  w.document.open();
+  w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Составы групп по педагогам</title><style>${css}</style></head><body>${body}</body></html>`);
+  w.document.close();
+  setTimeout(()=>{ try{ w.focus(); w.print(); }catch(e){} },300);
 }
 
 /* ===== ПУБЛИКАЦИЯ ПО ОДНОЙ ГРУППЕ (кнопка-статус в таблице «Группы») =====
