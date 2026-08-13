@@ -1633,6 +1633,8 @@ details.client .cli-cols .cc-bal{width:74px;font-weight:600}
       <button id="fbAuthBtn" type="submit" style="width:100%;padding:10px;border:none;border-radius:8px;background:#b5532a;color:#fff;font-size:14px;font-weight:600;cursor:pointer">Войти</button>
       <div id="fbLoginErr" style="color:#c0392b;font-size:12px;margin-top:8px;min-height:15px"></div>
       <div style="text-align:center;margin-top:6px"><a id="fbAuthToggle" href="#" onclick="fbToggleMode();return false" style="font-size:12px;color:#b5532a;text-decoration:none">Нет аккаунта? Зарегистрироваться</a></div>
+      <!-- пароль восстановить нельзя (его никто не хранит) — только задать новый по письму -->
+      <div style="text-align:center;margin-top:4px"><a id="fbAuthReset" href="#" onclick="fbResetPass();return false" style="font-size:12px;color:#8a8178;text-decoration:none">Забыли пароль?</a></div>
     </form>
     <div id="fbPendingBox" style="display:none">
       <div id="fbPendingMsg" style="font-size:13px;color:#5a5049;line-height:1.5;margin-bottom:10px">Заявка на доступ отправлена. Доступ откроет администратор — как только одобрит, вы войдёте автоматически.</div>
@@ -1728,7 +1730,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-07-31-24";
+const APP_VER="2026-07-31-25";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -2751,7 +2753,9 @@ function _fbRenderAuthMode(){
   const t=document.getElementById("fbAuthTitle"), sub=document.getElementById("fbAuthSub"),
         btn=document.getElementById("fbAuthBtn"), tg=document.getElementById("fbAuthToggle"),
         err=document.getElementById("fbLoginErr");
-  if(err) err.textContent="";
+  if(err){ err.textContent=""; err.style.color="#c0392b"; }
+  const rs=document.getElementById("fbAuthReset");
+  if(rs) rs.style.display=(_fbMode==="signup")?"none":"";   // при регистрации сбрасывать нечего
   // при регистрации браузер должен предложить СГЕНЕРИРОВАТЬ пароль, при входе — подставить сохранённый
   const ps=document.getElementById("fbPass");
   if(_fbMode==="signup"){
@@ -2767,9 +2771,30 @@ function _fbRenderAuthMode(){
 function fbToggleMode(){ _fbMode=(_fbMode==="login")?"signup":"login"; _fbRenderAuthMode(); }
 function fbAuthSubmit(){ if(_fbMode==="signup") fbSignup(); else fbLogin(); }
 function _fbCreds(){ return { email:(document.getElementById("fbEmail").value||"").trim(), pass:document.getElementById("fbPass").value||"", err:document.getElementById("fbLoginErr") }; }
+/* Пароль восстановить нельзя: Firebase хранит только его хэш, увидеть исходный не может никто,
+   включая администратора. Единственный путь — задать новый по ссылке из письма.
+   ⚠️ Про несуществующий адрес Firebase намеренно молчит (иначе по ответу можно было бы
+   перебирать чужие почты), поэтому и пишем осторожно: «если аккаунт заведён». */
+function fbResetPass(){
+  const auth=_fbAuth(); if(!auth) return;
+  const c=_fbCreds();
+  if(!c.email){ if(c.err){ c.err.style.color="#c0392b"; c.err.textContent="Впишите email — на него уйдёт письмо"; } return; }
+  if(c.err){ c.err.style.color="#8a8178"; c.err.textContent="Отправляю письмо…"; }
+  auth.sendPasswordResetEmail(c.email).then(function(){
+    if(c.err){ c.err.style.color="#2F6B44";
+      c.err.textContent="Если аккаунт с адресом "+c.email+" заведён, письмо со ссылкой уже отправлено. Проверьте почту и «Спам»."; }
+  }).catch(function(e){
+    const m=(e&&e.code)||"";
+    if(c.err){ c.err.style.color="#c0392b";
+      c.err.textContent=(m==="auth/invalid-email")?"Адрес написан с ошибкой — проверьте email"
+        :(m==="auth/too-many-requests")?"Слишком много попыток. Подождите несколько минут"
+        :("Не удалось отправить письмо: "+((e&&e.message)||m)); }
+  });
+}
 function fbLogin(){
   const auth=_fbAuth(); if(!auth) return;
   const c=_fbCreds();
+  if(c.err) c.err.style.color="#c0392b";   // после сброса пароля подпись была зелёной
   if(!c.email||!c.pass){ if(c.err) c.err.textContent="Введите email и пароль"; return; }
   if(c.err) c.err.textContent="Вход…";
   auth.signInWithEmailAndPassword(c.email,c.pass).then(function(){
@@ -2777,7 +2802,19 @@ function fbLogin(){
     // поле чистим с задержкой: если стереть пароль сразу, Chrome не успевает предложить
     // «сохранить пароль» — он решает это уже после отправки формы
     setTimeout(function(){ const p=document.getElementById("fbPass"); if(p) p.value=""; }, 2500);
-  }).catch(function(e){ if(c.err) c.err.textContent="Не удалось войти: "+((e&&e.message)||"проверьте email/пароль"); });
+  }).catch(function(e){
+    const m=(e&&e.code)||"";
+    // Firebase на неверный пароль и на несуществующий адрес отвечает ОДИНАКОВО
+    // (invalid-credential) — чтобы нельзя было перебором искать чужие почты. Значит и мы
+    // не можем сказать точно: пишем оба варианта и куда нажать.
+    if(c.err) c.err.innerHTML=
+      (m==="auth/invalid-credential"||m==="auth/wrong-password"||m==="auth/user-not-found")
+        ? "Неверный пароль — или аккаунта с таким адресом ещё нет. Нажмите «Забыли пароль?»: если аккаунт есть, придёт письмо со ссылкой. Письма нет — регистрируйтесь заново."
+      : (m==="auth/invalid-email") ? "Адрес написан с ошибкой — проверьте email"
+      : (m==="auth/too-many-requests") ? "Слишком много попыток. Подождите несколько минут"
+      : (m==="auth/network-request-failed") ? "Нет связи с сервером — проверьте интернет"
+      : ("Не удалось войти: "+esc((e&&e.message)||"проверьте email и пароль"));
+  });
 }
 function fbSignup(){
   const auth=_fbAuth(); if(!auth) return;
