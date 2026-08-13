@@ -1722,7 +1722,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-07-31-21";
+const APP_VER="2026-07-31-22";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -5281,7 +5281,7 @@ async function _addKidToAlfa(name,phone,dob,mode){
     const r=await fetch(ALFA_PROXY+"?action=createCustomer",{method:"POST",
       headers:{"Content-Type":"application/json","Authorization":"Bearer "+token},
       body:JSON.stringify({name:name, phone:phone, dob:dob, dryRun:false})});
-    const j=await r.json().catch(()=>({ok:false,error:"ответ не JSON ("+r.status+")"}));
+    const j=await _apiJson(r);
     try{ console.log("➕ createCustomer — ответ Альфы:", j); }catch(e){}
     if(!r.ok||!j.ok){ const raw=j.raw?(" · Альфа: "+JSON.stringify(j.raw).slice(0,300)):""; throw new Error((j.error||("ошибка "+r.status))+raw); }
     const id=j.id;
@@ -6462,6 +6462,20 @@ function openAlfaSync(){
 }
 function closeAlfa(){ document.getElementById("alfaModal").classList.remove("show"); }
 
+/* Ответ прокси. Если это НЕ JSON — показываем начало тела: там обычно предупреждение PHP,
+   BOM или пустая строка из config.php, напечатанные раньше ответа. Без этого сообщение
+   «ответ не JSON» ничего не объясняет и причину приходится угадывать. */
+async function _apiJson(r){
+  const t=await r.text().catch(()=>"");
+  // BOM печатается ДО запуска PHP (он в самом начале файла), поэтому серверный буфер его не
+  // ловит — снимаем здесь, иначе валидный ответ не разбирается из-за одного невидимого символа
+  try{ return JSON.parse(String(t).replace(/^﻿/,"").trim()); }
+  catch(e){
+    const head=String(t||"").replace(/\s+/g," ").trim().slice(0,180);
+    console.warn("Прокси вернул не JSON ("+r.status+"). Тело целиком:",t);
+    return {ok:false,error:"ответ не JSON ("+r.status+")"+(head?(": "+head):" — тело пустое, см. консоль F12")};
+  }
+}
 async function _alfaIdToken(){
   const au=_fbAuth();
   if(!au||!au.currentUser) throw new Error("Нужно войти в модель (Firebase).");
@@ -7076,7 +7090,7 @@ async function _newKidCall(dry){
   const box=document.getElementById("nkResult"); box.innerHTML=dry?"Проверяю…":"Создаю в Альфе…";
   const token=await _alfaIdToken();
   const r=await fetch(ALFA_PROXY+"?action=createCustomer",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+token},body:JSON.stringify(Object.assign({dryRun:!!dry},p))});
-  const j=await r.json().catch(()=>({ok:false,error:"ответ не JSON ("+r.status+")"}));
+  const j=await _apiJson(r);
   if(!r.ok||!j.ok) throw new Error(j.error||("ошибка "+r.status));
   return {p,j};
 }
@@ -7229,7 +7243,7 @@ async function kidAlfaUpdate(i){
     const r=await fetch(ALFA_PROXY+"?action=history",{method:"POST",
       headers:{"Content-Type":"application/json","Authorization":"Bearer "+token},
       body:JSON.stringify(hasId?{customerId:k.alfaId}:{name:nm})});
-    const j=await r.json().catch(()=>({ok:false,error:"ответ не JSON (код "+r.status+")"}));
+    const j=await _apiJson(r);
     if(!r.ok||!j.ok) throw new Error(j.error||("Ошибка "+r.status));
     if(j.notFound || !j.customerId){ toast("В Альфе не найден: "+shortName(nm)); return; }
     const s=j.summary||{};
@@ -7285,7 +7299,7 @@ async function kidsPullAges(){
     const token=await _alfaIdToken();
     const r=await fetch(ALFA_PROXY+"?action=customers",{method:"POST",
       headers:{"Content-Type":"application/json","Authorization":"Bearer "+token},body:JSON.stringify({})});
-    const j=await r.json().catch(()=>({ok:false,error:"ответ не JSON (код "+r.status+")"}));
+    const j=await _apiJson(r);
     if(!r.ok||!j.ok) throw new Error(j.error||("Ошибка "+r.status));
     const cust=(j.customers||[]).filter(c=>c&&c.name);
     // Сопоставление: СНАЧАЛА по связи с Альфой (alfaId — точное), потом по имени.
@@ -7945,7 +7959,7 @@ async function pullOldRoster(){
       try{
         const r=await fetch(ALFA_PROXY+"?action=visitcounts",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+token},
           body:JSON.stringify({ids:chunk,from:LY_FROM,to:LY_TO,th:th})});   // th → прокси остановится, как только порог взят
-        const j=await r.json().catch(()=>({ok:false,error:"ответ не JSON ("+r.status+")"}));
+        const j=await _apiJson(r);
         if(!r.ok||!j.ok) throw new Error(j.error||("ошибка "+r.status));
         Object.assign(roster, j.counts||{}); done+=chunk.length;
         if(!dbg && j.debug && j.debug.sampleLesson){ dbg=j.debug; try{ console.log("🔄 visitcounts — образец урока из Альфы:", dbg); }catch(e){} }
@@ -8726,7 +8740,7 @@ async function _pubCall(action,payload){
   const token=await _alfaIdToken();
   const r=await fetch(ALFA_PROXY+"?action="+action,{method:"POST",
     headers:{"Content-Type":"application/json","Authorization":"Bearer "+token},body:JSON.stringify(payload||{})});
-  const j=await r.json().catch(()=>({ok:false,error:"ответ не JSON ("+r.status+")"}));
+  const j=await _apiJson(r);
   // ответ Alfa (что именно она забраковала) кладём в ошибку — иначе диагностика превращается в гадание
   if(!r.ok||!j.ok){ const e=new Error(j.error||("ошибка "+r.status)); e.data=j; throw e; }
   return j;
@@ -10391,7 +10405,7 @@ async function _archiveInAlfa(alfaId, name){
     const r=await fetch(ALFA_PROXY+"?action=archiveCustomer",{method:"POST",
       headers:{"Content-Type":"application/json","Authorization":"Bearer "+token},
       body:JSON.stringify({customerId:alfaId, mode:(S.alfaArchiveMode||"is_study"), dryRun:false})});
-    const j=await r.json().catch(()=>({ok:false,error:"ответ не JSON ("+r.status+")"}));
+    const j=await _apiJson(r);
     try{ console.log("🗄 archiveCustomer — ответ Альфы:", j); }catch(e){}
     if(!r.ok||!j.ok){ const raw=j.raw?(" · Альфа: "+JSON.stringify(j.raw).slice(0,300)):""; throw new Error((j.error||("ошибка "+r.status))+raw); }
     if(j.archived){ toast("Архивирован в Альфе ✅: "+shortName(name)); return; }
@@ -10425,7 +10439,7 @@ async function archProbeRun(){
     const token=await _alfaIdToken();
     const r=await fetch(ALFA_PROXY+"?action=customerRaw",{method:"POST",
       headers:{"Content-Type":"application/json","Authorization":"Bearer "+token},body:JSON.stringify({ids})});
-    const j=await r.json().catch(()=>({ok:false,error:"ответ не JSON ("+r.status+")"}));
+    const j=await _apiJson(r);
     if(!r.ok||!j.ok) throw new Error(j.error||("ошибка "+r.status));
     try{ console.log("🔍 customerRaw — сырые карточки:", j.customers); }catch(e){}
     const A=(j.customers||{})[String(ids[0])], B=ids[1]!=null?(j.customers||{})[String(ids[1])]:null;
@@ -10459,7 +10473,7 @@ async function alfaDiagDates(){
     const token=await _alfaIdToken();
     const r=await fetch(ALFA_PROXY+"?action=customers",{method:"POST",
       headers:{"Content-Type":"application/json","Authorization":"Bearer "+token},body:JSON.stringify({diag:true})});
-    const j=await r.json().catch(()=>({ok:false,error:"ответ не JSON ("+r.status+")"}));
+    const j=await _apiJson(r);
     if(!r.ok||!j.ok) throw new Error(j.error||("ошибка "+r.status));
     const d=j.diag||{};
     try{ console.log("🔬 поля клиента из Альфы:", d.all_keys); console.log("🔬 датовые поля:", d.date_fields); }catch(e){}
@@ -10478,7 +10492,7 @@ async function pullBalances(){
   try{
     const token=await _alfaIdToken();
     const r=await fetch(ALFA_PROXY+"?action=customers",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+token},body:JSON.stringify({})});
-    const j=await r.json().catch(()=>({ok:false,error:"ответ не JSON ("+r.status+")"}));
+    const j=await _apiJson(r);
     if(!r.ok||!j.ok) throw new Error(j.error||("ошибка "+r.status));
     const list=(j.customers||[]).filter(c=>c&&c.name);
     const byId=new Map(); list.forEach(c=>{ if(c.id!=null) byId.set(String(c.id),c); });
@@ -10575,7 +10589,7 @@ async function _amoCall(action,payload){
   const token=await _alfaIdToken();
   const r=await fetch(AMO_PROXY+"?action="+action,{method:"POST",
     headers:{"Content-Type":"application/json","Authorization":"Bearer "+token},body:JSON.stringify(payload||{})});
-  const j=await r.json().catch(()=>({ok:false,error:"ответ не JSON ("+r.status+")"}));
+  const j=await _apiJson(r);
   if(!r.ok||!j.ok) throw new Error(j.error||("ошибка "+r.status));
   return j;
 }
@@ -10688,7 +10702,7 @@ async function amoPullDob(){
     const token=await _alfaIdToken();
     const r=await fetch(ALFA_PROXY+"?action=customers",{method:"POST",
       headers:{"Content-Type":"application/json","Authorization":"Bearer "+token},body:JSON.stringify({})});
-    const j=await r.json().catch(()=>({ok:false,error:"ответ не JSON ("+r.status+")"}));
+    const j=await _apiJson(r);
     if(!r.ok||!j.ok) throw new Error(j.error||("ошибка "+r.status));
     const byPhone={};
     (j.customers||[]).forEach(c=>{ (c.phones||[]).forEach(p=>{ const k=_phoneKey(p); if(k&&!byPhone[k]) byPhone[k]=c; }); });
@@ -10929,7 +10943,7 @@ async function _amoCollectFixes(){
   _amoLeads=savedL; _amoContacts=savedC;
   const r=await fetch(ALFA_PROXY+"?action=customers",{method:"POST",
     headers:{"Content-Type":"application/json","Authorization":"Bearer "+token},body:JSON.stringify({})});
-  const j=await r.json().catch(()=>({ok:false,error:"ответ не JSON ("+r.status+")"}));
+  const j=await _apiJson(r);
   if(!r.ok||!j.ok) throw new Error(j.error||("ошибка "+r.status));
   const byPhone={};
   (j.customers||[]).forEach(c=>{ (c.phones||[]).forEach(p=>{ const k=_phoneKey(p); if(k && !byPhone[k]) byPhone[k]=c; }); });
@@ -11050,7 +11064,7 @@ async function openAlfaNew(){
   try{
     const token=await _alfaIdToken();
     const r=await fetch(ALFA_PROXY+"?action=customers",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+token},body:JSON.stringify({})});
-    const j=await r.json().catch(()=>({ok:false,error:"ответ не JSON ("+r.status+")"}));
+    const j=await _apiJson(r);
     if(!r.ok||!j.ok) throw new Error(j.error||("ошибка "+r.status));
     // «Детали» (взрослое пространство) — отдельная CRM, НЕ детские курсы. Исключаем клиентов,
     // которые ТОЛЬКО в таких филиалах (по имени филиала «Детали»).
@@ -11413,7 +11427,7 @@ async function mayPullAges(){
     const token=await _alfaIdToken();
     const r=await fetch(ALFA_PROXY+"?action=customers",{method:"POST",
       headers:{"Content-Type":"application/json","Authorization":"Bearer "+token},body:JSON.stringify({})});
-    const j=await r.json().catch(()=>({ok:false,error:"ответ не JSON (код "+r.status+")"}));
+    const j=await _apiJson(r);
     if(!r.ok||!j.ok) throw new Error(j.error||("Ошибка "+r.status));
     const cust=(j.customers||[]).filter(c=>c&&c.dob&&c.name);
     const byN2={}; cust.forEach(c=>{ const n=_normName(c.name); if(n && !byN2[n]) byN2[n]=c; });

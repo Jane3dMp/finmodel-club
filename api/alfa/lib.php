@@ -3,6 +3,14 @@
 // CORS, ответы JSON, проверка Firebase ID-токена, авторизация и вызовы AlfaCRM.
 declare(strict_types=1);
 
+/* Ответ обязан быть ЧИСТЫМ JSON. Ошибки PHP печатать в тело нельзя (клиент получит «ответ не
+   JSON», а в предупреждении может мелькнуть путь или аргумент вызова), поэтому вывод глушим и
+   включаем буфер: всё лишнее, что успеет напечататься, json_out выбросит и покажет отдельным
+   полем serverNoise. Логирование на сервере при этом сохраняется. */
+@ini_set('display_errors', '0');
+@ini_set('zend.exception_ignore_args', '1');
+if (function_exists('ob_start')) @ob_start();
+
 // ---------- Конфигурация ----------
 function cfg(): array {
     static $c = null;
@@ -18,9 +26,20 @@ function cfg(): array {
 
 // ---------- Ответ JSON ----------
 function json_out(array $data, int $code = 200): void {
-    http_response_code($code);
-    header('Content-Type: application/json; charset=utf-8');
-    echo json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    /* ⚠️ Всё, что успело напечататься ДО ответа, выбрасываем. Иначе одна пустая строка после ?>
+       в созданном вручную config.php, BOM из файлового менеджера или предупреждение PHP уезжают
+       в тело раньше JSON — клиент получает 200 и «ответ не JSON», а причина не видна. */
+    $junk = '';
+    while (ob_get_level() > 0) { $junk .= (string)ob_get_clean(); }
+    if (!headers_sent()) {
+        http_response_code($code);
+        header('Content-Type: application/json; charset=utf-8');
+    }
+    $junk = trim($junk);
+    if ($junk !== '') $data['serverNoise'] = mb_substr($junk, 0, 400);   // чтобы было видно, что именно мешало
+    $json = json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE | JSON_PARTIAL_OUTPUT_ON_ERROR);
+    if ($json === false) $json = '{"ok":false,"error":"Не удалось собрать ответ (битые символы в данных CRM)"}';
+    echo $json;
     exit;
 }
 
