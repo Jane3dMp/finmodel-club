@@ -296,8 +296,14 @@ details.cwarn .cwarn-body{padding:0 14px 12px}
 .grp-alfa.a-done{background:#E8F5EC;border-color:#9BC9AB;color:#2F6B44}
 .grp-alfa.a-link{background:#FBF2CE;border-color:#DCC98A;color:#6B5411}
 .grp-alfa.a-similar{background:#F3F1EC;border-color:#C9C2B8;color:#5C574F}
-#groupsTable tr.grp-done td{opacity:.55}
-#groupsTable tr.grp-done .grp-name b{text-decoration:line-through}
+/* Группа НАБРАНА: спокойная зелёная подложка. Раньше это было «бледно + зачёркнуто» — читалось
+   как «отменена», хотя смысл ровно обратный: набор закрыт, группа укомплектована. */
+#groupsTable tr.grp-done td{background:#E9F5EC}
+#groupsTable tr.grp-done .grp-name b{color:#2F6B44}
+#groupsTable tr.grp-done td:first-child{box-shadow:inset 3px 0 0 #4F9E63}
+/* та же метка в сетке расписания — чтобы не сверять два экрана */
+.les.les-done{background:#E9F5EC}
+.les.les-done .lt{color:#3F7A55}
 /* редактор детей в модалке занятия */
 #kidsTable{width:100%;border-collapse:collapse;margin-top:4px}
 #kidsTable th{background:var(--graphite);color:#fff;font-size:10px;font-weight:600;padding:4px 3px;text-align:center;line-height:1.1}
@@ -1722,7 +1728,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-07-31-23";
+const APP_VER="2026-07-31-24";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -4412,6 +4418,9 @@ function courseFromLib(name){
 }
 /* CSS-класс цветового кодирования занятия по бренду курса (для сетки расписания) */
 function _lesEcoClass(course){ const c=courseFromLib(course); const e=c&&c.eco; return e?(" eco-"+e):""; }
+/* Группа отмечена как НАБРАННАЯ (галочка на вкладке «Группы»). Отметка одна на группу, поэтому
+   в сетке подсвечиваются все её занятия сразу — сверять два экрана не нужно. */
+function _grpDone(l){ return !!(l&&l.course&&(S.groupsDone||{})[_grpKeyOf(l)]); }
 
 function planTotals(){
   let revWeek=0, kidsTot=0, groups=0;
@@ -4728,7 +4737,7 @@ function renderGrid(){
         // пометим перекрытые ячейки ниже
         for(let k=1;k<span;k++){ covered[(si+k)+"_"+room]=true; }
         h+=`<td class="cell-les" rowspan="${span}" ondragover="dragOver(event)" ondrop="dropLes(event,'${slot}','${esc(room)}')">
-          <div class="les${pinned?' pinned':''}${newintake?' newintake':''}${_lesEcoClass(les.course)}" data-idx="${idx}" data-id="${esc(les.id)}" style="height:100%" draggable="${pinned?'false':'true'}" ${pinned?'':`ondragstart="dragStart(event,'${esc(les.id)}')" ondragend="dragEnd(event)"`} onclick="editLes(_lesIdx('${esc(les.id)}'))">
+          <div class="les${pinned?' pinned':''}${newintake?' newintake':''}${_grpDone(les)?' les-done':''}${_lesEcoClass(les.course)}" data-idx="${idx}" data-id="${esc(les.id)}" style="height:100%" draggable="${pinned?'false':'true'}" ${pinned?'':`ondragstart="dragStart(event,'${esc(les.id)}')" ondragend="dragEnd(event)"`} onclick="editLes(_lesIdx('${esc(les.id)}'))">
             <div class="les-tools">
               <span class="lt-btn" onclick="event.stopPropagation();togglePin(_lesIdx('${esc(les.id)}'))" title="${pinned?'Открепить':'Закрепить'}">${pinned?'📌':'📍'}</span>
               <span class="lt-btn" onclick="event.stopPropagation();toggleNewIntake(_lesIdx('${esc(les.id)}'))" title="${newintake?'Снять «новый набор»':'Отметить «новый набор»'}">${newintake?'🟠':'🆕'}</span>
@@ -8385,7 +8394,11 @@ function saveViberTpl(){
 let _groupsQuery="", _groupsSort={col:"course",dir:1}, _groupsHideDone=false, _groupsShown=[], _groupsCourse="";
 function grpRerenderKeepFocus(){ renderGroups(); const el=document.getElementById("grpQ"); if(el){ const v=el.value; el.focus(); el.value=""; el.value=v; } }
 function grpSort(col){ if(_groupsSort.col===col) _groupsSort.dir*=-1; else _groupsSort={col,dir:1}; renderGroups(); }
-function grpToggleDone(i){ const g=_groupsShown[i]; if(!g) return; if(!S.groupsDone) S.groupsDone={}; if(S.groupsDone[g.key]) delete S.groupsDone[g.key]; else S.groupsDone[g.key]=1; persistLocal(); renderGroups(); }
+/* отметка «группа набрана» — общая для вкладки «Группы» и сетки, поэтому перерисовываем обе */
+function grpToggleDone(i){ const g=_groupsShown[i]; if(!g) return;
+  if(!S.groupsDone) S.groupsDone={};
+  if(S.groupsDone[g.key]) delete S.groupsDone[g.key]; else S.groupsDone[g.key]=1;
+  persistLocal(); renderGroups(); if(typeof renderGrid==="function") renderGrid(); }
 /* возраст/класс группы — рукописные, хранятся по ключу группы (как groupsDone), синхронизируются.
    Без rerender: значение уже в поле, а перерисовка выбивала бы фокус при заполнении подряд */
 function setGroupMeta(key,f,v){
@@ -8455,23 +8468,23 @@ function renderGroups(){
   if(_groupsHideDone) shown=shown.filter(g=>!g.done);
   _groupsShown=shown;
   const totKids=groups.reduce((a,g)=>a+g.kids,0), totPaid=groups.reduce((a,g)=>a+g.paid,0), doneCount=groups.filter(g=>g.done).length;
-  let html=`<div class="callout" style="margin-bottom:10px">Групп: <b>${groups.length}</b> · детей вписано: <b>${totKids}</b> · с 💰: <b style="color:var(--green)">${totPaid}</b> · готово: <b>${doneCount}</b></div>
+  let html=`<div class="callout" style="margin-bottom:10px">Групп: <b>${groups.length}</b> · детей вписано: <b>${totKids}</b> · с 💰: <b style="color:var(--green)">${totPaid}</b> · набрано: <b style="color:var(--green)">${doneCount}</b></div>
     <div class="hd-actions" style="margin-bottom:8px">
       <span class="hd-grp"><input type="search" id="grpQ" class="cell" style="width:230px" placeholder="🔍 Поиск по группе или курсу" value="${esc(_groupsQuery)}" oninput="_groupsQuery=this.value;grpRerenderKeepFocus()"></span>
       <span class="hd-grp"><select id="grpCourse" class="cell" style="max-width:230px" title="Показать только выбранный курс" onchange="_groupsCourse=this.value;renderGroups()"><option value="">📚 Все курсы (${courseList.length})</option>${courseList.map(c=>`<option ${c===_groupsCourse?"selected":""}>${esc(c)}</option>`).join("")}</select></span>
       <span class="hd-sep"></span>
-      <span class="hd-grp"><button class="btn ${_groupsHideDone?'':'ghost'} sm" onclick="_groupsHideDone=!_groupsHideDone;renderGroups()" title="Спрятать/показать закреплённые (готовые) группы">${_groupsHideDone?'👁 Показать готовые':'📌 Скрыть готовые'} (${doneCount})</button></span>
+      <span class="hd-grp"><button class="btn ${_groupsHideDone?'':'ghost'} sm" onclick="_groupsHideDone=!_groupsHideDone;renderGroups()" title="Спрятать/показать набранные группы">${_groupsHideDone?'👁 Показать набранные':'✓ Скрыть набранные'} (${doneCount})</button></span>
       <span class="hd-grp"><button class="btn sm" onclick="openAddKid()" title="Создать нового ребёнка и вписать в группу">➕ Новый ребёнок</button>
         <button class="btn ghost sm" onclick="openRosterPrint()" title="Списки детей по педагогам: выбрать педагогов и столбцы, у каждого свой лист">🖨 Составы по педагогам</button></span>
       ${_fbIsAdmin?`<span class="hd-grp"><button class="btn ghost sm" onclick="pubSyncGroups(this)" title="Прочитать список групп AlfaCRM и показать в столбце «Alfa», какие из наших там уже есть">⟳ Сверить с Alfa</button>
         <button class="btn sm" onclick="openPublish()" title="Массовое создание групп и расписания в AlfaCRM (сначала сухой прогон)">📤 Опубликовать в Alfa</button></span>`:""}
     </div>
     <div class="tscroll"><table id="groupsTable"><thead><tr>
-      <th style="width:30px" title="Закреп (готово)">📌</th>${_grpTh("alfa",'<span title="Опубликована ли группа в расписании AlfaCRM">Alfa</span>',"center")}${_grpTh("name","Группа","left")}${_grpTh("age","Возраст","center")}${_grpTh("klass","Класс","center")}${_grpTh("kids","Детей","center")}${_grpTh("ryes",'<span style="color:#7CE0A0">🟢</span>',"center")}${_grpTh("rno",'<span style="color:#F0A0A0">🔴</span>',"center")}${_grpTh("rmaybe",'<span style="color:#F2D06B">🟡</span>',"center")}${_grpTh("rnone","Молчат","center")}${_grpTh("paid","💰","center")}${_grpTh("course","Курс","left")}${_grpTh("teacher","Педагог","left")}${_grpTh("sched","Расписание","left")}${_grpTh("room","Каб.","center")}<th></th>
+      <th style="width:34px" title="Группа набрана — набор закрыт, строка подсветится зелёным здесь и в сетке">✓</th>${_grpTh("alfa",'<span title="Опубликована ли группа в расписании AlfaCRM">Alfa</span>',"center")}${_grpTh("name","Группа","left")}${_grpTh("age","Возраст","center")}${_grpTh("klass","Класс","center")}${_grpTh("kids","Детей","center")}${_grpTh("ryes",'<span style="color:#7CE0A0">🟢</span>',"center")}${_grpTh("rno",'<span style="color:#F0A0A0">🔴</span>',"center")}${_grpTh("rmaybe",'<span style="color:#F2D06B">🟡</span>',"center")}${_grpTh("rnone","Молчат","center")}${_grpTh("paid","💰","center")}${_grpTh("course","Курс","left")}${_grpTh("teacher","Педагог","left")}${_grpTh("sched","Расписание","left")}${_grpTh("room","Каб.","center")}<th></th>
     </tr></thead><tbody>`;
   shown.forEach((g,i)=>{
     html+=`<tr class="${g.done?'grp-done':''}">
-      <td style="text-align:center"><span class="grp-pin${g.done?' on':''}" title="${g.done?'Готова — снять закреп':'Отметить готовой (закрепить)'}" onclick="grpToggleDone(${i})">📌</span></td>
+      <td style="text-align:center"><input type="checkbox" style="width:auto;margin:0;cursor:pointer" ${g.done?"checked":""} title="${g.done?'Группа набрана — снять отметку':'Отметить, что группа набрана'}" onchange="grpToggleDone(${i})"></td>
       <td style="text-align:center"><span class="grp-alfa a-${g.pub.k}" title="${esc(g.pub.t)}${_fbIsAdmin?' · нажмите, чтобы опубликовать расписание в Alfa':''}" ${_fbIsAdmin?`onclick="pubOne('${_jsStr(g.key)}')"`:'style="cursor:default"'}>${g.pub.lab}</span></td>
       <td style="text-align:left"><span class="grp-name" title="Открыть карточку занятия" onclick="${g.firstId?`editLes(_lesIdx('${esc(g.firstId)}'))`:`editLes(${g.firstIdx})`}"><b>${esc(g.name)}</b></span>${g.newIntake?' <span class="ni-tag" title="Группа с новым набором">NEW</span>':''}</td>
       <td style="text-align:center"><input class="cell grp-meta" value="${esc(g.age)}" placeholder="—" title="Возраст группы — впишите вручную (напр. 7–9)" onchange="setGroupMeta('${_jsStr(g.key)}','age',this.value)"></td>
@@ -8489,7 +8502,7 @@ function renderGroups(){
       <td style="text-align:center"><button class="btn ghost sm" onclick="${g.firstId?`gotoKidLessonId('${esc(g.firstId)}')`:`gotoKidLesson(${g.firstIdx})`}" title="Открыть группу в сетке">→</button></td>
     </tr>`;
   });
-  if(!shown.length) html+=`<tr><td colspan="16" style="padding:12px;color:var(--muted)">${_groupsHideDone&&doneCount?'Все группы под фильтром закреплены (готовы). Нажмите «Показать готовые».':'Групп не найдено.'}</td></tr>`;
+  if(!shown.length) html+=`<tr><td colspan="16" style="padding:12px;color:var(--muted)">${_groupsHideDone&&doneCount?'Все группы под фильтром набраны. Нажмите «Показать набранные».':'Групп не найдено.'}</td></tr>`;
   html+=`</tbody></table></div>`;
   box.innerHTML=html;
 }
