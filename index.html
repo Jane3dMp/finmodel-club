@@ -1722,7 +1722,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-07-31-22";
+const APP_VER="2026-07-31-23";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -6465,16 +6465,44 @@ function closeAlfa(){ document.getElementById("alfaModal").classList.remove("sho
 /* Ответ прокси. Если это НЕ JSON — показываем начало тела: там обычно предупреждение PHP,
    BOM или пустая строка из config.php, напечатанные раньше ответа. Без этого сообщение
    «ответ не JSON» ничего не объясняет и причину приходится угадывать. */
+/* Страница-заглушка ХОСТИНГА («Секундочку…» со спиннером и перезагрузкой через 5 сек) — это
+   защита от ботов: запрос до нашего PHP вообще не доходит, отдаётся HTML с кодом 200. Отличаем
+   её от настоящей ошибки, чтобы не пугать текстом чужой вёрстки и просто повторить запрос. */
+function _isHostChallenge(t){
+  const s=String(t||"");
+  return /^\s*<(!doctype|html)/i.test(s) &&
+         (/Секундочку/i.test(s) || (/location\.reload/i.test(s) && /setTimeout/i.test(s)));
+}
 async function _apiJson(r){
   const t=await r.text().catch(()=>"");
   // BOM печатается ДО запуска PHP (он в самом начале файла), поэтому серверный буфер его не
   // ловит — снимаем здесь, иначе валидный ответ не разбирается из-за одного невидимого символа
   try{ return JSON.parse(String(t).replace(/^﻿/,"").trim()); }
   catch(e){
+    if(_isHostChallenge(t)){
+      console.warn("Хостинг вернул страницу проверки вместо ответа прокси — запрос не дошёл до PHP.");
+      return {ok:false, challenge:true, error:"Хостинг показал страницу проверки «Секундочку…» — запрос не дошёл до прокси"};
+    }
     const head=String(t||"").replace(/\s+/g," ").trim().slice(0,180);
     console.warn("Прокси вернул не JSON ("+r.status+"). Тело целиком:",t);
     return {ok:false,error:"ответ не JSON ("+r.status+")"+(head?(": "+head):" — тело пустое, см. консоль F12")};
   }
+}
+/* Запрос к прокси с повтором на страницу проверки: она сама обещает перезагрузку через 5 сек,
+   значит через несколько секунд защита обычно пропускает. Ждём чуть дольше и пробуем ещё раз. */
+async function _apiPost(url, action, payload, tries){
+  tries=tries||3;
+  let last=null;
+  for(let i=0;i<tries;i++){
+    const token=await _alfaIdToken();
+    const r=await fetch(url+"?action="+action,{method:"POST",
+      headers:{"Content-Type":"application/json","Authorization":"Bearer "+token},body:JSON.stringify(payload||{})});
+    const j=await _apiJson(r);
+    if(!j.challenge) return {r,j};
+    last={r,j};
+    if(i<tries-1){ toast("Хостинг проверяет запрос, повторяю…"); await new Promise(z=>setTimeout(z,6000)); }
+  }
+  return last;
 }
 async function _alfaIdToken(){
   const au=_fbAuth();
@@ -8737,10 +8765,8 @@ function _pubPlan(g,opt){
 }
 
 async function _pubCall(action,payload){
-  const token=await _alfaIdToken();
-  const r=await fetch(ALFA_PROXY+"?action="+action,{method:"POST",
-    headers:{"Content-Type":"application/json","Authorization":"Bearer "+token},body:JSON.stringify(payload||{})});
-  const j=await _apiJson(r);
+  const {r,j}=await _apiPost(ALFA_PROXY,action,payload);
+  if(j.challenge) throw new Error("Хостинг не пропустил запрос (страница проверки «Секундочку…»). Попробуйте ещё раз через минуту.");
   // ответ Alfa (что именно она забраковала) кладём в ошибку — иначе диагностика превращается в гадание
   if(!r.ok||!j.ok){ const e=new Error(j.error||("ошибка "+r.status)); e.data=j; throw e; }
   return j;
@@ -10586,10 +10612,8 @@ async function openAmoNew(){
     <p style="font-size:12px;color:var(--muted)">Если написано про config.php или токен — заполните <code>api/amo/config.php</code> на сервере (см. <code>api/amo/README.md</code>).</p>`; }
 }
 async function _amoCall(action,payload){
-  const token=await _alfaIdToken();
-  const r=await fetch(AMO_PROXY+"?action="+action,{method:"POST",
-    headers:{"Content-Type":"application/json","Authorization":"Bearer "+token},body:JSON.stringify(payload||{})});
-  const j=await _apiJson(r);
+  const {r,j}=await _apiPost(AMO_PROXY,action,payload);
+  if(j.challenge) throw new Error("Хостинг не пропустил запрос к amoCRM (страница проверки «Секундочку…»). Обновите страницу и попробуйте ещё раз; если повторяется — нужно снять защиту хостинга с папки /finmodel/api/");
   if(!r.ok||!j.ok) throw new Error(j.error||("ошибка "+r.status));
   return j;
 }
