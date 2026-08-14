@@ -1374,7 +1374,8 @@ details.client .cli-cols .cc-bal{width:74px;font-weight:600}
  <div class="modal" style="max-width:640px">
   <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
    <h3 style="margin:0">📥 Новые из amoCRM</h3>
-   <button class="btn ghost sm" style="margin-left:auto" onclick="closeAmoNew()">Закрыть</button>
+   <button class="btn ghost sm" style="margin-left:auto" onclick="amoDiag()" title="Понять, почему не отвечает: не доехала папка на сервер, защита хостинга или настройки amo">🔌 Проверить связь</button>
+   <button class="btn ghost sm" onclick="closeAmoNew()">Закрыть</button>
   </div>
   <p style="font-size:12px;color:var(--muted);margin:0 0 8px;line-height:1.45">
    Заявки из amoCRM. Выберите воронку и этапы — покажем сделки, которых ещё нет у вас,
@@ -1730,7 +1731,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-07-31-25";
+const APP_VER="2026-08-14-01";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -10660,6 +10661,40 @@ async function openAmoNew(){
     _amoRenderPicker();
   }catch(e){ body.innerHTML=`<div class="callout" style="border-color:var(--red)">Не получилось: ${esc((e&&e.message)||e)}</div>
     <p style="font-size:12px;color:var(--muted)">Если написано про config.php или токен — заполните <code>api/amo/config.php</code> на сервере (см. <code>api/amo/README.md</code>).</p>`; }
+}
+/* ПОЧЕМУ НЕ ОТВЕЧАЕТ amoCRM. Одна и та же ошибка («страница проверки») бывает по трём разным
+   причинам, и лечатся они по-разному. Различаем так:
+   1) просим статический файл папки (config.example.php — он есть в заливке). Ответ 404 = папку
+      на сервер не залили; страница проверки = защита стоит на всём пути; пусто с кодом 200 =
+      папка на месте и PHP работает;
+   2) затем обычный ping — он покажет уже настройки amo (config.php, токен).
+   Без этого приходится гадать, а хостингу нечего предъявить. */
+async function amoDiag(){
+  const body=document.getElementById("amoNewBody");
+  const out=[]; const say=()=>{ body.innerHTML=`<div class="callout">${out.join("<br>")}</div>`; };
+  out.push("⏳ Проверяю…"); say();
+  // 1) есть ли папка на сервере
+  try{
+    const r=await fetch(AMO_PROXY+"config.example.php",{method:"GET",cache:"no-store"});
+    const t=await r.text().catch(()=>"");
+    out.length=0;
+    if(_isHostChallenge(t)) out.push('🛑 <b>Защита хостинга</b> перехватывает даже обычный файл в этой папке. Значит дело не в amo и не в настройках: страницу проверки отдаёт сам сервер.');
+    else if(r.status===404)  out.push('🛑 <b>Папки <code>api/amo/</code> нет на сервере</b> — автозаливка её не доставила. Проверьте на хостинге, есть ли файл <code>finmodel/api/amo/index.php</code>.');
+    else if(r.ok && t.trim()==="") out.push("✅ Папка на месте, PHP в ней работает.");
+    else out.push("⚠️ Файл папки ответил кодом "+r.status+", тело: "+esc(String(t).slice(0,120)));
+  }catch(e){ out.length=0; out.push("⚠️ Не удалось запросить файл папки: "+esc((e&&e.message)||e)); }
+  say();
+  // 2) сам прокси
+  try{
+    const j=await _amoCall("ping",{});
+    out.push("✅ amoCRM отвечает: аккаунт «"+esc((j.account&&j.account.name)||"—")+"», домен "+esc(j.host||"—")+".");
+  }catch(e){
+    const m=(e&&e.message)||String(e);
+    out.push("🛑 Прокси amo: "+esc(m));
+    if(/config\.php/i.test(m)) out.push("→ На сервере нет <code>api/amo/config.php</code>. Создайте его из <code>config.example.php</code>: поддомен amo и долгосрочный токен.");
+    else if(/токен|401|unauthorized/i.test(m)) out.push("→ Токен amoCRM не принят: истёк или скопирован не полностью.");
+  }
+  say();
 }
 async function _amoCall(action,payload){
   const {r,j}=await _apiPost(AMO_PROXY,action,payload);
