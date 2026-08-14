@@ -1731,7 +1731,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-08-14-01";
+const APP_VER="2026-08-14-02";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -8817,7 +8817,7 @@ function _pubPlan(g,opt){
 
 async function _pubCall(action,payload){
   const {r,j}=await _apiPost(ALFA_PROXY,action,payload);
-  if(j.challenge) throw new Error("Хостинг не пропустил запрос (страница проверки «Секундочку…»). Попробуйте ещё раз через минуту.");
+  if(j.challenge) throw new Error("Хостинг не пропустил запрос (страница проверки «Секундочку…»). Откройте адрес прокси вкладкой, дождитесь ответа — браузер пройдёт проверку, и запросы начнут проходить: "+ALFA_PROXY+"?action=ping");
   // ответ Alfa (что именно она забраковала) кладём в ошибку — иначе диагностика превращается в гадание
   if(!r.ok||!j.ok){ const e=new Error(j.error||("ошибка "+r.status)); e.data=j; throw e; }
   return j;
@@ -10669,6 +10669,22 @@ async function openAmoNew(){
       папка на месте и PHP работает;
    2) затем обычный ping — он покажет уже настройки amo (config.php, токен).
    Без этого приходится гадать, а хостингу нечего предъявить. */
+/* Как пройти защиту прямо сейчас. Страница «Секундочку…» — это JS-проверка: она сама
+   перезагружается и ставит браузеру cookie. Из fetch этого не происходит (скрипт со страницы
+   не выполняется), а вот если открыть адрес прокси ВКЛАДКОЙ — проверка пройдёт по-настоящему,
+   cookie сохранится для этого пути, и последующие запросы приложения уже пропустят. */
+function _challengeFixHTML(){
+  return `<div style="margin-top:6px;line-height:1.5">
+    <b>Что попробовать сейчас:</b> откройте адрес прокси вкладкой и дождитесь, пока «Секундочку…»
+    сменится текстом (ожидаемо «Нет токена авторизации» — это нормально). Браузер пройдёт проверку
+    и запомнит её, после чего вернитесь сюда и повторите.
+    <div style="margin-top:4px;display:flex;gap:6px;flex-wrap:wrap">
+      <button class="btn ghost sm" onclick="window.open(ALFA_PROXY+'?action=ping','_blank')">Открыть проверку · Альфа</button>
+      <button class="btn ghost sm" onclick="window.open(AMO_PROXY+'?action=ping','_blank')">Открыть проверку · amo</button>
+    </div>
+    <div style="margin-top:6px;color:var(--muted)">Не помогло — защиту снимает хостинг: попросите
+    исключить путь <code>/finmodel/api/</code> из проверки, это внутренний API самого сайта.</div></div>`;
+}
 async function amoDiag(){
   const body=document.getElementById("amoNewBody");
   const out=[]; const say=()=>{ body.innerHTML=`<div class="callout">${out.join("<br>")}</div>`; };
@@ -10678,7 +10694,7 @@ async function amoDiag(){
     const r=await fetch(AMO_PROXY+"config.example.php",{method:"GET",cache:"no-store"});
     const t=await r.text().catch(()=>"");
     out.length=0;
-    if(_isHostChallenge(t)) out.push('🛑 <b>Защита хостинга</b> перехватывает даже обычный файл в этой папке. Значит дело не в amo и не в настройках: страницу проверки отдаёт сам сервер.');
+    if(_isHostChallenge(t)) out.push('🛑 <b>Защита хостинга</b> перехватывает даже обычный файл в этой папке. Значит дело не в amo и не в настройках: страницу проверки отдаёт сам сервер.'+_challengeFixHTML());
     else if(r.status===404)  out.push('🛑 <b>Папки <code>api/amo/</code> нет на сервере</b> — автозаливка её не доставила. Проверьте на хостинге, есть ли файл <code>finmodel/api/amo/index.php</code>.');
     else if(r.ok && t.trim()==="") out.push("✅ Папка на месте, PHP в ней работает.");
     else out.push("⚠️ Файл папки ответил кодом "+r.status+", тело: "+esc(String(t).slice(0,120)));
