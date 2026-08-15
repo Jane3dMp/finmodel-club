@@ -1,10 +1,16 @@
 <!DOCTYPE html>
-<html lang="ru">
+<!-- ⚠️ authgate снимается ТОЛЬКО после подтверждения доступа (см. _fbGrant).
+     Раньше страница рисовалась сразу, а проверка приходила от Firebase через пару секунд —
+     всё это время посторонний видел дашборд, расписание и данные детей. -->
+<html lang="ru" class="authgate">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Финмодель · Прознание 2026/2027</title>
 <style>
+/* ЗАМОК ДО ВХОДА: пока на <html> висит authgate, наружу видно только окно входа. */
+html.authgate body > *:not(#fbLogin){display:none !important}
+html.authgate #fbLogin{display:flex !important}
 :root{
   /* спокойная нейтральная палитра: белый/серый/чёрный + приглушённая охра (акцент) + голубой CODDY.
      Для дневной работы по 8 часов — мягкий контраст, без тёплой «детской» терракоты. */
@@ -1628,7 +1634,8 @@ details.client .cli-cols .cc-bal{width:74px;font-weight:600}
     <div id="fbAuthSub" style="font-size:12px;color:#8a8178;margin-bottom:14px">Команда «Прознание»</div>
     <!-- настоящая <form> с name/autocomplete: без неё браузер не предлагает сохранить пароль
          и не подставляет его из менеджера паролей (эвристика по одиночным input ненадёжна) -->
-    <form id="fbAuthForm" onsubmit="fbAuthSubmit();return false" autocomplete="on">
+    <div id="fbChecking" style="font-size:13px;color:#5a5049;line-height:1.5">Проверяем доступ…</div>
+    <form id="fbAuthForm" style="display:none" onsubmit="fbAuthSubmit();return false" autocomplete="on">
       <input id="fbEmail" name="username" type="email" placeholder="email" autocomplete="username" required style="width:100%;box-sizing:border-box;padding:9px 12px;border:1px solid #ccc;border-radius:8px;margin-bottom:8px;font-size:14px">
       <input id="fbPass" name="password" type="password" placeholder="пароль" autocomplete="current-password" required style="width:100%;box-sizing:border-box;padding:9px 12px;border:1px solid #ccc;border-radius:8px;margin-bottom:12px;font-size:14px">
       <button id="fbAuthBtn" type="submit" style="width:100%;padding:10px;border:none;border-radius:8px;background:#b5532a;color:#fff;font-size:14px;font-weight:600;cursor:pointer">Войти</button>
@@ -1731,7 +1738,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-08-14-02";
+const APP_VER="2026-08-14-03";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -2568,10 +2575,22 @@ let _fbAccRef=null, _fbAccessData={};
 function _accessKey(email){ return String(email||"").trim().toLowerCase().replace(/[.#$\[\]\/]/g,","); }
 function _fbAuth(){ return (typeof firebase!=="undefined" && firebase.auth) ? firebase.auth() : null; }
 function fbStart(){
-  if(!FB_CONFIG.databaseURL) return;
-  if(!fbInit()){ setSync("err","Firebase не загрузился — локальный режим"); return; }
+  // Если проверять доступ нечем (нет облака или не поднялся SDK) — это локальный режим,
+  // общих данных в нём нет, и держать содержимое закрытым незачем.
+  if(!FB_CONFIG.databaseURL){ _fbUnlock(); return; }
+  if(!fbInit()){ setSync("err","Firebase не загрузился — локальный режим"); _fbUnlock(); return; }
   const auth=_fbAuth();
-  if(!auth){ fbConnect(); return; }   // auth SDK не загрузился — работаем без входа
+  if(!auth){ _fbUnlock(); fbConnect(); return; }   // auth SDK не загрузился — работаем без входа
+  /* Страховка: если облако не ответило (нет сети, блокировка), содержимое так и останется
+     закрытым — это правильно, но человек должен видеть форму входа, а не пустой экран. */
+  setTimeout(function(){
+    if(!_fbGranted && document.documentElement.classList.contains("authgate")){
+      const c=document.getElementById("fbChecking");
+      if(c && c.style.display!=="none"){ _fbShowLogin();
+        const e=document.getElementById("fbLoginErr");
+        if(e){ e.style.color="#8a8178"; e.textContent="Сервер не ответил — войдите заново"; } }
+    }
+  }, 9000);
   // вход помнится в браузере до явного «Выйти» (иначе после закрытия вкладки просят пароль заново)
   try{ if(firebase.auth.Auth && firebase.auth.Auth.Persistence) auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL); }catch(e){}
   auth.onAuthStateChanged(function(user){
@@ -2718,6 +2737,7 @@ function _fbGrant(isAdmin, tabs){
 }
 function _fbShowLogin(){
   const o=document.getElementById("fbLogin"); if(!o) return;
+  _fbLock(); _fbShowChecking(false);
   o.style.display="flex";
   const lo=document.getElementById("fbLogoutBtn"); if(lo) lo.style.display="none";
   const who=document.getElementById("fbWhoami"); if(who) who.textContent="";
@@ -2730,6 +2750,7 @@ function _fbShowLogin(){
 }
 function _fbShowPending(){
   const o=document.getElementById("fbLogin"); if(!o) return;
+  _fbLock(); _fbShowChecking(false);
   o.style.display="flex";
   document.getElementById("fbAuthForm").style.display="none";
   document.getElementById("fbPendingBox").style.display="block";
@@ -2749,7 +2770,14 @@ function _fbShowPending(){
   if(idb) idb.innerHTML=cu?("Ваш ID для администратора: <b style='user-select:all'>"+esc(cu.uid)+"</b>"):"";
   setSync("warn","Ждёт одобрения");
 }
-function _fbHideLogin(){ const o=document.getElementById("fbLogin"); if(o) o.style.display="none"; }
+/* Замок снимаем ТОЛЬКО здесь — когда доступ реально подтверждён. */
+function _fbUnlock(){ document.documentElement.classList.remove("authgate"); }
+/* и возвращаем, как только доступа не стало: выход, смена аккаунта, ожидание одобрения */
+function _fbLock(){ document.documentElement.classList.add("authgate"); }
+function _fbShowChecking(on){
+  const c=document.getElementById("fbChecking"); if(c) c.style.display=on?"block":"none";
+}
+function _fbHideLogin(){ const o=document.getElementById("fbLogin"); if(o) o.style.display="none"; _fbUnlock(); }
 function _fbRenderAuthMode(){
   const t=document.getElementById("fbAuthTitle"), sub=document.getElementById("fbAuthSub"),
         btn=document.getElementById("fbAuthBtn"), tg=document.getElementById("fbAuthToggle"),
