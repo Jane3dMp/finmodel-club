@@ -1738,7 +1738,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-08-17-03";
+const APP_VER="2026-08-17-04";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -9911,12 +9911,26 @@ function _pubTariffFor(course,may){
   const key=may?("май::"+course):course;
   const man=_pubTarMap()[key];
   if(man){ const t=(_pubTariffs||[]).find(x=>+x.id===+man); return t?Object.assign({},t,{manual:true}):{id:+man,name:"id "+man,manual:true}; }
+  const near=_pubTariffCands(course,may);
+  return near.length===1?Object.assign({},near[0],{byPrice:true}):null;
+}
+/* Кандидаты под цену курса. Одну цену часто носят несколько шаблонов, и выбирать руками каждый
+   раз незачем. Сужаем по очереди, отбрасывая уточнение, если оно не оставляет ничего:
+   1) поурочные на ОДИН урок — нужен абонемент на год, а не пакет из 8 занятий;
+   2) не пробные и не разовые — они бывают на ту же цену, но для одного посещения;
+   3) привязанные к нашему предмету — в шаблоне Alfa предметы можно задать заранее.
+   Если после этого остался ровно один — берём его; если несколько, честно просим выбрать. */
+function _pubTariffCands(course,may){
   const price=_pubCoursePrice(course,may);
-  if(!price||!_pubTariffs) return null;
-  const near=_pubTariffs.filter(t=>Math.abs(_pubNum(t.price)-price)<0.01);
-  const one=near.filter(t=>(_pubNum(t.lesson_count)||1)===1);
-  const pick=(one.length===1?one[0]:(near.length===1?near[0]:null));
-  return pick?Object.assign({},pick,{byPrice:true}):null;
+  if(!price||!_pubTariffs) return [];
+  let near=_pubTariffs.filter(t=>Math.abs(_pubNum(t.price)-price)<0.01);
+  if(!near.length) return [];
+  const narrow=(list,f)=>{ const r=list.filter(f); return r.length?r:list; };
+  near=narrow(near,t=>(_pubNum(t.lesson_count)||1)===1);
+  near=narrow(near,t=>!/пробн|разов|тест/i.test(String(t.name||"")));
+  const subj=_pubMap().subj[course];
+  if(subj) near=narrow(near,t=>(t.subject_ids||[]).map(Number).indexOf(+subj)>=0);
+  return near;
 }
 /* Последний день майской цены — день перед переходом на полную (по умолчанию 31.12.2026) */
 function _mayEndIso(){
@@ -9932,8 +9946,11 @@ function _pubTariffWhy(course,may){
   const what=may?"майскую цену":"цену";
   if(!price) return "у курса «"+course+"» не указана "+(may?"майская цена":"цена занятия");
   if(!_pubTariffs) return "шаблоны Alfa ещё не прочитаны";
-  const near=_pubTariffs.filter(t=>Math.abs(_pubNum(t.price)-price)<0.01);
-  if(near.length>1) return "под "+what+" "+price+" р подходит несколько шаблонов ("+near.length+") — выберите нужный в списке ниже";
+  // считаем по тем же правилам, что и подбор, — иначе сообщение говорит «несколько», хотя
+  // после отсева пробных и пакетов остаётся один и выбирать уже нечего
+  const near=_pubTariffCands(course,may);
+  if(near.length>1) return "под "+what+" "+price+" р подходит несколько шаблонов ("+near.length+"): "+
+    near.slice(0,3).map(t=>t.name).join(", ")+(near.length>3?" и др.":"")+" — выберите нужный в списке ниже";
   const close=_pubTariffs.slice().sort((a,b)=>Math.abs(_pubNum(a.price)-price)-Math.abs(_pubNum(b.price)-price))
     .slice(0,3).map(t=>t.name+" ("+_pubNum(t.price)+")").join(", ");
   return "нет шаблона на "+price+" р за занятие"+(may?" (майская цена)":"")+". Видим шаблонов: "+_pubTariffs.length+
