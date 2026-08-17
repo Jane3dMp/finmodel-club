@@ -761,6 +761,9 @@ switch ($action) {
             $subj = array_values(array_filter(array_map('intval', (array)($it['subjectIds'] ?? []))));
             $lt   = array_values(array_filter(array_map('intval', (array)($it['lessonTypeIds'] ?? []))));
             if (!$cid || !$tid || !$subj) { $skipped[] = ['customer_id' => $cid, 'why' => 'не хватает данных (клиент, шаблон или предмет)']; continue; }
+            // период этого ребёнка нужен уже для проверки «есть ли действующий»
+            $itB = alfa_iso((string)($it['bDate'] ?? '')) ?: $bIso;
+            $itE = alfa_iso((string)($it['eDate'] ?? '')) ?: $eIso;
             /* Уже есть абонемент по этому предмету — второй не выдаём. ⚠️ Но «есть» означает
                ДЕЙСТВУЮЩИЙ на наш период: у ребёнка, который ходит не первый год, лежат
                прошлогодние абонементы (в карточке Alfa это «Архивные абонементы»). Раньше они
@@ -772,17 +775,19 @@ switch ($action) {
                 if (!array_intersect($exs, $subj)) continue;
                 if (!empty($ex['is_archive']) || !empty($ex['dead'])) continue;      // архивный — не помеха
                 $exEnd = alfa_iso((string)($ex['e_date_v'] ?? ($ex['e_date'] ?? '')));
-                if ($exEnd !== '' && $exEnd < $bIso) continue;                        // закончился до начала нашего периода
+                if ($exEnd !== '' && $exEnd < $itB) continue;                        // закончился до начала нашего периода
                 $dup = true; $dupWhy = 'действующий абонемент по этому курсу уже есть'
                     . ($exEnd !== '' ? (' (до ' . alfa_date($exEnd) . ')') : '');
                 break;
             }
             if ($dup) { $skipped[] = ['customer_id' => $cid, 'why' => $dupWhy]; continue; }
+            // период можно задать НА КАЖДОГО: у купивших майский абонемент действует по майской
+            // цене только до перехода на полную стоимость, у остальных — весь учебный год
             $body = array_merge(['customer_id' => $cid, 'tariff_id' => $tid, 'subject_ids' => $subj,
                                  'is_separate_balance' => $sep ? 1 : 0],
                                 $lt ? ['lesson_type_ids' => $lt] : [],
                                 $note !== '' ? ['note' => $note] : [],
-                                alfa_shape_dates($shape, $bIso, $eIso));
+                                alfa_shape_dates($shape, $itB, $itE));
             $plan[] = ['customer_id' => $cid, 'body' => $body];
         }
         if (!$live) json_out(['ok' => true, 'dryRun' => true, 'branch' => $bid, 'shape' => $shape,

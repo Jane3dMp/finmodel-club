@@ -1738,7 +1738,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-08-17-01";
+const APP_VER="2026-08-17-02";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -9620,22 +9620,36 @@ function _p1Opts(){ const a=_p1Alfa(); return {groupId:a?+a.id:0, branch:_p1Bran
 function _pubGiveOn(){ const c=_pubCfg(); return c.giveTariff!==false; }
 function pubSetGive(v){ const c=_pubCfg(); c.giveTariff=!!v; _pubSave(); if(typeof _p1Render==="function") _p1Render(); }
 /* кому и что выдадим: возвращает {rows,tariff,subj,why} — why непусто, если выдать нельзя */
+/* ⚠️ Раньше майских пропускали: считалось, что абонемент в Alfa у них уже есть. Оказалось,
+   не у всех — деньги приняты платежом, а абонемента нет («Счета и абонементы: не задано»),
+   и такой ребёнок оставался без него. Теперь выдаём ВСЕМ, у кого нет действующего (это
+   проверяет прокси), но майским — по майской цене и только до перехода на полную стоимость,
+   как в примере из Alfa: «Регулярное (24,00/1), 01.09.2026–31.12.2026, майский 26». */
 function _tariffPlanFor(course, kids){
   const m=_pubMap(), subj=m.subj[course]?+m.subj[course]:0;
   if(!subj) return {rows:[],why:"курс «"+course+"» не сопоставлен с предметом Alfa"};
-  const t=_pubTariffFor(course);
-  if(!t) return {rows:[],why:_pubTariffWhy(course)};
-  const lt=_pubCfg().lessonTypeId?[+_pubCfg().lessonTypeId]:[];
-  const rows=kids.filter(k=>k.alfaId&&!k.may)          // у майских абонемент уже есть
-    .map(k=>({customerId:+k.alfaId, tariffId:+t.id, subjectIds:[subj], lessonTypeIds:lt, _name:k.name||k.n}));
-  return {rows,tariff:t,subj,price};
+  const c=_pubCfg(), lt=c.lessonTypeId?[+c.lessonTypeId]:[];
+  const list=kids.filter(k=>k.alfaId);
+  const needMay=list.some(k=>k.may), needReg=list.some(k=>!k.may);
+  const tReg=needReg?_pubTariffFor(course,false):null;
+  const tMay=needMay?_pubTariffFor(course,true):null;
+  if(needReg&&!tReg) return {rows:[],why:_pubTariffWhy(course,false)};
+  if(needMay&&!tMay) return {rows:[],why:_pubTariffWhy(course,true)};
+  const mayEnd=_mayEndIso();
+  const rows=list.map(k=>{
+    const t=k.may?tMay:tReg;
+    return {customerId:+k.alfaId, tariffId:+t.id, subjectIds:[subj], lessonTypeIds:lt,
+            bDate:c.bDate, eDate:k.may?mayEnd:c.eDate, _name:k.name||k.n, _may:!!k.may};
+  });
+  return {rows, tariff:tReg||tMay, tariffReg:tReg, tariffMay:tMay, subj,
+          nReg:rows.filter(r=>!r._may).length, nMay:rows.filter(r=>r._may).length, mayEnd};
 }
 /* Кому в этой группе нужен абонемент. ⚠️ Считаем НЕ только тех, кого сейчас добавляем: ребёнок
    может уже состоять в группе (перенесли раньше или продлили из архива), а действующего
    абонемента у него нет. Раньше такие оставались без абонемента навсегда — выдача была намертво
    привязана к моменту добавления в группу. Отказавшихся и майских (у них абонемент есть) не берём. */
 function _tariffCandidates(){
-  return _p1Kids().filter(r=>r.alfaId && !r.may && !_p1Refused(r));
+  return _p1Kids().filter(r=>r.alfaId && !_p1Refused(r));
 }
 async function p1GiveTariffs(){
   if(!_p1||_p1.busy) return;
@@ -9777,22 +9791,27 @@ function _p1KidsHtml(){
     // считаем ВСЕХ, кому абонемент нужен, а не только отмеченных к добавлению: ребёнок может
     // уже состоять в группе, а действующего абонемента у него нет
     const P=_tariffPlanFor(_p1.g.course, _tariffCandidates());
-    const cur=_pubTarMap()[_p1.g.course]||"";
-    let pick="";
-    if(_pubTariffs&&_pubTariffs.length){
-      pick=`<select class="cell" data-f="tariff" style="max-width:230px" onchange="pubSetTariff('${_jsStr(_p1.g.course)}',this.value)">
-        <option value="">— по цене —</option>`+_pubTariffs.slice()
-        .sort((a,b)=>_pubNum(a.price)-_pubNum(b.price)||String(a.name).localeCompare(String(b.name),"ru"))
-        .map(t=>`<option value="${esc(t.id)}"${String(cur)===String(t.id)?" selected":""}>${esc(t.name)} · ${_pubNum(t.price)} р</option>`).join("")+`</select>`;
-    }
+    // Два шаблона: обычный и майский. Майским абонемент нужен по майской цене и только до
+    // перехода на полную стоимость — так же, как это заведено в Alfa вручную.
+    const sel1=(key,lab)=>{
+      if(!_pubTariffs||!_pubTariffs.length) return "";
+      const cur=_pubTarMap()[key]||"";
+      return `<label style="display:flex;gap:4px;align-items:center;margin:0;color:var(--muted)">${lab}
+        <select class="cell" data-f="tariff:${esc(key)}" style="max-width:200px" onchange="pubSetTariff('${_jsStr(key)}',this.value)">
+          <option value="">— по цене —</option>`+_pubTariffs.slice()
+          .sort((a,b)=>_pubNum(a.price)-_pubNum(b.price)||String(a.name).localeCompare(String(b.name),"ru"))
+          .map(t=>`<option value="${esc(t.id)}"${String(cur)===String(t.id)?" selected":""}>${esc(t.name)} · ${_pubNum(t.price)} р</option>`).join("")+`</select></label>`;
+    };
     h+=`<div style="display:flex;gap:8px;align-items:center;margin-top:8px;font-size:12px;flex-wrap:wrap">
       <label style="display:flex;gap:6px;align-items:center;margin:0;cursor:pointer;white-space:nowrap">
         <input type="checkbox" style="width:auto;margin:0" ${_pubGiveOn()?"checked":""} onchange="pubSetGive(this.checked)">
-        Абонемент без 💰${P.why?"":` <b>${P.rows.length}</b>`}</label>
-      ${pick}
+        Абонементы${P.why?"":` <b>${P.rows.length}</b>`}</label>
       ${P.why?`<span style="color:var(--terra)">${esc(P.why)}</span>`
-             :`<button class="btn ghost sm" ${P.rows.length&&!_p1.busy?"":"disabled"} onclick="p1GiveTariffs()"
-                 title="Выдать абонемент всем, у кого нет 💰 майского — включая тех, кто уже состоит в группе. У кого уже есть действующий, пропустим">🎫 Выдать абонементы (${P.rows.length})</button>`}</div>`;
+             :`<span style="color:var(--muted)">обычных ${P.nReg}${P.nMay?` · 💰 майских ${P.nMay} до ${esc(_pubDMY(P.mayEnd))}`:""}</span>
+               <button class="btn ghost sm" ${P.rows.length&&!_p1.busy?"":"disabled"} onclick="p1GiveTariffs()"
+                 title="Выдать абонемент всем, у кого нет действующего — включая тех, кто уже состоит в группе">🎫 Выдать абонементы (${P.rows.length})</button>`}</div>
+      <div style="display:flex;gap:10px;align-items:center;margin-top:4px;font-size:12px;flex-wrap:wrap">
+        ${sel1(_p1.g.course,"шаблон:")}${P.nMay?sel1("май::"+_p1.g.course,"💰 майский:"):""}</div>`;
   }
   h+=`<div class="hd-actions les-foot" style="margin-top:8px">
       <button class="btn ghost sm" onclick="p1TariffNeeds()" title="Посчитать по конструктору, какие шаблоны абонементов нужно завести в Alfa">📋 Какие абонементы нужны</button>
@@ -9871,26 +9890,46 @@ function _pubNum(v){
   return isFinite(n)?n:0;
 }
 /* Шаблон для курса: сначала ручная привязка, потом подбор по цене (поурочный, 1 урок) */
-function _pubTariffFor(course){
-  const man=_pubTarMap()[course];
+/* Цена курса для абонемента: у купивших майский до перехода на полную стоимость действует
+   «Майская цена» с вкладки «Курсы», у остальных обычная. */
+function _pubCoursePrice(course,may){
+  const c=(S.courses||[]).find(o=>o.name===course);
+  if(!c) return 0;
+  if(may && c.mayPrice!=null && c.mayPrice!=="" && _pubNum(c.mayPrice)>0) return _pubNum(c.mayPrice);
+  return _pubNum(c.price);
+}
+/* Шаблон под цену: поурочный на один урок с такой же ценой. Ручная привязка (своя для обычной
+   и для майской цены) всегда важнее подбора. */
+function _pubTariffFor(course,may){
+  const key=may?("май::"+course):course;
+  const man=_pubTarMap()[key];
   if(man){ const t=(_pubTariffs||[]).find(x=>+x.id===+man); return t?Object.assign({},t,{manual:true}):{id:+man,name:"id "+man,manual:true}; }
-  const c=(S.courses||[]).find(o=>o.name===course), price=_pubNum(c&&c.price);
+  const price=_pubCoursePrice(course,may);
   if(!price||!_pubTariffs) return null;
   const near=_pubTariffs.filter(t=>Math.abs(_pubNum(t.price)-price)<0.01);
   const one=near.filter(t=>(_pubNum(t.lesson_count)||1)===1);
   const pick=(one.length===1?one[0]:(near.length===1?near[0]:null));
   return pick?Object.assign({},pick,{byPrice:true}):null;
 }
+/* Последний день майской цены — день перед переходом на полную (по умолчанию 31.12.2026) */
+function _mayEndIso(){
+  const f=_pubCfg().full||"2027-01-01";
+  const d=new Date(f+"T12:00:00"); if(isNaN(d)) return "2026-12-31";
+  d.setDate(d.getDate()-1);
+  const z=n=>String(n).padStart(2,"0");
+  return d.getFullYear()+"-"+z(d.getMonth()+1)+"-"+z(d.getDate());
+}
 /* Почему шаблон не подобрался — чтобы вместо «нет шаблона» было видно, что мы вообще видим */
-function _pubTariffWhy(course){
-  const c=(S.courses||[]).find(o=>o.name===course), price=_pubNum(c&&c.price);
-  if(!price) return "у курса «"+course+"» не указана цена занятия";
+function _pubTariffWhy(course,may){
+  const price=_pubCoursePrice(course,may);
+  const what=may?"майской цены":"цены";
+  if(!price) return "у курса «"+course+"» не указана "+(may?"майская цена":"цена занятия");
   if(!_pubTariffs) return "шаблоны Alfa ещё не прочитаны";
   const near=_pubTariffs.filter(t=>Math.abs(_pubNum(t.price)-price)<0.01);
-  if(near.length>1) return "под цену "+price+" р подходит несколько шаблонов ("+near.length+") — выберите нужный";
+  if(near.length>1) return "под "+what+" "+price+" р подходит несколько шаблонов ("+near.length+") — выберите нужный";
   const close=_pubTariffs.slice().sort((a,b)=>Math.abs(_pubNum(a.price)-price)-Math.abs(_pubNum(b.price)-price))
     .slice(0,3).map(t=>t.name+" ("+_pubNum(t.price)+")").join(", ");
-  return "нет шаблона на "+price+" р за занятие. Видим шаблонов: "+_pubTariffs.length+
+  return "нет шаблона на "+price+" р за занятие"+(may?" (майская цена)":"")+". Видим шаблонов: "+_pubTariffs.length+
          (close?("; ближайшие: "+close):"")+" — выберите вручную или заведите в Alfa";
 }
 
