@@ -1738,7 +1738,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-08-17-04";
+const APP_VER="2026-08-17-05";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -8505,11 +8505,14 @@ function renderGroups(){
     g.key=k; g.done=!!(S.groupsDone||{})[k];
     const gm=(S.groupMeta||{})[k]||{}; g.age=gm.age||""; g.klass=gm.klass||"";   // рукописные возраст/класс группы
     g.alfaId=+(gm.alfaId||0)||0;                                                 // опубликована в Alfa — чтобы не создать дубль
-    const names=new Set(), paid=new Set(), rep={};   // rep: ФИО → лучший ответ + флаг «не придёт» (как в «Движении по группам»)
+    const names=new Set(), paid=new Set(), inAlfa=new Set(), rep={};   // rep: ФИО → лучший ответ + флаг «не придёт» (как в «Движении по группам»)
     const rank=r=>r==="yes"?3:r==="no"?2:r==="maybe"?1:0;
+    const gmAlfa=String(gm.alfaId||"");
     g.idxs.forEach(i=>kidsOf(S.grid[i]).forEach(kd=>{ const n=_nameKey(kd.n); if(!n) return; names.add(n); if(kd.may) paid.add(n);   // тёзки = разные дети
+      // ребёнок заведён ИМЕННО в эту группу Alfa — отметка ставится после успешного переноса
+      if(gmAlfa && String(kd.alfaGrp||"")===gmAlfa) inAlfa.add(n);
       const p=rep[n]||(rep[n]={reply:"",no:false}); if(kd.no) p.no=true; if(rank(kd.vbReply)>rank(p.reply)) p.reply=kd.vbReply; }));
-    g.kids=names.size; g.paid=paid.size;
+    g.kids=names.size; g.paid=paid.size; g.kidsAlfa=inAlfa.size;
     { const ks=Object.values(rep);
       g.rNo   =ks.filter(p=>p.no||p.reply==="no").length;              // 🔴 отказ / не придёт
       g.rYes  =ks.filter(p=>!p.no&&p.reply==="yes").length;            // 🟢 подтвердили
@@ -9384,10 +9387,15 @@ let _p1=null;
 function _pubGrpStatus(g,aIdx){
   const gm=(S.groupMeta||{})[g.key]||{};
   const id=+(gm.alfaId||0)||0;
-  const kids=gm.kidsIn?(" · детей в Alfa: "+gm.kidsIn+(gm.kidsTot?("/"+gm.kidsTot):"")):"";
-  if(id&&gm.alfaSched) return {k:"done",lab:"✓ в Alfa",rank:3,
+  /* Детей считаем ПО САМИМ ДЕТЯМ (отметка k.alfaGrp), а не по сохранённому счётчику: счётчик —
+     снимок на момент переноса, а состав с тех пор мог измениться. Хотя бы один заведён —
+     показываем «👤N»; не пользовались переносом — этой части просто нет. */
+  const kn=+(g.kidsAlfa||0)||0;
+  const kb=kn?(" · 👤"+kn+(g.kids?("/"+g.kids):"")):"";
+  const kids=kn?(" · детей заведено в Alfa: "+kn+(g.kids?(" из "+g.kids):"")):" · дети в Alfa ещё не заводились";
+  if(id&&gm.alfaSched) return {k:"done",lab:"✓ в Alfa"+kb,rank:(kn?4:3),
     t:"Расписание опубликовано в AlfaCRM · id "+id+(gm.alfaAt?(" · "+gm.alfaAt):"")+(gm.alfaLes?(" · занятий: "+gm.alfaLes):"")+kids};
-  if(id) return {k:"link",lab:"◐ связана",rank:2,
+  if(id) return {k:"link",lab:"◐ связана"+kb,rank:(kn?2.5:2),
     t:"Связана с группой Alfa id "+id+(gm.alfaName?(" «"+gm.alfaName+"»"):"")+", расписание ещё не опубликовано"+kids};
   if(aIdx){
     const hit=_pubMatch(aIdx,_pubName(g));
