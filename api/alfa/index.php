@@ -712,22 +712,40 @@ switch ($action) {
         break;
 
     // --- АБОНЕМЕНТЫ РЕБЁНКА (READ): что у него уже выдано, чтобы не выдать второй раз ---
+    //     Принимает и одного (customerId), и список (customerIds) — модели нужен сразу весь
+    //     состав группы: иначе «у кого абонемент есть» было видно ТОЛЬКО в отказе после
+    //     попытки выдать, и ребёнок без абонемента ничем не отличался от ребёнка с ним.
     case 'customerTariffs':
-        @set_time_limit(60);
-        $cid = (int)($in['customerId'] ?? 0);
-        if ($cid <= 0) json_out(['ok' => false, 'error' => 'Не передан id клиента']);
-        $bid = (int)($in['branch'] ?? 0) ?: alfa_branch();
-        $r = alfa_customer_tariffs($bid, $cid);
-        $rows = [];
-        foreach ($r['items'] as $it) {
-            $rows[] = ['id' => $it['id'] ?? null, 'tariff_id' => $it['tariff_id'] ?? null,
-                       'subject_ids' => array_values(array_map('intval', (array)($it['subject_ids'] ?? []))),
-                       'b_date' => $it['b_date_v'] ?? ($it['b_date'] ?? null),
-                       'e_date' => $it['e_date_v'] ?? ($it['e_date'] ?? null),
-                       'balance' => $it['balance'] ?? null, 'note' => $it['note'] ?? null];
+        @set_time_limit(120);
+        $ids = array_values(array_unique(array_filter(array_map('intval',
+                   (array)($in['customerIds'] ?? [])), fn($x) => $x > 0)));
+        if (!$ids && (int)($in['customerId'] ?? 0) > 0) $ids = [(int)$in['customerId']];
+        if (!$ids) json_out(['ok' => false, 'error' => 'Не передан id клиента']);
+        if (count($ids) > 80) $ids = array_slice($ids, 0, 80);   // страховка от долгого запроса
+        $bid  = (int)($in['branch'] ?? 0) ?: alfa_branch();
+        $subj = array_values(array_filter(array_map('intval', (array)($in['subjectIds'] ?? []))));
+        $bIso = alfa_iso((string)($in['bDate'] ?? '')) ?: '';
+        $map = [];
+        foreach ($ids as $cid) {
+            $r = alfa_customer_tariffs($bid, $cid);
+            $rows = [];
+            foreach ($r['items'] as $it) {
+                $rows[] = ['id' => $it['id'] ?? null, 'tariff_id' => $it['tariff_id'] ?? null,
+                           'subject_ids' => array_values(array_map('intval', (array)($it['subject_ids'] ?? []))),
+                           'b_date' => $it['b_date_v'] ?? ($it['b_date'] ?? null),
+                           'e_date' => $it['e_date_v'] ?? ($it['e_date'] ?? null),
+                           'is_archive' => (int)($it['is_archive'] ?? 0),
+                           'balance' => $it['balance'] ?? null, 'note' => $it['note'] ?? null];
+            }
+            // «действующий» считаем ровно теми же правилами, что и выдача, — иначе значок
+            // в списке и решение прокси разошлись бы, а это худший вид вранья интерфейса
+            $act = $subj ? alfa_tariff_active($r['items'], $subj, $bIso) : ['active' => null, 'until' => ''];
+            $map[$cid] = ['ok' => $r['ok'], 'count' => count($rows), 'subs' => $rows,
+                          'active' => $act['active'], 'until' => $act['until']];
         }
-        json_out(['ok' => true, 'customerId' => $cid, 'branch' => $bid, 'count' => count($rows),
-                  'subs' => $rows, 'sample' => $r['items'][0] ?? null]);
+        $one = count($ids) === 1 ? $map[$ids[0]] : null;
+        json_out(['ok' => true, 'branch' => $bid, 'ids' => $ids, 'byId' => $map]
+                 + ($one ? ['customerId' => $ids[0], 'count' => $one['count'], 'subs' => $one['subs']] : []));
         break;
 
     // --- ВЫДАТЬ АБОНЕМЕНТ (WRITE, dryRun по умолчанию) ---
@@ -769,18 +787,13 @@ switch ($action) {
                прошлогодние абонементы (в карточке Alfa это «Архивные абонементы»). Раньше они
                тоже считались, и новый абонемент молча не выдавался — при том что действующих
                у ребёнка не было ни одного. */
-            $dup = false; $dupWhy = '';
-            foreach (($existing[$cid] ?? []) as $ex) {
-                $exs = array_map('intval', (array)($ex['subject_ids'] ?? []));
-                if (!array_intersect($exs, $subj)) continue;
-                if (!empty($ex['is_archive']) || !empty($ex['dead'])) continue;      // архивный — не помеха
-                $exEnd = alfa_iso((string)($ex['e_date_v'] ?? ($ex['e_date'] ?? '')));
-                if ($exEnd !== '' && $exEnd < $itB) continue;                        // закончился до начала нашего периода
-                $dup = true; $dupWhy = 'действующий абонемент по этому курсу уже есть'
-                    . ($exEnd !== '' ? (' (до ' . alfa_date($exEnd) . ')') : '');
-                break;
+            $act = alfa_tariff_active($existing[$cid] ?? [], $subj, $itB);
+            if ($act['active']) {
+                $skipped[] = ['customer_id' => $cid, 'have' => true,
+                              'why' => 'действующий абонемент по этому курсу уже есть'
+                                       . ($act['until'] !== '' ? (' (до ' . alfa_date($act['until']) . ')') : '')];
+                continue;
             }
-            if ($dup) { $skipped[] = ['customer_id' => $cid, 'why' => $dupWhy]; continue; }
             // период можно задать НА КАЖДОГО: у купивших майский абонемент действует по майской
             // цене только до перехода на полную стоимость, у остальных — весь учебный год
             $body = array_merge(['customer_id' => $cid, 'tariff_id' => $tid, 'subject_ids' => $subj,

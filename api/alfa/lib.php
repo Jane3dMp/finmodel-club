@@ -387,6 +387,22 @@ function alfa_customer_tariffs(int $branch, int $customerId): array {
     }
     return ['ok' => true, 'items' => $out];
 }
+/* Есть ли у ребёнка ДЕЙСТВУЮЩИЙ абонемент по этим предметам на нашу дату начала.
+   ⚠️ Прошлогодние (архивные и закончившиеся до начала периода) не в счёт: у ребёнка,
+   который ходит не первый год, их пачка, и раньше из-за них новый абонемент молча
+   не выдавался. Одна функция на выдачу и на проверку — чтобы значок в списке и решение
+   при выдаче не могли разойтись. */
+function alfa_tariff_active(array $items, array $subjectIds, string $bIso): array {
+    foreach ($items as $ex) {
+        $exs = array_map('intval', (array)($ex['subject_ids'] ?? []));
+        if ($subjectIds && !array_intersect($exs, $subjectIds)) continue;
+        if (!empty($ex['is_archive']) || !empty($ex['dead'])) continue;
+        $end = alfa_iso((string)($ex['e_date_v'] ?? ($ex['e_date'] ?? '')));
+        if ($end !== '' && $bIso !== '' && $end < $bIso) continue;
+        return ['active' => true, 'until' => $end];
+    }
+    return ['active' => false, 'until' => ''];
+}
 /* Выдать абонемент. Поля — по модели Alfa: tariff_id, subject_ids, lesson_type_ids,
    is_separate_balance, период, комментарий. customer_id дублируем в адрес. */
 function alfa_tariff_give(int $branch, int $customerId, array $body): array {

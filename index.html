@@ -1738,7 +1738,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-08-17-08";
+const APP_VER="2026-08-18-01";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -9481,7 +9481,7 @@ async function pubOne(key){
   if(!_fbIsAdmin){ toast("Публикует только админ"); return; }
   const el=document.getElementById("pubOneModal"); if(!el) return;
   _p1={key,mode:"",sel:0,q:"",log:"",busy:false,upd:false,g:null,
-       kidsOpen:false,kidsLog:"",kidSkip:{},members:null};
+       kidsOpen:false,kidsLog:"",kidSkip:{},members:null,tarHave:null};
   el.classList.add("show");
   const b=document.getElementById("pubOneBody");
   b.innerHTML=`<div style="padding:12px;color:var(--muted)">Читаю справочники и группы из Альфы… (до минуты)</div>`;
@@ -9686,8 +9686,13 @@ function _tariffPlanFor(course, kids){
     return {customerId:+k.alfaId, tariffId:+t.id, subjectIds:[subj], lessonTypeIds:lt,
             bDate:c.bDate, eDate:k.may?mayEnd:c.eDate, _name:k.name||k.n, _may:!!k.may};
   });
+  /* wantReg/wantMay — сколько детей КАЖДОГО вида ждёт абонемента, независимо от того,
+     подобрался ли шаблон. По ним рисуются выпадашки: раньше считали по rows, и когда майский
+     шаблон был неоднозначен, майских в rows не было → выпадашка не появлялась, а подсказка
+     звала «выберите нужный в списке ниже». Выбирать было негде — дети оставались без абонемента. */
   return {rows, tariff:tReg||tMay, tariffReg:tReg, tariffMay:tMay, subj, mayEnd,
           nReg:rows.filter(r=>!r._may).length, nMay:rows.filter(r=>r._may).length,
+          wantReg:list.filter(k=>!k.may).length, wantMay:list.filter(k=>k.may).length,
           note:notes.join(" · "), why:(rows.length?"":(notes.join(" · ")||"некому выдавать"))};
 }
 /* Кому в этой группе нужен абонемент. ⚠️ Считаем НЕ только тех, кого сейчас добавляем: ребёнок
@@ -9696,6 +9701,33 @@ function _tariffPlanFor(course, kids){
    привязана к моменту добавления в группу. Отказавшихся и майских (у них абонемент есть) не берём. */
 function _tariffCandidates(){
   return _p1Kids().filter(r=>r.alfaId && !_p1Refused(r));
+}
+/* Кто из группы уже с абонементом. Знать это иначе было нельзя: «у него уже есть» всплывало
+   ТОЛЬКО в отказе после попытки выдать, и ребёнок без абонемента выглядел так же, как с ним.
+   Ответ храним в _p1.tarHave (id → {active,until}); решение принимает прокси той же функцией,
+   что и выдача, поэтому значок не может разойтись с делом. */
+function _p1TarMark(r){
+  const st=_p1&&_p1.tarHave&&r.alfaId?_p1.tarHave[+r.alfaId]:null;
+  if(!st) return "";
+  if(st.active) return `<span style="color:var(--green)" title="Абонемент по этому курсу есть${st.until?" (до "+esc(_pubDMY(st.until))+")":""}">🎫</span>`;
+  return `<span style="color:var(--terra)" title="Абонемента по этому курсу нет">—</span>`;
+}
+async function p1CheckTariffs(){
+  if(!_p1||_p1.busy) return;
+  const m=_pubMap(), subj=m.subj[_p1.g.course]?+m.subj[_p1.g.course]:0;
+  if(!subj){ _p1.kidsLog=`<div class="callout" style="border-color:var(--terra)">Курс «${esc(_p1.g.course)}» не сопоставлен с предметом Alfa — по чему проверять, неизвестно.</div>`; _p1Render(); return; }
+  const ids=_p1Kids().filter(r=>r.alfaId).map(r=>+r.alfaId);
+  if(!ids.length){ toast("Не у кого проверять: нет связи с Альфой"); return; }
+  _p1.busy=true; _p1.kidsLog="⏳ Спрашиваю Alfa про абонементы…"; _p1Render();
+  try{
+    const j=await _pubCall("customerTariffs",{branch:_p1Branch(), customerIds:ids,
+      subjectIds:[subj], bDate:_pubCfg().bDate});
+    const by=j.byId||{}; _p1.tarHave={};
+    Object.keys(by).forEach(k=>{ _p1.tarHave[+k]={active:!!by[k].active, until:by[k].until||""}; });
+    const have=Object.values(_p1.tarHave).filter(x=>x.active).length;
+    _p1.kidsLog=`<div class="callout" style="border-color:var(--green)">🎫 Абонемент по курсу «${esc(_p1.g.course)}» есть у <b>${have}</b> из ${ids.length}. Остальным — нужен.</div>`;
+  }catch(e){ _p1.kidsLog=_pubErrHtml(e,"проверка абонементов"); }
+  _p1.busy=false; _p1Render();
 }
 async function p1GiveTariffs(){
   if(!_p1||_p1.busy) return;
@@ -9715,8 +9747,13 @@ async function p1GiveTariffs(){
     if(g) logCrm("выданы абонементы («"+((P.tariff&&P.tariff.name)||"шаблон")+"») по курсу «"+_p1.g.course+"»: "+g+" до "+_pubDMY(c.eDate));
     if(er.length) console.warn("🎫 giveTariff — ошибки:",er);
     if(sk.length) console.log("🎫 giveTariff — пропущены:",sk);
+    // проверка «у кого есть» после выдачи устарела — пусть значки не врут
+    if(g) _p1.tarHave=null;
+    const allHave=!g&&!er.length&&sk.length&&sk.every(x=>x.have);
     _p1.kidsLog=`<div class="callout" style="border-color:${er.length?"var(--terra)":"var(--green)"}">
-      ${g?`✅ Выдано абонементов: <b>${g}</b> (${esc((P.tariff&&P.tariff.name)||"шаблон")}, до ${esc(_pubDMY(c.eDate))}).`:"Ни одного не выдано."}
+      ${g?`✅ Выдано абонементов: <b>${g}</b> (${esc((P.tariff&&P.tariff.name)||"шаблон")}, до ${esc(_pubDMY(c.eDate))}).`
+         :allHave?`✅ Выдавать нечего: действующий абонемент по этому курсу уже есть у всех <b>${sk.length}</b>.`
+         :"Ни одного не выдано."}
       ${sk.length?`<br>Пропущено <b>${sk.length}</b>: ${esc([...new Set(sk.map(x=>x.why||"без причины"))].join("; "))}`:""}
       ${er.length?`<br><span style="color:var(--red)">Ошибок: ${er.length}</span> — ${esc(er.slice(0,3).map(e=>e.why||("id "+e.customer_id)).join("; "))}`:""}</div>`;
     toast(g?("Выдано абонементов: "+g):(sk.length?"Все пропущены — см. пояснение":"Ничего не выдано"));
@@ -9824,6 +9861,7 @@ function _p1KidsHtml(){
       <span style="width:16px;text-align:center">${rep}</span>
       <span style="width:16px;text-align:center">${r.may?'<span title="Купил майский">💰</span>':''}</span>
       <span style="width:16px;text-align:center;font-size:11px">${r.sent?'<span style="color:var(--green)" title="Viber отправлен">📨</span>':''}</span>
+      <span style="width:16px;text-align:center;font-size:11px">${_p1TarMark(r)}</span>
       <span style="flex:1;min-width:0">${esc(r.name)}</span>
       <span style="font-size:11px">${st}</span>
       <span style="font-size:11px;color:var(--muted);width:60px;text-align:right">${r.alfaId?("id "+r.alfaId):""}</span></label>`;
@@ -9846,7 +9884,7 @@ function _p1KidsHtml(){
         <select class="cell" data-f="tariff:${esc(key)}" style="max-width:200px" onchange="pubSetTariff('${_jsStr(key)}',this.value)">
           <option value="">— по цене —</option>`+_pubTariffs.slice()
           .sort((a,b)=>_pubNum(a.price)-_pubNum(b.price)||String(a.name).localeCompare(String(b.name),"ru"))
-          .map(t=>`<option value="${esc(t.id)}"${String(cur)===String(t.id)?" selected":""}>${esc(t.name)} · ${_pubNum(t.price)} р</option>`).join("")+`</select></label>`;
+          .map(t=>`<option value="${esc(t.id)}"${String(cur)===String(t.id)?" selected":""}>${esc(_pubTariffLabel(t))}</option>`).join("")+`</select></label>`;
     };
     h+=`<div style="display:flex;gap:8px;align-items:center;margin-top:8px;font-size:12px;flex-wrap:wrap">
       <label style="display:flex;gap:6px;align-items:center;margin:0;cursor:pointer;white-space:nowrap">
@@ -9858,12 +9896,14 @@ function _p1KidsHtml(){
                <button class="btn ghost sm" ${P.rows.length&&!_p1.busy?"":"disabled"} onclick="p1GiveTariffs()"
                  title="Выдать абонемент всем, у кого нет действующего — включая тех, кто уже состоит в группе">🎫 Выдать абонементы (${P.rows.length})</button>`}</div>
       <div style="display:flex;gap:10px;align-items:center;margin-top:4px;font-size:12px;flex-wrap:wrap">
-        ${P.nReg?sel1(_p1.g.course,"шаблон:"):""}${P.nMay?sel1("май::"+_p1.g.course,"💰 майский:"):""}</div>`;
+        ${P.wantReg?sel1(_p1.g.course,"шаблон:"):""}${P.wantMay?sel1("май::"+_p1.g.course,"💰 майский:"):""}</div>`;
   }
   h+=`<div class="hd-actions les-foot" style="margin-top:8px">
       <button class="btn ghost sm" onclick="p1TariffNeeds()" title="Посчитать по конструктору, какие шаблоны абонементов нужно завести в Alfa">📋 Какие абонементы нужны</button>
       <button class="btn ghost sm" onclick="p1Tariffs()" title="Посмотреть, какие шаблоны абонементов заведены в вашей AlfaCRM">🎫 Абонементы Альфы</button>
       <button class="btn ghost sm" onclick="p1KidsRefresh()" title="Перечитать состав группы из Alfa">⟳ Обновить состав из Alfa</button>
+      <button class="btn ghost sm" ${_p1.busy?"disabled":""} onclick="p1CheckTariffs()"
+        title="Спросить у Alfa, у кого по этому курсу абонемент уже есть">🎫 Проверить абонементы</button>
       <button class="btn sm" style="margin-left:auto" ${sel&&!_p1.busy?"":"disabled"} onclick="p1KidsAdd()">👥 Добавить в группу Alfa (${sel})</button>
     </div><div id="p1KidsLog" style="margin-top:8px;font-size:12px">${_p1.kidsLog||""}</div>`;
   return h;
@@ -9921,6 +9961,12 @@ async function _pubEnsureTariffs(force){
     return _pubTariffs;
   })();
   try{ return await _pubTarLoading; } finally { _pubTarLoading=null; }
+}
+/* Подпись шаблона. Имя «Регулярное» в Alfa носят сразу несколько шаблонов — по имени и цене
+   их не различить, поэтому дописываем число уроков и id. */
+function _pubTariffLabel(t){
+  const n=_pubNum(t.lesson_count);
+  return String(t.name||("#"+t.id))+" · "+_pubNum(t.price)+" р"+(n?(" · "+n+" ур."):"")+" · #"+t.id;
 }
 function _pubTarMap(){ const m=_pubMap(); if(!m.tariff) m.tariff={}; return m.tariff; }
 function pubSetTariff(course,id){
@@ -9990,7 +10036,7 @@ function _pubTariffWhy(course,may){
   // после отсева пробных и пакетов остаётся один и выбирать уже нечего
   const near=_pubTariffCands(course,may);
   if(near.length>1) return "под "+what+" "+price+" р подходит несколько шаблонов ("+near.length+"): "+
-    near.slice(0,3).map(t=>t.name).join(", ")+(near.length>3?" и др.":"")+" — выберите нужный в списке ниже";
+    near.slice(0,3).map(_pubTariffLabel).join("; ")+(near.length>3?" и др.":"")+" — выберите нужный в списке ниже";
   const close=_pubTariffs.slice().sort((a,b)=>Math.abs(_pubNum(a.price)-price)-Math.abs(_pubNum(b.price)-price))
     .slice(0,3).map(t=>t.name+" ("+_pubNum(t.price)+")").join(", ");
   return "нет шаблона на "+price+" р за занятие"+(may?" (майская цена)":"")+". Видим шаблонов: "+_pubTariffs.length+
