@@ -1738,7 +1738,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-08-17-07";
+const APP_VER="2026-08-17-08";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -8728,6 +8728,22 @@ function _pubGuess(name,list){
   return cand.length===1?cand[0].id:null;                            // неоднозначное не угадываем — пусть выберут руками
 }
 function _pubTailNum(s){ const m=String(s||"").match(/(\d+)$/); return m?m[1]:""; }
+/* Похоже ли выбранное соответствие на ошибку? Точное совпадение имён — точно нет.
+   Кабинеты: «1 этаж №1» и «1 этаж №2» отличаются только хвостовым номером — самый частый
+   случай неверной привязки, и на глаз он не виден. Педагоги: сверяем фамилию, потому что
+   в Alfa часто «Иванова М.П.» против нашей «Иванова Мария». Курсы/предметы: считаем нормой,
+   когда одно название входит в другое («Робототехника» ⊂ «Робототехника (1 час)»). */
+function _pubMapOdd(kind,ours,theirs){
+  const a=_normCourse(ours), b=_normCourse(theirs);
+  if(!a||!b||a===b) return false;
+  if(kind==="teacher"){
+    const w=x=>_normCourse(String(x||"").trim().split(/\s+/)[0]||"");
+    return w(ours)!==w(theirs);
+  }
+  const near=a.indexOf(b)>=0||b.indexOf(a)>=0;
+  if(kind==="room") return !near || _pubTailNum(a)!==_pubTailNum(b);
+  return !near;
+}
 function _pubRefList(k){ return (_pubRefs&&_pubRefs[k])||[]; }
 function _pubOpts(list,sel,ph,noId){
   let h=`<option value="">${esc(ph||"— не выбрано —")}</option>`;
@@ -9556,16 +9572,27 @@ function _p1Render(){
       <div style="font-size:11px;color:var(--muted);margin-top:4px">Ляжет в филиал <b>${esc(_pubBrName(br))}</b> ${(g.branchInfo||{}).fromRoom?"(определён по кабинету)":"(по умолчанию)"}</div></div>`:""}</div>`;
 
   h+=`<div style="font-weight:700;margin-bottom:6px">2 · Что уйдёт в расписание</div>`;
+  /* Соответствия показываем ВСЕГДА, а не только когда их не хватает. Неверная привязка (наш
+     «1 этаж №1» → кабинет Alfa «1 этаж №2») из этого окна не правилась вовсе — приходилось идти
+     в массовую модалку, а на глаз ошибку легко пропустить. Расхождение имён подсвечиваем. */
   const need=[];
-  if(m.subj[g.course]==null) need.push(["subj",g.course,"subjects","предмет курса"]);
-  g.rooms.forEach(r=>{ if(m.room[r]==null) need.push(["room",r,"rooms","кабинет"]); });
-  g.teachers.forEach(t=>{ if(m.teacher[t]==null) need.push(["teacher",t,"teachers","педагог"]); });
-  if(need.length) h+=`<div class="callout" style="border-color:var(--terra);margin-bottom:8px">
-    <div style="font-size:12px;margin-bottom:6px">Не хватает соответствий — выберите, что это в Alfa:</div>
+  need.push(["subj",g.course,"subjects","предмет курса"]);
+  g.rooms.forEach(r=>need.push(["room",r,"rooms","кабинет"]));
+  g.teachers.forEach(t=>need.push(["teacher",t,"teachers","педагог"]));
+  const miss=need.filter(([k,v])=>m[k][v]==null).length;
+  if(need.length) h+=`<div class="callout" style="border-color:${miss?"var(--terra)":"var(--line)"};margin-bottom:8px">
+    <div style="font-size:12px;margin-bottom:6px">${miss?"Не хватает соответствий — выберите, что это в Alfa:":"Соответствия с Alfa — проверьте и поправьте, если подставилось не то:"}</div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 10px;align-items:center">`+
-    need.map(([kind,val,ref,lab])=>`<div style="font-size:12px"><b>${esc(val)}</b> <span style="color:var(--muted)">— ${esc(lab)}</span></div>
-      <select class="cell" onchange="pubSetMap('${_jsStr(kind)}','${_jsStr(val)}',this.value)">${
-        _pubOpts(ref==="rooms"?_pubRefList("rooms").map(o=>({id:o.id,name:o.name+(o.branch?(" · "+_pubBrName(o.branch)):"")})):_pubRefList(ref),"","— выбрать —")}</select>`).join("")+
+    need.map(([kind,val,ref,lab])=>{
+      const cur=m[kind][val];
+      const nm=cur!=null?_pubRefName(ref,cur):"";
+      // разные названия у нашего и альфовского — почти всегда ошибка подбора, её надо видеть
+      const odd=cur!=null&&nm&&_pubMapOdd(kind,val,nm);
+      return `<div style="font-size:12px"><b>${esc(val)}</b> <span style="color:var(--muted)">— ${esc(lab)}</span>${
+        odd?`<br><span style="color:var(--terra)">≠ в Alfa «${esc(nm)}»</span>`:""}</div>
+      <select class="cell"${odd?' style="border-color:var(--terra)"':''} onchange="pubSetMap('${_jsStr(kind)}','${_jsStr(val)}',this.value)">${
+        _pubOpts(ref==="rooms"?_pubRefList("rooms").map(o=>({id:o.id,name:o.name+(o.branch?(" · "+_pubBrName(o.branch)):"")})):_pubRefList(ref),cur==null?"":cur,"— выбрать —")}</select>`;
+    }).join("")+
     `</div></div>`;
 
   h+=`<div class="tscroll"><table style="width:100%"><thead><tr>
@@ -9575,7 +9602,13 @@ function _p1Render(){
     const rid=s.room?m.room[s.room]:null, tid=s.teacher?m.teacher[s.teacher]:null;
     h+=`<tr><td style="text-align:left">${esc(DAY_NAMES[s.day]||"?")}</td>
       <td style="text-align:left">${esc(s.start||"—")}–${esc(s.end||_pubAddMin(s.start,60))}</td>
-      <td style="text-align:left">${s.room?esc(s.room)+(rid?` <span style="color:var(--muted)">→ ${esc(_pubRefName("rooms",rid))}</span>`:` <b style="color:var(--red)">не сопоставлен</b>`):'<span style="color:var(--muted)">—</span>'}</td>
+      <td style="text-align:left">${s.room?esc(s.room)+(rid?(function(){
+          const nm=_pubRefName("rooms",rid);
+          // стрелка «наш кабинет → кабинет Alfa» пугает, когда названия разные: подсвечиваем,
+          // потому что это почти всегда неверно подобранное соответствие, а не так задумано
+          const odd=nm&&_pubMapOdd("room",s.room,nm);
+          return ` <span style="color:${odd?"var(--terra)":"var(--muted)"}"${odd?' title="Названия не совпадают — проверьте соответствие выше"':''}>→ ${esc(nm)}${odd?" ⚠":""}</span>`;
+        })():` <b style="color:var(--red)">не сопоставлен</b>`):'<span style="color:var(--muted)">—</span>'}</td>
       <td style="text-align:left">${s.teacher?esc(shortName(s.teacher))+(tid?` <span style="color:var(--muted)">→ ${esc(_pubRefName("teachers",tid))}</span>`:` <b style="color:var(--red)">не сопоставлен</b>`):'<span style="color:var(--muted)">—</span>'}</td></tr>`;
   });
   h+=`</tbody></table></div>`;
