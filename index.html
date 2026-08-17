@@ -1738,7 +1738,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-08-14-03";
+const APP_VER="2026-08-17-01";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -9630,6 +9630,39 @@ function _tariffPlanFor(course, kids){
     .map(k=>({customerId:+k.alfaId, tariffId:+t.id, subjectIds:[subj], lessonTypeIds:lt, _name:k.name||k.n}));
   return {rows,tariff:t,subj,price};
 }
+/* Кому в этой группе нужен абонемент. ⚠️ Считаем НЕ только тех, кого сейчас добавляем: ребёнок
+   может уже состоять в группе (перенесли раньше или продлили из архива), а действующего
+   абонемента у него нет. Раньше такие оставались без абонемента навсегда — выдача была намертво
+   привязана к моменту добавления в группу. Отказавшихся и майских (у них абонемент есть) не берём. */
+function _tariffCandidates(){
+  return _p1Kids().filter(r=>r.alfaId && !r.may && !_p1Refused(r));
+}
+async function p1GiveTariffs(){
+  if(!_p1||_p1.busy) return;
+  const a=_p1Alfa(); if(!a){ toast("Сначала выберите группу в Alfa"); return; }
+  const c=_pubCfg(), rows=_tariffCandidates();
+  const P=_tariffPlanFor(_p1.g.course, rows);
+  if(P.why){ _p1.kidsLog=`<div class="callout" style="border-color:var(--terra)">Абонементы не выданы: ${esc(P.why)}</div>`; _p1Render(); return; }
+  if(!P.rows.length){ toast("Некому выдавать: у всех либо 💰 майский, либо нет связи с Альфой"); return; }
+  if(!confirm("Выдать абонемент «"+((P.tariff&&P.tariff.name)||"?")+"» — "+P.rows.length+" реб.?\n\n"+
+    P.rows.slice(0,12).map(r=>"• "+r._name).join("\n")+(P.rows.length>12?("\n… и ещё "+(P.rows.length-12)):"")+
+    "\n\nПериод: "+_pubDMY(c.bDate)+" — "+_pubDMY(c.eDate)+"\nУ кого уже есть действующий — пропустим.\n\nЭто живая запись в CRM.")) return;
+  _p1.busy=true; _p1.kidsLog="⏳ Выдаю абонементы…"; _p1Render();
+  try{
+    const j=await _pubCall("giveTariff",{dryRun:false, branch:_p1Branch(), items:P.rows,
+      b_date:c.bDate, e_date:c.eDate, separate:false, note:"учебный год 26/27"});
+    const g=(j.given||[]).length, sk=(j.skipped||[]), er=(j.errors||[]);
+    if(g) logCrm("выданы абонементы («"+((P.tariff&&P.tariff.name)||"шаблон")+"») по курсу «"+_p1.g.course+"»: "+g+" до "+_pubDMY(c.eDate));
+    if(er.length) console.warn("🎫 giveTariff — ошибки:",er);
+    if(sk.length) console.log("🎫 giveTariff — пропущены:",sk);
+    _p1.kidsLog=`<div class="callout" style="border-color:${er.length?"var(--terra)":"var(--green)"}">
+      ${g?`✅ Выдано абонементов: <b>${g}</b> (${esc((P.tariff&&P.tariff.name)||"шаблон")}, до ${esc(_pubDMY(c.eDate))}).`:"Ни одного не выдано."}
+      ${sk.length?`<br>Пропущено <b>${sk.length}</b>: ${esc([...new Set(sk.map(x=>x.why||"без причины"))].join("; "))}`:""}
+      ${er.length?`<br><span style="color:var(--red)">Ошибок: ${er.length}</span> — ${esc(er.slice(0,3).map(e=>e.why||("id "+e.customer_id)).join("; "))}`:""}</div>`;
+    toast(g?("Выдано абонементов: "+g):(sk.length?"Все пропущены — см. пояснение":"Ничего не выдано"));
+  }catch(e){ _p1.kidsLog=_pubErrHtml(e,"выдача абонементов"); }
+  _p1.busy=false; _p1Render();
+}
 async function _giveTariffs(course, kids, branch){
   if(!_pubGiveOn()) return null;
   try{ await _pubEnsureTariffs(); }catch(e){ return {why:"не удалось прочитать шаблоны абонементов: "+((e&&e.message)||e)}; }
@@ -9741,7 +9774,9 @@ function _p1KidsHtml(){
   // Шаблон запоминается на курс, поэтому строка короткая: галочка, сколько человек и выпадашка
   // с уже выбранным — искать в списке каждый раз не нужно.
   {
-    const P=_tariffPlanFor(_p1.g.course, rows.filter(r=>_p1KidOn(r)));
+    // считаем ВСЕХ, кому абонемент нужен, а не только отмеченных к добавлению: ребёнок может
+    // уже состоять в группе, а действующего абонемента у него нет
+    const P=_tariffPlanFor(_p1.g.course, _tariffCandidates());
     const cur=_pubTarMap()[_p1.g.course]||"";
     let pick="";
     if(_pubTariffs&&_pubTariffs.length){
@@ -9755,7 +9790,9 @@ function _p1KidsHtml(){
         <input type="checkbox" style="width:auto;margin:0" ${_pubGiveOn()?"checked":""} onchange="pubSetGive(this.checked)">
         Абонемент без 💰${P.why?"":` <b>${P.rows.length}</b>`}</label>
       ${pick}
-      ${P.why?`<span style="color:var(--terra)">${esc(P.why)}</span>`:""}</div>`;
+      ${P.why?`<span style="color:var(--terra)">${esc(P.why)}</span>`
+             :`<button class="btn ghost sm" ${P.rows.length&&!_p1.busy?"":"disabled"} onclick="p1GiveTariffs()"
+                 title="Выдать абонемент всем, у кого нет 💰 майского — включая тех, кто уже состоит в группе. У кого уже есть действующий, пропустим">🎫 Выдать абонементы (${P.rows.length})</button>`}</div>`;
   }
   h+=`<div class="hd-actions les-foot" style="margin-top:8px">
       <button class="btn ghost sm" onclick="p1TariffNeeds()" title="Посчитать по конструктору, какие шаблоны абонементов нужно завести в Alfa">📋 Какие абонементы нужны</button>

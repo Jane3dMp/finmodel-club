@@ -761,13 +761,23 @@ switch ($action) {
             $subj = array_values(array_filter(array_map('intval', (array)($it['subjectIds'] ?? []))));
             $lt   = array_values(array_filter(array_map('intval', (array)($it['lessonTypeIds'] ?? []))));
             if (!$cid || !$tid || !$subj) { $skipped[] = ['customer_id' => $cid, 'why' => 'не хватает данных (клиент, шаблон или предмет)']; continue; }
-            // уже есть абонемент по этому предмету — второй не выдаём
-            $dup = false;
+            /* Уже есть абонемент по этому предмету — второй не выдаём. ⚠️ Но «есть» означает
+               ДЕЙСТВУЮЩИЙ на наш период: у ребёнка, который ходит не первый год, лежат
+               прошлогодние абонементы (в карточке Alfa это «Архивные абонементы»). Раньше они
+               тоже считались, и новый абонемент молча не выдавался — при том что действующих
+               у ребёнка не было ни одного. */
+            $dup = false; $dupWhy = '';
             foreach (($existing[$cid] ?? []) as $ex) {
                 $exs = array_map('intval', (array)($ex['subject_ids'] ?? []));
-                if (array_intersect($exs, $subj)) { $dup = true; break; }
+                if (!array_intersect($exs, $subj)) continue;
+                if (!empty($ex['is_archive']) || !empty($ex['dead'])) continue;      // архивный — не помеха
+                $exEnd = alfa_iso((string)($ex['e_date_v'] ?? ($ex['e_date'] ?? '')));
+                if ($exEnd !== '' && $exEnd < $bIso) continue;                        // закончился до начала нашего периода
+                $dup = true; $dupWhy = 'действующий абонемент по этому курсу уже есть'
+                    . ($exEnd !== '' ? (' (до ' . alfa_date($exEnd) . ')') : '');
+                break;
             }
-            if ($dup) { $skipped[] = ['customer_id' => $cid, 'why' => 'абонемент по этому курсу уже есть']; continue; }
+            if ($dup) { $skipped[] = ['customer_id' => $cid, 'why' => $dupWhy]; continue; }
             $body = array_merge(['customer_id' => $cid, 'tariff_id' => $tid, 'subject_ids' => $subj,
                                  'is_separate_balance' => $sep ? 1 : 0],
                                 $lt ? ['lesson_type_ids' => $lt] : [],
