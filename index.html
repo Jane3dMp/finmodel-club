@@ -1453,18 +1453,6 @@ details.client .cli-cols .cc-bal{width:74px;font-weight:600}
 </div>
 <button id="peekFab" onclick="peekTeam()" title="Подсмотреть итоги отдела">👀</button>
 
-<div class="modal-bg" id="remindModal" style="z-index:95">
- <div class="modal" style="max-width:400px;text-align:center">
-  <div id="remindEmoji" style="font-size:42px;line-height:1;margin-bottom:6px">💬</div>
-  <h3 id="remindMsg" style="margin:0 0 8px;font-size:20px;line-height:1.3">Время напомнить будущим клиентам о нас :)</h3>
-  <p style="font-size:13px;color:var(--muted);margin:0 0 18px;line-height:1.5">Напишите в Viber тем, кто ещё молчит — блок «не отправлено за день» на «Расписании» и воронка на «Наборе».</p>
-  <div style="display:flex;gap:10px;justify-content:center;align-items:center;flex-wrap:wrap">
-   <button class="btn" onclick="closeRemind()">Понятно 👍</button>
-   <button class="btn ghost sm" onclick="remindMuteToday()" title="Больше не показывать сегодня">Не сегодня</button>
-  </div>
- </div>
-</div>
-
 <div class="modal-bg" id="logModal">
  <div class="modal" style="max-width:920px">
   <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
@@ -1738,7 +1726,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-08-18-01";
+const APP_VER="2026-08-18-02";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -12396,65 +12384,9 @@ if(S.gasUrl){
 /* инициализация истории отмены после старта */
 setTimeout(()=>{ if(_lastSnap===null) _lastSnap=_snap(); updateUndoBtn(); }, 0);
 
-/* ===== Почасовое напоминание 11:00–18:00: «Время напомнить будущим клиентам о нас» =====
-   Состояние — только в localStorage (per-device UI), модель/Firebase не трогает. */
-function _remTodayKey(){ const d=new Date(); return d.getFullYear()+"-"+(d.getMonth()+1)+"-"+d.getDate(); }
-function _remSlotKey(){ return _remTodayKey()+"-"+new Date().getHours(); }
-/* 20 весёлых вариантов — каждый показ берём НЕ такой, как в прошлый раз (одинаковое бесит) */
-const REMIND_MSGS=[
-  {e:"😏",t:"Родители сами себя не запишут. Пора в Viber!"},
-  {e:"✊",t:"Тук-тук! Это будущие клиенты стучатся. Открываем Viber?"},
-  {e:"👀",t:"Пока ты читаешь это — кто-то пишет твоим родителям. Успей первым!"},
-  {e:"💬",t:"Viber соскучился по твоим сообщениям."},
-  {e:"🙂",t:"Один родитель = одна улыбка (и +1 к набору). Пишем!"},
-  {e:"🧊",t:"Молчащие родители сами себя не разморозят. Помоги им!"},
-  {e:"☕",t:"Кофе выпит? Тогда за рассылку!"},
-  {e:"✨",t:"Напомни родителям, что мы существуем и мы классные."},
-  {e:"🔔",t:"Час пробил! Время сеять добро и записи."},
-  {e:"💛",t:"Будущий клиент думает о нас. Помоги ему решиться."},
-  {e:"😅",t:"Не откладывай на потом — потом придёт следующее напоминание."},
-  {e:"👣",t:"Каждое сообщение — шаг к полной группе."},
-  {e:"🥰",t:"Родители любят внимание. Подари им его — в Viber."},
-  {e:"😌",t:"План по набору сам себя не выполнит… или выполнит? Пиши!"},
-  {e:"💪",t:"Секунда мужества — и ты уже пишешь родителю."},
-  {e:"🎬",t:"Viber, родители, ты. Классическое трио. Погнали!"},
-  {e:"🎯",t:"Ещё пара сообщений — и группа набрана."},
-  {e:"📩",t:"Дети ждут крутых занятий. Родители ждут твоего сообщения."},
-  {e:"🦸",t:"Время маленького подвига: написать тем, кто молчит."},
-  {e:"🚀",t:"Три… два… один… рассылка пошла!"}
-];
-function _remPickIdx(){
-  const n=REMIND_MSGS.length; if(n<=1) return 0;
-  let last=parseInt(localStorage.getItem("remMsgIdx"),10); if(isNaN(last)) last=-1;
-  let i; do{ i=Math.floor(Math.random()*n); }while(i===last);
-  try{ localStorage.setItem("remMsgIdx", i); }catch(e){}
-  return i;
-}
-function openRemind(){
-  const m=document.getElementById("remindModal"); if(!m) return;
-  const msg=REMIND_MSGS[_remPickIdx()]||REMIND_MSGS[0];
-  const t=document.getElementById("remindMsg"), e=document.getElementById("remindEmoji");
-  if(t) t.textContent=msg.t; if(e) e.textContent=msg.e;
-  m.classList.add("show");
-}
-function closeRemind(){ const m=document.getElementById("remindModal"); if(m) m.classList.remove("show"); }
-function remindMuteToday(){ try{ localStorage.setItem("remMuteDay", _remTodayKey()); }catch(e){} closeRemind(); if(typeof toast==="function") toast("Напоминания скрыты до завтра"); }
-function _remCheck(){
-  try{
-    const h=new Date().getHours();
-    if(h<11 || h>18) return;                                          // окно 11:00–18:00 включительно
-    const login=document.getElementById("fbLogin");
-    if(login && login.style.display!=="none") return;                 // ещё не вошли — не мешаем
-    if(document.querySelector(".modal-bg.show")) return;              // открыта другая модалка — покажем в следующую минуту
-    if(localStorage.getItem("remMuteDay")===_remTodayKey()) return;   // нажали «Не сегодня»
-    const slot=_remSlotKey();
-    if(localStorage.getItem("remLastSlot")===slot) return;            // этот час уже показывали
-    localStorage.setItem("remLastSlot", slot);
-    openRemind();
-  }catch(e){}
-}
-setInterval(_remCheck, 60000);   // проверяем раз в минуту, показываем раз в час
-setTimeout(_remCheck, 6000);     // и вскоре после загрузки (если открыли посреди рабочего часа)
+/* Почасовая всплывашка «Пора в Viber!» убрана: рассылка родителям больше не идёт каждый
+   день, и напоминание только мешало. Блок «не отправлено за день» на «Расписании» остался —
+   он показывает то же самое, но молча и только тогда, когда на него смотрят. */
 /* новые из amo (оплаченный этап) — тихо проверяем при загрузке и раз в 10 минут:
    бейдж в шапке загорается, когда кого-то надо посадить в группу */
 setTimeout(function(){ try{ _amoCheck(true); }catch(e){} }, 12000);
