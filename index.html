@@ -554,6 +554,11 @@ details.cwarn .cwarn-body{padding:0 14px 12px}
 #wageRef th:first-child{text-align:left}
 #wageRef td.num{text-align:center}
 #wageRef th:not(:first-child):not(:last-child),#wageRef td.num{width:60px}
+/* Колонка «Курс» тянулась на всю свободную ширину и отбрасывала ставки к правому краю.
+   Отдаём ей ровно ширину выпадашки, а весь остаток пусть забирает последняя колонка
+   с кнопками (width:100% на ней — обычный приём: она съедает всё лишнее). */
+#wageRef th:first-child,#wageRef td:first-child{width:206px}
+#wageRef th:last-child,#wageRef td:last-child{width:100%}
 #realTable td.a-right .cell{text-align:right}
 
 /* прайс для менеджеров — только просмотр */
@@ -1733,7 +1738,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-08-18-03";
+const APP_VER="2026-08-18-04";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
