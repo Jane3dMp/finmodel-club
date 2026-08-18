@@ -547,6 +547,13 @@ details.cwarn .cwarn-body{padding:0 14px 12px}
 #realTable th{white-space:normal;line-height:1.15;vertical-align:middle}
 #realTable td:first-child{min-width:210px}
 #realTable td.a-right input.cell{width:72px}
+/* Справочник ставок ЗП: число детей в шапке и поле ставки под ним должны стоять
+   друг над другом. Общие правила разводили их по краям колонки — th по левому краю,
+   .num по правому, — и колонка «4» оказывалась левее своих же значений. */
+#wageRef th{text-align:center}
+#wageRef th:first-child{text-align:left}
+#wageRef td.num{text-align:center}
+#wageRef th:not(:first-child):not(:last-child),#wageRef td.num{width:60px}
 #realTable td.a-right .cell{text-align:right}
 
 /* прайс для менеджеров — только просмотр */
@@ -1726,7 +1733,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-08-18-02";
+const APP_VER="2026-08-18-03";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
