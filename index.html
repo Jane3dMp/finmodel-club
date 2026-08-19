@@ -6381,11 +6381,19 @@ let _mayRows=[], _mayCourses=[];
    в «Арт-студия» буква латинская, а выглядит как русская → строки не совпадают) */
 const _CONFUSE={a:"а",c:"с",e:"е",o:"о",p:"р",x:"х",y:"у",k:"к",m:"м",t:"т",h:"н"};
 function _foldLat(s){ return String(s).toLowerCase().replace(/[acehkmoptxy]/g,ch=>_CONFUSE[ch]||ch); }
+/* Ключ ребёнка — два первых слова ФИО, но В АЛФАВИТНОМ ПОРЯДКЕ.
+   Порядок слов в Альфе не гарантирован: карточки, заведённые из amoCRM, лежат
+   как «Имя Фамилия» («Павел Колычев»), а в наших списках — «Фамилия Имя».
+   Из-за этого ребёнок числился «не найден в Альфе», хотя карточка в CRM есть
+   (жалоба Жанны 19.08.2026, Павел Колычев id 3805). Сортировка делает ключ
+   одинаковым для обоих написаний, а тёзок по-прежнему разводит _sameKid
+   по полному ФИО. */
 function _normName(s){
   return _foldLat(cleanKidName(String(s||"").replace(/\(.*?\)/g," ").replace(/\bрезерв\w*\b/gi," "))
     .replace(/ё/gi,"е"))
-    .split(" ").slice(0,2).join(" ");        // Фамилия Имя
+    .split(" ").filter(Boolean).slice(0,2).sort().join(" ");
 }
+
 /* Сопоставление ФИО по СЛОВАМ (Фамилия Имя Отчество). Два имени считаются одним
    ребёнком, только если одно — пословный ПРЕФИКС другого:
    «Полонников Даниил» ↔ «Полонников Даниил Ильич» — да (в списке нет отчества),
@@ -6407,11 +6415,21 @@ function _nameWords(s){
   return res;
 }
 function _sameKid(a,b){
-  const A=_nameWords(a), B=_nameWords(b), n=Math.min(A.length,B.length);
-  if(n<2){ return A.length===1 && B.length===1 && A[0]===B[0] && A[0]!==""; }  // однословные — только точное равенство (иначе дедуп/поиск/💰 по «Алиса» молча не срабатывали); 1-слово vs 2-слова остаётся неоднозначным → false
-  for(let i=0;i<n;i++){ if(A[i]!==B[i]) return false; }
+  const A=_nameWords(a), B=_nameWords(b);
+  // однословные — только точное равенство (иначе дедуп/поиск/💰 по «Алиса» молча
+  // не срабатывали); 1-слово vs 2-слова остаётся неоднозначным → false
+  if(A.length<2 || B.length<2){ return A.length===1 && B.length===1 && A[0]===B[0] && A[0]!==""; }
+  // Слова сравниваем КАК НАБОР, а не по порядку: «Колычев Павел» и «Павел
+  // Колычев» — один ребёнок (в Альфе часть карточек заведена из amoCRM именем
+  // вперёд). Строгость сохраняется: более короткое ФИО должно целиком входить
+  // в более длинное, поэтому «Полонников Даниил Ильич» и «Полонников Даниил
+  // Петрович» по-прежнему разные дети.
+  const short = A.length<=B.length ? A : B;
+  const pool  = (A.length<=B.length ? B : A).slice();
+  for(const w of short){ const i=pool.indexOf(w); if(i<0) return false; pool.splice(i,1); }
   return true;
 }
+
 function _nameKey(s){ return _nameWords(s).join(" "); }   // полный ключ (для дедупа списка)
 function _normCourse(s){
   return _foldLat(String(s||"").replace(/ё/gi,"е")).replace(/[^а-яa-z0-9]/gi,"");
@@ -7424,8 +7442,12 @@ async function kidsPullAges(){
     // и ребёнок получал чужую дату рождения.
     const byId=new Map(); cust.forEach(c=>{ if(c.id!=null) byId.set(String(c.id),c); });
     const bySurname=new Map();
-    cust.forEach(c=>{ const s=(_nameWords(c.name)[0]||""); if(!s) return;   // нормализованная фамилия (ё→е, латиница-двойники)
-      if(!bySurname.has(s)) bySurname.set(s,[]); bySurname.get(s).push(c); });
+    // Раскладываем по ОБОИМ первым словам: в Альфе фамилия бывает и вторым
+    // словом («Павел Колычев» — карточка из amoCRM), и по одному только
+    // первому такой ребёнок не находился.
+    cust.forEach(c=>{ _nameWords(c.name).slice(0,2).forEach(s=>{ if(!s) return;
+      if(!bySurname.has(s)) bySurname.set(s,[]);
+      if(bySurname.get(s).indexOf(c)<0) bySurname.get(s).push(c); }); });
     _kidsFromDOM();   // пока шёл запрос, пользователь мог править ФИО/поля — берём свежий снимок, иначе ререндер их сотрёт
     let nAge=0, byIdN=0, byNameN=0;
     const rep={noDob:[], ambig:[], miss:[]};              // разбор по детям — числа в тосте не объясняли, КОГО добивать руками
@@ -10874,8 +10896,10 @@ async function pullBalances(){
     const byId=new Map(); list.forEach(c=>{ if(c.id!=null) byId.set(String(c.id),c); });
     // индекс по фамилии — чтобы не сравнивать каждого с каждым
     const bySurname=new Map();
-    list.forEach(c=>{ const s=(_nameWords(c.name)[0]||""); if(!s) return;   // нормализованная фамилия (ё→е, латиница-двойники)
-      if(!bySurname.has(s)) bySurname.set(s,[]); bySurname.get(s).push(c); });
+    // по обоим первым словам — см. пояснение выше: порядок слов в Альфе разный
+    list.forEach(c=>{ _nameWords(c.name).slice(0,2).forEach(s=>{ if(!s) return;
+      if(!bySurname.has(s)) bySurname.set(s,[]);
+      if(bySurname.get(s).indexOf(c)<0) bySurname.get(s).push(c); }); });
     let byIdN=0, byNameN=0, ambig=0, miss=0, dobN=0, parN=0, createdN=0, attendN=0;
     const apply=k=>{
       if(!k||!k.n) return;
@@ -11583,7 +11607,7 @@ function mayFindAnywhere(fio){
     kids.push(k); gset.add((l.group||((DAY_NAMES[l.day]||"")+" "+(l.start||"")))+" · "+(l.course||"")); } }));
   return {found:kids.length>0, kids, groupsText:[...gset].join(", "), anyMay:kids.some(k=>k.may), allMay:kids.length>0&&kids.every(k=>k.may)};
 }
-function mayCleanFio(fio){ return cleanKidName(String(fio).replace(/\(.*?\)/g," ").replace(/резерв\w*/gi," ").replace(/[#!]/g," ")); }
+function mayCleanFio(fio){ return cleanKidName(String(fio).replace(/\(.*?\)/g," ").replace(/\bрезерв\w*\b/gi," ").replace(/[#!]/g," ")); }
 /* все группы ребёнка в сетке, сгруппированные по (курс · группа) */
 function mayOccurrences(fio){
   const map={};
