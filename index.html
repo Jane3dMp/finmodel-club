@@ -1741,7 +1741,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-08-18-06";
+const APP_VER="2026-08-18-07";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -8293,7 +8293,7 @@ function _oldNewHTML(){
       </div>
       <div class="on-sum">Уникальных детей в расписании <b>${G.uniqTotal}</b> = возврат ${G.retPool} + новые ${G.newPool}${G.unknownPool?` + не сопоставлены ${G.unknownPool}`:""} ·
         подтвердили <b>${G.confirmedUniq}</b>${G.unplaced?` <span title="Майские из списка, которых в расписании ещё нет: они учтены в бублике «Возврат», но не в этой строке">+ ${G.unplaced} майских ещё не вписаны</span>`:""}
-        <div class="on-sum-n">Бублики складывать нельзя: «Возврат» — только подтвердившие, «Новый набор» — все вписанные. Верхняя полоса считает записи в группы, а не детей.</div></div>
+        <div class="on-sum-n">Числа в двух кругах выше складывать нельзя: в «Возврате» только подтвердившие, в «Новом наборе» — все вписанные. А полоса в самом верху считает записи в группы, а не детей.</div></div>
       ${(()=>{ const cs=_alfaClientStats(); if(!cs.has) return "";
         return `<div class="on-clients">
           <span class="oc oc-cli" title="Оформлены в AlfaCRM как ученики (is_study=1)"><b>${cs.clients}</b> клиенты</span>
