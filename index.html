@@ -7806,7 +7806,9 @@ function _realPnl(){
     lab:p.lab, b:p.b, e:p.e, months:[],
     rev:0, wage:0, lessons:0, tax:0, profit:0,
   }));
-  const warn={noPrice:new Set(), emptyGroups:new Set(), silent:0};
+  // предупреждения копим ИМЕНАМИ, а не счётчиками: цикл идёт по девяти месяцам,
+  // и обычный инкремент завысил бы число молчунов ровно в девять раз
+  const warn={noPrice:new Set(), emptyGroups:new Set(), silent:new Set()};
 
   periods.forEach(P=>{
     const byMonth=_planDays(P.b,P.e,hol);
@@ -7824,7 +7826,7 @@ function _realPnl(){
         kidsOf(l).forEach(k=>{
           const nk=_nameKey(k.n); if(!nk||seen.has(nk)) return; seen.add(nk);
           if(k.no||k.vbReply==="no") return;
-          if(!(k.may||k.vbReply==="yes")){ warn.silent++; return; }
+          if(!(k.may||k.vbReply==="yes")){ warn.silent.add(nk); return; }   // молчит — в факт не берём
           sum+=(mayOn&&k.may)?pr.m:pr.p;
           nConf++;
         });
@@ -7854,7 +7856,7 @@ function _realPnl(){
   periods.forEach(P=>{ year.rev+=P.rev; year.wage+=P.wage; year.lessons+=P.lessons;
                        year.tax+=P.tax; year.profit+=P.profit; year.months+=P.months.length; });
   return {periods, year, ops, adminFOT, npd,
-          warn:{noPrice:[...warn.noPrice], emptyGroups:[...warn.emptyGroups], silent:warn.silent}};
+          warn:{noPrice:[...warn.noPrice], emptyGroups:[...warn.emptyGroups], silent:warn.silent.size}};
 }
 
 /* Блок «Расходы и прибыль при этой загрузке» — под таблицей оборота.
@@ -7890,7 +7892,7 @@ function _realPnlHTML(){
   h+=`<div class="tscroll" style="margin-top:10px"><table><thead><tr>
       <th style="text-align:left">Месяц</th><th style="text-align:center">Занятий</th>
       <th class="num">Выручка</th><th class="num">ЗП педагогов</th><th class="num">Постоянные</th>
-      <th class="num">Налоги и взносы</th><th class="num">Остаётся</th>
+      <th class="num">От оборота</th><th class="num">Налоги и взносы</th><th class="num">Остаётся</th>
     </tr></thead><tbody>`;
   R.periods.forEach((P,pi)=>{
     P.months.forEach(m=>{
@@ -7898,7 +7900,8 @@ function _realPnlHTML(){
         <td style="text-align:center">${m.lessons}</td>
         <td class="num">${fmt(m.rev)} р</td>
         <td class="num" style="color:var(--red)">${fmt(m.wage)} р</td>
-        <td class="num" style="color:var(--red)">${fmt(m.ops+m.adminFOT+m.pct+m.acq)} р</td>
+        <td class="num" style="color:var(--red)">${fmt(m.ops+m.adminFOT)} р</td>
+        <td class="num" style="color:var(--red)">${(m.pct+m.acq)?fmt(m.pct+m.acq)+' р':'—'}</td>
         <td class="num" style="color:var(--red)">${fmt(m.taxes)} р</td>
         <td class="num"><b style="color:var(--${m.profit>=0?'green':'red'})">${fmt(m.profit)} р</b></td></tr>`;
     });
@@ -7906,7 +7909,7 @@ function _realPnlHTML(){
       <td style="text-align:center"><b>${P.lessons}</b></td>
       <td class="num"><b>${fmt(P.rev)} р</b></td>
       <td class="num"><b>${fmt(P.wage)} р</b></td>
-      <td class="num"></td>
+      <td class="num"></td><td class="num"></td>
       <td class="num"><b>${fmt(P.tax)} р</b></td>
       <td class="num"><b style="color:var(--${P.profit>=0?'green':'red'})">${fmt(P.profit)} р</b></td></tr>`;
   });
@@ -7921,7 +7924,7 @@ function _realPnlHTML(){
 
   h+=`<div style="font-size:11px;color:var(--muted);margin-top:8px;line-height:1.6">
     Постоянные расходы (${fmt(R.ops)} р) и админ-команда (${fmt(R.adminFOT)} р) берутся с вкладки «Постоянные расходы»
-    и от загрузки не зависят. Налоги: УСН ${fmt1(+((S.tax||{}).usn)||0)}% от выручки, взносы
+    и от загрузки не зависят. «От оборота» — эквайринг и расходы, заданные процентом от выручки: они растут вместе с ней. Налоги: УСН ${fmt1(+((S.tax||{}).usn)||0)}% от выручки, взносы
     ${fmt1((+((S.tax||{}).fszn)||0)+(+((S.tax||{}).belgosstrah)||0))}% от фонда зарплаты${R.npd?` (за вычетом НПД ${fmt(R.npd)} р)`:''}.
     ${(+(S.assume||{}).ownerSalary)?`Зарплата собственника ${fmt(+(S.assume||{}).ownerSalary)} р/мес уже вычтена. `:''}<br>
     <b>Что важно понимать про эти числа.</b>
