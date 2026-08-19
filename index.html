@@ -391,6 +391,7 @@ details.cwarn .cwarn-body{padding:0 14px 12px}
 :is(#goals,#report) .goaltop-sub{font-size:11px;opacity:.55;margin-top:3px}
 .on-sum{margin-top:10px;padding:8px 12px;border:1px solid var(--line);border-radius:10px;background:var(--sand-l);font-size:12px;line-height:1.5}
 .on-sum-n{color:var(--muted);font-size:11px;margin-top:3px;line-height:1.45}
+.on-sum-may{margin-top:6px;padding-top:6px;border-top:1px dashed var(--line);line-height:1.5}
 :is(#goals,#report) .goaltop-num{font-size:30px;font-weight:800;letter-spacing:-.02em;font-variant-numeric:tabular-nums;line-height:1.1}
 :is(#goals,#report) .goaltop-num span{font-size:16px;font-weight:600;opacity:.6}
 :is(#goals,#report) .goaltop-bar{flex:1;height:12px;background:rgba(255,255,255,.15);border-radius:8px;overflow:hidden}
@@ -1741,7 +1742,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-08-18-07";
+const APP_VER="2026-08-18-08";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -7995,6 +7996,26 @@ function _goalsKidLists(){
     unknownKids: sort(arr.filter(o=>_kidClass(o,cut)==='unknown'))
   };
 }
+/* Куда разошлись ВСЕ 💰 «оплатил майский». В подпись «Возврата» попадают только те майские,
+   кого мы отнесли к прошлогодним и кто не отказался, — поэтому цифра там всегда меньше, чем
+   майских на самом деле, и каждый раз возникает вопрос «а где остальные?». Отвечаем цифрами:
+   часть уехала в «Новый набор» (Альфа завела карточку этим летом), часть не сопоставлена,
+   часть отказалась, а часть строк списка не считается вовсе — без распознанного курса. */
+function _mayStats(){
+  const L=_goalsKidLists(), all=[...L.oldKids,...L.newKids,...L.unknownKids];
+  const ref=o=>o.no||o.reply==='no';
+  const mayOf=a=>a.filter(o=>o.may&&!ref(o)).length;
+  let lTotal=0,lPlaced=0,lUnplaced=0,lNoCourse=0,lDismiss=0;
+  (S.mayList||[]).forEach(r=>{ if(!r) return; lTotal++;
+    if(r.placeDismiss){ lDismiss++; return; }                    // подсказку «вписать» скрыли руками
+    if(!mayRowCourse(r)){ lNoCourse++; return; }                 // курс не распознан — строка нигде не учтена
+    if(mayOccFor(r).length>0){ lPlaced++; return; }              // уже стоит в группе — считается по расписанию
+    lUnplaced++;
+  });
+  return {grid:all.filter(o=>o.may).length, inRet:mayOf(L.oldKids), inNew:mayOf(L.newKids),
+    unmatched:mayOf(L.unknownKids), refused:all.filter(o=>o.may&&ref(o)).length,
+    lTotal,lPlaced,lUnplaced,lNoCourse,lDismiss};
+}
 /* статус ребёнка коротким значком — для строки списка */
 function _goalsKidStatus(o){
   if(o.no||o.reply==='no') return '<span style="color:var(--red)">отказ</span>';
@@ -8293,6 +8314,11 @@ function _oldNewHTML(){
       </div>
       <div class="on-sum">Уникальных детей в расписании <b>${G.uniqTotal}</b> = возврат ${G.retPool} + новые ${G.newPool}${G.unknownPool?` + не сопоставлены ${G.unknownPool}`:""} ·
         подтвердили <b>${G.confirmedUniq}</b>${G.unplaced?` <span title="Майские из списка, которых в расписании ещё нет: они учтены в бублике «Возврат», но не в этой строке">+ ${G.unplaced} майских ещё не вписаны</span>`:""}
+        ${(()=>{ const M=_mayStats();
+          const lost=M.lNoCourse+M.lDismiss;
+          return `<div class="on-sum-may">💰 <b>Майских всего ${M.grid+M.lUnplaced}</b>: в расписании ${M.grid} · в списке не вписаны ${M.lUnplaced}.
+            В «Возврат» вошли <b>${M.inRet+M.lUnplaced}</b>${M.inNew?` · в «Новый набор» ${M.inNew}`:""}${M.unmatched?` · не сопоставлены ${M.unmatched}`:""}${M.refused?` · отказались ${M.refused}`:""}.
+            ${lost?`<span style="color:var(--terra)">Не учтены ${lost} строк списка${M.lNoCourse?` (${M.lNoCourse} без распознанного курса)`:""}${M.lDismiss?` (${M.lDismiss} скрыты кнопкой «не вписывать»)`:""} — проверьте вкладку «💰 Импорт оплативших майский».</span>`:""}</div>`; })()}
         <div class="on-sum-n">Числа в двух кругах выше складывать нельзя: в «Возврате» только подтвердившие, в «Новом наборе» — все вписанные. А полоса в самом верху считает записи в группы, а не детей.</div></div>
       ${(()=>{ const cs=_alfaClientStats(); if(!cs.has) return "";
         return `<div class="on-clients">
