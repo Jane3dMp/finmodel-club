@@ -7777,6 +7777,162 @@ function _planCalc(){
 }
 function _planLabel(ym){ const p=ym.split("-"); return (PLAN_MON[+p[1]-1]||ym)+" "+p[0]; }
 function _planDMY(iso){ const p=String(iso||"").split("-"); return p.length===3?(p[2]+"."+p[1]+"."+p[0]):iso; }
+/* Деньги при ТЕКУЩЕЙ загрузке — по живому расписанию, а не по модели.
+   «Дашборд» считает так: цена × детей в группе × групп × 4 недели. Это план.
+   Здесь всё берётся с земли: сколько раз занятие реально выпадает в месяце,
+   сколько детей в нём подтвердили участие, сколько за них заплатит педагог
+   по своей ставке. Просьба Жанны 19.08.2026: «нужны расходы согласно загрузки
+   и запущенных групп — сделай реальную картину».
+
+   Группа считается ЗАПУЩЕННОЙ, если в ней есть хоть один подтвердивший
+   ребёнок (оплатил майский или ответил «да»). Пустые слоты расписания — это
+   намерение, а не работа: ни выручки, ни зарплаты они не дают.
+
+   Сценарные ползунки (цена/наполняемость/ЗП/аренда) здесь НЕ применяются:
+   это факт, а не сценарий. */
+function _realPnl(){
+  const c=_planCfg(), hol=_planHolSet(c.hol);
+  const tax=S.tax||{}, as=S.assume||{};
+
+  // постоянные расходы: операционные и админ-команда — они не зависят от загрузки
+  let ops=0, adminFOT=0;
+  for(const k in S.fixed){
+    const v=+S.fixed[k]||0;
+    if((S.fixedGroup||{})[k]===2) adminFOT+=v; else ops+=v;
+  }
+  const npd=+S._npdMonth||0;
+
+  const periods=[{b:c.p1b,e:c.p1e,lab:"Осень"},{b:c.p2b,e:c.p2e,lab:"Весна"}].map(p=>({
+    lab:p.lab, b:p.b, e:p.e, months:[],
+    rev:0, wage:0, lessons:0, tax:0, profit:0,
+  }));
+  const warn={noPrice:new Set(), emptyGroups:new Set(), silent:0};
+
+  periods.forEach(P=>{
+    const byMonth=_planDays(P.b,P.e,hol);
+    Object.keys(byMonth).sort().forEach(ym=>{
+      const wd=byMonth[ym];
+      const mayOn=(ym+"-01")<c.full;               // месяц целиком до перехода на полную цену
+      let rev=0, wage=0, lessons=0, seats=0;
+      (S.grid||[]).forEach(l=>{
+        if(!l.course) return;
+        const n=wd[+l.day||0]||0; if(!n) return;   // сколько раз этот день выпал в месяце
+        const pr=_planPrice(l.course);
+        if(!pr.p) warn.noPrice.add(l.course);
+        // считаем ТОЛЬКО подтвердивших: они и платят, и определяют ставку педагога
+        const seen=new Set(); let sum=0, nConf=0;
+        kidsOf(l).forEach(k=>{
+          const nk=_nameKey(k.n); if(!nk||seen.has(nk)) return; seen.add(nk);
+          if(k.no||k.vbReply==="no") return;
+          if(!(k.may||k.vbReply==="yes")){ warn.silent++; return; }
+          sum+=(mayOn&&k.may)?pr.m:pr.p;
+          nConf++;
+        });
+        if(!nConf){ warn.emptyGroups.add((l.group&&l.group.trim())||l.course); return; }  // группа не запущена
+        rev+=sum*n;
+        wage+=wageForLesson(l.course,nConf,l)*n;
+        lessons+=n;
+        seats+=nConf;
+      });
+      rev=Math.round(rev); wage=Math.round(wage);
+      // налоги и взносы — те же правила, что на «Налоги РБ и ФОТ»
+      const usn=rev*((+tax.usn||0)/100);
+      const acq=rev*((+tax.acquiring||0)/100);
+      const fotBase=Math.max(0, wage+adminFOT-npd);
+      const contrib=fotBase*(((+tax.fszn||0)+(+tax.belgosstrah||0))/100);
+      let pct=0; (S.fixedPct||[]).forEach(p=>{ pct+=rev*((+p.pct||0)/100); });
+      const taxes=usn+contrib;
+      const profit=rev-wage-ops-adminFOT-pct-acq-taxes-(+as.ownerSalary||0);
+      const m={ym,mayOn,rev,wage,lessons,seats,ops,adminFOT,pct:Math.round(pct),acq:Math.round(acq),
+               usn:Math.round(usn),contrib:Math.round(contrib),taxes:Math.round(taxes),profit:Math.round(profit)};
+      P.months.push(m);
+      P.rev+=m.rev; P.wage+=m.wage; P.lessons+=m.lessons; P.tax+=m.taxes; P.profit+=m.profit;
+    });
+  });
+
+  const year={rev:0,wage:0,lessons:0,tax:0,profit:0,months:0};
+  periods.forEach(P=>{ year.rev+=P.rev; year.wage+=P.wage; year.lessons+=P.lessons;
+                       year.tax+=P.tax; year.profit+=P.profit; year.months+=P.months.length; });
+  return {periods, year, ops, adminFOT, npd,
+          warn:{noPrice:[...warn.noPrice], emptyGroups:[...warn.emptyGroups], silent:warn.silent}};
+}
+
+/* Блок «Расходы и прибыль при этой загрузке» — под таблицей оборота.
+   Жанна смотрит сюда, чтобы понять не «сколько соберём», а «сколько останется». */
+function _realPnlHTML(){
+  const R=_realPnl();
+  const Y=R.year, mN=Y.months||1;
+  const perMonth=n=>Math.round(n/mN);
+  const expenses=Y.rev-Y.profit;                    // всё, что уходит: ЗП, постоянные, налоги, ЗП собственника
+  const rent=Y.rev>0?(Y.profit/Y.rev*100):0;
+  const money=(n,cls)=>`<span${cls?` style="color:var(--${cls})"`:''}>${fmt(n)} р</span>`;
+
+  let h=`<div style="border-top:2px solid var(--line);margin-top:26px;padding-top:16px">
+    <h3 style="margin:0 0 2px">Расходы и прибыль при этой загрузке</h3>
+    <div class="sec-desc" style="margin-bottom:10px">Не модель, а живое расписание: считаем только запущенные группы —
+      те, где есть хотя бы один подтвердивший ребёнок. Зарплата педагога берётся по его ставке за занятие
+      при таком числе детей, постоянные расходы и налоги — как на своих вкладках. Ползунки сценариев здесь не действуют.</div>
+    <div class="goalstats">
+      <div class="gs"><span class="gs-lab">Выручка в месяц</span>
+        <span class="gs-val">${fmt(perMonth(Y.rev))} р</span>
+        <span class="gs-sub">в среднем за ${mN} учебных месяцев</span></div>
+      <div class="gs"><span class="gs-lab">Расходы в месяц</span>
+        <span class="gs-val" style="color:var(--red)">${fmt(perMonth(expenses))} р</span>
+        <span class="gs-sub">ЗП педагогов ${fmt(perMonth(Y.wage))} р · постоянные ${fmt(R.ops+R.adminFOT)} р · налоги ${fmt(perMonth(Y.tax))} р</span></div>
+      <div class="gs"><span class="gs-lab">Остаётся в месяц</span>
+        <span class="gs-val" style="color:var(--${Y.profit>=0?'green':'red'})">${fmt(perMonth(Y.profit))} р</span>
+        <span class="gs-sub">рентабельность ${fmt1(rent)}%</span></div>
+      <div class="gs"><span class="gs-lab">За учебный год</span>
+        <span class="gs-val" style="color:var(--${Y.profit>=0?'green':'red'})">${fmt(Y.profit)} р</span>
+        <span class="gs-sub">выручка ${fmt(Y.rev)} р · занятий ${Y.lessons}</span></div>
+    </div>`;
+
+  h+=`<div class="tscroll" style="margin-top:10px"><table><thead><tr>
+      <th style="text-align:left">Месяц</th><th style="text-align:center">Занятий</th>
+      <th class="num">Выручка</th><th class="num">ЗП педагогов</th><th class="num">Постоянные</th>
+      <th class="num">Налоги и взносы</th><th class="num">Остаётся</th>
+    </tr></thead><tbody>`;
+  R.periods.forEach((P,pi)=>{
+    P.months.forEach(m=>{
+      h+=`<tr><td style="text-align:left">${esc(_planLabel(m.ym))}</td>
+        <td style="text-align:center">${m.lessons}</td>
+        <td class="num">${fmt(m.rev)} р</td>
+        <td class="num" style="color:var(--red)">${fmt(m.wage)} р</td>
+        <td class="num" style="color:var(--red)">${fmt(m.ops+m.adminFOT+m.pct+m.acq)} р</td>
+        <td class="num" style="color:var(--red)">${fmt(m.taxes)} р</td>
+        <td class="num"><b style="color:var(--${m.profit>=0?'green':'red'})">${fmt(m.profit)} р</b></td></tr>`;
+    });
+    h+=`<tr style="background:var(--sand-l)"><td style="text-align:left"><b>Итого ${pi===0?"осень":"весна"}</b></td>
+      <td style="text-align:center"><b>${P.lessons}</b></td>
+      <td class="num"><b>${fmt(P.rev)} р</b></td>
+      <td class="num"><b>${fmt(P.wage)} р</b></td>
+      <td class="num"></td>
+      <td class="num"><b>${fmt(P.tax)} р</b></td>
+      <td class="num"><b style="color:var(--${P.profit>=0?'green':'red'})">${fmt(P.profit)} р</b></td></tr>`;
+  });
+  h+=`</tbody></table></div>`;
+
+  // Чего Жанна не должна не заметить: из-за этого картина выглядит хуже или лучше, чем есть
+  const w=R.warn, notes=[];
+  if(w.noPrice.length) notes.push(`<b style="color:var(--red)">Курсы без цены:</b> ${esc(w.noPrice.join(", "))} — их дети считаются бесплатными.`);
+  if(w.emptyGroups.length) notes.push(`<b>Не запущены (нет подтвердивших):</b> ${esc(w.emptyGroups.slice(0,8).join(", "))}${w.emptyGroups.length>8?` и ещё ${w.emptyGroups.length-8}`:''} — ни выручки, ни зарплаты по ним не считаем.`);
+  if(w.silent) notes.push(`Дети без ответа в счёт не идут — если они придут, выручка вырастет (их видно в колонке «Потенциал» выше).`);
+  if(notes.length) h+=`<div class="callout" style="margin-top:10px;font-size:12px;line-height:1.6">${notes.join("<br>")}</div>`;
+
+  h+=`<div style="font-size:11px;color:var(--muted);margin-top:8px;line-height:1.6">
+    Постоянные расходы (${fmt(R.ops)} р) и админ-команда (${fmt(R.adminFOT)} р) берутся с вкладки «Постоянные расходы»
+    и от загрузки не зависят. Налоги: УСН ${fmt1(+((S.tax||{}).usn)||0)}% от выручки, взносы
+    ${fmt1((+((S.tax||{}).fszn)||0)+(+((S.tax||{}).belgosstrah)||0))}% от фонда зарплаты${R.npd?` (за вычетом НПД ${fmt(R.npd)} р)`:''}.
+    ${(+(S.assume||{}).ownerSalary)?`Зарплата собственника ${fmt(+(S.assume||{}).ownerSalary)} р/мес уже вычтена. `:''}<br>
+    <b>Что важно понимать про эти числа.</b>
+    Здесь только учебные месяцы (${mN}) — лето в расчёт не входит, хотя аренду и админ-команду вы платите круглый год.
+    Декабрь и январь неполные (занятия обрываются на каникулы), поэтому занятий в них меньше, а расходы полные —
+    минус в этих строках нормален, смотрите на итог по периоду. Ставка педагога по тарифной сетке считается
+    минимум как за четырёх детей, поэтому группа из двоих-троих даёт минус — именно такие строки и стоит смотреть первыми.
+  </div></div>`;
+  return h;
+}
+
 function _planHTML(){
   const R=_planCalc(), c=R.cfg;
   const totConf=R.periods.reduce((a,p)=>a+p.revConf,0), totAll=R.periods.reduce((a,p)=>a+p.revAll,0);
@@ -7817,6 +7973,8 @@ function _planHTML(){
       <td class="num" style="color:var(--muted)"><b>${fmt(P.revAll)} р</b></td></tr>`;
   });
   h+=`</tbody></table></div>`;
+
+  h+=_realPnlHTML();          // деньги при этой же загрузке: расходы, налоги, остаток
 
   h+=`<details style="margin-top:8px"><summary style="cursor:pointer;font-weight:600;font-size:13px">⚙ Периоды, выходные и переход на полную цену</summary>
     <div style="padding:8px 2px 0;display:flex;flex-wrap:wrap;gap:10px;align-items:end">
