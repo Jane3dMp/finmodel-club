@@ -1758,7 +1758,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-08-20-08";
+const APP_VER="2026-08-20-09";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -8717,13 +8717,13 @@ function _goalsFunnel(){
   return {records,sent,nonMay,nmYes,nmNo,nmMaybe,silent,confirmed,unique,perChild:unique>0?records/unique:0};
 }
 /* полукруглый спидометр: значение val из max, стрелка + дуга */
-function _gauge(val,max,color,label,sub){
+function _gauge(val,max,color,label,sub,title){
   const maxRaw=(+max||0); val=+val||0;   // maxRaw — для подписи (может быть 0); для дуги клампим к 1
   const frac=Math.max(0,Math.min(1,val/Math.max(1,maxRaw)));
   const R=80, arcLen=Math.PI*R;
   const deg=180-frac*180, rad=deg*Math.PI/180;
   const nx=(100+70*Math.cos(rad)).toFixed(1), ny=(100-70*Math.sin(rad)).toFixed(1);
-  return `<div class="gauge">
+  return `<div class="gauge"${title?` title="${esc(title)}"`:''}>
     <svg viewBox="0 0 200 108" class="gauge-svg" aria-hidden="true">
       <path d="M20 100 A80 80 0 0 1 180 100" fill="none" stroke="var(--g-track,#ECE1C6)" stroke-width="14" stroke-linecap="round"/>
       <path d="M20 100 A80 80 0 0 1 180 100" fill="none" stroke="${color}" stroke-width="14" stroke-linecap="round" stroke-dasharray="${(frac*arcLen).toFixed(1)} ${arcLen.toFixed(1)}"/>
@@ -8836,10 +8836,21 @@ function _goalsDashHTML(opts){
   // От общего числа записей эти доли ничего не говорят, пока половина ещё молчит.
   const answered=F.nmYes+F.nmNo;
   const pcOf=v=>answered?Math.round(v/answered*100):0;
+  // 20.08.2026 Жанна: «эти 502 — это кто?». Знаменатель тут не «все дети», поэтому пишем прямо
+  // в подписи, из кого он сложен, и целиком объясняем в подсказке при наведении.
+  const answTip="Записи в группы (ребёнок на двух курсах — две записи), где родитель уже ответил "
+    +"«да» ("+F.nmYes+") или «отказ» ("+F.nmNo+"). Купившие майский сюда не входят — они уже оплатили, "
+    +"их не спрашиваем. Молчащие ("+F.silent+") и «думают» ("+F.nmMaybe+") — тоже: они ещё не ответили. "
+    +"Всего записей в группы: "+F.records+", из них без майского: "+F.nonMay+".";
   h+=`<div class="gaugerow gr-3">`
-    +_gauge(F.nmYes, answered, "#4F9E63", "Подтвердили", `<b>${pcOf(F.nmYes)}%</b> ответивших · из ${answered}`)
-    +_gauge(F.nmNo, answered, "#C6553F", "Отказ", `<b>${pcOf(F.nmNo)}%</b> ответивших · из ${answered}`)
-    +_gauge(F.nmMaybe, F.nonMay, "#E0A02E", "Думают", "ещё думают · из "+F.nonMay+" без майского")
+    +_gauge(F.nmYes, answered, "#4F9E63", "Подтвердили",
+        `<b>${pcOf(F.nmYes)}%</b> ответивших · из ${answered} ответов`, answTip)
+    +_gauge(F.nmNo, answered, "#C6553F", "Отказ",
+        `<b>${pcOf(F.nmNo)}%</b> ответивших · из ${answered} ответов`, answTip)
+    +_gauge(F.nmMaybe, F.nonMay, "#E0A02E", "Думают", "из "+F.nonMay+" без 💰 майского",
+        "Здесь знаменатель ДРУГОЙ: все записи без купленного майского ("+F.nonMay+"), а не только "
+        +"ответившие. «Думают» — это 🟡 в ответе родителя; пока они не ответят «да» или «нет», "
+        +"в два соседних спидометра они не попадают.")
     +`</div>`;
   // отдельные показатели: уникальные дети («количество рук»), записи, мест на ребёнка
   h+=`<div class="goalstats">
