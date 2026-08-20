@@ -1757,7 +1757,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-08-20-06";
+const APP_VER="2026-08-20-07";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -4394,10 +4394,15 @@ function _expBody(ym){
     ? `<div class="sec-desc" style="margin:2px 0 8px">${esc(_planLabel(M.ym))}: занятий по календарю
         <b>${M.lessons}</b>${Object.keys(M.days||{}).filter(k=>M.days[k]).length
           ?" ("+Object.keys(M.days).filter(k=>M.days[k]).sort().map(k=>dn[+k]+" ×"+M.days[k]).join(" · ")+")":""} —
-        выходные и праздники уже вычтены. Мест занято <b>${M.seats}</b>.
+        выходные уже вычтены${(M.hols&&M.hols.length)
+          ?`, плюс выпали нерабочие <b>${M.hols.map(_planDMY).join(", ")}</b>`:""}.
+        Мест занято <b>${M.seats}</b>, выручка на одно занятие <b>${fmt(M.lessons?E.revY/M.lessons:0)} р</b>.
         ${M.mayOn?`Действует <b>майская цена</b>: по ней пришло ${fmt(M.revMay)} р (${M.seatsMay} мест из ${M.seats}).`
                  :`Майская цена уже не действует — все платят полную.`}
-        Доля — от выручки месяца ${fmt(E.revY)} р.</div>`
+        Доля — от выручки месяца ${fmt(E.revY)} р.</div>
+       <div class="hint" style="margin:-4px 0 8px">Месяцы сравнивайте по «выручке на занятие»: сама выручка
+        зависит ещё и от того, сколько раз выпал каждый день недели, а праздник на загруженном дне
+        забирает сразу все занятия этого дня.</div>`
     : `<div class="sec-desc" style="margin:2px 0 8px">Живое расписание, ${E.mN} учебных месяцев: только запущенные
         группы (есть хотя бы один подтвердивший ребёнок). «В месяц» — среднее по этим месяцам, лето не в счёт;
         занятий за год ${E.lessonsY}. По майской цене за год ${fmt(E.revMayY)} р.
@@ -8057,6 +8062,9 @@ function _realPnl(){
     Object.keys(byMonth).sort().forEach(ym=>{
       const wd=byMonth[ym];
       const mayOn=(ym+"-01")<c.full;               // месяц целиком до перехода на полную цену
+      // какие даты выпали из этого месяца как нерабочие: из-за них месяц может «просесть»
+      // сильнее, чем кажется — особенно если праздник попал на загруженный день недели
+      const hols=[...hol].filter(x=>x.slice(0,7)===ym && x>=P.b && x<=P.e).sort();
       let rev=0, wage=0, lessons=0, seats=0, revMay=0, seatsMay=0;
       (S.grid||[]).forEach(l=>{
         if(!l.course) return;
@@ -8097,7 +8105,7 @@ function _realPnl(){
                usn:Math.round(usn),contrib:Math.round(contrib),taxes:Math.round(taxes),profit:Math.round(profit),
                // сколько раз каждый день недели выпал в этом месяце (выходные и праздники уже вычтены
                // в _planDays) и сколько денег пришло по майской цене — для помесячного разбора
-               days:Object.assign({},wd), revMay:Math.round(revMay), seatsMay};
+               days:Object.assign({},wd), hols, revMay:Math.round(revMay), seatsMay};
       P.months.push(m);
       P.rev+=m.rev; P.wage+=m.wage; P.lessons+=m.lessons; P.tax+=m.taxes; P.profit+=m.profit;
     });
