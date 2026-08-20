@@ -79,6 +79,13 @@ td{padding:6px 9px;border-bottom:1px solid var(--line)}
 tr:nth-child(even) td{background:var(--sand-l)}
 tbody tr:hover td{background:#EEEDEA}
 .tscroll{overflow-x:auto;border-radius:9px;border:1px solid var(--line)}
+/* Таблица расходов: на широком экране она расползалась во всю панель, и глаз не связывал
+   статью с её цифрой. Держим её узкой и по центру, числовые колонки — фиксированной ширины. */
+.exp{max-width:720px;margin:0 auto}
+.exp table{table-layout:fixed;width:100%}
+.exp th.num,.exp td.num{width:104px}
+.exp td:first-child,.exp th:first-child{word-break:break-word}
+.exp .exp-note{display:block;font-weight:400;margin-top:1px}
 input.cell{width:62px;border:1px solid var(--line);border-radius:5px;padding:4px 6px;font-size:13px;
   text-align:right;background:#fff;font-family:inherit}
 input.cell:focus{outline:none;border-color:var(--terra);background:#FFFCF6}
@@ -1196,7 +1203,7 @@ details.client .cli-cols .cc-bal{width:74px;font-weight:600}
     <table id="taxCalc"></table>
     <div id="taxCalcMore"></div></div>
  </div>
- <div class="card" style="margin-top:14px"><h3>Все расходы при этой загрузке</h3>
+ <div class="card" style="margin-top:14px;max-width:780px"><h3>Все расходы при этой загрузке</h3>
    <div id="taxExpenses"></div></div>
 </section>
 
@@ -1747,7 +1754,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-08-20-04";
+const APP_VER="2026-08-20-05";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -4345,15 +4352,15 @@ function _expenseHTML(open){
   const row=(r,cls)=>`<tr${cls?` class="${cls}"`:''}><td style="text-align:left">${esc(r.n)}</td>
       <td class="num">${fmt(E.mo(r.y))} р</td><td class="num">${fmt(r.y)} р</td>
       <td class="num" style="color:var(--muted)">${share(r.y)}</td></tr>`;
-  let h=`<div class="sec-desc" style="margin:-4px 0 8px">Живое расписание, ${E.mN} учебных месяцев: только запущенные
-      группы (есть хотя бы один подтвердивший ребёнок). «В месяц» — среднее по этим месяцам, лето не в счёт.
-      Доля считается от фактической выручки ${fmt(E.revY)} р за год.</div>
+  let h=`<div class="exp"><div class="sec-desc" style="margin:-4px 0 8px">Живое расписание, ${E.mN} учебных месяцев:
+      только запущенные группы (есть хотя бы один подтвердивший ребёнок). «В месяц» — среднее по этим месяцам,
+      лето не в счёт. Доля — от фактической выручки ${fmt(E.revY)} р за год.</div>
     <div class="tscroll"><table><thead><tr><th style="text-align:left">Статья</th>
-      <th class="num">В месяц</th><th class="num">За учебный год</th><th class="num">Доля выручки</th>
+      <th class="num">В месяц</th><th class="num">За год</th><th class="num">Доля</th>
     </tr></thead><tbody>`;
   E.G.forEach(g=>{
     h+=`<tr style="background:var(--sand-l)"><td style="text-align:left"><b>${esc(g.t)}</b>
-        <span class="hint">${esc(g.note)}</span></td>
+        <span class="hint exp-note">${esc(g.note)}</span></td>
       <td class="num"><b>${fmt(g.mo)} р</b></td><td class="num"><b>${fmt(g.y)} р</b></td>
       <td class="num"><b>${share(g.y)}</b></td></tr>`;
     if(g.rows.length>1) g.rows.forEach(r=>{ h+=row(r); });
@@ -4377,6 +4384,7 @@ function _expenseHTML(open){
   if(w.emptyGroups&&w.emptyGroups.length)
     h+=`<div class="hint" style="margin-top:6px">Групп без подтвердивших: <b>${w.emptyGroups.length}</b> — они здесь не считаются ни в выручку, ни в зарплату.</div>`;
   if(w.silent) h+=`<div class="hint">Молчат (ещё не подтвердили): <b>${w.silent}</b> — когда ответят, вырастет и выручка, и ЗП педагогов.</div>`;
+  h+=`</div>`;
   return open===false
     ? `<details style="margin-top:12px"><summary style="cursor:pointer;font-size:13px">Расходы по статьям — расширенная таблица</summary>${h}</details>`
     : h;
