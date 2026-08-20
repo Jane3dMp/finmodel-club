@@ -1191,7 +1191,10 @@ details.client .cli-cols .cc-bal{width:74px;font-weight:600}
  <div class="callout"><b>Важно:</b> в РБ нет «УСН доходы минус расходы». Налог при УСН — 6% от валовой выручки. Взносы ФСЗН 34% и Белгосстрах 0,6% платятся с ФОТ работников по трудовым договорам. Сотрудники на НПД (самозанятые — например, видеограф, СММ) взносами не облагаются: укажите их ФОТ в поле «ФОТ на НПД», он вычитается из базы.</div>
  <div class="row2">
   <div class="card"><h3>Ставки</h3><div id="taxRates"></div></div>
-  <div class="card"><h3>Расчёт налоговой нагрузки</h3><table id="taxCalc"></table></div>
+  <div class="card"><h3>Расчёт налоговой нагрузки</h3>
+    <div class="sec-desc" id="taxCalcNote" style="margin:-4px 0 8px"></div>
+    <table id="taxCalc"></table>
+    <div id="taxCalcMore"></div></div>
  </div>
 </section>
 
@@ -1742,7 +1745,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-08-20-02";
+const APP_VER="2026-08-20-03";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -4271,6 +4274,36 @@ function delFixedPct(i){
   S.fixedPct.splice(i,1); persistLocal(); renderAll(); toast("Статья удалена");
 }
 
+/* Налоговая нагрузка при ТЕКУЩЕЙ загрузке, а не по модели.
+   Просьба Жанны 20.08.2026: «хочу, чтобы эта таблица считалась от ситуации на текущий момент —
+   по загрузке, выручке, занятости педсостава и прогнозируемому обороту».
+   Берём готовый помесячный расчёт `_realPnl()` (тот же, что в «Отчёте по набору»): запущенные
+   группы, подтвердившие дети, ставка педагога при таком числе детей, майская цена до перехода.
+   Здесь сводим его к «в месяц» — налоги считают и платят помесячно.
+   ⚠️ Делим на число УЧЕБНЫХ месяцев, а не на 12: лето в расчёт не входит, иначе средняя
+   нагрузка выглядела бы заметно меньше того, что реально придётся платить в сентябре. */
+function _taxReal(){
+  const R=_realPnl(), tax=S.tax||{};
+  let rev=0, wage=0, usn=0, acq=0, fotBase=0, lessons=0, seats=0, mN=0;
+  const months=[];
+  R.periods.forEach(P=>P.months.forEach(m=>{
+    mN++;
+    // база взносов считается ПО МЕСЯЦУ: в декабре занятий меньше, ФОТ педагогов ниже
+    const fb=Math.max(0, m.wage+R.adminFOT-R.npd);
+    rev+=m.rev; wage+=m.wage; usn+=m.usn; acq+=m.acq; fotBase+=fb;
+    lessons+=m.lessons; seats+=m.seats;
+    months.push(Object.assign({},m,{fotBase:Math.round(fb),
+      fszn:Math.round(fb*((+tax.fszn||0)/100)), belg:Math.round(fb*((+tax.belgosstrah||0)/100))}));
+  }));
+  const d=mN||1, per=n=>n/d, fb=per(fotBase);
+  const F={mN, months, warn:R.warn, adminFOT:R.adminFOT, npd:R.npd,
+    rev:per(rev), wage:per(wage), usn:per(usn), acq:per(acq),
+    lessons:per(lessons), seats:per(seats), fotBase:fb,
+    fszn:fb*((+tax.fszn||0)/100), belg:fb*((+tax.belgosstrah||0)/100)};
+  F.taxTotal=F.usn+F.fszn+F.belg;
+  return F;
+}
+
 /* ===== РЕНДЕР: НАЛОГИ ===== */
 function renderTax(){
   const r=document.getElementById("taxRates");
@@ -4280,19 +4313,52 @@ function renderTax(){
    <div class="field"><label>Белгосстрах, %<span class="hint">от ФОТ</span></label><input type="number" value="${S.tax.belgosstrah}" onchange="updTax('belgosstrah',this.value)"></div>
    <div class="field"><label>Эквайринг, % от выручки</label><input type="number" value="${S.tax.acquiring}" onchange="updTax('acquiring',this.value)"></div>
    <div class="field"><label>ФОТ на НПД (самозанятые), р/мес<span class="hint">видеограф, СММ — НЕ облагается взносами</span></label><input type="number" value="${S._npdMonth||0}" onchange="updNpd(this.value)"></div>`;
-  const T=totals();
-  document.getElementById("taxCalc").innerHTML=`<tbody>
-   <tr><td>Валовая выручка/мес</td><td class="num">${fmt(T.rev)} р</td></tr>
-   <tr><td>Налог УСН (${S.tax.usn}%)</td><td class="num neg">${fmt(T.usn)} р</td></tr>
-   <tr><td>ФОТ педагогов/мес</td><td class="num">${fmt(T.wage)} р</td></tr>
-   <tr><td>ФОТ админ-команды/мес</td><td class="num">${fmt(T.adminFOT)} р</td></tr>
-   <tr><td>− ФОТ на НПД (не облагается)</td><td class="num">−${fmt(T.npd)} р</td></tr>
-   <tr><td><b>База взносов</b> (педагоги + админ − НПД)</td><td class="num"><b>${fmt(T.fotBase)} р</b></td></tr>
-   <tr><td>ФСЗН (${S.tax.fszn}%)</td><td class="num neg">${fmt(T.fszn)} р</td></tr>
-   <tr><td>Белгосстрах (${S.tax.belgosstrah}%)</td><td class="num neg">${fmt(T.belg)} р</td></tr>
-   <tr class="totrow"><td>Итого налоги и взносы</td><td class="num">${fmt(T.taxTotal)} р</td></tr>
-   <tr><td>Налоговая нагрузка к выручке</td><td class="num">${T.rev>0?fmt1(T.taxTotal/T.rev*100):0}%</td></tr>
+  const T=totals(), F=_taxReal();
+  const two=(f,m,cls)=>`<td class="num${cls?" "+cls:""}"><b>${fmt(f)} р</b></td><td class="num" style="color:var(--muted)">${fmt(m)} р</td>`;
+  document.getElementById("taxCalcNote").innerHTML=
+    F.mN?`Первая колонка — <b>по текущей загрузке</b>: живое расписание, только запущенные группы (есть хотя бы
+      один подтвердивший ребёнок), зарплата педагога по его ставке при таком числе детей. В среднем
+      за ${F.mN} учебных месяцев, лето не в счёт. Вторая — по модели с «Курсов и маржи», для сверки.`
+     :`Живое расписание пока не даёт фактических цифр (нет подтвердивших детей) — показана только модель.`;
+  document.getElementById("taxCalc").innerHTML=`<thead><tr>
+     <th style="text-align:left"></th><th class="num">По загрузке</th><th class="num">По модели</th></tr></thead>
+   <tbody>
+   <tr><td>Валовая выручка/мес</td>${two(F.rev,T.rev)}</tr>
+   <tr><td>Налог УСН (${S.tax.usn}%)</td>${two(F.usn,T.usn,"neg")}</tr>
+   <tr><td>ФОТ педагогов/мес</td>${two(F.wage,T.wage)}</tr>
+   <tr><td>ФОТ админ-команды/мес</td>${two(F.adminFOT,T.adminFOT)}</tr>
+   <tr><td>− ФОТ на НПД (не облагается)</td><td class="num"><b>−${fmt(F.npd)} р</b></td><td class="num" style="color:var(--muted)">−${fmt(T.npd)} р</td></tr>
+   <tr><td><b>База взносов</b> (педагоги + админ − НПД)</td>${two(F.fotBase,T.fotBase)}</tr>
+   <tr><td>ФСЗН (${S.tax.fszn}%)</td>${two(F.fszn,T.fszn,"neg")}</tr>
+   <tr><td>Белгосстрах (${S.tax.belgosstrah}%)</td>${two(F.belg,T.belg,"neg")}</tr>
+   <tr class="totrow"><td>Итого налоги и взносы</td><td class="num">${fmt(F.taxTotal)} р</td><td class="num" style="opacity:.7">${fmt(T.taxTotal)} р</td></tr>
+   <tr><td>Налоговая нагрузка к выручке</td><td class="num"><b>${F.rev>0?fmt1(F.taxTotal/F.rev*100):0}%</b></td><td class="num" style="color:var(--muted)">${T.rev>0?fmt1(T.taxTotal/T.rev*100):0}%</td></tr>
+   <tr><td>Эквайринг (${S.tax.acquiring}%)<span class="hint">не налог — комиссия банка, в «итого» не входит</span></td>${two(F.acq,T.variableExtra,"neg")}</tr>
   </tbody>`;
+  document.getElementById("taxCalcMore").innerHTML=_taxMonthsHTML(F);
+}
+/* Помесячно: налоги платятся каждый месяц, а месяцы неравные — в декабре и январе занятий меньше,
+   выручка и ФОТ падают вместе с ними. Средняя цифра это скрывает, поэтому даём разбивку. */
+function _taxMonthsHTML(F){
+  if(!F.mN) return "";
+  const w=F.warn||{};
+  const rows=F.months.map(m=>`<tr><td>${_planLabel(m.ym)}${m.mayOn?' <span class="hint">майская цена</span>':''}</td>
+      <td class="num">${fmt(m.rev)}</td><td class="num">${fmt(m.usn)}</td>
+      <td class="num">${fmt(m.fotBase)}</td><td class="num">${fmt(m.fszn+m.belg)}</td>
+      <td class="num"><b>${fmt(m.usn+m.fszn+m.belg)}</b></td></tr>`).join("");
+  const sum=F.months.reduce((a,m)=>({rev:a.rev+m.rev, usn:a.usn+m.usn,
+    fb:a.fb+m.fotBase, con:a.con+m.fszn+m.belg}),{rev:0,usn:0,fb:0,con:0});
+  let warn="";
+  if(w.emptyGroups&&w.emptyGroups.length) warn+=`<div class="hint" style="margin-top:6px">Не в счёт — групп без подтвердивших: <b>${w.emptyGroups.length}</b>: с них нет ни выручки, ни зарплаты.</div>`;
+  if(w.silent) warn+=`<div class="hint">Молчат (ещё не подтвердили): <b>${w.silent}</b> — их деньги и налоги с них сюда не попали.</div>`;
+  if(w.noPrice&&w.noPrice.length) warn+=`<div class="hint" style="color:var(--red)">Без цены в «Курсах и марже»: ${w.noPrice.map(esc).join(", ")} — выручка по ним нулевая.</div>`;
+  return `<details style="margin-top:10px"><summary style="cursor:pointer;font-size:13px">Помесячно (${F.mN} месяцев)</summary>
+    <table style="margin-top:6px"><thead><tr><th style="text-align:left">Месяц</th><th class="num">Выручка</th>
+      <th class="num">УСН</th><th class="num">База взносов</th><th class="num">Взносы</th><th class="num">Итого</th></tr></thead>
+      <tbody>${rows}
+      <tr class="totrow"><td>За учебный год</td><td class="num">${fmt(sum.rev)}</td><td class="num">${fmt(sum.usn)}</td>
+        <td class="num">${fmt(sum.fb)}</td><td class="num">${fmt(sum.con)}</td><td class="num">${fmt(sum.usn+sum.con)}</td></tr>
+      </tbody></table>${warn}</details>`;
 }
 function updTax(k,v){ S.tax[k]=parseFloat(v)||0; persistLocal(); renderAll(); }
 function updNpd(v){ S._npdMonth=parseFloat(v)||0; persistLocal(); renderAll(); }
