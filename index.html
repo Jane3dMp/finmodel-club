@@ -933,8 +933,7 @@ details.client .cli-cols .cc-bal{width:74px;font-weight:600}
  </div>
  <div class="card">
   <h3>Топ и аутсайдеры по марже курсов</h3>
-  <div class="sec-desc" style="margin:-2px 0 6px">Маржа курса — по модели («Курсы и маржа»): цена и ставка педагога
-   при плановой наполняемости, <b>с учётом ползунков сценариев</b>. От выбранного месяца не зависит.</div>
+  <div class="sec-desc" id="topNote" style="margin:-2px 0 6px"></div>
   <div class="row2">
    <div><b style="color:var(--green)">🟢 Локомотивы</b><table id="topCourses" style="margin-top:8px"></table></div>
    <div><b style="color:var(--red)">🔴 Под вопросом</b><table id="botCourses" style="margin-top:8px"></table></div>
@@ -1761,7 +1760,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-08-20-13";
+const APP_VER="2026-08-20-14";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -4580,6 +4579,35 @@ function renderSettings(){
 }
 function updAssume(k,v){ S.assume[k]=parseFloat(v)||0; persistLocal(); renderAll(); }
 
+/* Свернуть накопленное по курсам за месяц: множества групп и детей — в числа. */
+function _courseMonth(byCourse,courseKids){
+  const out={};
+  for(const k in byCourse){ const c=byCourse[k];
+    out[k]={rev:Math.round(c.rev), wage:Math.round(c.wage), lessons:c.lessons,
+            groups:c.groups.size, kids:(courseKids[k]?courseKids[k].size:0)}; }
+  return out;
+}
+/* Маржа курсов ПО ФАКТУ за выбранный месяц (или в среднем за учебный год).
+   20.08.2026 Жанна: «клуба мат. стратегии уже нет» — а он висел в «Локомотивах».
+   Блок считался по справочнику «Курсы и маржа»: там у курса остались проставлены группы,
+   хотя в расписании его давно нет. Теперь берём только то, что реально идёт. */
+function _courseFact(ym){
+  const R=_realPnl(), all=_pnlMonths(R);
+  const months=ym?all.filter(m=>m.ym===ym):all;
+  const d=months.length||1, agg={};
+  months.forEach(m=>{ const cs=m.courses||{};
+    for(const k in cs){ const c=cs[k];
+      const a=agg[k]||(agg[k]={rev:0,wage:0,lessons:0,groups:0,kids:0});
+      a.rev+=c.rev; a.wage+=c.wage; a.lessons+=c.lessons;
+      a.groups=Math.max(a.groups,c.groups); a.kids=Math.max(a.kids,c.kids); }
+  });
+  return Object.keys(agg).map(name=>{
+    const a=agg[name], rev=a.rev/d, wage=a.wage/d, margin=rev-wage;
+    return {name, rev, wage, margin, marginPct:rev>0?margin/rev*100:0,
+            lessons:a.lessons/d, groups:a.groups, kids:a.kids};
+  });
+}
+
 /* Плоский список месяцев из _realPnl, схлопнутый по ym.
    Осенний и весенний периоды может задеть один календарный месяц (например осень до 10.01,
    весна с 11.01) — тогда в списке оказывались ДВА «янв ’27» по половине месяца каждый:
@@ -4755,18 +4783,33 @@ function renderDash(){
      ${(fact&&T.warn&&T.warn.emptyGroups&&T.warn.emptyGroups.length)?`<div class="hint" style="margin-top:4px">Групп без подтвердивших: <b>${T.warn.emptyGroups.length}</b> — они не дают ни выручки, ни зарплаты.${T.warn.silent?` Молчат ещё <b>${T.warn.silent}</b> детей.`:""}</div>`:""}`;
 
   // топ/аутсайдеры
-  const ranked=S.courses.map((c,i)=>({c,i,r:applyScn(c)})).filter(x=>x.r.groups>0&&x.r.fillN>0);
+  // В факте — только курсы, которые реально идут по расписанию с подтвердившими детьми.
+  // По модели курс остаётся в списке, пока в справочнике «Курсы и маржа» у него стоят группы,
+  // даже если из расписания его убрали.
+  const ranked=fact
+    ? _courseFact(_expMonth).filter(x=>x.rev>0||x.wage>0)
+        .map(x=>({c:{name:x.name}, i:-1, r:{margin:x.margin, marginPct:x.marginPct}}))
+    : S.courses.map((c,i)=>({c,i,r:applyScn(c)})).filter(x=>x.r.groups>0&&x.r.fillN>0);
   ranked.sort((a,b)=>b.r.margin-a.r.margin);
   const top=ranked.slice(0,6), bot=ranked.slice(-6).reverse();
   // ⚠️ скобки обязательны: `a < b?.c || 1e9` разбирается как `(a < b?.c) || 1e9` — правая часть
   // всегда истинна, фильтр не отсекал ничего, и оба списка показывали одни и те же курсы,
   // только в обратном порядке: самый прибыльный курс стоял в «Под вопросом».
   const cut=top.length?top[top.length-1].r.margin:1e9;
+  const tn=document.getElementById("topNote");
+  if(tn) tn.innerHTML=fact
+    ? `Маржа курса <b>по расписанию</b>: выручка от подтвердивших минус зарплата педагогов
+       ${one?`за ${esc(_planLabel(M.ym))}`:`в среднем за учебный месяц`}. Курсы, которых нет
+       в расписании или где никто не подтвердил, сюда не попадают. Постоянные расходы не вычитаются —
+       это вклад курса в их покрытие.`
+    : `Маржа курса — <b>по модели</b> («Курсы и маржа»): цена и ставка педагога при плановой
+       наполняемости, с учётом ползунков сценариев. Курс остаётся здесь, пока у него в справочнике
+       проставлены группы, даже если в расписании его уже нет.`;
   document.getElementById("topCourses").innerHTML=courseMini(top);
   document.getElementById("botCourses").innerHTML=courseMini(bot.filter(x=>x.r.margin<cut));
 }
 function courseMini(arr){
-  if(!arr.length) return `<tbody><tr><td class="muted">Заполните группы и наполняемость на вкладке «Курсы»</td></tr></tbody>`;
+  if(!arr.length) return `<tbody><tr><td class="muted">Пока нечего показать: нет курсов с запущенными группами</td></tr></tbody>`;
   let h="<tbody>";
   arr.forEach(({c,r})=>{ h+=`<tr><td>${esc(c.name)}</td>
     <td class="num ${r.margin>=0?'pos':'neg'}">${fmt(r.margin)} р</td>
@@ -8253,6 +8296,9 @@ function _realPnl(){
       // группа 2×/нед стоит в сетке ДВУМЯ занятиями с одним и тем же составом, поэтому seats
       // (сумма по строкам) задваивает детей. Для «Мест занято» копим уникальные ФИО за месяц.
       const kidsU=new Set();
+      // разбивка по курсам: нужна дашборду, чтобы «Топ и аутсайдеры» показывали курсы,
+      // которые реально идут по расписанию, а не те, у кого в справочнике проставлены группы
+      const byCourse={}, courseKids={};
       (S.grid||[]).forEach(l=>{
         if(!l.course) return;
         const n=wd[+l.day||0]||0; if(!n) return;   // сколько раз этот день выпал в месяце
@@ -8272,12 +8318,19 @@ function _realPnl(){
           if(isMay){ sumMay+=cost; nMay++; }
         });
         if(!nConf){ warn.emptyGroups.add((l.group&&l.group.trim())||l.course); return; }  // группа не запущена
+        const lesWage=wageForLesson(l.course,nConf,l)*n;
         rev+=sum*n;
         revMay+=sumMay*n;
-        wage+=wageForLesson(l.course,nConf,l)*n;
+        wage+=lesWage;
         lessons+=n;
         seats+=nConf;
         seatsMay+=nMay;
+        const cKey=l.course;
+        const cc=byCourse[cKey]||(byCourse[cKey]={rev:0,wage:0,lessons:0,groups:new Set(),kids:0});
+        cc.rev+=sum*n; cc.wage+=lesWage; cc.lessons+=n;
+        cc.groups.add((l.group&&l.group.trim())||(cKey+"|"+(l.day||"")+"|"+(l.start||"")));
+        (courseKids[cKey]||(courseKids[cKey]=new Set()));
+        seen.forEach(nk=>courseKids[cKey].add(nk));
       });
       rev=Math.round(rev); wage=Math.round(wage);
       // налоги и взносы — те же правила, что на «Налоги РБ и ФОТ»
@@ -8293,7 +8346,7 @@ function _realPnl(){
                // сколько раз каждый день недели выпал в этом месяце (выходные и праздники уже вычтены
                // в _planDays) и сколько денег пришло по майской цене — для помесячного разбора
                days:Object.assign({},wd), hols, revMay:Math.round(revMay), seatsMay,
-               kidsU:kidsU.size};
+               kidsU:kidsU.size, courses:_courseMonth(byCourse,courseKids)};
       P.months.push(m);
       P.rev+=m.rev; P.wage+=m.wage; P.lessons+=m.lessons; P.tax+=m.taxes; P.profit+=m.profit;
     });

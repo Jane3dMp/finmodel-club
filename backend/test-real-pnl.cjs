@@ -24,7 +24,7 @@ function grab(name) {
   if (!m) { console.log('не найдена функция ' + name); process.exit(1); }
   return m[0];
 }
-const src = ['_planDays', '_planHolSet', '_realPnl'].map(grab).join('\n');
+const src = ['_planDays', '_planHolSet', '_courseMonth', '_realPnl'].map(grab).join('\n');
 
 // Расписание: две группы по вторникам. Первая запущена (2 подтвердивших),
 // вторая — заготовка без единого подтверждения, её считать нельзя.
