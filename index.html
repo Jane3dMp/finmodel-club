@@ -1758,7 +1758,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-08-20-10";
+const APP_VER="2026-08-20-11";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -3956,7 +3956,10 @@ function printPrice(){
 function _mayCountForCourse(name){
   const seen=new Set();
   (S.grid||[]).forEach(l=>{ if(l.course!==name) return;
-    kidsOf(l).forEach(k=>{ if(k&&k.may){ const nn=_nameKey(k.n); if(nn) seen.add(nn); } });   // тёзки = разные дети
+    // отказавшегося не считаем, даже если майский оплачен: он не придёт и денег не принесёт.
+    // Раньше здесь была единственная в деньгах проверка «💰 без оглядки на отказ», и оборот
+    // на вкладке «Реальный оборот» держал таких детей как платящих.
+    kidsOf(l).forEach(k=>{ if(k&&k.may&&!k.no&&k.vbReply!=="no"){ const nn=_nameKey(k.n); if(nn) seen.add(nn); } });   // тёзки = разные дети
   });
   return seen.size;
 }
@@ -5640,9 +5643,14 @@ function renderKidsEditor(){
   // отказ = галочка ❌ ИЛИ ответ «Отказ». Остальные счётчики — только по неотказавшимся.
   const act=_editKids;
   const cSent=act.filter(k=>k.vbSent).length;
-  const cn=act.filter(k=>k.no||k.vbReply==="no").length;
-  const cy=act.filter(k=>!k.no&&k.vbReply==="yes").length, cm=act.filter(k=>!k.no&&k.vbReply==="maybe").length;
-  const cNo=act.filter(k=>!k.no&&k.vbSent&&!k.vbReply).length;
+  const cRef=k=>k.no||k.vbReply==="no";
+  const cn=act.filter(cRef).length;
+  // 💰 майский — тоже подтверждение (оплатил = придёт), иначе сводка в карточке расходилась
+  // с «Набором». И «без ответа» больше не требует отправленного Viber: группа из майских,
+  // которым не писали, показывала нули во всех четырёх корзинах сразу.
+  const cy=act.filter(k=>!cRef(k)&&(k.may||k.vbReply==="yes")).length;
+  const cm=act.filter(k=>!cRef(k)&&!k.may&&k.vbReply==="maybe").length;
+  const cNo=act.filter(k=>!cRef(k)&&!k.may&&!k.vbReply).length;
   const summary=`<div style="font-size:12px;color:var(--coal);margin:2px 0 6px;display:flex;gap:12px;flex-wrap:wrap">
       <span>📨 Отправлено: <b>${cSent}</b>/${act.length}</span>
       <span>🟢 Подтвердили: <b>${cy}</b></span>
@@ -7885,8 +7893,12 @@ function renderVbTodo(){
   (S.grid||[]).forEach(l=>{
     if(l.day!==curDay) return;
     kidsOf(l).forEach(k=>{
+      // отказ считаем ДО выхода: правило «❌ ИЛИ ответ «отказ»» действует везде в модели, а тут
+      // ❌ отсекался раньше счётчика — и 🔴 падал до нуля ровно в тот момент, когда менеджер
+      // ставил уточняющую галочку поверх ответа «Отказ»
+      if(k.no||k.vbReply==="no") cn++;
       if(k.no) return;                              // «не придёт» — не в рассылке
-      if(k.vbReply==="yes") cy++; else if(k.vbReply==="no") cn++; else if(k.vbReply==="maybe") cm++;
+      if(k.vbReply==="yes") cy++; else if(k.vbReply==="maybe") cm++;
       const it={name:k.n, course:l.course, time:l.start, li:S.grid.indexOf(l), ki:l.kids.indexOf(k),
                 icons:kidIcons(k), c:(k.c||""), reply:(k.vbReply||""), alfaId:k.alfaId||null};
       if(!k.vbSent){ if(_viberNumber(k.phone)) toSend.push(it); else noPhone.push(it); }
@@ -8284,20 +8296,28 @@ function _ownerReport(){
     const g=groups[key];
     kidsOf(l).forEach(k=>{
       const nn=_nameKey(k.n); if(!nn) return;   // дедуп внутри группы по ПОЛНОМУ ФИО (тёзки = разные дети)
-      const p=g.kids[nn]||{name:k.n,sent:false,reply:"",no:false};
-      p.sent=p.sent||!!k.vbSent; p.no=p.no||!!k.no;
+      const p=g.kids[nn]||{name:k.n,sent:false,reply:"",no:false,may:false};
+      p.sent=p.sent||!!k.vbSent; p.no=p.no||!!k.no; p.may=p.may||!!k.may;
       const rank=r=>r==="yes"?3:r==="no"?2:r==="maybe"?1:0;
       if(rank(k.vbReply)>rank(p.reply)) p.reply=k.vbReply;
       g.kids[nn]=p;
     });
   });
   const rows=Object.values(groups).map(g=>{
-    // «❌ не придёт» считаем ОТКАЗОМ: ребёнок остаётся в «Записано» и попадает в «Отказ»,
-    // но в оборот (только по подтвердившим) не идёт.
+    // Правило одно на всю модель (см. _goalsFunnel): отказ = ❌ ИЛИ ответ «отказ», и он
+    // перевешивает всё; подтвердил = оплатил 💰 майский ИЛИ ответил «да».
+    // ⚠️ 20.08.2026: здесь майские НЕ считались подтвердившими — читался только ответ «да».
+    // Ребёнок, оплативший майский и не ответивший в Viber (а майский шаблон и не спрашивает
+    // «планируете ли»), падал в «Молчат», не давал оборота и тянул группу в «Группы риска»:
+    // полностью оплаченная группа показывала заполненность 0% и помечалась риском.
     const ks=Object.values(g.kids);
     const total=ks.length, sent=ks.filter(k=>k.sent).length;
-    const no=ks.filter(k=>k.no||k.reply==="no").length;
-    const yes=ks.filter(k=>!k.no&&k.reply==="yes").length, maybe=ks.filter(k=>!k.no&&k.reply==="maybe").length;
+    const ref=k=>k.no||k.reply==="no";
+    const no=ks.filter(ref).length;
+    const yes=ks.filter(k=>!ref(k)&&(k.may||k.reply==="yes")).length;
+    // «думают» — только те, кто ещё не подтверждён: оплативший майский уже в «yes»,
+    // иначе он попал бы в две корзины сразу и «Молчат» ушли бы в минус
+    const maybe=ks.filter(k=>!ref(k)&&!k.may&&k.reply==="maybe").length;
     const none=total-yes-no-maybe, fill=g.cap>0?Math.round(yes/g.cap*100):0, revWeek=yes*g.price*g.visits;
     const risk=total>0 && (yes/total)<0.5;
     return Object.assign({},g,{total,sent,yes,no,maybe,none,fill,revWeek,risk});
@@ -8651,7 +8671,11 @@ function _goalsData(){
   const retYes=old.filter(k=>!k.may && k.reply==='yes').length;         // подтвердили продолжение
   const retWork=old.filter(k=>!k.may && k.reply!=='yes').length;        // молчат и думают
   const retNo=oldAll.filter(refused).length;                            // отказ / не придёт
+  // ⚠️ newYes считает ТОЛЬКО ответивших «да» — для подписи он не годится: новичок мог
+  // оплатить майский и ничего не ответить. Для подписи есть newSecured (майский ИЛИ «да»).
   const newTotal=nw.length, newYes=nw.filter(k=>k.reply==='yes').length;
+  const newMay=nw.filter(k=>k.may).length;                              // новые: оплатили майский
+  const newYesOnly=nw.filter(k=>!k.may && k.reply==='yes').length;      // новые: ответили «да»
   const newUnver=newAll.filter(_newUnverified).length;   // в новых, но связь с Альфой не подтверждена
   /* Итог по УНИКАЛЬНЫМ детям — его спрашивают чаще всего, а сложить бублики нельзя:
      в «Возврате» сидят ещё и майские из списка, которых в расписании нет, а «Новый набор»
@@ -8659,7 +8683,7 @@ function _goalsData(){
   const retMayPlaced=old.filter(k=>k.may).length;                       // майские, уже стоящие в сетке
   const newSecured=nw.filter(k=>k.may||k.reply==='yes').length;         // новые: оплатили или «да»
   return {retMay,retMayPlaced,retYes,retSecured:retMay+retYes,retWork,retNo,retPool:oldAll.length,
-    newTotal,newYes,newSecured,newUnver,newPool:newAll.length,unknownPool:unknownAll.length,
+    newTotal,newYes,newMay,newYesOnly,newSecured,newUnver,newPool:newAll.length,unknownPool:unknownAll.length,
     uniqTotal:oldAll.length+newAll.length+unknownAll.length,
     confirmedUniq:retMayPlaced+retYes+newSecured,
     unplaced,hasRoster,rosterAt:S.oldRosterAt||""};
@@ -8792,7 +8816,7 @@ function _oldNewHTML(){
     ? `<div class="on-row">
         <div>${dn(G.retSecured,goalR,"#4F9E63","Возврат прошлогодних",`оплатили майский ${G.retMay}${G.unplaced?` <span title="Из них ${G.unplaced} — майские из списка, которых в расписании ещё нет">(в сетке ${G.retMayPlaced} · из списка ${G.unplaced})</span>`:""} · «да» ${G.retYes} · в работе ${G.retWork} · отказ ${G.retNo}`)}
           ${_goalsKidListHTML("Возврат",lists.oldKids,"#4F9E63")}</div>
-        <div>${dn(G.newTotal,goalN,"#1F5BC0","Новый набор",`вписано ${G.newTotal} · подтвердили ${G.newYes}${G.newUnver?` · не подтверждены Альфой ${G.newUnver}`:""}`)}
+        <div>${dn(G.newTotal,goalN,"#1F5BC0","Новый набор",`вписано ${G.newTotal} · подтвердили ${G.newSecured}${G.newMay?` (оплатили майский ${G.newMay} · «да» ${G.newYesOnly})`:""}${G.newUnver?` · не подтверждены Альфой ${G.newUnver}`:""}`)}
           ${_goalsKidListHTML("Новый набор",lists.newKids,"#1F5BC0")}</div>
       </div>
       <div class="on-sum">Уникальных детей в расписании <b>${G.uniqTotal}</b> = возврат ${G.retPool} + новые ${G.newPool}${G.unknownPool?` + не сопоставлены ${G.unknownPool}`:""} ·
