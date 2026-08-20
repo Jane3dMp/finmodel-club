@@ -1196,6 +1196,8 @@ details.client .cli-cols .cc-bal{width:74px;font-weight:600}
     <table id="taxCalc"></table>
     <div id="taxCalcMore"></div></div>
  </div>
+ <div class="card" style="margin-top:14px"><h3>Все расходы при этой загрузке</h3>
+   <div id="taxExpenses"></div></div>
 </section>
 
 <!-- ===== ТБУ ===== -->
@@ -1745,7 +1747,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-08-20-03";
+const APP_VER="2026-08-20-04";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -4274,6 +4276,112 @@ function delFixedPct(i){
   S.fixedPct.splice(i,1); persistLocal(); renderAll(); toast("Статья удалена");
 }
 
+/* Постатейная расшифровка расходов при текущей загрузке.
+   Просьба Жанны 20.08.2026: «давай более расширенную таблицу по расходам» — в сводке всё было
+   свалено в «постоянные» и «налоги», а ей нужно видеть, КУДА именно уходят деньги.
+
+   Здесь каждая статья отдельной строкой, в трёх измерениях: в месяц, за учебный год и долей
+   от выручки. Статьи делятся на те, что зависят от загрузки (ЗП педагогов, %-расходы, эквайринг,
+   налоги), и те, что идут независимо от неё (аренда, админ-команда) — вторые платятся, даже если
+   не запустится ни одна группа, и именно они делают слабый месяц убыточным.
+
+   ⚠️ Считаем ПО МЕСЯЦАМ и суммируем, а не «среднее × 12»: месяцы неравные, а вычет НПД из базы
+   взносов обрезается по нулю в том месяце, где это случилось. */
+function _expenseData(){
+  const R=_realPnl(), tax=S.tax||{}, as=S.assume||{};
+  const months=[]; R.periods.forEach(P=>P.months.forEach(m=>months.push(m)));
+  const mN=months.length, d=mN||1;
+  const sum=f=>months.reduce((a,m)=>a+f(m),0);
+
+  const revY=sum(m=>m.rev);
+  const wageY=sum(m=>m.wage);
+  const fbY=sum(m=>Math.max(0, m.wage+R.adminFOT-R.npd));   // база взносов, помесячно
+  const usnY=sum(m=>m.usn), acqY=sum(m=>m.acq);
+  const fsznY=fbY*((+tax.fszn||0)/100), belgY=fbY*((+tax.belgosstrah||0)/100);
+  const ownerY=(+as.ownerSalary||0)*mN;
+
+  // статьи с вкладки «Постоянные расходы»: группа 2 — админ-команда, остальное — операционные
+  const admin=[], ops=[];
+  for(const k in (S.fixed||{})){
+    const v=+S.fixed[k]||0;
+    ((S.fixedGroup||{})[k]===2?admin:ops).push({n:k, mo:v, y:v*mN});
+  }
+  // расходы, заданные процентом от оборота, — растут вместе с выручкой
+  const pct=(S.fixedPct||[]).filter(p=>p&&(+p.pct||0)).map(p=>({
+    n:(String(p.name||"").trim()||"Процент от оборота")+" ("+fmt1(+p.pct||0)+"%)",
+    y:sum(m=>m.rev*((+p.pct||0)/100))}));
+
+  const byY=(a,b)=>b.y-a.y;                                 // сверху — самое дорогое
+  const G=[
+    {t:"Зарплата педагогов", zav:true, note:"по ставке педагога за занятие при фактическом числе детей",
+     rows:[{n:"ФОТ педагогов", y:wageY}]},
+    {t:"Админ-команда", zav:false, note:"с вкладки «Постоянные расходы», от загрузки не зависит",
+     rows:admin.sort(byY)},
+    {t:"Постоянные расходы", zav:false, note:"аренда, сервисы и прочее — платятся независимо от набора",
+     rows:ops.sort(byY)},
+    {t:"От оборота", zav:true, note:"растут вместе с выручкой",
+     rows:pct.concat([{n:"Эквайринг ("+fmt1(+tax.acquiring||0)+"%)", y:acqY}]).sort(byY)},
+    {t:"Налоги и взносы", zav:true, note:"УСН с выручки, взносы с фонда зарплаты",
+     rows:[{n:"УСН ("+fmt1(+tax.usn||0)+"%)", y:usnY},
+           {n:"ФСЗН ("+fmt1(+tax.fszn||0)+"%)", y:fsznY},
+           {n:"Белгосстрах ("+fmt1(+tax.belgosstrah||0)+"%)", y:belgY}]},
+    {t:"Зарплата собственника", zav:false, note:"оценка вашего труда в операционке, с «Параметров»",
+     rows:ownerY?[{n:"ЗП собственника", y:ownerY}]:[]},
+  ].filter(g=>g.rows.length);
+  G.forEach(g=>{ g.rows.forEach(r=>{ if(r.mo==null) r.mo=r.y/d; }); g.y=g.rows.reduce((a,r)=>a+r.y,0); g.mo=g.y/d; });
+
+  const totalY=G.reduce((a,g)=>a+g.y,0);
+  const zavY=G.filter(g=>g.zav).reduce((a,g)=>a+g.y,0);     // зависят от загрузки
+  const fixY=totalY-zavY;                                   // идут в любом случае
+  return {G, mN, months, warn:R.warn, revY, totalY, zavY, fixY,
+          profitY:revY-totalY, mo:n=>n/d};
+}
+/* Таблица расходов. `open` — раскрывать ли сразу (на вкладке налогов да, в отчёте свёрнуто). */
+function _expenseHTML(open){
+  const E=_expenseData();
+  if(!E.mN) return `<div class="callout">Живое расписание пока не даёт фактических цифр: нет ни одной запущенной
+    группы с подтвердившими детьми. Как только появятся — расходы посчитаются здесь по статьям.</div>`;
+  const share=y=>E.revY>0?fmt1(y/E.revY*100)+"%":"—";
+  const row=(r,cls)=>`<tr${cls?` class="${cls}"`:''}><td style="text-align:left">${esc(r.n)}</td>
+      <td class="num">${fmt(E.mo(r.y))} р</td><td class="num">${fmt(r.y)} р</td>
+      <td class="num" style="color:var(--muted)">${share(r.y)}</td></tr>`;
+  let h=`<div class="sec-desc" style="margin:-4px 0 8px">Живое расписание, ${E.mN} учебных месяцев: только запущенные
+      группы (есть хотя бы один подтвердивший ребёнок). «В месяц» — среднее по этим месяцам, лето не в счёт.
+      Доля считается от фактической выручки ${fmt(E.revY)} р за год.</div>
+    <div class="tscroll"><table><thead><tr><th style="text-align:left">Статья</th>
+      <th class="num">В месяц</th><th class="num">За учебный год</th><th class="num">Доля выручки</th>
+    </tr></thead><tbody>`;
+  E.G.forEach(g=>{
+    h+=`<tr style="background:var(--sand-l)"><td style="text-align:left"><b>${esc(g.t)}</b>
+        <span class="hint">${esc(g.note)}</span></td>
+      <td class="num"><b>${fmt(g.mo)} р</b></td><td class="num"><b>${fmt(g.y)} р</b></td>
+      <td class="num"><b>${share(g.y)}</b></td></tr>`;
+    if(g.rows.length>1) g.rows.forEach(r=>{ h+=row(r); });
+  });
+  h+=`<tr class="totrow"><td style="text-align:left">Итого расходов</td>
+      <td class="num">${fmt(E.mo(E.totalY))} р</td><td class="num">${fmt(E.totalY)} р</td>
+      <td class="num">${share(E.totalY)}</td></tr>
+    <tr><td style="text-align:left"><b>Остаётся</b></td>
+      <td class="num"><b style="color:var(--${E.profitY>=0?'green':'red'})">${fmt(E.mo(E.profitY))} р</b></td>
+      <td class="num"><b style="color:var(--${E.profitY>=0?'green':'red'})">${fmt(E.profitY)} р</b></td>
+      <td class="num"><b>${share(E.profitY)}</b></td></tr>
+    </tbody></table></div>`;
+  // Главное, что видно из этой разбивки: сколько уходит в любом случае, даже без единой группы
+  h+=`<div class="callout" style="margin-top:10px;font-size:12px;line-height:1.7">
+      <b>Зависит от загрузки:</b> ${fmt(E.mo(E.zavY))} р/мес — ЗП педагогов, проценты с оборота, налоги.
+      Нет групп — нет и этих расходов.<br>
+      <b>Идёт в любом случае:</b> <span style="color:var(--red)">${fmt(E.mo(E.fixY))} р/мес</span> — аренда,
+      админ-команда и прочее постоянное. Это платится, даже если не запустится ни одна группа: чтобы выйти
+      в ноль, нужно сначала закрыть эту сумму.</div>`;
+  const w=E.warn||{};
+  if(w.emptyGroups&&w.emptyGroups.length)
+    h+=`<div class="hint" style="margin-top:6px">Групп без подтвердивших: <b>${w.emptyGroups.length}</b> — они здесь не считаются ни в выручку, ни в зарплату.</div>`;
+  if(w.silent) h+=`<div class="hint">Молчат (ещё не подтвердили): <b>${w.silent}</b> — когда ответят, вырастет и выручка, и ЗП педагогов.</div>`;
+  return open===false
+    ? `<details style="margin-top:12px"><summary style="cursor:pointer;font-size:13px">Расходы по статьям — расширенная таблица</summary>${h}</details>`
+    : h;
+}
+
 /* Налоговая нагрузка при ТЕКУЩЕЙ загрузке, а не по модели.
    Просьба Жанны 20.08.2026: «хочу, чтобы эта таблица считалась от ситуации на текущий момент —
    по загрузке, выручке, занятости педсостава и прогнозируемому обороту».
@@ -4336,6 +4444,7 @@ function renderTax(){
    <tr><td>Эквайринг (${S.tax.acquiring}%)<span class="hint">не налог — комиссия банка, в «итого» не входит</span></td>${two(F.acq,T.variableExtra,"neg")}</tr>
   </tbody>`;
   document.getElementById("taxCalcMore").innerHTML=_taxMonthsHTML(F);
+  document.getElementById("taxExpenses").innerHTML=_expenseHTML(true);
 }
 /* Помесячно: налоги платятся каждый месяц, а месяцы неравные — в декабре и январе занятий меньше,
    выручка и ФОТ падают вместе с ними. Средняя цифра это скрывает, поэтому даём разбивку. */
@@ -7996,6 +8105,8 @@ function _realPnlHTML(){
       <td class="num"><b style="color:var(--${P.profit>=0?'green':'red'})">${fmt(P.profit)} р</b></td></tr>`;
   });
   h+=`</tbody></table></div>`;
+
+  h+=_expenseHTML(false);        // та же постатейная расшифровка, что на «Налогах» — здесь свёрнута
 
   // Чего Жанна не должна не заметить: из-за этого картина выглядит хуже или лучше, чем есть
   const w=R.warn, notes=[];
