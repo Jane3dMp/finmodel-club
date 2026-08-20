@@ -17,7 +17,7 @@ function check(name, ok, detail) {
 const near = (a, b) => Math.abs(a - b) < 1;
 
 const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
-const m = html.match(/\nfunction _expenseData\(\)\s*\{[\s\S]*?\n\}/m);
+const m = html.match(/\nfunction _expenseData\([^)]*\)\s*\{[\s\S]*?\n\}/m);
 if (!m) { console.log('не найдено: _expenseData'); process.exit(1); }
 const fmt1 = n => String(Math.round(n * 10) / 10);
 const build = (S, realPnl) =>
@@ -100,6 +100,33 @@ const profitRealPnl = R.periods.reduce((a, P) => a + P.months.reduce((b, m) => {
 }, 0), 0);
 check('«остаётся» совпадает с помесячным расчётом в отчёте', near(E.profitY, profitRealPnl),
   Math.round(E.profitY) + ' vs ' + Math.round(profitRealPnl));
+
+// ---- помесячный режим: Жанна переключает месяц, и всё должно пересчитаться на ЭТОТ месяц ----
+// «по кол-ву дней месяца с учетом выходных» — число занятий приходит из _planDays (праздники и
+// выходные уже вычтены), а постоянные расходы за один месяц берутся один раз, не за девять.
+const Edec = build(S, () => R)('2026-12');
+check('выбран один месяц — он один и считается', Edec.mN === 1 && Edec.months[0].ym === '2026-12');
+check('выручка — только этого месяца', near(Edec.revY, 60000), 'revY=' + Edec.revY);
+check('ЗП педагогов — только этого месяца', near(grp2(Edec, 'Зарплата педагогов').y, 18000));
+check('постоянные берутся ЗА ОДИН месяц, а не за девять',
+  near(grp2(Edec, 'Постоянные расходы').y, OPS), 'ops=' + grp2(Edec, 'Постоянные расходы').y);
+check('админ-команда — тоже за один месяц', near(grp2(Edec, 'Админ-команда').y, ADMIN));
+check('ЗП собственника — за один месяц', near(grp2(Edec, 'Зарплата собственника').y, 1000));
+check('налоги считаются от этого месяца',
+  near(grp2(Edec, 'Налоги и взносы').y, 3600 + (18000 + ADMIN) * 0.346));
+check('разбивка по месяцу тоже сходится', near(Edec.totalY + Edec.profitY, 60000));
+check('«в месяц» в режиме одного месяца = сама сумма', near(Edec.mo(Edec.totalY), Edec.totalY));
+check('весь список месяцев остаётся для переключателя', Edec.all.length === 2);
+check('выбранный месяц запомнен в данных', Edec.ym === '2026-12');
+
+const Esep = build(S, () => R)('2026-09');
+check('другой месяц — другие цифры', near(Esep.revY, 100000) && !near(Esep.totalY, Edec.totalY));
+check('сумма двух месяцев = год', near(Esep.revY + Edec.revY, E.revY));
+check('расходы двух месяцев = годовые', near(Esep.totalY + Edec.totalY, E.totalY),
+  Math.round(Esep.totalY + Edec.totalY) + ' vs ' + Math.round(E.totalY));
+
+const Enone = build(S, () => R)('2027-03');
+check('месяца нет в расписании — пустой расчёт, без падения', Enone.mN === 0 && isFinite(Enone.totalY));
 
 console.log(bad ? ('\nПРОВАЛЕНО проверок: ' + bad) : '\nВсе проверки прошли.');
 process.exit(bad ? 1 : 0);

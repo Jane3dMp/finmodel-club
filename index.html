@@ -86,6 +86,9 @@ tbody tr:hover td{background:#EEEDEA}
 .exp th.num,.exp td.num{width:104px}
 .exp td:first-child,.exp th:first-child{word-break:break-word}
 .exp .exp-note{display:block;font-weight:400;margin-top:1px}
+.exp-tabs{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:8px}
+.exp-tabs .chip{padding:3px 9px}
+.exp-tabs .chip.exp-on{background:var(--graphite);border-color:var(--graphite);color:#fff}
 input.cell{width:62px;border:1px solid var(--line);border-radius:5px;padding:4px 6px;font-size:13px;
   text-align:right;background:#fff;font-family:inherit}
 input.cell:focus{outline:none;border-color:var(--terra);background:#FFFCF6}
@@ -1204,7 +1207,7 @@ details.client .cli-cols .cc-bal{width:74px;font-weight:600}
     <div id="taxCalcMore"></div></div>
  </div>
  <div class="card" style="margin-top:14px;max-width:780px"><h3>Все расходы при этой загрузке</h3>
-   <div id="taxExpenses"></div></div>
+   <div id="taxExpensesBox"></div></div>
 </section>
 
 <!-- ===== ТБУ ===== -->
@@ -1754,7 +1757,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-08-20-05";
+const APP_VER="2026-08-20-06";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -4294,9 +4297,12 @@ function delFixedPct(i){
 
    ⚠️ Считаем ПО МЕСЯЦАМ и суммируем, а не «среднее × 12»: месяцы неравные, а вычет НПД из базы
    взносов обрезается по нулю в том месяце, где это случилось. */
-function _expenseData(){
+function _expenseData(ym){
   const R=_realPnl(), tax=S.tax||{}, as=S.assume||{};
-  const months=[]; R.periods.forEach(P=>P.months.forEach(m=>months.push(m)));
+  const all=[]; R.periods.forEach(P=>P.months.forEach(m=>all.push(m)));
+  // ym задан — считаем ОДИН месяц: занятий в нём столько, сколько дней недели реально выпало
+  // (выходные и праздники уже вычтены), а постоянные расходы берутся за один месяц, не за год
+  const months=ym?all.filter(m=>m.ym===ym):all;
   const mN=months.length, d=mN||1;
   const sum=f=>months.reduce((a,m)=>a+f(m),0);
 
@@ -4340,44 +4346,83 @@ function _expenseData(){
   const totalY=G.reduce((a,g)=>a+g.y,0);
   const zavY=G.filter(g=>g.zav).reduce((a,g)=>a+g.y,0);     // зависят от загрузки
   const fixY=totalY-zavY;                                   // идут в любом случае
-  return {G, mN, months, warn:R.warn, revY, totalY, zavY, fixY,
+  return {G, mN, months, all, ym:ym||"", warn:R.warn, revY, totalY, zavY, fixY,
+          revMayY:sum(m=>m.revMay||0), lessonsY:sum(m=>m.lessons||0), seatsY:sum(m=>m.seats||0),
           profitY:revY-totalY, mo:n=>n/d};
+}
+/* Выбранный месяц для таблицы расходов. Личный режим просмотра, а не часть модели: в S его
+   класть нельзя — иначе переключение месяца у одного менеджера дёргало бы экран у остальных. */
+let _expMonth=(function(){ try{ return localStorage.getItem("exp_month")||""; }catch(e){ return ""; } })();
+function setExpMonth(ym){
+  _expMonth=ym||"";
+  try{ localStorage.setItem("exp_month",_expMonth); }catch(e){}
+  // перерисовываем только сами таблицы: полный ререндер схлопнул бы раскрывашку в отчёте
+  const a=document.getElementById("taxExpenses"), b=document.getElementById("repExpenses");
+  if(a) a.innerHTML=_expBody(_expMonth);
+  if(b) b.innerHTML=_expBody(_expMonth);
+}
+const EXP_MON_SHORT=["янв","фев","мар","апр","май","июн","июл","авг","сен","окт","ноя","дек"];
+function _expMonLabel(ym){
+  const p=String(ym).split("-");
+  return (EXP_MON_SHORT[+p[1]-1]||ym)+" ’"+String(p[0]).slice(2);
 }
 /* Таблица расходов. `open` — раскрывать ли сразу (на вкладке налогов да, в отчёте свёрнуто). */
 function _expenseHTML(open){
-  const E=_expenseData();
+  const body=`<div id="${open===false?"repExpenses":"taxExpenses"}">${_expBody(_expMonth)}</div>`;
+  return open===false
+    ? `<details style="margin-top:12px"><summary style="cursor:pointer;font-size:13px">Расходы по статьям — расширенная таблица</summary>${body}</details>`
+    : body;
+}
+function _expBody(ym){
+  const E=_expenseData(ym);
+  if(E.ym && !E.mN) return _expBody("");        // выбранного месяца в расписании нет — показываем средний
   if(!E.mN) return `<div class="callout">Живое расписание пока не даёт фактических цифр: нет ни одной запущенной
-    группы с подтвердившими детьми. Как только появятся — расходы посчитаются здесь по статьям.</div>`;
+    группы с подтвердившими детьми. Как только появятся — расходы посчитаются здесь по статьям, помесячно.</div>`;
   const share=y=>E.revY>0?fmt1(y/E.revY*100)+"%":"—";
+  const one=E.mN===1&&E.ym, M=one?E.months[0]:null;      // выбран конкретный месяц
+  // в режиме одного месяца «за год» дублировало бы ту же цифру — колонку оставляем пустой
+  const two=(y,b1,b2)=>`<td class="num">${b1?"<b>":""}${fmt(E.mo(y))} р${b1?"</b>":""}</td>`
+    +`<td class="num">${one?"":(b2?"<b>":"")+fmt(y)+" р"+(b2?"</b>":"")}</td>`;
   const row=(r,cls)=>`<tr${cls?` class="${cls}"`:''}><td style="text-align:left">${esc(r.n)}</td>
-      <td class="num">${fmt(E.mo(r.y))} р</td><td class="num">${fmt(r.y)} р</td>
-      <td class="num" style="color:var(--muted)">${share(r.y)}</td></tr>`;
-  let h=`<div class="exp"><div class="sec-desc" style="margin:-4px 0 8px">Живое расписание, ${E.mN} учебных месяцев:
-      только запущенные группы (есть хотя бы один подтвердивший ребёнок). «В месяц» — среднее по этим месяцам,
-      лето не в счёт. Доля — от фактической выручки ${fmt(E.revY)} р за год.</div>
-    <div class="tscroll"><table><thead><tr><th style="text-align:left">Статья</th>
-      <th class="num">В месяц</th><th class="num">За год</th><th class="num">Доля</th>
+      ${two(r.y)}<td class="num" style="color:var(--muted)">${share(r.y)}</td></tr>`;
+  const dn=["","Пн","Вт","Ср","Чт","Пт","Сб","Вс"];
+  const tab=(v,lab,t)=>`<button class="chip${(_expMonth===v)?" exp-on":""}" title="${t||""}" onclick="setExpMonth('${v}')">${lab}</button>`;
+  let h=`<div class="exp">
+    <div class="exp-tabs">${tab("","Средний месяц","Среднее по всем учебным месяцам")}${
+      E.all.map(m=>tab(m.ym,_expMonLabel(m.ym),_planLabel(m.ym)+(m.mayOn?" · майская цена":""))).join("")}</div>`;
+  h+=one
+    ? `<div class="sec-desc" style="margin:2px 0 8px">${esc(_planLabel(M.ym))}: занятий по календарю
+        <b>${M.lessons}</b>${Object.keys(M.days||{}).filter(k=>M.days[k]).length
+          ?" ("+Object.keys(M.days).filter(k=>M.days[k]).sort().map(k=>dn[+k]+" ×"+M.days[k]).join(" · ")+")":""} —
+        выходные и праздники уже вычтены. Мест занято <b>${M.seats}</b>.
+        ${M.mayOn?`Действует <b>майская цена</b>: по ней пришло ${fmt(M.revMay)} р (${M.seatsMay} мест из ${M.seats}).`
+                 :`Майская цена уже не действует — все платят полную.`}
+        Доля — от выручки месяца ${fmt(E.revY)} р.</div>`
+    : `<div class="sec-desc" style="margin:2px 0 8px">Живое расписание, ${E.mN} учебных месяцев: только запущенные
+        группы (есть хотя бы один подтвердивший ребёнок). «В месяц» — среднее по этим месяцам, лето не в счёт;
+        занятий за год ${E.lessonsY}. По майской цене за год ${fmt(E.revMayY)} р.
+        Доля — от фактической выручки ${fmt(E.revY)} р за год.</div>`;
+  h+=`<div class="tscroll"><table><thead><tr><th style="text-align:left">Статья</th>
+      <th class="num">${one?"Сумма":"В месяц"}</th><th class="num">${one?"":"За год"}</th><th class="num">Доля</th>
     </tr></thead><tbody>`;
   E.G.forEach(g=>{
     h+=`<tr style="background:var(--sand-l)"><td style="text-align:left"><b>${esc(g.t)}</b>
         <span class="hint exp-note">${esc(g.note)}</span></td>
-      <td class="num"><b>${fmt(g.mo)} р</b></td><td class="num"><b>${fmt(g.y)} р</b></td>
-      <td class="num"><b>${share(g.y)}</b></td></tr>`;
+      ${two(g.y,true,true)}<td class="num"><b>${share(g.y)}</b></td></tr>`;
     if(g.rows.length>1) g.rows.forEach(r=>{ h+=row(r); });
   });
   h+=`<tr class="totrow"><td style="text-align:left">Итого расходов</td>
-      <td class="num">${fmt(E.mo(E.totalY))} р</td><td class="num">${fmt(E.totalY)} р</td>
-      <td class="num">${share(E.totalY)}</td></tr>
+      ${two(E.totalY)}<td class="num">${share(E.totalY)}</td></tr>
     <tr><td style="text-align:left"><b>Остаётся</b></td>
       <td class="num"><b style="color:var(--${E.profitY>=0?'green':'red'})">${fmt(E.mo(E.profitY))} р</b></td>
-      <td class="num"><b style="color:var(--${E.profitY>=0?'green':'red'})">${fmt(E.profitY)} р</b></td>
+      <td class="num">${one?"":`<b style="color:var(--${E.profitY>=0?'green':'red'})">${fmt(E.profitY)} р</b>`}</td>
       <td class="num"><b>${share(E.profitY)}</b></td></tr>
     </tbody></table></div>`;
   // Главное, что видно из этой разбивки: сколько уходит в любом случае, даже без единой группы
   h+=`<div class="callout" style="margin-top:10px;font-size:12px;line-height:1.7">
-      <b>Зависит от загрузки:</b> ${fmt(E.mo(E.zavY))} р/мес — ЗП педагогов, проценты с оборота, налоги.
+      <b>Зависит от загрузки:</b> ${fmt(E.mo(E.zavY))} р${one?"":"/мес"} — ЗП педагогов, проценты с оборота, налоги.
       Нет групп — нет и этих расходов.<br>
-      <b>Идёт в любом случае:</b> <span style="color:var(--red)">${fmt(E.mo(E.fixY))} р/мес</span> — аренда,
+      <b>Идёт в любом случае:</b> <span style="color:var(--red)">${fmt(E.mo(E.fixY))} р${one?"":"/мес"}</span> — аренда,
       админ-команда и прочее постоянное. Это платится, даже если не запустится ни одна группа: чтобы выйти
       в ноль, нужно сначала закрыть эту сумму.</div>`;
   const w=E.warn||{};
@@ -4385,9 +4430,7 @@ function _expenseHTML(open){
     h+=`<div class="hint" style="margin-top:6px">Групп без подтвердивших: <b>${w.emptyGroups.length}</b> — они здесь не считаются ни в выручку, ни в зарплату.</div>`;
   if(w.silent) h+=`<div class="hint">Молчат (ещё не подтвердили): <b>${w.silent}</b> — когда ответят, вырастет и выручка, и ЗП педагогов.</div>`;
   h+=`</div>`;
-  return open===false
-    ? `<details style="margin-top:12px"><summary style="cursor:pointer;font-size:13px">Расходы по статьям — расширенная таблица</summary>${h}</details>`
-    : h;
+  return h;
 }
 
 /* Налоговая нагрузка при ТЕКУЩЕЙ загрузке, а не по модели.
@@ -4452,7 +4495,7 @@ function renderTax(){
    <tr><td>Эквайринг (${S.tax.acquiring}%)<span class="hint">не налог — комиссия банка, в «итого» не входит</span></td>${two(F.acq,T.variableExtra,"neg")}</tr>
   </tbody>`;
   document.getElementById("taxCalcMore").innerHTML=_taxMonthsHTML(F);
-  document.getElementById("taxExpenses").innerHTML=_expenseHTML(true);
+  document.getElementById("taxExpensesBox").innerHTML=_expenseHTML(true);
 }
 /* Помесячно: налоги платятся каждый месяц, а месяцы неравные — в декабре и январе занятий меньше,
    выручка и ФОТ падают вместе с ними. Средняя цифра это скрывает, поэтому даём разбивку. */
@@ -8014,26 +8057,32 @@ function _realPnl(){
     Object.keys(byMonth).sort().forEach(ym=>{
       const wd=byMonth[ym];
       const mayOn=(ym+"-01")<c.full;               // месяц целиком до перехода на полную цену
-      let rev=0, wage=0, lessons=0, seats=0;
+      let rev=0, wage=0, lessons=0, seats=0, revMay=0, seatsMay=0;
       (S.grid||[]).forEach(l=>{
         if(!l.course) return;
         const n=wd[+l.day||0]||0; if(!n) return;   // сколько раз этот день выпал в месяце
         const pr=_planPrice(l.course);
         if(!pr.p) warn.noPrice.add(l.course);
         // считаем ТОЛЬКО подтвердивших: они и платят, и определяют ставку педагога
-        const seen=new Set(); let sum=0, nConf=0;
+        const seen=new Set(); let sum=0, nConf=0, sumMay=0, nMay=0;
         kidsOf(l).forEach(k=>{
           const nk=_nameKey(k.n); if(!nk||seen.has(nk)) return; seen.add(nk);
           if(k.no||k.vbReply==="no") return;
           if(!(k.may||k.vbReply==="yes")){ warn.silent.add(nk); return; }   // молчит — в факт не берём
-          sum+=(mayOn&&k.may)?pr.m:pr.p;
-          nConf++;
+          // майский действует только в месяцы ДО перехода на полную цену — дальше тот же
+          // ребёнок платит обычную. Считаем отдельно, чтобы было видно, сколько это денег.
+          const isMay=!!(mayOn&&k.may);
+          const cost=isMay?pr.m:pr.p;
+          sum+=cost; nConf++;
+          if(isMay){ sumMay+=cost; nMay++; }
         });
         if(!nConf){ warn.emptyGroups.add((l.group&&l.group.trim())||l.course); return; }  // группа не запущена
         rev+=sum*n;
+        revMay+=sumMay*n;
         wage+=wageForLesson(l.course,nConf,l)*n;
         lessons+=n;
         seats+=nConf;
+        seatsMay+=nMay;
       });
       rev=Math.round(rev); wage=Math.round(wage);
       // налоги и взносы — те же правила, что на «Налоги РБ и ФОТ»
@@ -8045,7 +8094,10 @@ function _realPnl(){
       const taxes=usn+contrib;
       const profit=rev-wage-ops-adminFOT-pct-acq-taxes-(+as.ownerSalary||0);
       const m={ym,mayOn,rev,wage,lessons,seats,ops,adminFOT,pct:Math.round(pct),acq:Math.round(acq),
-               usn:Math.round(usn),contrib:Math.round(contrib),taxes:Math.round(taxes),profit:Math.round(profit)};
+               usn:Math.round(usn),contrib:Math.round(contrib),taxes:Math.round(taxes),profit:Math.round(profit),
+               // сколько раз каждый день недели выпал в этом месяце (выходные и праздники уже вычтены
+               // в _planDays) и сколько денег пришло по майской цене — для помесячного разбора
+               days:Object.assign({},wd), revMay:Math.round(revMay), seatsMay};
       P.months.push(m);
       P.rev+=m.rev; P.wage+=m.wage; P.lessons+=m.lessons; P.tax+=m.taxes; P.profit+=m.profit;
     });

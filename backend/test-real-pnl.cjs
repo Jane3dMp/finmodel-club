@@ -103,10 +103,12 @@ check('отказавшийся ребёнок не платит и не под�
 // Блок должен ещё и нарисоваться: вёрстка собирается той же функцией, что
 // на экране, поэтому опечатка в шаблоне видна здесь, а не у Жанны.
 // _realPnlHTML вставляет постатейную расшифровку расходов — берём и её, иначе блок не соберётся
-const srcHtml = ['_planLabel', '_realPnlHTML', '_expenseData', '_expenseHTML'].map(grab).join('\n');
+const srcHtml = ['_planLabel', '_realPnlHTML', '_expenseData', '_expenseHTML', '_expBody', '_expMonLabel'].map(grab).join('\n');
 ctx.esc = (x) => String(x == null ? '' : x);
 ctx.fmt = (n) => String(Math.round(n));
 ctx.fmt1 = (n) => String(Math.round(n * 10) / 10);
+ctx.EXP_MON_SHORT = ['янв','фев','мар','апр','май','июн','июл','авг','сен','окт','ноя','дек'];
+ctx._expMonth = '';   // личный выбор месяца живёт в localStorage, в тесте — «средний месяц»
 ctx.PLAN_MON = ['января','февраля','марта','апреля','мая','июня','июля','августа','сентября','октября','ноября','декабря'];
 const html2 = new Function('ctx', 'with (ctx) { ' + src + '\n' + srcHtml + '\n return _realPnlHTML(); }')(sandbox);
 
@@ -126,6 +128,21 @@ check('в расшифровке видно, что уходит независ�
 check('теги div сбалансированы', (html2.match(/<div/g)||[]).length === (html2.match(/<\/div>/g)||[]).length,
   'открыто ' + (html2.match(/<div/g)||[]).length + ', закрыто ' + (html2.match(/<\/div>/g)||[]).length);
 check('таблица расходов в узкой обёртке', /class="exp"/.test(html2));
+check('есть переключатель месяцев', /class="exp-tabs"/.test(html2) && /сен ’26/.test(html2),
+  'месяц должен переключаться прямо в таблице');
+
+// то же самое, но с выбранным месяцем: Жанна нажимает «сен ’26»
+console.log('\nВыбран один месяц:');
+const one = new Function('ctx', 'with (ctx) { ' + src + '\n' + srcHtml + '\n return _expBody("2026-09"); }')(sandbox);
+check('месяц собрался', typeof one === 'string' && one.length > 300, 'длина: ' + (one || '').length);
+check('видно календарь месяца', /занятий по календарю/.test(one) && /выходные и праздники уже вычтены/.test(one),
+  'считаем по числу дней месяца, а не «×4 недели»');
+check('дни недели расписаны', /Вт ×|Ср ×|Чт ×/.test(one), 'сколько раз выпал каждый день');
+check('сказано про майскую цену', /майская цена|Майская цена/.test(one));
+check('колонка «за год» в месячном режиме убрана', one.indexOf('За год') < 0);
+check('шаблонные вставки раскрыты', one.indexOf('${') < 0);
+check('теги div сбалансированы', (one.match(/<div/g)||[]).length === (one.match(/<\/div>/g)||[]).length,
+  'открыто ' + (one.match(/<div/g)||[]).length + ', закрыто ' + (one.match(/<\/div>/g)||[]).length);
 
 console.log(bad ? '\nПЛОХО: ' + bad + '\n' : '\nВсё хорошо.\n');
 process.exit(bad ? 1 : 0);
