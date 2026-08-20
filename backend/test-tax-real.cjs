@@ -18,13 +18,16 @@ function check(name, ok, detail) {
 const near = (a, b) => Math.abs(a - b) < 0.51;
 
 const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
-const m = html.match(/\nfunction _taxReal\(\)\s*\{[\s\S]*?\n\}/m);
+const m = html.match(/\nfunction _taxReal\([^)]*\)\s*\{[\s\S]*?\n\}/m);
 if (!m) { console.log('не найдено: _taxReal'); process.exit(1); }
 
 // подставляем свой _realPnl — так проверяется именно сведение к «в месяц», без всей сетки
+// _taxReal берёт месяцы через _pnlMonths (схлопывает один календарный месяц из двух периодов)
+const mp = html.match(/\nfunction _pnlMonths\([^)]*\)\s*\{[\s\S]*?\n\}/m);
+if (!mp) { console.log('не найдено: _pnlMonths'); process.exit(1); }
 function build(realPnl, tax) {
   const S = { tax: tax };
-  return new Function('S', '_realPnl', m[0] + '\nreturn _taxReal;')(S, realPnl);
+  return new Function('S', '_realPnl', mp[0] + '\n' + m[0] + '\nreturn _taxReal;')(S, realPnl);
 }
 const TAX = { usn: 6, fszn: 34, belgosstrah: 0.6, acquiring: 1.5 };
 const mon = (ym, rev, wage) => ({
@@ -75,6 +78,19 @@ check('пустое расписание: без деления на ноль', 
 const F4 = build(() => R, { usn: 6, fszn: 30, belgosstrah: 0, acquiring: 0 })();
 check('ставка ФСЗН берётся из настроек', near(F4.fszn, (24000 + 26300) * 0.30), 'fszn=' + F4.fszn);
 check('нулевой Белгосстрах не ломает расчёт', F4.belg === 0);
+
+// ---- выбранный месяц: на вкладке «Налоги» и в таблице расходов период должен быть один ----
+// раньше _taxReal всегда усредняла по всем месяцам: сверху стояли средние за год налоги,
+// а прямо под ними — расходы выбранного декабря
+const TX = build(() => R, TAX);
+const Fd = TX('2026-12');
+check('выбран месяц — считается только он', Fd.mN === 1 && Fd.ym === '2026-12');
+check('выручка месяца, а не среднее', near(Fd.rev, 60000), 'rev=' + Fd.rev);
+check('УСН месяца', near(Fd.usn, 3600), 'usn=' + Fd.usn);
+check('база взносов месяца', near(Fd.fotBase, 18000 + 26300), 'fotBase=' + Fd.fotBase);
+check('без месяца — прежнее среднее по всем', near(TX('').rev, 80000));
+check('месяца нет в расписании — пусто, без падения',
+  TX('2030-01').mN === 0 && isFinite(TX('2030-01').taxTotal));
 
 console.log(bad ? ('\nПРОВАЛЕНО проверок: ' + bad) : '\nВсе проверки прошли.');
 process.exit(bad ? 1 : 0);

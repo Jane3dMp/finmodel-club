@@ -19,9 +19,12 @@ const near = (a, b) => Math.abs(a - b) < 1;
 const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
 const m = html.match(/\nfunction _expenseData\([^)]*\)\s*\{[\s\S]*?\n\}/m);
 if (!m) { console.log('не найдено: _expenseData'); process.exit(1); }
+// _pnlMonths схлопывает месяцы по ym: осень и весна могут задеть один календарный месяц
+const mp = html.match(/\nfunction _pnlMonths\([^)]*\)\s*\{[\s\S]*?\n\}/m);
+if (!mp) { console.log('не найдено: _pnlMonths'); process.exit(1); }
 const fmt1 = n => String(Math.round(n * 10) / 10);
 const build = (S, realPnl) =>
-  new Function('S', '_realPnl', 'fmt1', m[0] + '\nreturn _expenseData;')(S, realPnl, fmt1);
+  new Function('S', '_realPnl', 'fmt1', mp[0] + '\n' + m[0] + '\nreturn _expenseData;')(S, realPnl, fmt1);
 
 const mon = (ym, rev, wage) => ({ ym, mayOn: false, rev, wage, lessons: 10, seats: 40,
   usn: Math.round(rev * 0.06), acq: Math.round(rev * 0.015) });
@@ -56,7 +59,18 @@ check('ЗП педагогов — из факта', near(grp('Зарплата 
 check('админ-команда: статьи группы 2, × число месяцев', near(grp('Админ-команда').y, ADMIN * mN));
 check('постоянные: остальные статьи, × число месяцев', near(grp('Постоянные расходы').y, OPS * mN));
 check('от оборота = проценты + эквайринг', near(grp('От оборота').y, pctY + acqY));
-check('налоги = УСН + ФСЗН + Белгосстрах', near(grp('Налоги и взносы').y, usnY + fsznY + belgY));
+// взносы разделены на две части: с ФОТ педагогов они растут вместе с загрузкой, а с админ-ФОТ
+// платятся, даже если не запустится ни одна группа. Пока они лежали в одной «зависящей» группе,
+// выноска «идёт в любом случае» занижала сумму, а порог безубыточности выходил ниже реального.
+const conAdmin = ADMIN * mN * 0.346, conTeach = wageY * 0.346;
+check('налоги с оборота = УСН + взносы с ФОТ педагогов',
+  near(grp('Налоги с оборота и ФОТ педагогов').y, usnY + conTeach),
+  'группа=' + grp('Налоги с оборота и ФОТ педагогов').y);
+check('взносы с админ-команды вынесены в постоянные',
+  near(grp('Взносы с админ-команды').y, conAdmin), 'группа=' + grp('Взносы с админ-команды').y);
+check('вместе они дают прежнюю сумму УСН и взносов',
+  near(grp('Налоги с оборота и ФОТ педагогов').y + grp('Взносы с админ-команды').y,
+       usnY + fsznY + belgY));
 check('ЗП собственника × число месяцев', near(grp('Зарплата собственника').y, ownerY));
 
 check('каждая статья постоянных — отдельной строкой', grp('Постоянные расходы').rows.length === 2);
@@ -65,10 +79,10 @@ check('нулевая %-статья не показывается', grp('От �
 check('«в месяц» у постоянной статьи = сама ставка, не делённая заново',
   near(grp('Постоянные расходы').rows[0].mo, 4000), 'mo=' + grp('Постоянные расходы').rows[0].mo);
 
-check('зависит от загрузки: ЗП + оборотные + налоги',
-  near(E.zavY, wageY + pctY + acqY + usnY + fsznY + belgY), 'zavY=' + E.zavY);
-check('идёт в любом случае: постоянные + админ + собственник',
-  near(E.fixY, ADMIN * mN + OPS * mN + ownerY), 'fixY=' + E.fixY);
+check('зависит от загрузки: ЗП + оборотные + УСН + взносы с педагогов',
+  near(E.zavY, wageY + pctY + acqY + usnY + conTeach), 'zavY=' + E.zavY);
+check('идёт в любом случае: постоянные + админ + собственник + взносы с админ-ФОТ',
+  near(E.fixY, ADMIN * mN + OPS * mN + ownerY + conAdmin), 'fixY=' + E.fixY);
 check('зависимое + постоянное = весь расход', near(E.zavY + E.fixY, E.totalY));
 check('предупреждения проброшены как есть', E.warn.silent === 7 && E.warn.emptyGroups.length === 1);
 
@@ -76,8 +90,11 @@ check('предупреждения проброшены как есть', E.war
 const R2 = Object.assign({}, R, { npd: 25000 });
 const E2 = build(S, () => R2)();
 const fb2 = Math.max(0, 30000 + ADMIN - 25000) + Math.max(0, 18000 + ADMIN - 25000);
+// НПД (25 000) больше админ-ФОТ, поэтому постоянной части взносов не остаётся вовсе
 check('НПД срезает базу взносов помесячно',
-  near(grp2(E2, 'Налоги и взносы').y, usnY + fb2 * 0.346), 'налоги=' + grp2(E2, 'Налоги и взносы').y);
+  near(grp2(E2, 'Налоги с оборота и ФОТ педагогов').y, usnY + fb2 * 0.346),
+  'налоги=' + grp2(E2, 'Налоги с оборота и ФОТ педагогов').y);
+check('при НПД больше админ-ФОТ постоянных взносов нет', !grp2(E2, 'Взносы с админ-команды'));
 function grp2(E, t) { return E.G.find(g => g.t === t); }
 
 // нет ни одной запущенной группы — таблицу рисовать не из чего, но и падать нельзя
@@ -113,7 +130,8 @@ check('постоянные берутся ЗА ОДИН месяц, а не з�
 check('админ-команда — тоже за один месяц', near(grp2(Edec, 'Админ-команда').y, ADMIN));
 check('ЗП собственника — за один месяц', near(grp2(Edec, 'Зарплата собственника').y, 1000));
 check('налоги считаются от этого месяца',
-  near(grp2(Edec, 'Налоги и взносы').y, 3600 + (18000 + ADMIN) * 0.346));
+  near(grp2(Edec, 'Налоги с оборота и ФОТ педагогов').y + grp2(Edec, 'Взносы с админ-команды').y,
+       3600 + (18000 + ADMIN) * 0.346));
 check('разбивка по месяцу тоже сходится', near(Edec.totalY + Edec.profitY, 60000));
 check('«в месяц» в режиме одного месяца = сама сумма', near(Edec.mo(Edec.totalY), Edec.totalY));
 check('весь список месяцев остаётся для переключателя', Edec.all.length === 2);

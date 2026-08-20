@@ -934,7 +934,7 @@ details.client .cli-cols .cc-bal{width:74px;font-weight:600}
  <div class="card">
   <h3>Топ и аутсайдеры по марже курсов</h3>
   <div class="sec-desc" style="margin:-2px 0 6px">Маржа курса — по модели («Курсы и маржа»): цена и ставка педагога
-   при плановой наполняемости. От выбранного месяца не зависит.</div>
+   при плановой наполняемости, <b>с учётом ползунков сценариев</b>. От выбранного месяца не зависит.</div>
   <div class="row2">
    <div><b style="color:var(--green)">🟢 Локомотивы</b><table id="topCourses" style="margin-top:8px"></table></div>
    <div><b style="color:var(--red)">🔴 Под вопросом</b><table id="botCourses" style="margin-top:8px"></table></div>
@@ -1761,7 +1761,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-08-20-12";
+const APP_VER="2026-08-20-13";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -4306,7 +4306,7 @@ function delFixedPct(i){
    взносов обрезается по нулю в том месяце, где это случилось. */
 function _expenseData(ym){
   const R=_realPnl(), tax=S.tax||{}, as=S.assume||{};
-  const all=[]; R.periods.forEach(P=>P.months.forEach(m=>all.push(m)));
+  const all=_pnlMonths(R);
   // ym задан — считаем ОДИН месяц: занятий в нём столько, сколько дней недели реально выпало
   // (выходные и праздники уже вычтены), а постоянные расходы берутся за один месяц, не за год
   const months=ym?all.filter(m=>m.ym===ym):all;
@@ -4318,6 +4318,12 @@ function _expenseData(ym){
   const fbY=sum(m=>Math.max(0, m.wage+R.adminFOT-R.npd));   // база взносов, помесячно
   const usnY=sum(m=>m.usn), acqY=sum(m=>m.acq);
   const fsznY=fbY*((+tax.fszn||0)/100), belgY=fbY*((+tax.belgosstrah||0)/100);
+  const conPct=(+tax.fszn||0)+(+tax.belgosstrah||0);
+  // взносы делим на две части: с ФОТ педагогов (растут с загрузкой) и с админ-ФОТ (постоянные).
+  // НПД вычитается сначала из админ-части — она и так постоянная, так честнее к «порогу нуля».
+  const conAdminBase=sum(()=>Math.max(0, R.adminFOT-R.npd));
+  const conAdmin=conAdminBase*(conPct/100);
+  const conTeach=Math.max(0, (fsznY+belgY)-conAdmin);
   const ownerY=(+as.ownerSalary||0)*mN;
 
   // статьи с вкладки «Постоянные расходы»: группа 2 — админ-команда, остальное — операционные
@@ -4341,10 +4347,13 @@ function _expenseData(ym){
      rows:ops.sort(byY)},
     {t:"От оборота", zav:true, note:"растут вместе с выручкой",
      rows:pct.concat([{n:"Эквайринг ("+fmt1(+tax.acquiring||0)+"%)", y:acqY}]).sort(byY)},
-    {t:"Налоги и взносы", zav:true, note:"УСН с выручки, взносы с фонда зарплаты",
+    {t:"Налоги с оборота и ФОТ педагогов", zav:true, note:"УСН с выручки, взносы с зарплаты педагогов",
      rows:[{n:"УСН ("+fmt1(+tax.usn||0)+"%)", y:usnY},
-           {n:"ФСЗН ("+fmt1(+tax.fszn||0)+"%)", y:fsznY},
-           {n:"Белгосстрах ("+fmt1(+tax.belgosstrah||0)+"%)", y:belgY}]},
+           {n:"Взносы с ФОТ педагогов ("+fmt1(conPct)+"%)", y:conTeach}]},
+    // взносы с админ-ФОТ платятся, даже если не запустится ни одна группа: держим их в
+    // постоянной части, иначе «идёт в любом случае» занижено и порог безубыточности тоже
+    {t:"Взносы с админ-команды", zav:false, note:"ФСЗН и Белгосстрах с постоянного ФОТ — платятся без единой группы",
+     rows:conAdmin>0?[{n:"ФСЗН + Белгосстрах ("+fmt1(conPct)+"%)", y:conAdmin}]:[]},
     {t:"Зарплата собственника", zav:false, note:"оценка вашего труда в операционке, с «Параметров»",
      rows:ownerY?[{n:"ЗП собственника", y:ownerY}]:[]},
   ].filter(g=>g.rows.length);
@@ -4367,7 +4376,8 @@ function setExpMonth(ym){
   const a=document.getElementById("taxExpenses"), b=document.getElementById("repExpenses");
   if(a) a.innerHTML=_expBody(_expMonth);
   if(b) b.innerHTML=_expBody(_expMonth);
-  // дашборд считает тот же месяц — иначе на двух вкладках стояли бы разные периоды
+  // дашборд и налоги считают тот же месяц — иначе на одном экране стояли бы разные периоды
+  if(typeof renderTaxCalc==="function") renderTaxCalc();
   if(typeof renderDash==="function" && document.getElementById("dashSwitch")) renderDash();
 }
 const EXP_MON_SHORT=["янв","фев","мар","апр","май","июн","июл","авг","сен","окт","ноя","дек"];
@@ -4384,7 +4394,9 @@ function _expenseHTML(open){
 }
 function _expBody(ym){
   const E=_expenseData(ym);
-  if(E.ym && !E.mN) return _expBody("");        // выбранного месяца в расписании нет — показываем средний
+  // выбранного месяца в расписании больше нет (сдвинули периоды): молча показать средние нельзя —
+  // ни один чип не подсветится, и средние прочтутся как выбранный месяц. Сбрасываем выбор.
+  if(E.ym && !E.mN){ _expMonth=""; try{ localStorage.setItem("exp_month",""); }catch(e){} return _expBody(""); }
   if(!E.mN) return `<div class="callout">Живое расписание пока не даёт фактических цифр: нет ни одной запущенной
     группы с подтвердившими детьми. Как только появятся — расходы посчитаются здесь по статьям, помесячно.</div>`;
   const share=y=>E.revY>0?fmt1(y/E.revY*100)+"%":"—";
@@ -4464,11 +4476,14 @@ function _expBody(ym){
    Здесь сводим его к «в месяц» — налоги считают и платят помесячно.
    ⚠️ Делим на число УЧЕБНЫХ месяцев, а не на 12: лето в расчёт не входит, иначе средняя
    нагрузка выглядела бы заметно меньше того, что реально придётся платить в сентябре. */
-function _taxReal(){
+function _taxReal(ym){
   const R=_realPnl(), tax=S.tax||{};
   let rev=0, wage=0, usn=0, acq=0, fotBase=0, lessons=0, seats=0, mN=0;
   const months=[];
-  R.periods.forEach(P=>P.months.forEach(m=>{
+  // тот же месяц, что выбран в таблице расходов и на дашборде: иначе на одном экране стояли бы
+  // средние за год налоги и декабрьские расходы
+  const src=_pnlMonths(R).filter(m=>!ym||m.ym===ym);
+  src.forEach(m=>{
     mN++;
     // база взносов считается ПО МЕСЯЦУ: в декабре занятий меньше, ФОТ педагогов ниже
     const fb=Math.max(0, m.wage+R.adminFOT-R.npd);
@@ -4476,9 +4491,9 @@ function _taxReal(){
     lessons+=m.lessons; seats+=m.seats;
     months.push(Object.assign({},m,{fotBase:Math.round(fb),
       fszn:Math.round(fb*((+tax.fszn||0)/100)), belg:Math.round(fb*((+tax.belgosstrah||0)/100))}));
-  }));
+  });
   const d=mN||1, per=n=>n/d, fb=per(fotBase);
-  const F={mN, months, warn:R.warn, adminFOT:R.adminFOT, npd:R.npd,
+  const F={mN, months, ym:ym||"", warn:R.warn, adminFOT:R.adminFOT, npd:R.npd,
     rev:per(rev), wage:per(wage), usn:per(usn), acq:per(acq),
     lessons:per(lessons), seats:per(seats), fotBase:fb,
     fszn:fb*((+tax.fszn||0)/100), belg:fb*((+tax.belgosstrah||0)/100)};
@@ -4486,24 +4501,22 @@ function _taxReal(){
   return F;
 }
 
-/* ===== РЕНДЕР: НАЛОГИ ===== */
-function renderTax(){
-  const r=document.getElementById("taxRates");
-  r.innerHTML=`
-   <div class="field"><label>УСН, % от валовой выручки<span class="hint">2026: 6%</span></label><input type="number" value="${S.tax.usn}" onchange="updTax('usn',this.value)"></div>
-   <div class="field"><label>ФСЗН (наниматель), %<span class="hint">от ФОТ по труд. договорам</span></label><input type="number" value="${S.tax.fszn}" onchange="updTax('fszn',this.value)"></div>
-   <div class="field"><label>Белгосстрах, %<span class="hint">от ФОТ</span></label><input type="number" value="${S.tax.belgosstrah}" onchange="updTax('belgosstrah',this.value)"></div>
-   <div class="field"><label>Эквайринг, % от выручки</label><input type="number" value="${S.tax.acquiring}" onchange="updTax('acquiring',this.value)"></div>
-   <div class="field"><label>ФОТ на НПД (самозанятые), р/мес<span class="hint">видеограф, СММ — НЕ облагается взносами</span></label><input type="number" value="${S._npdMonth||0}" onchange="updNpd(this.value)"></div>`;
-  const T=totals(), F=_taxReal();
+/* Таблица «Расчёт налоговой нагрузки» — отдельно от полей ввода ставок: при смене месяца
+   перерисовываем только её, иначе у Жанны слетал бы фокус из поля, которое она правит. */
+function renderTaxCalc(){
+  if(!document.getElementById("taxCalc")) return;
+  const T=totals(), F=_taxReal(_expMonth);
+  const one=F.mN===1&&F.ym, M=one?F.months[0]:null;
   const two=(f,m,cls)=>`<td class="num${cls?" "+cls:""}"><b>${fmt(f)} р</b></td><td class="num" style="color:var(--muted)">${fmt(m)} р</td>`;
   document.getElementById("taxCalcNote").innerHTML=
     F.mN?`Первая колонка — <b>по текущей загрузке</b>: живое расписание, только запущенные группы (есть хотя бы
-      один подтвердивший ребёнок), зарплата педагога по его ставке при таком числе детей. В среднем
-      за ${F.mN} учебных месяцев, лето не в счёт. Вторая — по модели с «Курсов и маржи», для сверки.`
+      один подтвердивший ребёнок), зарплата педагога по его ставке при таком числе детей.
+      ${one?`Показан <b>${esc(_planLabel(M.ym))}</b> — месяц выбирается в таблице расходов ниже.`
+           :`В среднем за ${F.mN} учебных месяцев, лето не в счёт.`}
+      Вторая — по модели с «Курсов и маржи», для сверки.`
      :`Живое расписание пока не даёт фактических цифр (нет подтвердивших детей) — показана только модель.`;
   document.getElementById("taxCalc").innerHTML=`<thead><tr>
-     <th style="text-align:left"></th><th class="num">По загрузке</th><th class="num">По модели</th></tr></thead>
+     <th style="text-align:left"></th><th class="num">${one?"За месяц":"По загрузке"}</th><th class="num">По модели</th></tr></thead>
    <tbody>
    <tr><td>Валовая выручка/мес</td>${two(F.rev,T.rev)}</tr>
    <tr><td>Налог УСН (${S.tax.usn}%)</td>${two(F.usn,T.usn,"neg")}</tr>
@@ -4517,7 +4530,18 @@ function renderTax(){
    <tr><td>Налоговая нагрузка к выручке</td><td class="num"><b>${F.rev>0?fmt1(F.taxTotal/F.rev*100):0}%</b></td><td class="num" style="color:var(--muted)">${T.rev>0?fmt1(T.taxTotal/T.rev*100):0}%</td></tr>
    <tr><td>Эквайринг (${S.tax.acquiring}%)<span class="hint">не налог — комиссия банка, в «итого» не входит</span></td>${two(F.acq,T.variableExtra,"neg")}</tr>
   </tbody>`;
-  document.getElementById("taxCalcMore").innerHTML=_taxMonthsHTML(F);
+  document.getElementById("taxCalcMore").innerHTML=_taxMonthsHTML(_taxReal(""));   // разбивка всегда по всем месяцам
+}
+/* ===== РЕНДЕР: НАЛОГИ ===== */
+function renderTax(){
+  const r=document.getElementById("taxRates");
+  if(r) r.innerHTML=`
+   <div class="field"><label>УСН, % от валовой выручки<span class="hint">2026: 6%</span></label><input type="number" value="${S.tax.usn}" onchange="updTax('usn',this.value)"></div>
+   <div class="field"><label>ФСЗН (наниматель), %<span class="hint">от ФОТ по труд. договорам</span></label><input type="number" value="${S.tax.fszn}" onchange="updTax('fszn',this.value)"></div>
+   <div class="field"><label>Белгосстрах, %<span class="hint">от ФОТ</span></label><input type="number" value="${S.tax.belgosstrah}" onchange="updTax('belgosstrah',this.value)"></div>
+   <div class="field"><label>Эквайринг, % от выручки</label><input type="number" value="${S.tax.acquiring}" onchange="updTax('acquiring',this.value)"></div>
+   <div class="field"><label>ФОТ на НПД (самозанятые), р/мес<span class="hint">видеограф, СММ — НЕ облагается взносами</span></label><input type="number" value="${S._npdMonth||0}" onchange="updNpd(this.value)"></div>`;
+  renderTaxCalc();
   document.getElementById("taxExpensesBox").innerHTML=_expenseHTML(true);
 }
 /* Помесячно: налоги платятся каждый месяц, а месяцы неравные — в декабре и январе занятий меньше,
@@ -4556,6 +4580,26 @@ function renderSettings(){
 }
 function updAssume(k,v){ S.assume[k]=parseFloat(v)||0; persistLocal(); renderAll(); }
 
+/* Плоский список месяцев из _realPnl, схлопнутый по ym.
+   Осенний и весенний периоды может задеть один календарный месяц (например осень до 10.01,
+   весна с 11.01) — тогда в списке оказывались ДВА «янв ’27» по половине месяца каждый:
+   два одинаковых чипа, mN=2, выручка и ФОТ делились пополам, а постоянные расходы
+   оставались полномесячными — месяц выглядел вдвое убыточнее, чем на самом деле. */
+function _pnlMonths(R){
+  const by={}, out=[];
+  R.periods.forEach(P=>P.months.forEach(m=>{
+    const cur=by[m.ym];
+    if(!cur){ by[m.ym]=Object.assign({},m,{days:Object.assign({},m.days),hols:(m.hols||[]).slice()}); out.push(m.ym); return; }
+    ["rev","wage","lessons","seats","revMay","seatsMay","kidsU","acq","usn","pct","contrib","taxes","profit"]
+      .forEach(k=>{ if(typeof m[k]==="number") cur[k]=(cur[k]||0)+m[k]; });
+    for(const d in (m.days||{})) cur.days[d]=(cur.days[d]||0)+m.days[d];
+    (m.hols||[]).forEach(h=>{ if(cur.hols.indexOf(h)<0) cur.hols.push(h); });
+    cur.hols.sort();
+    cur.mayOn=cur.mayOn||m.mayOn;
+  }));
+  return out.sort().map(ym=>by[ym]);
+}
+
 /* P&L по ФАКТУ — те же поля, что отдаёт totals(), но посчитанные по живому расписанию.
    Просьба Жанны 20.08.2026: «эту модель в таком виде предлагаю сделать именно по месяцу
    в реальном времени, исходя из набора текущего по сетке расписания».
@@ -4568,7 +4612,7 @@ function updAssume(k,v){ S.assume[k]=parseFloat(v)||0; persistLocal(); renderAll
    и они не разъезжались при правках. Ползунки сценариев здесь НЕ применяются: это факт. */
 function _dashFact(ym){
   const R=_realPnl(), tax=S.tax||{}, as=S.assume||{};
-  const all=[]; R.periods.forEach(P=>P.months.forEach(m=>all.push(m)));
+  const all=_pnlMonths(R);
   const months=ym?all.filter(m=>m.ym===ym):all;
   const mN=months.length, d=mN||1;
   const sum=f=>months.reduce((a,m)=>a+f(m),0), per=n=>n/d;
@@ -4590,7 +4634,8 @@ function _dashFact(ym){
   // аренда без ползунка сценария — в факте он не применяется
   let rent=0; for(const k in (S.fixed||{})) if(k.indexOf("Аренда")===0) rent+=+S.fixed[k]||0;
   return {rev,wage,mat,variableExtra,grossProfit,fixed,pctExpense,opProfit,usn,fszn,belg,taxTotal,netProfit,
-    lessons:per(sum(m=>m.lessons)), kids:per(sum(m=>m.seats)), revMay:per(sum(m=>m.revMay)),
+    lessons:per(sum(m=>m.lessons)), kids:per(sum(m=>m.kidsU||0)), seats:per(sum(m=>m.seats)),
+    revMay:per(sum(m=>m.revMay)),
     fotBase,adminFOT:R.adminFOT,npd:R.npd,owner,rent,ops:R.ops,
     mN,months,all,ym:ym||"",warn:R.warn,fact:true};
 }
@@ -4607,10 +4652,15 @@ function setDashMode(v){
 /* ===== РЕНДЕР: ДАШБОРД ===== */
 function renderDash(){
   const fact=_dashMode!=="model";
-  const F=fact?_dashFact(_expMonth):null;
-  // выбран месяц, которого в расписании нет (сменили периоды) — показываем средний
-  const T=(fact&&F.mN)?F:(fact?_dashFact(""):totals());
+  let F=fact?_dashFact(_expMonth):null;
+  // выбранного месяца в расписании больше нет (сдвинули периоды) — сбрасываем выбор, иначе
+  // ни один чип не подсветится и средние цифры прочтутся как цифры выбранного месяца
+  if(fact && _expMonth && !F.mN){ _expMonth=""; try{ localStorage.setItem("exp_month",""); }catch(e){} F=_dashFact(""); }
+  const T=fact?F:totals();
   const one=!!(fact&&T.mN===1&&T.ym), M=one?T.months[0]:null;
+  // ⚠️ mN — это число месяцев КАЛЕНДАРЯ: оно равно девяти всегда, даже когда ни один ребёнок
+  // не подтвердил. «Есть что показывать» определяем по занятым местам, а не по mN.
+  const has=!fact || T.months.some(m=>(m.kidsU||0)>0);
   const rentShare=T.rev>0?((fact?T.rent:sumRent())/T.rev*100):0;
   const fotShare=T.rev>0?((T.wage+(fact?T.adminFOT:sumAdminFOT()))/T.rev*100):0;
 
@@ -4629,7 +4679,7 @@ function renderDash(){
   }
   const desc=document.getElementById("dashDesc");
   if(desc) desc.innerHTML=fact
-    ? (T.mN
+    ? (has
         ? (one
             ? `${esc(_planLabel(M.ym))} по живому расписанию: занятий по календарю <b>${M.lessons}</b>
                (выходные и праздники вычтены), мест занято <b>${M.seats}</b>.
@@ -4647,19 +4697,19 @@ function renderDash(){
   k.innerHTML=`
    ${kpi("Выручка/мес",fmt(T.rev)+" р","coal",fact?(one?"за этот месяц, по подтвердившим":"в среднем за учебный месяц"):"по проведённым занятиям")}
    ${kpi("Чистая прибыль",fmt(T.netProfit)+" р",profCls,"после налогов и ЗП собств.")}
-   ${kpi("Рентабельность",(T.rev>0?fmt1(T.netProfit/T.rev*100):0)+"%",profCls,"чистая прибыль / выручка")}
-   ${fact?kpi("Мест занято",fmt(T.kids),"blue","подтвердившие в запущенных группах")
+   ${kpi("Рентабельность",T.rev>0?(fmt1(T.netProfit/T.rev*100)+"%"):"—",T.rev>0?profCls:"coal","чистая прибыль / выручка")}
+   ${fact?kpi("Мест занято",fmt(T.kids),"blue","детей в запущенных группах (без повторов)")
          :kpi("Плановая ёмкость",fmt(T.kids),"blue","факт детей × групп (модель)")}
    ${kpi("Занятий/мес",fmt(T.lessons),"blue",fact?"по календарю, без праздников":"всего по расписанию")}
-   ${kpi("Доля ФОТ",fmt1(fotShare)+"%",fotShare>55?"red":"green","педагоги + админ-команда")}
-   ${kpi("Доля аренды",fmt1(rentShare)+"%",rentShare>12?"red":"green","ориентир 8–12%")}
-   ${kpi("Налог. нагрузка",(T.rev>0?fmt1(T.taxTotal/T.rev*100):0)+"%","coal","УСН + взносы")}`;
+   ${kpi("Доля ФОТ",T.rev>0?(fmt1(fotShare)+"%"):"—",T.rev>0?(fotShare>55?"red":"green"):"coal","педагоги + админ-команда")}
+   ${kpi("Доля аренды",T.rev>0?(fmt1(rentShare)+"%"):"—",T.rev>0?(rentShare>12?"red":"green"):"coal","ориентир 8–12%")}
+   ${kpi("Налог. нагрузка",T.rev>0?(fmt1(T.taxTotal/T.rev*100)+"%"):"—","coal","УСН + взносы")}`;
 
   // P&L
   document.getElementById("pnlTable").innerHTML=`<tbody>
    ${pnl("Выручка",T.rev,"")}
    ${pnl("− ЗП педагогов",-T.wage,"sub")}
-   ${pnl("− Материалы",-T.mat,"sub")}
+   ${T.mat>0?pnl("− Материалы",-T.mat,"sub"):""}
    ${pnl("− Эквайринг",-T.variableExtra,"sub")}
    ${pnl("= Валовая прибыль",T.grossProfit,"mid")}
    ${pnl("− Постоянные расходы",-T.fixed,"sub")}
@@ -4679,11 +4729,17 @@ function renderDash(){
     : `Выручка считается по проведённым занятиям (4 недели/мес). Налог УСН — от валовой выручки.`;
 
   // структура расходов
+  // ЗП собственника вычитается из чистой прибыли в обоих режимах (totals() и _dashFact),
+  // поэтому и в структуре расходов она должна стоять строкой — иначе сумма строк не сходится
+  // с «Всего расходов» под таблицей, и сложить её глазами нельзя.
+  const own=+S.assume.ownerSalary||0;
   const items=[
     ["ЗП педагогов",T.wage],
     ...(fact?[["Админ-команда",T.adminFOT],["Аренда, сервисы и прочее",T.ops]]
             :[["Постоянные (аренда, команда, сервисы)",T.fixed]]),
-    ["Материалы",T.mat],["Налоги и взносы",T.taxTotal],["Эквайринг",T.variableExtra],["Расходы % от оборота",T.pctExpense]
+    ["Материалы",T.mat],["Налоги и взносы",T.taxTotal],["Эквайринг",T.variableExtra],
+    ["Расходы % от оборота",T.pctExpense],
+    ...(own>0?[["ЗП собственника",own]]:[])
   ];
   let sh="<tbody>";
   items.forEach(([n,v])=>{ const p=T.rev>0?v/T.rev*100:0;
@@ -4691,9 +4747,9 @@ function renderDash(){
       <td style="width:130px"><div class="barwrap"><div class="bar" style="width:${Math.min(p,100)}%"></div><span class="barlbl">${fmt1(p)}%</span></div></td></tr>`; });
   sh+="</tbody>";
   document.getElementById("structTable").innerHTML=sh;
-  const totExp=T.wage+T.fixed+T.mat+T.taxTotal+T.variableExtra+T.pctExpense+(fact?T.owner:0);
+  const totExp=T.wage+T.fixed+T.mat+T.taxTotal+T.variableExtra+T.pctExpense+own;
   document.getElementById("structHint").innerHTML=
-    `<b>Всего расходов:</b> ${fmt(totExp)} р${(fact&&one)?"":"/мес"}${(fact&&T.owner)?` <span style="color:var(--muted)">(включая ЗП собственника ${fmt(T.owner)} р)</span>`:""}.
+    `<b>Всего расходов:</b> ${fmt(totExp)} р${one?"":"/мес"}.
      Прибыль ${T.netProfit>=0?"положительная":"отрицательная"}: <b>${fmt(T.netProfit)} р</b>.
      ${fotShare>55?"⚠ Доля ФОТ выше 55% — проверьте загрузку и ставки.":""}
      ${(fact&&T.warn&&T.warn.emptyGroups&&T.warn.emptyGroups.length)?`<div class="hint" style="margin-top:4px">Групп без подтвердивших: <b>${T.warn.emptyGroups.length}</b> — они не дают ни выручки, ни зарплаты.${T.warn.silent?` Молчат ещё <b>${T.warn.silent}</b> детей.`:""}</div>`:""}`;
@@ -4702,8 +4758,12 @@ function renderDash(){
   const ranked=S.courses.map((c,i)=>({c,i,r:applyScn(c)})).filter(x=>x.r.groups>0&&x.r.fillN>0);
   ranked.sort((a,b)=>b.r.margin-a.r.margin);
   const top=ranked.slice(0,6), bot=ranked.slice(-6).reverse();
+  // ⚠️ скобки обязательны: `a < b?.c || 1e9` разбирается как `(a < b?.c) || 1e9` — правая часть
+  // всегда истинна, фильтр не отсекал ничего, и оба списка показывали одни и те же курсы,
+  // только в обратном порядке: самый прибыльный курс стоял в «Под вопросом».
+  const cut=top.length?top[top.length-1].r.margin:1e9;
   document.getElementById("topCourses").innerHTML=courseMini(top);
-  document.getElementById("botCourses").innerHTML=courseMini(bot.filter(x=>x.r.margin<top[top.length-1]?.r.margin||1e9));
+  document.getElementById("botCourses").innerHTML=courseMini(bot.filter(x=>x.r.margin<cut));
 }
 function courseMini(arr){
   if(!arr.length) return `<tbody><tr><td class="muted">Заполните группы и наполняемость на вкладке «Курсы»</td></tr></tbody>`;
@@ -4730,6 +4790,7 @@ function kpi(label,val,cls,sub){
 function pnl(label,val,type){
   const cls=type==="tot"?"totrow":"";
   const style=type==="mid"?"font-weight:600;border-top:1px solid var(--terra)":(type==="sub"?"color:var(--muted)":"");
+  if(Object.is(val,-0)) val=0;          // «-0 р» зелёным читалось как доход
   const vcls=val>=0?"pos":"neg";
   return `<tr class="${cls}"><td style="${style}">${label}</td><td class="num ${type==='tot'?'':vcls}" style="${style}">${fmt(val)} р</td></tr>`;
 }
@@ -4804,7 +4865,9 @@ function onSlider(){
    ${kpi("Чистая прибыль",fmt(T.netProfit)+" р",T.netProfit>=0?"green":"red","")}
    ${kpi("Рентабельность",(T.rev>0?fmt1(T.netProfit/T.rev*100):0)+"%",T.netProfit>=0?"green":"red","")}
    ${kpi("Маржа до постоянных",fmt(T.grossProfit)+" р","blue","валовая прибыль")}`;
-  // дашборд тоже обновим (для согласованности после возврата на базовый)
+  // блок «Топ и аутсайдеры» на дашборде считается под теми же ползунками — без этого вызова
+  // он показывал маржу от прошлого положения ручек
+  if(typeof renderDash==="function" && document.getElementById("dashSwitch")) renderDash();
 }
 
 /* ===== ОБЩЕЕ ===== */
@@ -8187,6 +8250,9 @@ function _realPnl(){
       // сильнее, чем кажется — особенно если праздник попал на загруженный день недели
       const hols=[...hol].filter(x=>x.slice(0,7)===ym && x>=P.b && x<=P.e).sort();
       let rev=0, wage=0, lessons=0, seats=0, revMay=0, seatsMay=0;
+      // группа 2×/нед стоит в сетке ДВУМЯ занятиями с одним и тем же составом, поэтому seats
+      // (сумма по строкам) задваивает детей. Для «Мест занято» копим уникальные ФИО за месяц.
+      const kidsU=new Set();
       (S.grid||[]).forEach(l=>{
         if(!l.course) return;
         const n=wd[+l.day||0]||0; if(!n) return;   // сколько раз этот день выпал в месяце
@@ -8202,7 +8268,7 @@ function _realPnl(){
           // ребёнок платит обычную. Считаем отдельно, чтобы было видно, сколько это денег.
           const isMay=!!(mayOn&&k.may);
           const cost=isMay?pr.m:pr.p;
-          sum+=cost; nConf++;
+          sum+=cost; nConf++; kidsU.add(nk);
           if(isMay){ sumMay+=cost; nMay++; }
         });
         if(!nConf){ warn.emptyGroups.add((l.group&&l.group.trim())||l.course); return; }  // группа не запущена
@@ -8226,7 +8292,8 @@ function _realPnl(){
                usn:Math.round(usn),contrib:Math.round(contrib),taxes:Math.round(taxes),profit:Math.round(profit),
                // сколько раз каждый день недели выпал в этом месяце (выходные и праздники уже вычтены
                // в _planDays) и сколько денег пришло по майской цене — для помесячного разбора
-               days:Object.assign({},wd), hols, revMay:Math.round(revMay), seatsMay};
+               days:Object.assign({},wd), hols, revMay:Math.round(revMay), seatsMay,
+               kidsU:kidsU.size};
       P.months.push(m);
       P.rev+=m.rev; P.wage+=m.wage; P.lessons+=m.lessons; P.tax+=m.taxes; P.profit+=m.profit;
     });

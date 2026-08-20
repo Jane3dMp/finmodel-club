@@ -24,12 +24,16 @@ const grab = (name) => {
   if (!m) { console.log('не найдено: ' + name); process.exit(1); }
   return m[0];
 };
-const SRC = grab('_dashFact') + '\n' + grab('_expenseData');
+// _pnlMonths схлопывает месяцы по ym: осень и весна могут задеть один календарный месяц
+const SRC = grab('_pnlMonths') + '\n' + grab('_dashFact') + '\n' + grab('_expenseData');
 const fmt1 = n => String(Math.round(n * 10) / 10);
 const build = (S, realPnl) => new Function('S', '_realPnl', 'fmt1',
   SRC + '\nreturn {dash:_dashFact, exp:_expenseData};')(S, realPnl, fmt1);
 
-const mon = (ym, rev, wage) => ({ ym, mayOn: ym < '2027-01', rev, wage, lessons: 100, seats: 40,
+// seats — сумма по строкам сетки (группа 2×/нед стоит двумя занятиями с одним составом),
+// kidsU — уникальные дети месяца. Для «Мест занято» нужен именно kidsU, иначе детей задваивает.
+const mon = (ym, rev, wage) => ({ ym, mayOn: ym < '2027-01', rev, wage, lessons: 100,
+  seats: 40, kidsU: 35,
   usn: Math.round(rev * 0.06), acq: Math.round(rev * 0.015), pct: Math.round(rev * 0.05),
   revMay: ym < '2027-01' ? Math.round(rev * 0.3) : 0, seatsMay: 12 });
 
@@ -99,7 +103,11 @@ const Rspr = { ops: OPS, adminFOT: ADMIN, npd: 0, warn: {},
   periods: [{ months: [mon('2027-03', 60000, 18000)] }] };
 check('после перехода на полную цену майских денег нет',
   build(S, () => Rspr).dash('2027-03').revMay === 0);
-check('занятия и места пробрасываются', D.lessons === 100 && D.kids === 40);
+check('занятия пробрасываются', D.lessons === 100);
+// группа 2x/нед стоит в сетке двумя строками с одним составом: seats её задваивает,
+// поэтому «Мест занято» на дашборде считается по уникальным детям месяца
+check('«мест занято» — по уникальным детям, а не по строкам сетки',
+  D.kids === 35 && D.seats === 40, 'kids=' + D.kids + ', seats=' + D.seats);
 check('предупреждения пробрасываются', D.warn.silent === 7 && D.warn.emptyGroups.length === 1);
 
 // ---- НПД срезает базу взносов помесячно, не на средних ----
@@ -117,6 +125,20 @@ check('но постоянные расходы всё равно видны', n
   'аренда и команда платятся, даже если не запустилась ни одна группа');
 check('пустое расписание даёт убыток размером с постоянные',
   near(F3.netProfit, -(OPS + ADMIN + 1000)), 'netProfit=' + Math.round(F3.netProfit));
+
+// ---- один календарный месяц не должен попасть в список дважды ----
+// осень и весна могут задеть один месяц (осень до 10.01, весна с 11.01): раньше в ленте было
+// два чипа «янв ’27» по половине месяца, mN=2, выручка делилась пополам, а постоянные расходы
+// оставались полномесячными — месяц выглядел вдвое убыточнее
+const Rsplit = { ops: OPS, adminFOT: ADMIN, npd: 0, warn: {},
+  periods: [{ months: [mon('2027-01', 30000, 9000)] }, { months: [mon('2027-01', 40000, 12000)] }] };
+const Fsplit = build(S, () => Rsplit).dash('2027-01');
+check('месяц из двух периодов схлопывается в один', Fsplit.mN === 1, 'mN=' + Fsplit.mN);
+check('в ленте месяцев он тоже один', Fsplit.all.length === 1);
+check('деньги обеих половин сложены, а не усреднены', near(Fsplit.rev, 70000), 'rev=' + Fsplit.rev);
+check('ЗП тоже сложена', near(Fsplit.wage, 21000));
+check('занятия сложены', Fsplit.lessons === 200);
+check('постоянные остались за один месяц', near(Fsplit.fixed, OPS + ADMIN));
 
 console.log(bad ? ('\nПРОВАЛЕНО проверок: ' + bad) : '\nВсе проверки прошли.');
 process.exit(bad ? 1 : 0);

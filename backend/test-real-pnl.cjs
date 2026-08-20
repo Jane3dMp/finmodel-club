@@ -103,7 +103,8 @@ check('отказавшийся ребёнок не платит и не под�
 // Блок должен ещё и нарисоваться: вёрстка собирается той же функцией, что
 // на экране, поэтому опечатка в шаблоне видна здесь, а не у Жанны.
 // _realPnlHTML вставляет постатейную расшифровку расходов — берём и её, иначе блок не соберётся
-const srcHtml = ['_planLabel', '_planDMY', '_realPnlHTML', '_expenseData', '_expenseHTML', '_expBody', '_expMonLabel'].map(grab).join('\n');
+const srcHtml = ['_planLabel', '_planDMY', '_realPnlHTML', '_pnlMonths', '_expenseData',
+                 '_expenseHTML', '_expBody', '_expMonLabel'].map(grab).join('\n');
 ctx.esc = (x) => String(x == null ? '' : x);
 ctx.fmt = (n) => String(Math.round(n));
 ctx.fmt1 = (n) => String(Math.round(n * 10) / 10);
