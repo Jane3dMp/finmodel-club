@@ -1742,7 +1742,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-08-18-08";
+const APP_VER="2026-08-20-01";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -6664,7 +6664,8 @@ function alfaBuildMatch(customers){
     const key=_normName(c.name); if(!key) return;
     const phone=(c.phones&&c.phones.find(p=>String(p).replace(/\D/g,"").length>=6))||"";
     if(!idx.has(key)) idx.set(key,[]);
-    idx.get(key).push({id:c.id,name:c.name,phone:phone,dob:c.dob||"",balance:(c.balance!=null?c.balance:null)});
+    idx.get(key).push({id:c.id,name:c.name,phone:phone,dob:c.dob||"",balance:(c.balance!=null?c.balance:null),
+      created:c.created||"",lastAttend:c.last_attend||""});
   });
   // уникальные дети модели (+ набор полных ФИО на каждое «Фамилия Имя» — для детекта тёзок)
   const kids=new Map();
@@ -6734,33 +6735,43 @@ function alfaApply(){
   });
   // карта нормимя → {phone,id}
   const set=new Map();
-  M.willSet.forEach(w=>{ if(w.pick&&w.pick.phone) set.set(w.kid.key,{phone:w.pick.phone,id:w.pick.id,dob:w.pick.dob||"",balance:(w.pick.balance!=null?w.pick.balance:null)}); });
+  // Раньше сюда попадали только дети С телефоном — у остальных терялась и связь, и даты.
+  M.willSet.forEach(w=>{ if(!w.pick) return;
+    set.set(w.kid.key,{phone:w.pick.phone||"",id:w.pick.id,dob:w.pick.dob||"",balance:(w.pick.balance!=null?w.pick.balance:null),
+      created:w.pick.created||"",lastAttend:w.pick.lastAttend||""}); });
 
-  let updated=0;
-  (S.grid||[]).forEach(l=>kidsOf(l).forEach(k=>{
+  let updated=0, datesN=0;
+  /* ⚠️ Дата внесения в Альфу и последнее посещение раньше приходили ТОЛЬКО из «💰 Обновить балансы».
+     Ребёнок, связанный этой кнопкой, оставался «в Альфе, дата не загружена» — и _kidClass относил
+     его к НОВОМУ набору, хотя в Альфе он с прошлых лет. Список клиентов тот же самый, просто
+     не выбрасываем поля. Пустым не затираем: нет данных ≠ «дат нет». */
+  const applyOne=k=>{
+    if(!k||!k.n) return;
     const v=set.get(_normName(k.n)); if(!v) return;
-    if(k.phone!==v.phone || k.alfaId!==v.id || (v.dob&&k.dob!==_dobIso(v.dob))){ k.phone=v.phone; k.alfaId=v.id; if(v.dob) k.dob=_dobIso(v.dob); updated++; }
-    else if(v.dob && !k.dob){ k.dob=_dobIso(v.dob); }
+    let ch=false;
+    if(v.phone && k.phone!==v.phone){ k.phone=v.phone; ch=true; }
+    if(v.id!=null && k.alfaId!==v.id){ k.alfaId=v.id; ch=true; }
+    if(v.dob && !k.dob){ k.dob=_dobIso(v.dob); ch=true; }
     if(v.balance!=null) k.alfaBalance=v.balance;   // активный баланс из Альфы (последний известный)
-  }));
+    if(v.created){ const iso=_alfaCreatedIso(v.created); if(iso && k.alfaCreated!==iso){ k.alfaCreated=iso; datesN++; } }
+    if(v.lastAttend){ const iso=_dobIso(v.lastAttend); if(iso) k.alfaLastAttend=iso; }
+    if(ch) updated++;
+  };
+  (S.grid||[]).forEach(l=>kidsOf(l).forEach(applyOne));
   // дети без группы (список ожидания) — в S.grid их нет, обновляем отдельно, иначе у них
   // навсегда остаётся пустой телефон/баланс и непонятно, у кого есть деньги
-  (Array.isArray(S.waitlist)?S.waitlist:[]).forEach(w=>{
-    const v=set.get(_normName(w.n||"")); if(!v) return;
-    if(v.phone) w.phone=v.phone; if(v.id!=null) w.alfaId=v.id; if(v.dob&&!w.dob) w.dob=_dobIso(v.dob);
-    if(v.balance!=null) w.alfaBalance=v.balance;
-  });
+  (Array.isArray(S.waitlist)?S.waitlist:[]).forEach(applyOne);
   persistLocal(); if(typeof fbSchedulePush==="function") fbSchedulePush();
   if(typeof renderGrid==="function") renderGrid(); refreshKidSearch();
 
   document.getElementById("alfaBody").innerHTML=`
     <div class="callout" style="border-color:var(--green)">
-      Готово. Телефон проставлен у <b>${updated}</b> записей детей.
+      Готово. Обновлено записей детей: <b>${updated}</b>${datesN?` · 📅 дата внесения в Альфу подтянута у <b>${datesN}</b>`:""}.
     </div>
     <p style="font-size:12px;color:var(--muted)">Телефоны сохранились в модели и ушли в Firebase.
     Теперь в карточке занятия у ребёнка активна кнопка 📨 — написать родителю в Viber.</p>`;
   const b=document.getElementById("alfaBtn"); b.style.display="none";   // остаётся одна «Закрыть» в футере
-  toast("Телефонов проставлено: "+updated);
+  toast("Обновлено записей: "+updated+(datesN?(" · 📅 дат внесения "+datesN):""));
 }
 
 /* ===== ОТПРАВКА РОДИТЕЛЮ В VIBER ===== */
@@ -7468,6 +7479,9 @@ async function kidsPullAges(){
       else if(!c.dob && !k.dob) rep.noDob.push({n:k.n});   // ребёнок найден, но в Альфе не заполнена дата рождения
       if(c.id!=null && (k.alfaId==null||k.alfaId==="")) k.alfaId=c.id;
       if(c.phones && c.phones[0] && !k.phone) k.phone=c.phones[0];
+      // дата внесения / последнее посещение — от них зависит «возврат или новый набор»
+      if(c.created){ const ic=_alfaCreatedIso(c.created); if(ic) k.alfaCreated=ic; }
+      if(c.last_attend){ const il=_dobIso(c.last_attend); if(il) k.alfaLastAttend=il; }
     });
     const idx=_modalLesIdx();
     if(S.grid[idx]) S.grid[idx].kids=_editKids.filter(x=>x.n);
