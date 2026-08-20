@@ -1742,7 +1742,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-08-20-01";
+const APP_VER="2026-08-20-02";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -6665,7 +6665,7 @@ function alfaBuildMatch(customers){
     const phone=(c.phones&&c.phones.find(p=>String(p).replace(/\D/g,"").length>=6))||"";
     if(!idx.has(key)) idx.set(key,[]);
     idx.get(key).push({id:c.id,name:c.name,phone:phone,dob:c.dob||"",balance:(c.balance!=null?c.balance:null),
-      created:c.created||"",lastAttend:c.last_attend||""});
+      created:c.created||"",lastAttend:c.last_attend||"",study:(c.is_study!=null?(+c.is_study?1:0):null)});
   });
   // уникальные дети модели (+ набор полных ФИО на каждое «Фамилия Имя» — для детекта тёзок)
   const kids=new Map();
@@ -6738,7 +6738,7 @@ function alfaApply(){
   // Раньше сюда попадали только дети С телефоном — у остальных терялась и связь, и даты.
   M.willSet.forEach(w=>{ if(!w.pick) return;
     set.set(w.kid.key,{phone:w.pick.phone||"",id:w.pick.id,dob:w.pick.dob||"",balance:(w.pick.balance!=null?w.pick.balance:null),
-      created:w.pick.created||"",lastAttend:w.pick.lastAttend||""}); });
+      created:w.pick.created||"",lastAttend:w.pick.lastAttend||"",study:(w.pick.study!=null?w.pick.study:null)}); });
 
   let updated=0, datesN=0;
   /* ⚠️ Дата внесения в Альфу и последнее посещение раньше приходили ТОЛЬКО из «💰 Обновить балансы».
@@ -6753,6 +6753,7 @@ function alfaApply(){
     if(v.id!=null && k.alfaId!==v.id){ k.alfaId=v.id; ch=true; }
     if(v.dob && !k.dob){ k.dob=_dobIso(v.dob); ch=true; }
     if(v.balance!=null) k.alfaBalance=v.balance;   // активный баланс из Альфы (последний известный)
+    if(v.study!=null) k.alfaIsStudy=v.study;   // 1 клиент / 0 лид — лид всегда «новый»
     if(v.created){ const iso=_alfaCreatedIso(v.created); if(iso && k.alfaCreated!==iso){ k.alfaCreated=iso; datesN++; } }
     if(v.lastAttend){ const iso=_dobIso(v.lastAttend); if(iso) k.alfaLastAttend=iso; }
     if(ch) updated++;
@@ -7479,7 +7480,8 @@ async function kidsPullAges(){
       else if(!c.dob && !k.dob) rep.noDob.push({n:k.n});   // ребёнок найден, но в Альфе не заполнена дата рождения
       if(c.id!=null && (k.alfaId==null||k.alfaId==="")) k.alfaId=c.id;
       if(c.phones && c.phones[0] && !k.phone) k.phone=c.phones[0];
-      // дата внесения / последнее посещение — от них зависит «возврат или новый набор»
+      // дата внесения / последнее посещение / клиент-или-лид — от них зависит «возврат или новый набор»
+      if(c.is_study!=null) k.alfaIsStudy=(+c.is_study?1:0);
       if(c.created){ const ic=_alfaCreatedIso(c.created); if(ic) k.alfaCreated=ic; }
       if(c.last_attend){ const il=_dobIso(c.last_attend); if(il) k.alfaLastAttend=il; }
     });
@@ -8128,7 +8130,7 @@ function _dayBefore(iso){ const d=new Date(iso); if(isNaN(d))return "2026-06-30"
 function _visitCheckIds(){
   const L=_goalsKidLists();
   return [...new Set(L.newKids
-    .filter(o=> o.alfaId!=null && !o.prevAttend)
+    .filter(o=> o.alfaId!=null && !o.prevAttend && o.study!==0)   // лид не занимался — спрашивать нечего
     .map(o=>String(o.alfaId)))];
 }
 /* Проверить по истории Альфы: был ли ребёнок на занятиях ДО отсечки. Хоть одно — значит возврат.
@@ -8173,11 +8175,12 @@ function _goalsKidLists(){
   const cut=_newSince(), map={};
   (S.grid||[]).forEach(l=>kidsOf(l).forEach(k=>{ const key=_nameKey(k.n); if(!key) return;
     const o=map[key]||(map[key]={name:k.n, created:k.alfaCreated||"", lastAttend:k.alfaLastAttend||"", prevAttend:!!k.alfaPrevAttend, alfaId:(k.alfaId!=null?k.alfaId:null),
-      may:false, reply:"", no:false, amo:false, courses:new Set()});
+      study:null, may:false, reply:"", no:false, amo:false, courses:new Set()});
     if(String(k.n).trim().split(/\s+/).length>String(o.name).trim().split(/\s+/).length) o.name=k.n;
     if(k.alfaCreated && (!o.created || k.alfaCreated<o.created)) o.created=k.alfaCreated;
     if(k.alfaLastAttend && (!o.lastAttend || k.alfaLastAttend>o.lastAttend)) o.lastAttend=k.alfaLastAttend;
     if(k.alfaPrevAttend) o.prevAttend=true;
+    if(k.alfaIsStudy!=null) o.study=(o.study===1?1:k.alfaIsStudy);   // хоть где клиент → клиент
     if(o.alfaId==null && k.alfaId!=null) o.alfaId=k.alfaId;
     if(k.amoLeadId!=null && k.amoLeadId!=="") o.amo=true;
     if(k.may) o.may=true; if(k.no) o.no=true;
@@ -8228,9 +8231,11 @@ function _goalsKidListHTML(title,list,color){
   const when=o=>
       (o.lastAttend && o.lastAttend<cutW) ? ("посещал до "+_dmy(o.lastAttend))
     : o.prevAttend ? "посещал занятия до отсечки"
-    : o.created ? ("в Альфе с "+_dmy(o.created))
+    // лид — карточка есть, но ребёнок не оформлен и не занимался; дата тут ничего не значит
+    : (o.study===0 ? ("лид в Альфе"+(o.created?(", карточка с "+_dmy(o.created)):""))
+    : (o.created ? ("в Альфе с "+_dmy(o.created))
     : (o.alfaId!=null ? "в Альфе, дата не загружена"
-    : (o.amo ? "из amo · нет в Альфе" : "нет в Альфе"));
+    : (o.amo ? "из amo · нет в Альфе" : "нет в Альфе"))));
   const row=o=>`<div class="gk-row">
       <span class="gk-name" title="Открыть карточку ребёнка" onclick="openKidCardByName('${_jsStr(o.name)}')">${esc(o.name)}${o.amo&&!o.created?' <span style="font-size:10px;background:#e7eefb;color:#1F5BC0;border-radius:8px;padding:0 6px">amo</span>':''}</span>
       <span class="gk-when">${when(o)}</span>
@@ -8252,9 +8257,15 @@ function _dmy(iso){ const m=String(iso||"").match(/^(\d{4})-(\d{2})-(\d{2})/); r
    посещал до лета → возврат (самый надёжный признак), иначе по дате создания записи, иначе amo. */
 function _kidClass(o, cut){
   const inAlfa = o.alfaId!=null;
-  // ВОЗВРАТ — есть НАДЁЖНЫЙ след «был в клубе раньше»: проверено по посещениям (o.prevAttend),
-  // ИЛИ последнее посещение до этого лета, ИЛИ запись в Альфе создана раньше этого лета.
-  if(o.prevAttend || (o.lastAttend && o.lastAttend<cut) || (o.created && o.created<cut)) return 'old';
+  // ВОЗВРАТ — есть НАДЁЖНЫЙ след «был в клубе раньше»: проверено по посещениям (o.prevAttend)
+  // ИЛИ последнее посещение до этого лета. Это факт занятий, он перевешивает любой статус.
+  if(o.prevAttend || (o.lastAttend && o.lastAttend<cut)) return 'old';
+  // ЛИД (is_study=0) — карточка заведена, но ребёнок так и не оформлен и ни разу не занимался:
+  // «назначено пробное», заявка из Instagram/amo. Дата карточки у такого может быть и прошлогодней
+  // (заявка висела с прошлого сезона) — по ней его нельзя считать вернувшимся. Лид = НОВЫЙ.
+  if(o.study===0) return 'new';
+  // иначе смотрим на дату заведения записи в Альфе
+  if(o.created && o.created<cut) return 'old';
   // НОВЫЙ — запись создана с отсечки, ЛИБО пришёл из amo, ЛИБО есть в Альфе, но следов прошлого нет.
   if((o.created && o.created>=cut) || o.amo || inAlfa) return 'new';
   // Совсем не сопоставлен (ни Альфы, ни amo, ни дат). По умолчанию — новый (не был в системе = новичок),
@@ -8347,12 +8358,13 @@ function _goalsData(){
   const map={};
   (S.grid||[]).forEach(l=>{
     kidsOf(l).forEach(k=>{ const key=_nameKey(k.n); if(!key) return;
-      const o=map[key]||(map[key]={may:false,reply:'',no:false,alfaId:null,created:'',lastAttend:'',prevAttend:false,amo:false});
+      const o=map[key]||(map[key]={may:false,reply:'',no:false,alfaId:null,created:'',lastAttend:'',prevAttend:false,amo:false,study:null});
       if(o.alfaId==null && k.alfaId!=null && k.alfaId!=="") o.alfaId=k.alfaId;
       // самая ранняя дата внесения и самое позднее посещение (ребёнок мог встретиться в нескольких занятиях)
       if(k.alfaCreated && (!o.created || k.alfaCreated<o.created)) o.created=k.alfaCreated;
       if(k.alfaLastAttend && (!o.lastAttend || k.alfaLastAttend>o.lastAttend)) o.lastAttend=k.alfaLastAttend;
       if(k.alfaPrevAttend) o.prevAttend=true;   // проверено: посещал занятия до отсечки
+      if(k.alfaIsStudy!=null) o.study=(o.study===1?1:k.alfaIsStudy);   // 1 клиент / 0 лид
       if(k.amoLeadId!=null && k.amoLeadId!=="") o.amo=true;   // пришёл из amo (оплаченный этап)
       if(k.may) o.may=true; if(k.no) o.no=true;
       const rank=r=>r==='yes'?3:r==='no'?2:r==='maybe'?1:0;
@@ -8366,10 +8378,10 @@ function _goalsData(){
      Дата внесения приходит из выгрузки «Балансы и возраст» (поле created) — отдельных
      запросов не нужно. Пока её ни у кого нет — данные не готовы, цифры не показываем. */
   const cut=_newSince();
-  // Классификация:
-  //   НОВЫЙ  — заведён в Альфе с отсечки, ЛИБО пришёл из amo (оплаченный этап) и в Альфе его ещё нет.
-  //   ВОЗВРАТ— заведён в Альфе до отсечки; ЛИБО есть в Альфе (ID проставлен), но дату внесения не
-  //            загрузили — раз он уже в системе, считаем вернувшимся, а не «неизвестным».
+  // Классификация — одна на всю модель, см. _kidClass:
+  //   ВОЗВРАТ— есть след занятий до отсечки, либо карточка КЛИЕНТА заведена раньше отсечки.
+  //   НОВЫЙ  — лид (ещё не оформлен, не занимался), либо карточка с отсечки, либо amo, либо
+  //            есть в Альфе, но следов прошлого нет.
   //   НЕ СОПОСТАВЛЕН — ни ID из Альфы, ни amo: про него ничего не знаем, в счёт не идёт.
   const oldAll=arr.filter(o=>_kidClass(o,cut)==='old'),
         newAll=arr.filter(o=>_kidClass(o,cut)==='new'),
