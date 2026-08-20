@@ -1206,7 +1206,8 @@ details.client .cli-cols .cc-bal{width:74px;font-weight:600}
     <table id="taxCalc"></table>
     <div id="taxCalcMore"></div></div>
  </div>
- <div class="card" style="margin-top:14px;max-width:780px"><h3>Все расходы при этой загрузке</h3>
+ <div class="card" style="margin-top:14px;max-width:780px;margin-left:auto;margin-right:auto">
+   <h3>Все расходы при этой загрузке</h3>
    <div id="taxExpensesBox"></div></div>
 </section>
 
@@ -1757,7 +1758,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-08-20-07";
+const APP_VER="2026-08-20-08";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -4410,6 +4411,15 @@ function _expBody(ym){
   h+=`<div class="tscroll"><table><thead><tr><th style="text-align:left">Статья</th>
       <th class="num">${one?"Сумма":"В месяц"}</th><th class="num">${one?"":"За год"}</th><th class="num">Доля</th>
     </tr></thead><tbody>`;
+  // Оборот — первой строкой: именно от него считаются все доли ниже, и без него расходы
+  // не с чем сравнить глазами. Отдельной строкой показываем деньги по майской цене:
+  // в месяцы до перехода это заметная часть оборота, и она объясняет, почему он ниже.
+  h+=`<tr style="background:var(--graphite);color:#fff"><td style="text-align:left"><b>Оборот (выручка)</b>
+      <span class="hint exp-note" style="color:#D8D5CE">${one?"за этот месяц, по подтвердившим детям"
+        :"в среднем за месяц, по подтвердившим детям"}</span></td>
+    ${two(E.revY,true,true)}<td class="num"><b>100%</b></td></tr>`;
+  if(E.revMayY>0) h+=`<tr><td style="text-align:left">— из них по майской цене</td>
+    ${two(E.revMayY)}<td class="num" style="color:var(--muted)">${share(E.revMayY)}</td></tr>`;
   E.G.forEach(g=>{
     h+=`<tr style="background:var(--sand-l)"><td style="text-align:left"><b>${esc(g.t)}</b>
         <span class="hint exp-note">${esc(g.note)}</span></td>
