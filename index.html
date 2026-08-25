@@ -1129,7 +1129,7 @@ details.client .cli-cols .cc-bal{width:74px;font-weight:600}
  <div class="hd-actions" style="margin-bottom:8px">
   <button class="btn sm" onclick="printCompos()" title="Печать/сохранение на A4 (вертикальный)">🖨 Печать (A4)</button>
  </div>
- <div class="tscroll"><table id="composTable"></table></div>
+ <div class="tscroll"><table id="composTable" style="width:auto;max-width:640px;border-collapse:collapse"></table></div>
 </section>
 
 <!-- ===== КЛИЕНТЫ (все дети + их курсы/статусы) ===== -->
@@ -6535,16 +6535,16 @@ function renderCompos(){
   if(!S.compos) S.compos={};
   const uniq=_composCourses();
   let h=`<thead><tr>
-    <th style="width:220px;text-align:left">Курс</th>
-    <th style="text-align:left">1 учебный час</th>
-    <th style="text-align:left">2 учебных часа</th></tr></thead><tbody>`;
+    <th style="text-align:left">Курс</th>
+    <th style="width:110px;text-align:center">1 уч. час<br><span style="font-weight:400;font-size:10px;opacity:.8">макс. детей</span></th>
+    <th style="width:110px;text-align:center">2 уч. часа<br><span style="font-weight:400;font-size:10px;opacity:.8">макс. детей</span></th></tr></thead><tbody>`;
   if(!uniq.length){ h+=`<tr><td colspan="3" style="padding:12px;color:var(--muted)">Сначала заведите курсы на вкладке «Курсы и маржа».</td></tr>`; }
   uniq.forEach(name=>{
     const c=S.compos[name]||{}; const s=_jsStr(name);
     h+=`<tr>
-      <td style="text-align:left;font-weight:600;vertical-align:top">${esc(name)}</td>
-      <td style="padding:2px;vertical-align:top"><textarea class="cell" rows="3" style="width:100%;box-sizing:border-box;font-size:12px;line-height:1.4;resize:vertical" placeholder="ФИО детей + педагог…" oninput="updCompos('${s}','h1',this.value)">${esc(c.h1||"")}</textarea></td>
-      <td style="padding:2px;vertical-align:top"><textarea class="cell" rows="3" style="width:100%;box-sizing:border-box;font-size:12px;line-height:1.4;resize:vertical" placeholder="ФИО детей + педагог…" oninput="updCompos('${s}','h2',this.value)">${esc(c.h2||"")}</textarea></td>
+      <td style="text-align:left;font-weight:600">${esc(name)}</td>
+      <td style="text-align:center"><input class="cell" type="number" min="0" style="width:56px;text-align:center" placeholder="—" value="${c.h1!=null&&c.h1!==""?esc(c.h1):""}" onchange="updCompos('${s}','h1',this.value)"></td>
+      <td style="text-align:center"><input class="cell" type="number" min="0" style="width:56px;text-align:center" placeholder="—" value="${c.h2!=null&&c.h2!==""?esc(c.h2):""}" onchange="updCompos('${s}','h2',this.value)"></td>
     </tr>`;
   });
   box.innerHTML=h+"</tbody>";
@@ -6556,19 +6556,20 @@ function printCompos(){
   const uniq=_composCourses();
   let rows="";
   uniq.forEach(name=>{ const c=S.compos[name]||{};
-    rows+=`<tr><td class="c">${esc(name)}</td><td class="t">${esc(c.h1||"")||'&nbsp;'}</td><td class="t">${esc(c.h2||"")||'&nbsp;'}</td></tr>`;
+    const v1=(c.h1!=null&&c.h1!=="")?esc(c.h1):"—", v2=(c.h2!=null&&c.h2!=="")?esc(c.h2):"—";
+    rows+=`<tr><td class="c">${esc(name)}</td><td class="n">${v1}</td><td class="n">${v2}</td></tr>`;
   });
   const css=`@page{size:A4 portrait;margin:12mm}
     *{box-sizing:border-box} body{font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:#1c1410;margin:0}
     h1{font-size:16px;margin:0 0 2px} .sub{font-size:11px;color:#6b6157;margin-bottom:10px}
-    table{width:100%;border-collapse:collapse;font-size:11px;table-layout:fixed} thead{display:table-header-group}
-    th,td{border:1px solid #bbb;padding:5px 6px;text-align:left;vertical-align:top} th{background:#2a211b;color:#fff;font-weight:600}
-    td.c{font-weight:600;width:26%} td.t{white-space:pre-wrap;word-break:break-word} tbody tr:nth-child(even) td{background:#f7f3ee} tr{page-break-inside:avoid}
+    table{width:100%;border-collapse:collapse;font-size:12px} thead{display:table-header-group}
+    th,td{border:1px solid #bbb;padding:5px 7px;text-align:center;vertical-align:middle} th{background:#2a211b;color:#fff;font-weight:600}
+    th.c,td.c{text-align:left} td.c{font-weight:600;width:55%} td.n{font-weight:700} tbody tr:nth-child(even) td{background:#f7f3ee} tr{page-break-inside:avoid}
     .sign{margin-top:22px;display:flex;gap:40px;font-size:12px} .sign div{flex:1;border-top:1px solid #333;padding-top:4px;color:#555}`;
   w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Состав групп</title><style>${css}</style></head><body>
-    <h1>Состав групп — учебный год 2026/2027</h1>
+    <h1>Состав групп — максимальное число детей в группе (2026/2027)</h1>
     <div class="sub">Прознание + CODDY · сценарий: ${esc(currentScenarioName())} · ${esc(new Date().toLocaleDateString("ru-RU"))} · курсов: ${uniq.length}</div>
-    <table><thead><tr><th style="width:26%">Курс</th><th>1 учебный час</th><th>2 учебных часа</th></tr></thead><tbody>${rows}</tbody></table>
+    <table><thead><tr><th class="c" style="width:55%">Курс</th><th>1 учебный час</th><th>2 учебных часа</th></tr></thead><tbody>${rows}</tbody></table>
     <div class="sign"><div>Составил(а): _______________</div><div>Согласовано: _______________</div><div>Дата: __________</div></div>
   </body></html>`);
   w.document.close(); w.focus(); setTimeout(()=>{ try{ w.print(); }catch(e){} },300);
