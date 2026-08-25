@@ -898,6 +898,7 @@ details.client .cli-cols .cc-bal{width:74px;font-weight:600}
  <button class="tab" data-t="planner">Планировщик загрузки</button>
  <button class="tab" data-t="grid">Расписание (сетка)</button>
  <button class="tab" data-t="groups">Группы</button>
+ <button class="tab" data-t="compos">Состав групп</button>
  <button class="tab" data-t="clients">Клиенты</button>
  <button class="tab" data-t="price"><i data-ic="price"></i>Прайс</button>
  <button class="tab" data-t="cards"><i data-ic="idcard"></i>О курсах</button>
@@ -1119,6 +1120,16 @@ details.client .cli-cols .cc-bal{width:74px;font-weight:600}
   <div class="kidsearch-res"></div>
  </div>
  <div id="groupsBody"></div>
+</section>
+
+<!-- ===== СОСТАВ ГРУПП (на подпись) ===== -->
+<section class="panel" id="compos">
+ <h2 class="sec">Состав групп</h2>
+ <div class="sec-desc">Все ваши курсы. Впишите состав (дети + педагог) в две колонки — для групп на <b>1 учебный час</b> и на <b>2 учебных часа</b>. Заполняется вручную, сохраняется автоматически и синхронизируется. Для согласования и подписи — кнопка «🖨 Печать (A4)».</div>
+ <div class="hd-actions" style="margin-bottom:8px">
+  <button class="btn sm" onclick="printCompos()" title="Печать/сохранение на A4 (вертикальный)">🖨 Печать (A4)</button>
+ </div>
+ <div class="tscroll"><table id="composTable"></table></div>
 </section>
 
 <!-- ===== КЛИЕНТЫ (все дети + их курсы/статусы) ===== -->
@@ -2628,13 +2639,13 @@ function fbStart(){
   });
 }
 /* ---- вкладки по ролям ---- */
-const TAB_DEFS=[["dash","Дашборд"],["report","Отчёт по набору"],["courses","Курсы и маржа"],["real","Реальный оборот"],["planner","Планировщик загрузки"],["goals","Набор"],["grid","Расписание (сетка)"],["groups","Группы"],["clients","Клиенты"],["price","Прайс"],["cards","О курсах"],["may","Майский"],["staff","Педсостав и ФОТ"],["fixed","Постоянные расходы"],["tax","Налоги РБ и ФОТ"],["break","Точка безубыточности"],["scenario","Сценарии"],["settings","Параметры"]];
+const TAB_DEFS=[["dash","Дашборд"],["report","Отчёт по набору"],["courses","Курсы и маржа"],["real","Реальный оборот"],["planner","Планировщик загрузки"],["goals","Набор"],["grid","Расписание (сетка)"],["groups","Группы"],["compos","Состав групп"],["clients","Клиенты"],["price","Прайс"],["cards","О курсах"],["may","Майский"],["staff","Педсостав и ФОТ"],["fixed","Постоянные расходы"],["tax","Налоги РБ и ФОТ"],["break","Точка безубыточности"],["scenario","Сценарии"],["settings","Параметры"]];
 const MANAGER_DEFAULT_TABS=["grid","groups","clients","may","goals"];
 const ALWAYS_TABS={clients:1,price:1,goals:1,cards:1};   // видны всем ролям, даже если не отмечены в доступах
 const ADMIN_TABS={report:1};     // только для админа, не назначаются менеджерам
 function _defaultTabsMap(){ const m={}; MANAGER_DEFAULT_TABS.forEach(function(k){ m[k]=true; }); return m; }
 /* ---- режимы навигации: «Работа» (ежедневное) и «Финмодель» (финансы) ---- */
-const TAB_MODES={grid:"work",groups:"work",clients:"work",price:"work",cards:"work",may:"work",goals:"work",dash:"fin",report:"fin",courses:"fin",real:"fin",planner:"fin",staff:"fin",fixed:"fin",tax:"fin","break":"fin",scenario:"fin",settings:"fin"};
+const TAB_MODES={grid:"work",groups:"work",compos:"work",clients:"work",price:"work",cards:"work",may:"work",goals:"work",dash:"fin",report:"fin",courses:"fin",real:"fin",planner:"fin",staff:"fin",fixed:"fin",tax:"fin","break":"fin",scenario:"fin",settings:"fin"};
 // вкладки, видимые в ОБОИХ режимах: «О курсах» заполняет Жанна из «Финмодели»,
 // а менеджеры читают в «Работе» — без этого админу приходилось переключать режим
 const TAB_BOTH_MODES={cards:1};
@@ -6514,6 +6525,52 @@ function printWageRef(){
     <h1>Справочник ставок ЗП — ₽ за занятие по числу детей</h1>
     <div class="sub">Прознание + CODDY · сценарий: ${esc(currentScenarioName())} · ${esc(new Date().toLocaleDateString("ru-RU"))} · курсов: ${names.length}</div>
     <table><thead><tr>${head}</tr></thead><tbody>${rows}</tbody></table></body></html>`);
+  w.document.close(); w.focus(); setTimeout(()=>{ try{ w.print(); }catch(e){} },300);
+}
+
+/* ====== ВКЛАДКА «СОСТАВ ГРУПП» (на подпись) ====== */
+function _composCourses(){ return [...new Set((S.courses||[]).map(c=>c.name).filter(Boolean))].sort((a,b)=>a.localeCompare(b,"ru")); }
+function renderCompos(){
+  const box=document.getElementById("composTable"); if(!box) return;
+  if(!S.compos) S.compos={};
+  const uniq=_composCourses();
+  let h=`<thead><tr>
+    <th style="width:220px;text-align:left">Курс</th>
+    <th style="text-align:left">1 учебный час</th>
+    <th style="text-align:left">2 учебных часа</th></tr></thead><tbody>`;
+  if(!uniq.length){ h+=`<tr><td colspan="3" style="padding:12px;color:var(--muted)">Сначала заведите курсы на вкладке «Курсы и маржа».</td></tr>`; }
+  uniq.forEach(name=>{
+    const c=S.compos[name]||{}; const s=_jsStr(name);
+    h+=`<tr>
+      <td style="text-align:left;font-weight:600;vertical-align:top">${esc(name)}</td>
+      <td style="padding:2px;vertical-align:top"><textarea class="cell" rows="3" style="width:100%;box-sizing:border-box;font-size:12px;line-height:1.4;resize:vertical" placeholder="ФИО детей + педагог…" oninput="updCompos('${s}','h1',this.value)">${esc(c.h1||"")}</textarea></td>
+      <td style="padding:2px;vertical-align:top"><textarea class="cell" rows="3" style="width:100%;box-sizing:border-box;font-size:12px;line-height:1.4;resize:vertical" placeholder="ФИО детей + педагог…" oninput="updCompos('${s}','h2',this.value)">${esc(c.h2||"")}</textarea></td>
+    </tr>`;
+  });
+  box.innerHTML=h+"</tbody>";
+}
+function updCompos(name,slot,v){ if(!S.compos)S.compos={}; if(!S.compos[name])S.compos[name]={}; S.compos[name][slot]=v; persistLocal(); }
+function printCompos(){
+  const w=window.open("","_blank"); if(!w){ toast("Разрешите всплывающие окна для печати"); return; }
+  if(!S.compos)S.compos={};
+  const uniq=_composCourses();
+  let rows="";
+  uniq.forEach(name=>{ const c=S.compos[name]||{};
+    rows+=`<tr><td class="c">${esc(name)}</td><td class="t">${esc(c.h1||"")||'&nbsp;'}</td><td class="t">${esc(c.h2||"")||'&nbsp;'}</td></tr>`;
+  });
+  const css=`@page{size:A4 portrait;margin:12mm}
+    *{box-sizing:border-box} body{font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:#1c1410;margin:0}
+    h1{font-size:16px;margin:0 0 2px} .sub{font-size:11px;color:#6b6157;margin-bottom:10px}
+    table{width:100%;border-collapse:collapse;font-size:11px;table-layout:fixed} thead{display:table-header-group}
+    th,td{border:1px solid #bbb;padding:5px 6px;text-align:left;vertical-align:top} th{background:#2a211b;color:#fff;font-weight:600}
+    td.c{font-weight:600;width:26%} td.t{white-space:pre-wrap;word-break:break-word} tbody tr:nth-child(even) td{background:#f7f3ee} tr{page-break-inside:avoid}
+    .sign{margin-top:22px;display:flex;gap:40px;font-size:12px} .sign div{flex:1;border-top:1px solid #333;padding-top:4px;color:#555}`;
+  w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Состав групп</title><style>${css}</style></head><body>
+    <h1>Состав групп — учебный год 2026/2027</h1>
+    <div class="sub">Прознание + CODDY · сценарий: ${esc(currentScenarioName())} · ${esc(new Date().toLocaleDateString("ru-RU"))} · курсов: ${uniq.length}</div>
+    <table><thead><tr><th style="width:26%">Курс</th><th>1 учебный час</th><th>2 учебных часа</th></tr></thead><tbody>${rows}</tbody></table>
+    <div class="sign"><div>Составил(а): _______________</div><div>Согласовано: _______________</div><div>Дата: __________</div></div>
+  </body></html>`);
   w.document.close(); w.focus(); setTimeout(()=>{ try{ w.print(); }catch(e){} },300);
 }
 
@@ -13154,6 +13211,7 @@ document.querySelectorAll(".tab").forEach(tb=>tb.onclick=()=>{
   if(tb.dataset.t==="report" && typeof renderReport==="function") renderReport();
   if(tb.dataset.t==="goals" && typeof renderGoals==="function") renderGoals();
   if(tb.dataset.t==="cards" && typeof renderCards==="function") renderCards();
+  if(tb.dataset.t==="compos" && typeof renderCompos==="function") renderCompos();
   _scrollTabIntoView(tb);
   updateNavHeightDelayed();
 });
