@@ -10719,7 +10719,7 @@ function _p1KidsHtml(){
   if(!_p1.kidsOpen) return "";
   const a=_p1Alfa();
   if(!a) return `<div style="color:var(--muted);font-size:12px;padding:6px 0">Сначала выберите группу в Alfa (блок 1) — детей добавляем в неё.</div>`;
-  if(!_pubCustIdx) return `<div style="color:var(--muted);font-size:12px;padding:6px 0">⏳ Читаю клиентов Альфы…</div>`;
+  const custLoading = !_pubCustIdx;   // клиентов ещё читаем — показываем по сохранённым alfaId, недостающих дочитаем в фоне
   const rows=_p1Kids();
   if(!rows.length) return `<div style="color:var(--muted);font-size:12px;padding:6px 0">В этой группе пока никто не вписан.</div>`;
   const nIn=rows.filter(r=>r.inAlfa).length, nNo=rows.filter(r=>!r.alfaId).length;
@@ -10732,7 +10732,7 @@ function _p1KidsHtml(){
     Всего <b style="color:var(--coal)">${rows.length}</b> · в Alfa <b style="color:var(--green)">${nIn}</b> ·
     добавим <b style="color:var(--coal)">${canAdd.length}</b>${nNo?` · <span style="color:var(--red)">без связи ${nNo}</span>`:""}
     &nbsp; 🟢${cy} 🔴${cn} 🟡${cm} ○${cs} 💰${cp}
-    ${_p1.members?"":' · <span style="color:var(--terra)">состав Alfa не прочитан</span>'}</div>
+    ${_p1.members?"":' · <span style="color:var(--terra)">состав Alfa не прочитан</span>'}${custLoading?' · <span style="color:var(--terra)">⏳ читаю клиентов Альфы (для детей без привязки)…</span>':''}</div>
     <div class="hd-actions" style="margin-bottom:6px">
       <button class="btn ghost sm" onclick="p1KidsAll(1)" title="Отметить всех, кого можно добавить">✓ Все</button>
       <button class="btn ghost sm" onclick="p1KidsAll(0)" title="Снять все отметки">✕ Снять все</button>
@@ -10827,7 +10827,9 @@ async function p1KidsOpen(){
   _p1.kidsOpen=!_p1.kidsOpen; _p1Render();
   if(!_p1.kidsOpen) return;
   try{
-    if(!_pubCustIdx){ await _pubEnsureCustomers(); if(_p1) _p1Render(); }
+    // клиентов Alfa читаем ТОЛЬКО если есть дети без привязки (у большинства alfaId уже есть) —
+    // иначе тяжёлый запрос всех клиентов зря вешает блок
+    if(!_pubCustIdx && _p1Kids().some(r=>!r.alfaId)){ await _pubEnsureCustomers(); if(_p1) _p1Render(); }
     // шаблоны абонементов нужны сразу: без них строка про абонемент показывала бы «нет шаблона»,
     // хотя он есть — просто ещё не прочитан
     if(!_pubTariffs){ try{ await _pubEnsureTariffs(); }catch(e){} }
