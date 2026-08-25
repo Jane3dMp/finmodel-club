@@ -1125,8 +1125,9 @@ details.client .cli-cols .cc-bal{width:74px;font-weight:600}
 <!-- ===== СОСТАВ ГРУПП (на подпись) ===== -->
 <section class="panel" id="compos">
  <h2 class="sec">Состав групп</h2>
- <div class="sec-desc">Все ваши курсы. Впишите состав (дети + педагог) в две колонки — для групп на <b>1 учебный час</b> и на <b>2 учебных часа</b>. Заполняется вручную, сохраняется автоматически и синхронизируется. Для согласования и подписи — кнопка «🖨 Печать (A4)».</div>
+ <div class="sec-desc">Максимальное число детей в группе по каждому курсу — отдельно для групп на <b>1 учебный час</b> и <b>2 учебных часа</b>. Названия курсов тут можно править — это <b>не влияет</b> на расписание и остальные вкладки (отдельный список). Сохраняется автоматически. Для согласования и подписи — «🖨 Печать (A4)».</div>
  <div class="hd-actions" style="margin-bottom:8px">
+  <button class="btn ghost sm" onclick="composAddRow()">+ строка</button>
   <button class="btn sm" onclick="printCompos()" title="Печать/сохранение на A4 (вертикальный)">🖨 Печать (A4)</button>
  </div>
  <div class="tscroll"><table id="composTable" style="width:auto;max-width:640px;border-collapse:collapse"></table></div>
@@ -6528,36 +6529,51 @@ function printWageRef(){
   w.document.close(); w.focus(); setTimeout(()=>{ try{ w.print(); }catch(e){} },300);
 }
 
-/* ====== ВКЛАДКА «СОСТАВ ГРУПП» (на подпись) ====== */
-function _composCourses(){ return [...new Set((S.courses||[]).map(c=>c.name).filter(Boolean))].sort((a,b)=>a.localeCompare(b,"ru")); }
+/* ====== ВКЛАДКА «СОСТАВ ГРУПП» (на подпись) ======
+   Отдельный, независимый список: правка названий тут НИ на что больше не влияет. */
+function _composSeed(){ return [...new Set((S.courses||[]).map(c=>c.name).filter(Boolean))].sort((a,b)=>a.localeCompare(b,"ru")); }
+function _composRows(){
+  // S.compos — массив {name,h1,h2}. Разовая миграция со старого объекта {курс:{h1,h2}} и
+  // первичное наполнение из курсов модели (дальше — полностью независимо).
+  if(!Array.isArray(S.compos)){
+    const old=(S.compos&&typeof S.compos==="object")?S.compos:{};
+    const rows=[];
+    _composSeed().forEach(nm=>{ const o=old[nm]||{}; rows.push({name:nm,h1:(o.h1!=null?o.h1:""),h2:(o.h2!=null?o.h2:"")}); });
+    Object.keys(old).forEach(nm=>{ if(!rows.some(r=>r.name===nm)) rows.push({name:nm,h1:(old[nm].h1!=null?old[nm].h1:""),h2:(old[nm].h2!=null?old[nm].h2:"")}); });
+    S.compos=rows;
+  }
+  return S.compos;
+}
 function renderCompos(){
   const box=document.getElementById("composTable"); if(!box) return;
-  if(!S.compos) S.compos={};
-  const uniq=_composCourses();
+  const rows=_composRows();
   let h=`<thead><tr>
     <th style="text-align:left">Курс</th>
     <th style="width:110px;text-align:center">1 уч. час<br><span style="font-weight:400;font-size:10px;opacity:.8">макс. детей</span></th>
-    <th style="width:110px;text-align:center">2 уч. часа<br><span style="font-weight:400;font-size:10px;opacity:.8">макс. детей</span></th></tr></thead><tbody>`;
-  if(!uniq.length){ h+=`<tr><td colspan="3" style="padding:12px;color:var(--muted)">Сначала заведите курсы на вкладке «Курсы и маржа».</td></tr>`; }
-  uniq.forEach(name=>{
-    const c=S.compos[name]||{}; const s=_jsStr(name);
+    <th style="width:110px;text-align:center">2 уч. часа<br><span style="font-weight:400;font-size:10px;opacity:.8">макс. детей</span></th>
+    <th style="width:30px"></th></tr></thead><tbody>`;
+  if(!rows.length){ h+=`<tr><td colspan="4" style="padding:12px;color:var(--muted)">Пусто. Нажмите «+ строка».</td></tr>`; }
+  rows.forEach((r,i)=>{
     h+=`<tr>
-      <td style="text-align:left;font-weight:600">${esc(name)}</td>
-      <td style="text-align:center"><input class="cell" type="number" min="0" style="width:56px;text-align:center" placeholder="—" value="${c.h1!=null&&c.h1!==""?esc(c.h1):""}" onchange="updCompos('${s}','h1',this.value)"></td>
-      <td style="text-align:center"><input class="cell" type="number" min="0" style="width:56px;text-align:center" placeholder="—" value="${c.h2!=null&&c.h2!==""?esc(c.h2):""}" onchange="updCompos('${s}','h2',this.value)"></td>
+      <td><input class="cell" style="width:100%;min-width:220px;box-sizing:border-box;font-weight:600" value="${esc(r.name||"")}" placeholder="название курса" oninput="updComposRow(${i},'name',this.value)"></td>
+      <td style="text-align:center"><input class="cell" type="number" min="0" style="width:56px;text-align:center" placeholder="—" value="${r.h1!=null&&r.h1!==""?esc(r.h1):""}" onchange="updComposRow(${i},'h1',this.value)"></td>
+      <td style="text-align:center"><input class="cell" type="number" min="0" style="width:56px;text-align:center" placeholder="—" value="${r.h2!=null&&r.h2!==""?esc(r.h2):""}" onchange="updComposRow(${i},'h2',this.value)"></td>
+      <td style="text-align:center"><span class="k-del" title="Удалить строку" onclick="composDelRow(${i})">×</span></td>
     </tr>`;
   });
   box.innerHTML=h+"</tbody>";
 }
-function updCompos(name,slot,v){ if(!S.compos)S.compos={}; if(!S.compos[name])S.compos[name]={}; S.compos[name][slot]=v; persistLocal(); }
+function updComposRow(i,f,v){ const rows=_composRows(); if(!rows[i]) return; rows[i][f]=v; persistLocal(); }
+function composAddRow(){ _composRows().push({name:"",h1:"",h2:""}); persistLocal(); renderCompos();
+  const inps=document.querySelectorAll("#composTable tbody tr td:first-child input"); if(inps.length) inps[inps.length-1].focus(); }
+function composDelRow(i){ const rows=_composRows(); if(rows[i]===undefined) return; rows.splice(i,1); persistLocal(); renderCompos(); }
 function printCompos(){
   const w=window.open("","_blank"); if(!w){ toast("Разрешите всплывающие окна для печати"); return; }
-  if(!S.compos)S.compos={};
-  const uniq=_composCourses();
+  const rowsArr=_composRows();
   let rows="";
-  uniq.forEach(name=>{ const c=S.compos[name]||{};
-    const v1=(c.h1!=null&&c.h1!=="")?esc(c.h1):"—", v2=(c.h2!=null&&c.h2!=="")?esc(c.h2):"—";
-    rows+=`<tr><td class="c">${esc(name)}</td><td class="n">${v1}</td><td class="n">${v2}</td></tr>`;
+  rowsArr.forEach(r=>{ if(!(r.name||r.h1||r.h2)) return;
+    const v1=(r.h1!=null&&r.h1!=="")?esc(r.h1):"—", v2=(r.h2!=null&&r.h2!=="")?esc(r.h2):"—";
+    rows+=`<tr><td class="c">${esc(r.name||"")}</td><td class="n">${v1}</td><td class="n">${v2}</td></tr>`;
   });
   const css=`@page{size:A4 portrait;margin:12mm}
     *{box-sizing:border-box} body{font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:#1c1410;margin:0}
@@ -6568,7 +6584,7 @@ function printCompos(){
     .sign{margin-top:22px;display:flex;gap:40px;font-size:12px} .sign div{flex:1;border-top:1px solid #333;padding-top:4px;color:#555}`;
   w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Состав групп</title><style>${css}</style></head><body>
     <h1>Состав групп — максимальное число детей в группе (2026/2027)</h1>
-    <div class="sub">Прознание + CODDY · сценарий: ${esc(currentScenarioName())} · ${esc(new Date().toLocaleDateString("ru-RU"))} · курсов: ${uniq.length}</div>
+    <div class="sub">Прознание + CODDY · сценарий: ${esc(currentScenarioName())} · ${esc(new Date().toLocaleDateString("ru-RU"))} · строк: ${rowsArr.filter(r=>r.name||r.h1||r.h2).length}</div>
     <table><thead><tr><th class="c" style="width:55%">Курс</th><th>1 учебный час</th><th>2 учебных часа</th></tr></thead><tbody>${rows}</tbody></table>
     <div class="sign"><div>Составил(а): _______________</div><div>Согласовано: _______________</div><div>Дата: __________</div></div>
   </body></html>`);
