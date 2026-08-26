@@ -6643,7 +6643,7 @@ function _groupViberMsg(g){
     .replace(/\{курс\}/g,   g.course||"")
     .replace(/\{расписание\}/g, g.sched||"")
     .replace(/\{педагог\}/g, g.teacher||"")
-    .replace(/\{старт\}/g,  S.viberStart||VIBER_START_DEFAULT);
+    .replace(/\{старт\}/g,  g.start||S.viberStart||VIBER_START_DEFAULT);   // дата первого занятия ЭТОЙ группы
 }
 let _grpChat=null;
 function openGroupChat(i){
@@ -6656,7 +6656,9 @@ function openGroupChat(i){
   }));
   const withPhone=kids.filter(k=>k.phone), noPhone=kids.filter(k=>!k.phone);
   const teacher=[...(g.teachers||[])][0]||"";
-  const msg=_groupViberMsg({name:g.name, course:g.course, sched:g.schedText, teacher});
+  let startD=null; (g.slots||g.sched||[]).forEach(s=>{ const d=_firstLessonDate(s); if(d&&(!startD||d<startD)) startD=d; });
+  const start = startD?_viberDateStr(startD):(S.viberStart||VIBER_START_DEFAULT);   // старт по расписанию группы
+  const msg=_groupViberMsg({name:g.name, course:g.course, sched:g.schedText, teacher, start});
   const chatName=g.schedText ? (g.name+" · "+g.schedText) : g.name;   // название чата = группа + расписание
   _grpChat={name:chatName, message:msg, parents:withPhone, numbers:withPhone.map(k=>k.phone).join("\n")};
   document.getElementById("grpChatTitle").textContent="💬 Чат в Viber — "+g.name;
