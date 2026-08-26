@@ -6627,57 +6627,43 @@ function _groupViberMsg(g){
     .replace(/\{старт\}/g,  S.viberStart||VIBER_START_DEFAULT);
 }
 let _grpChat=null;
-function grpSetLink(key,val){ if(!S.groupLinks)S.groupLinks={}; const v=(val||"").trim(); if(v)S.groupLinks[key]=v; else delete S.groupLinks[key]; persistLocal(); if(_grpChat)openGroupChat(_grpChat.i); }
 function openGroupChat(i){
   const g=(typeof _groupsShown!=="undefined")&&_groupsShown[i]; if(!g){ toast("Группа не найдена"); return; }
   const seen=new Set(), kids=[];
   (g.idxs||[]).forEach(idx=>kidsOf(S.grid[idx]).forEach(k=>{
     const nk=_nameKey(k.n); if(!nk||seen.has(nk)) return; seen.add(nk);
-    if(k.no) return;                                   // «не придёт» — не зовём
+    if(k.no) return;                                   // «не придёт» — не берём
     kids.push({name:k.n, phone:_viberNumber(k.phone)});
   }));
   const withPhone=kids.filter(k=>k.phone), noPhone=kids.filter(k=>!k.phone);
   const teacher=[...(g.teachers||[])][0]||"";
-  const base=_groupViberMsg({name:g.name, course:g.course, sched:g.schedText, teacher});
-  const link=((S.groupLinks||{})[g.key]||"").trim();
-  const inviteMsg = link ? (base+"\n\nПрисоединяйтесь к чату группы по ссылке:\n"+link) : base;
-  _grpChat={i, key:g.key, name:g.name, message:base, link, inviteMsg,
-            parents:withPhone, numbers:withPhone.map(k=>k.phone).join("\n")};
+  const msg=_groupViberMsg({name:g.name, course:g.course, sched:g.schedText, teacher});
+  _grpChat={name:g.name, message:msg, parents:withPhone, numbers:withPhone.map(k=>k.phone).join("\n")};
   document.getElementById("grpChatTitle").textContent="💬 Чат в Viber — "+g.name;
   const parentsList = withPhone.map((k,pi)=>`<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:3px 0;border-bottom:1px solid #f0ebe4;font-size:13px">
-      <span>${esc(k.name)} <span style="color:var(--muted)">${esc(k.phone)}</span></span>
-      ${link?`<button class="btn sm" style="padding:1px 8px" onclick="grpInviteSend(${pi})">📨 Пригласить</button>`:''}</div>`).join("");
+      <span>${esc(k.name)}</span>
+      <span style="display:flex;align-items:center;gap:6px;white-space:nowrap"><span style="color:var(--muted)">${esc(k.phone)}</span>
+      <button class="btn ghost sm" style="padding:1px 7px" title="Скопировать номер — вставьте в поиск людей в Viber" onclick="grpCopyNum(${pi})">📋</button></span></div>`).join("");
   document.getElementById("grpChatBody").innerHTML=`
-    <div class="callout" style="margin-bottom:10px;font-size:12px">Viber не добавляет людей в группу по номерам. Рабочий путь: создать чат в Viber → взять его <b>ссылку‑приглашение</b> → разослать её родителям (каждый жмёт и вступает сам).</div>
-
-    <label>1. Создайте чат в Viber</label>
-    <div style="display:flex;gap:8px;align-items:center;margin:4px 0 4px">
+    <label>1. Название чата</label>
+    <div style="display:flex;gap:8px;align-items:center;margin:4px 0 12px">
       <input class="cell" style="flex:1;box-sizing:border-box" readonly value="${esc(g.name)}">
-      <button class="btn sm" onclick="grpChatCopy('name')">📋 Название</button></div>
-    <div style="font-size:11px;color:var(--muted);margin-bottom:12px">Viber → «+» → «Новая группа» (или «Сообщество») → назовите её (кнопка выше).</div>
+      <button class="btn sm" onclick="grpChatCopy('name')">📋 Копировать</button></div>
 
-    <label>2. Вставьте ссылку‑приглашение группы</label>
-    <div style="font-size:11px;color:var(--muted);margin:2px 0 4px">В Viber: настройки группы → «Пригласить по ссылке» / «Поделиться ссылкой» → скопируйте и вставьте сюда.</div>
-    <input class="cell wide" id="grpLinkInput" style="width:100%;box-sizing:border-box;margin-bottom:12px" placeholder="https://invite.viber.com/…" value="${esc(link)}" onchange="grpSetLink('${_jsStr(g.key)}',this.value)">
-
-    <label>3. Сообщение с приглашением</label>
-    <div style="white-space:pre-wrap;border:1px solid var(--line);border-radius:8px;padding:8px 10px;background:#f7f4f0;font-size:13px;margin:4px 0 6px">${esc(inviteMsg)}</div>
-    <button class="btn sm" style="margin-bottom:12px" onclick="grpChatCopy('inviteMsg')">📋 Копировать сообщение</button>
-
-    <label>4. Разошлите родителям (${withPhone.length})${link?"":" — <span style='color:var(--terra)'>вставьте ссылку выше, чтобы включить рассылку</span>"}</label>
-    <div style="max-height:26vh;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:4px 10px;margin:4px 0 6px">
+    <label>2. Участники (${withPhone.length}) — копируйте номер и вставляйте в поиск людей в Viber</label>
+    <div style="max-height:34vh;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:4px 10px;margin:4px 0 6px">
       ${parentsList||'<span style="color:var(--muted);font-size:13px">нет телефонов</span>'}
       ${noPhone.length?`<div style="color:var(--red);font-size:12px;margin-top:6px">Без телефона (${noPhone.length}): ${noPhone.map(k=>esc(k.name)).join(", ")} — сделайте «📞 Контакты из Альфы».</div>`:''}</div>
-    <div style="font-size:11px;color:var(--muted)">Кнопка «📨 Пригласить» копирует сообщение и открывает Viber этого родителя — вставьте (Ctrl+V) и отправьте. Родитель жмёт ссылку и вступает в чат.</div>`;
+    <button class="btn ghost sm" style="margin-bottom:12px" onclick="grpChatCopy('numbers')">📋 Скопировать все номера (${withPhone.length})</button>
+
+    <label>3. Сообщение о начале занятий</label>
+    <div style="white-space:pre-wrap;border:1px solid var(--line);border-radius:8px;padding:8px 10px;background:#f7f4f0;font-size:13px;margin:4px 0 6px">${esc(msg)}</div>
+    <button class="btn sm" onclick="grpChatCopy('message')">📋 Копировать сообщение</button>`;
   document.getElementById("grpChatModal").classList.add("show");
 }
-async function grpInviteSend(pi){
-  if(!_grpChat) return; const p=_grpChat.parents[pi]; if(!p) return;
-  const copied=await _copyText(_grpChat.inviteMsg||"");
-  _openViber(p.phone);
-  toast(copied?"Текст в буфере — вставьте в Viber (Ctrl+V)":"Открываю Viber");
-}
-async function grpChatCopy(kind){ if(!_grpChat) return; const ok=await _copyText(_grpChat[kind]||""); toast(ok?"Скопировано — вставьте в Viber (Ctrl+V)":"Не удалось скопировать"); }
+async function grpCopyNum(pi){ if(!_grpChat) return; const p=_grpChat.parents[pi]; if(!p) return;
+  const ok=await _copyText(p.phone||""); toast(ok?("Скопирован номер: "+p.phone):"Не удалось скопировать"); }
+async function grpChatCopy(kind){ if(!_grpChat) return; const ok=await _copyText(_grpChat[kind]||""); toast(ok?"Скопировано — вставьте (Ctrl+V)":"Не удалось скопировать"); }
 function closeGrpChat(){ document.getElementById("grpChatModal").classList.remove("show"); }
 
 /* ====== АВТОИМПОРТ ВЫГРУЗКИ АЛЬФЫ (.xlsx) ====== */
