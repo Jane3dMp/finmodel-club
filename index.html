@@ -6660,7 +6660,7 @@ function openGroupChat(i){
   const start = startD?_viberDateStr(startD):(S.viberStart||VIBER_START_DEFAULT);   // старт по расписанию группы
   const msg=_groupViberMsg({name:g.name, course:g.course, sched:g.schedText, teacher, start});
   const chatName=g.schedText ? (g.name+" · "+g.schedText) : g.name;   // название чата = группа + расписание
-  _grpChat={name:chatName, message:msg, parents:withPhone, numbers:withPhone.map(k=>k.phone).join("\n")};
+  _grpChat={key:g.key, chatDone:g.chatDone, name:chatName, message:msg, parents:withPhone, numbers:withPhone.map(k=>k.phone).join("\n")};
   document.getElementById("grpChatTitle").textContent="💬 Чат в Viber — "+g.name;
   const parentsList = withPhone.map((k,pi)=>`<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:3px 0;border-bottom:1px solid #f0ebe4;font-size:13px">
       <span>${esc(k.name)}</span>
@@ -6680,8 +6680,27 @@ function openGroupChat(i){
 
     <label>3. Сообщение о начале занятий</label>
     <div style="white-space:pre-wrap;border:1px solid var(--line);border-radius:8px;padding:8px 10px;background:#f7f4f0;font-size:13px;margin:4px 0 6px">${esc(msg)}</div>
-    <button class="btn sm" onclick="grpChatCopy('message')">📋 Копировать сообщение</button>`;
+    <button class="btn sm" onclick="grpChatCopy('message')">📋 Копировать сообщение</button>
+
+    <div style="border-top:1px solid var(--line);margin-top:14px;padding-top:12px" id="grpChatDoneWrap">${_grpChatDoneBtn(g.chatDone)}</div>`;
   document.getElementById("grpChatModal").classList.add("show");
+}
+function _grpChatDoneBtn(done){
+  return done
+    ? `<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><span style="color:var(--green);font-weight:700">✅ Чат создан, сообщение отправлено</span>
+        <button class="btn ghost sm" onclick="grpChatMarkDone(false)">Снять отметку</button></div>`
+    : `<button class="btn sm" style="background:var(--green);border-color:var(--green);color:#fff" onclick="grpChatMarkDone(true)">✅ Отметить: чат создан и сообщение отправлено</button>`;
+}
+function grpChatMarkDone(v){
+  if(!_grpChat||!_grpChat.key) return;
+  if(!S.groupMeta) S.groupMeta={};
+  const m=S.groupMeta[_grpChat.key]||(S.groupMeta[_grpChat.key]={});
+  if(v) m.chatDone=1; else delete m.chatDone;
+  if(!Object.keys(m).length) delete S.groupMeta[_grpChat.key];
+  persistLocal(); if(typeof fbSchedulePush==="function") fbSchedulePush();
+  _grpChat.chatDone=!!v;
+  const wrap=document.getElementById("grpChatDoneWrap"); if(wrap) wrap.innerHTML=_grpChatDoneBtn(!!v);
+  renderGroups();
 }
 async function grpCopyNum(pi){ if(!_grpChat) return; const p=_grpChat.parents[pi]; if(!p) return;
   const ok=await _copyText(p.phone||""); toast(ok?("Скопирован номер: "+p.phone):"Не удалось скопировать"); }
@@ -9502,7 +9521,7 @@ function renderGroups(){
   const aIdx=(_pubAlfaGroups&&_pubAlfaGroups.length)?_pubAlfaByName():null;
   const groups=order.map(k=>{ const g=map[k];
     g.key=k; g.done=!!(S.groupsDone||{})[k];
-    const gm=(S.groupMeta||{})[k]||{}; g.age=gm.age||""; g.klass=gm.klass||""; g.make=gm.make||"";   // рукописные возраст/класс группы + отметка «делать группу?»
+    const gm=(S.groupMeta||{})[k]||{}; g.age=gm.age||""; g.klass=gm.klass||""; g.make=gm.make||""; g.chatDone=!!gm.chatDone;   // возраст/класс + «делать?» + «чат создан»
     g.alfaId=+(gm.alfaId||0)||0;                                                 // опубликована в Alfa — чтобы не создать дубль
     const names=new Set(), paid=new Set(), inAlfa=new Set(), rep={};   // rep: ФИО → лучший ответ + флаг «не придёт» (как в «Движении по группам»)
     const rank=r=>r==="yes"?3:r==="no"?2:r==="maybe"?1:0;
@@ -9563,7 +9582,7 @@ function renderGroups(){
   shown.forEach((g,i)=>{
     html+=`<tr class="${g.done?'grp-done':''}">
       <td style="text-align:center"><select class="cell" style="width:56px;padding:2px 4px;font-weight:700;${g.make==='yes'?'color:var(--green)':g.make==='no'?'color:var(--red)':'color:var(--muted)'}" title="Делать ли эту группу? Сигнал админу" onchange="setGroupMake('${_jsStr(g.key)}',this.value)"><option value="" ${!g.make?'selected':''}>—</option><option value="yes" ${g.make==='yes'?'selected':''}>да</option><option value="no" ${g.make==='no'?'selected':''}>нет</option></select></td>
-      <td style="text-align:center;white-space:nowrap"><button class="btn ghost sm" onclick="openGroupChat(${i})" title="Помощник: создать чат в Viber для этой группы (название, участники, сообщение)">💬</button> <button class="btn ghost sm" onclick="${g.firstId?`gotoKidLessonId('${esc(g.firstId)}')`:`gotoKidLesson(${g.firstIdx})`}" title="Открыть группу в сетке">→</button></td>
+      <td style="text-align:center;white-space:nowrap"><button class="btn ${g.chatDone?'':'ghost'} sm" style="${g.chatDone?'background:var(--green);border-color:var(--green);color:#fff':''}" onclick="openGroupChat(${i})" title="${g.chatDone?'Чат создан и сообщение отправлено — открыть помощник':'Помощник: создать чат в Viber для этой группы (название, участники, сообщение)'}">${g.chatDone?'✅':'💬'}</button> <button class="btn ghost sm" onclick="${g.firstId?`gotoKidLessonId('${esc(g.firstId)}')`:`gotoKidLesson(${g.firstIdx})`}" title="Открыть группу в сетке">→</button></td>
       <td style="text-align:center"><input type="checkbox" style="width:auto;margin:0;cursor:pointer" ${g.done?"checked":""} title="${g.done?'Группа набрана — снять отметку':'Отметить, что группа набрана'}" onchange="grpToggleDone(${i})"></td>
       <td style="text-align:center"><span class="grp-alfa a-${g.pub.k}" title="${esc(g.pub.t)}${_fbIsAdmin?' · нажмите, чтобы опубликовать расписание в Alfa':''}" ${_fbIsAdmin?`onclick="pubOne('${_jsStr(g.key)}')"`:'style="cursor:default"'}>${g.pub.lab}</span></td><td style="text-align:center">${g.kidsAlfa?`<b style="color:var(--green)" title="Заведено в группу AlfaCRM: ${g.kidsAlfa} из ${g.kids}">${g.kidsAlfa}/${g.kids}</b>`:`<span style="color:var(--muted)" title="${g.alfaId?'Дети в эту группу Alfa ещё не заводились':'Группа не связана с Alfa'}">—</span>`}</td>
       <td style="text-align:left"><span class="grp-name" title="Открыть карточку занятия" onclick="${g.firstId?`editLes(_lesIdx('${esc(g.firstId)}'))`:`editLes(${g.firstIdx})`}"><b>${esc(g.name)}</b></span>${g.newIntake?' <span class="ni-tag" title="Группа с новым набором">NEW</span>':''}</td>
