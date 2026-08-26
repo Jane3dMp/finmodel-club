@@ -6657,7 +6657,8 @@ function openGroupChat(i){
   const withPhone=kids.filter(k=>k.phone), noPhone=kids.filter(k=>!k.phone);
   const teacher=[...(g.teachers||[])][0]||"";
   const msg=_groupViberMsg({name:g.name, course:g.course, sched:g.schedText, teacher});
-  _grpChat={name:g.name, message:msg, parents:withPhone, numbers:withPhone.map(k=>k.phone).join("\n")};
+  const chatName=g.schedText ? (g.name+" · "+g.schedText) : g.name;   // название чата = группа + расписание
+  _grpChat={name:chatName, message:msg, parents:withPhone, numbers:withPhone.map(k=>k.phone).join("\n")};
   document.getElementById("grpChatTitle").textContent="💬 Чат в Viber — "+g.name;
   const parentsList = withPhone.map((k,pi)=>`<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:3px 0;border-bottom:1px solid #f0ebe4;font-size:13px">
       <span>${esc(k.name)}</span>
@@ -6666,7 +6667,7 @@ function openGroupChat(i){
   document.getElementById("grpChatBody").innerHTML=`
     <label>1. Название чата</label>
     <div style="display:flex;gap:8px;align-items:center;margin:4px 0 12px">
-      <input class="cell" style="flex:1;box-sizing:border-box" readonly value="${esc(g.name)}">
+      <input class="cell" style="flex:1;box-sizing:border-box" readonly value="${esc(chatName)}">
       <button class="btn sm" onclick="grpChatCopy('name')">📋 Копировать</button></div>
 
     <label>2. Участники (${withPhone.length}) — копируйте номер и вставляйте в поиск людей в Viber</label>
