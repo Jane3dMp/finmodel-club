@@ -1547,6 +1547,16 @@ details.client .cli-cols .cc-bal{width:74px;font-weight:600}
  </div>
 </div>
 
+<div class="modal-bg" id="grpChatModal">
+ <div class="modal" style="max-width:600px">
+  <h3 id="grpChatTitle">💬 Чат в Viber</h3>
+  <div id="grpChatBody" style="font-size:13px"></div>
+  <div class="hd-actions les-foot" style="margin-top:12px">
+   <button class="btn ghost sm" onclick="closeGrpChat()">Закрыть</button>
+  </div>
+ </div>
+</div>
+
 <div class="modal-bg" id="vtplModal">
  <div class="modal" style="max-width:820px">
   <h3>✍️ Шаблон сообщения в Viber</h3>
@@ -6594,6 +6604,62 @@ function printCompos(){
   w.document.close(); w.focus(); setTimeout(()=>{ try{ w.print(); }catch(e){} },300);
 }
 
+/* ====== ПОМОЩНИК «ЧАТ В VIBER» ДЛЯ ГРУППЫ ======
+   Viber не даёт создать групповой чат / добавить участников по ссылке из браузера — это делается
+   вручную в приложении. Поэтому готовим всё для 3 копипастов: название, номера, сообщение. */
+const VIBER_GROUP_TPL_DEFAULT=[
+"Здравствуйте! 🌟",
+"Добро пожаловать в чат группы «{группа}» ({курс}).",
+"",
+"🗓 Занятия: {расписание}",
+"👩‍🏫 Педагог: {педагог}",
+"📅 Начало занятий: {старт}",
+"",
+"Рады видеть вас в новом учебном году — впереди много интересного! 🚀"
+].join("\n");
+function _groupViberMsg(g){
+  const tpl=S.viberGroupTpl||VIBER_GROUP_TPL_DEFAULT;
+  return tpl
+    .replace(/\{группа\}/g, g.name||"")
+    .replace(/\{курс\}/g,   g.course||"")
+    .replace(/\{расписание\}/g, g.sched||"")
+    .replace(/\{педагог\}/g, g.teacher||"")
+    .replace(/\{старт\}/g,  S.viberStart||VIBER_START_DEFAULT);
+}
+let _grpChat=null;
+function openGroupChat(i){
+  const g=(typeof _groupsShown!=="undefined")&&_groupsShown[i]; if(!g){ toast("Группа не найдена"); return; }
+  const seen=new Set(), kids=[];
+  (g.idxs||[]).forEach(idx=>kidsOf(S.grid[idx]).forEach(k=>{
+    const nk=_nameKey(k.n); if(!nk||seen.has(nk)) return; seen.add(nk);
+    if(k.no) return;                                   // «не придёт» — в чат не берём
+    kids.push({name:k.n, phone:_viberNumber(k.phone)});
+  }));
+  const withPhone=kids.filter(k=>k.phone), noPhone=kids.filter(k=>!k.phone);
+  const teacher=[...(g.teachers||[])][0]||"";
+  const msg=_groupViberMsg({name:g.name, course:g.course, sched:g.schedText, teacher});
+  _grpChat={name:g.name, numbers:withPhone.map(k=>k.phone).join("\n"), message:msg};
+  document.getElementById("grpChatTitle").textContent="💬 Чат в Viber — "+g.name;
+  document.getElementById("grpChatBody").innerHTML=`
+    <div class="callout" style="margin-bottom:10px;font-size:12px">Viber не создаёт группу по ссылке — чат заводите вручную в приложении, а здесь всё готово для 3 копипастов.</div>
+    <label>1. Название чата</label>
+    <div style="display:flex;gap:8px;align-items:center;margin:4px 0 12px">
+      <input class="cell" style="flex:1;box-sizing:border-box" readonly value="${esc(g.name)}">
+      <button class="btn sm" onclick="grpChatCopy('name')">📋 Копировать</button></div>
+    <label>2. Участники (${withPhone.length}) — кого добавить в группу</label>
+    <div style="max-height:26vh;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:6px 10px;margin:4px 0 6px;font-size:13px">
+      ${withPhone.map(k=>`<div style="display:flex;justify-content:space-between;gap:8px;padding:2px 0"><span>${esc(k.name)}</span><span style="color:var(--muted)">${esc(k.phone)}</span></div>`).join("")||'<span style="color:var(--muted)">нет телефонов</span>'}
+      ${noPhone.length?`<div style="color:var(--red);font-size:12px;margin-top:6px">Без телефона (${noPhone.length}): ${noPhone.map(k=>esc(k.name)).join(", ")} — сделайте «📞 Контакты из Альфы».</div>`:''}</div>
+    <button class="btn ghost sm" style="margin-bottom:12px" onclick="grpChatCopy('numbers')">📋 Скопировать все номера (${withPhone.length})</button>
+    <label>3. Сообщение о начале занятий</label>
+    <div style="white-space:pre-wrap;border:1px solid var(--line);border-radius:8px;padding:8px 10px;background:#f7f4f0;font-size:13px;margin:4px 0 6px">${esc(msg)}</div>
+    <button class="btn sm" onclick="grpChatCopy('message')">📋 Копировать сообщение</button>
+    <div class="callout" style="margin-top:12px;font-size:12px;line-height:1.6"><b>Как создать чат:</b> Viber → «+» → «Новая группа» → добавьте участников (номера выше) → назовите чат (кнопка 1) → отправьте сообщение (кнопка 3).</div>`;
+  document.getElementById("grpChatModal").classList.add("show");
+}
+async function grpChatCopy(kind){ if(!_grpChat) return; const ok=await _copyText(_grpChat[kind]||""); toast(ok?"Скопировано — вставьте в Viber (Ctrl+V)":"Не удалось скопировать"); }
+function closeGrpChat(){ document.getElementById("grpChatModal").classList.remove("show"); }
+
 /* ====== АВТОИМПОРТ ВЫГРУЗКИ АЛЬФЫ (.xlsx) ====== */
 const ALPHA_COURSE_MAP = {
  "3D Blender":"Blender","3D Blender и Unity":"Blender + Unity","3D Unity":"Blender + Unity",
@@ -9474,7 +9540,7 @@ function renderGroups(){
       <td style="text-align:left">${esc(g.teacherText||"—")}</td>
       <td style="text-align:left">${esc(g.schedText||"—")}</td>
       <td style="text-align:center">${esc(g.roomText||"—")}</td>
-      <td style="text-align:center"><button class="btn ghost sm" onclick="${g.firstId?`gotoKidLessonId('${esc(g.firstId)}')`:`gotoKidLesson(${g.firstIdx})`}" title="Открыть группу в сетке">→</button></td>
+      <td style="text-align:center;white-space:nowrap"><button class="btn ghost sm" onclick="openGroupChat(${i})" title="Помощник: создать чат в Viber для этой группы (название, участники, сообщение)">💬</button> <button class="btn ghost sm" onclick="${g.firstId?`gotoKidLessonId('${esc(g.firstId)}')`:`gotoKidLesson(${g.firstIdx})`}" title="Открыть группу в сетке">→</button></td>
     </tr>`;
   });
   if(!shown.length) html+=`<tr><td colspan="17" style="padding:12px;color:var(--muted)">${_groupsHideDone&&doneCount?'Все группы под фильтром набраны. Нажмите «Показать набранные».':'Групп не найдено.'}</td></tr>`;
