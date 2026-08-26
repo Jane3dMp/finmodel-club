@@ -1129,6 +1129,7 @@ details.client .cli-cols .cc-bal{width:74px;font-weight:600}
  <div class="hd-actions" style="margin-bottom:8px">
   <button class="btn ghost sm" onclick="composAddRow()">+ строка</button>
   <button class="btn sm" onclick="printCompos()" title="Печать/сохранение на A4 (вертикальный)">🖨 Печать (A4)</button>
+  <button class="btn ghost sm" onclick="exportComposXls()" title="Сохранить только таблицу в Excel (без заголовка и подписей)">⬇ Excel</button>
  </div>
  <div class="tscroll"><table id="composTable" style="width:auto;max-width:640px;border-collapse:collapse"></table></div>
  <div style="font-size:12px;font-style:italic;color:var(--muted);margin-top:8px">* Состав группы может быть увеличен с согласия педагога.</div>
@@ -6578,6 +6579,24 @@ function updComposRow(i,f,v){ const rows=_composRows(); if(!rows[i]) return; row
 function composAddRow(){ _composRows().push({name:"",h1:"",h2:""}); persistLocal(); renderCompos();
   const inps=document.querySelectorAll("#composTable tbody tr td:first-child input"); if(inps.length) inps[inps.length-1].focus(); }
 function composDelRow(i){ const rows=_composRows(); if(rows[i]===undefined) return; rows.splice(i,1); persistLocal(); renderCompos(); }
+/* Экспорт состава групп в Excel — ТОЛЬКО таблица (без заголовка-«шапки» и подписей-«подвала»).
+   Формат .xls как HTML-таблица: Excel открывает сразу, кириллица сохраняется (UTF-8 + BOM). */
+function exportComposXls(){
+  const rowsArr=_composRows().filter(r=>r.name||r.h1||r.h2);
+  if(!rowsArr.length){ toast("Таблица пуста"); return; }
+  const cell=v=>`<td>${(v==null||v==="")?"":esc(String(v))}</td>`;
+  let body="";
+  rowsArr.forEach(r=>{ body+=`<tr>${cell(r.name)}<td style="mso-number-format:'0';text-align:center">${(r.h1!=null&&r.h1!=="")?esc(r.h1):""}</td><td style="mso-number-format:'0';text-align:center">${(r.h2!=null&&r.h2!=="")?esc(r.h2):""}</td></tr>`; });
+  const html=`<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40"><head><meta charset="utf-8">
+    <!--[if gte mso 9]><xml><x:ExcelWorkbook><x:ExcelWorksheets><x:ExcelWorksheet><x:Name>Состав групп</x:Name><x:WorksheetOptions><x:DisplayGridlines/></x:WorksheetOptions></x:ExcelWorksheet></x:ExcelWorksheets></x:ExcelWorkbook></xml><![endif]-->
+    <style>td,th{border:1px solid #999;padding:4px 8px} th{background:#eee;font-weight:700}</style></head><body>
+    <table><tr><th>Курс</th><th>1 учебный час</th><th>2 учебных часа</th></tr>${body}</table></body></html>`;
+  const blob=new Blob(["﻿"+html],{type:"application/vnd.ms-excel;charset=utf-8"});
+  const url=URL.createObjectURL(blob), a=document.createElement("a");
+  a.href=url; a.download="Состав групп.xls"; document.body.appendChild(a); a.click();
+  setTimeout(()=>{ URL.revokeObjectURL(url); a.remove(); },400);
+  toast("Файл «Состав групп.xls» сохранён");
+}
 function printCompos(){
   const w=window.open("","_blank"); if(!w){ toast("Разрешите всплывающие окна для печати"); return; }
   const rowsArr=_composRows();
