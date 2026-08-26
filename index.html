@@ -9453,6 +9453,15 @@ function setGroupMeta(key,f,v){
   if(!Object.keys(m).length) delete S.groupMeta[key];
   persistLocal(); if(typeof fbSchedulePush==="function") fbSchedulePush();
 }
+/* отметка «делать ли группу?» — сигнал админу (да/нет). Перерисовываем, чтобы обновился цвет */
+function setGroupMake(key,v){
+  if(!S.groupMeta) S.groupMeta={};
+  const m=S.groupMeta[key]||(S.groupMeta[key]={});
+  v=String(v||"").trim();
+  if(v) m.make=v; else delete m.make;
+  if(!Object.keys(m).length) delete S.groupMeta[key];
+  persistLocal(); renderGroups();
+}
 function _grpTh(col,lab,align){ const a=_groupsSort.col===col?(_groupsSort.dir>0?" ▲":" ▼"):""; return `<th style="text-align:${align};cursor:pointer;user-select:none;white-space:nowrap" onclick="grpSort('${col}')" title="Сортировать">${lab}${a}</th>`; }
 function renderGroups(){
   const box=document.getElementById("groupsBody"); if(!box) return;
@@ -9471,7 +9480,7 @@ function renderGroups(){
   const aIdx=(_pubAlfaGroups&&_pubAlfaGroups.length)?_pubAlfaByName():null;
   const groups=order.map(k=>{ const g=map[k];
     g.key=k; g.done=!!(S.groupsDone||{})[k];
-    const gm=(S.groupMeta||{})[k]||{}; g.age=gm.age||""; g.klass=gm.klass||"";   // рукописные возраст/класс группы
+    const gm=(S.groupMeta||{})[k]||{}; g.age=gm.age||""; g.klass=gm.klass||""; g.make=gm.make||"";   // рукописные возраст/класс группы + отметка «делать группу?»
     g.alfaId=+(gm.alfaId||0)||0;                                                 // опубликована в Alfa — чтобы не создать дубль
     const names=new Set(), paid=new Set(), inAlfa=new Set(), rep={};   // rep: ФИО → лучший ответ + флаг «не придёт» (как в «Движении по группам»)
     const rank=r=>r==="yes"?3:r==="no"?2:r==="maybe"?1:0;
@@ -9527,10 +9536,11 @@ function renderGroups(){
         <button class="btn sm" onclick="openPublish()" title="Массовое создание групп и расписания в AlfaCRM (сначала сухой прогон)">📤 Опубликовать в Alfa</button></span>`:""}
     </div>
     <div class="tscroll"><table id="groupsTable"><thead><tr>
-      <th style="width:70px"></th><th style="width:34px" title="Группа набрана — набор закрыт, строка подсветится зелёным здесь и в сетке">✓</th>${_grpTh("alfa",'<span title="Опубликовано ли расписание группы в AlfaCRM">Alfa</span>',"center")}${_grpTh("alfakids",'<span title="Сколько детей группы заведено в эту группу AlfaCRM">👤 в Alfa</span>',"center")}${_grpTh("name","Группа","left")}${_grpTh("age","Возраст","center")}${_grpTh("klass","Класс","center")}${_grpTh("kids","Детей","center")}${_grpTh("ryes",'<span style="color:#7CE0A0">🟢</span>',"center")}${_grpTh("rno",'<span style="color:#F0A0A0">🔴</span>',"center")}${_grpTh("rmaybe",'<span style="color:#F2D06B">🟡</span>',"center")}${_grpTh("rnone","Молчат","center")}${_grpTh("paid","💰","center")}${_grpTh("course","Курс","left")}${_grpTh("teacher","Педагог","left")}${_grpTh("sched","Расписание","left")}${_grpTh("room","Каб.","center")}
+      <th style="width:62px" title="Делать ли эту группу? Отметка для админа: да — можно создавать в Alfa, нет — пока рано">Делать?</th><th style="width:70px"></th><th style="width:34px" title="Группа набрана — набор закрыт, строка подсветится зелёным здесь и в сетке">✓</th>${_grpTh("alfa",'<span title="Опубликовано ли расписание группы в AlfaCRM">Alfa</span>',"center")}${_grpTh("alfakids",'<span title="Сколько детей группы заведено в эту группу AlfaCRM">👤 в Alfa</span>',"center")}${_grpTh("name","Группа","left")}${_grpTh("age","Возраст","center")}${_grpTh("klass","Класс","center")}${_grpTh("kids","Детей","center")}${_grpTh("ryes",'<span style="color:#7CE0A0">🟢</span>',"center")}${_grpTh("rno",'<span style="color:#F0A0A0">🔴</span>',"center")}${_grpTh("rmaybe",'<span style="color:#F2D06B">🟡</span>',"center")}${_grpTh("rnone","Молчат","center")}${_grpTh("paid","💰","center")}${_grpTh("course","Курс","left")}${_grpTh("teacher","Педагог","left")}${_grpTh("sched","Расписание","left")}${_grpTh("room","Каб.","center")}
     </tr></thead><tbody>`;
   shown.forEach((g,i)=>{
     html+=`<tr class="${g.done?'grp-done':''}">
+      <td style="text-align:center"><select class="cell" style="width:56px;padding:2px 4px;font-weight:700;${g.make==='yes'?'color:var(--green)':g.make==='no'?'color:var(--red)':'color:var(--muted)'}" title="Делать ли эту группу? Сигнал админу" onchange="setGroupMake('${_jsStr(g.key)}',this.value)"><option value="" ${!g.make?'selected':''}>—</option><option value="yes" ${g.make==='yes'?'selected':''}>да</option><option value="no" ${g.make==='no'?'selected':''}>нет</option></select></td>
       <td style="text-align:center;white-space:nowrap"><button class="btn ghost sm" onclick="openGroupChat(${i})" title="Помощник: создать чат в Viber для этой группы (название, участники, сообщение)">💬</button> <button class="btn ghost sm" onclick="${g.firstId?`gotoKidLessonId('${esc(g.firstId)}')`:`gotoKidLesson(${g.firstIdx})`}" title="Открыть группу в сетке">→</button></td>
       <td style="text-align:center"><input type="checkbox" style="width:auto;margin:0;cursor:pointer" ${g.done?"checked":""} title="${g.done?'Группа набрана — снять отметку':'Отметить, что группа набрана'}" onchange="grpToggleDone(${i})"></td>
       <td style="text-align:center"><span class="grp-alfa a-${g.pub.k}" title="${esc(g.pub.t)}${_fbIsAdmin?' · нажмите, чтобы опубликовать расписание в Alfa':''}" ${_fbIsAdmin?`onclick="pubOne('${_jsStr(g.key)}')"`:'style="cursor:default"'}>${g.pub.lab}</span></td><td style="text-align:center">${g.kidsAlfa?`<b style="color:var(--green)" title="Заведено в группу AlfaCRM: ${g.kidsAlfa} из ${g.kids}">${g.kidsAlfa}/${g.kids}</b>`:`<span style="color:var(--muted)" title="${g.alfaId?'Дети в эту группу Alfa ещё не заводились':'Группа не связана с Alfa'}">—</span>`}</td>
