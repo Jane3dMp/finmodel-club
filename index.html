@@ -1628,6 +1628,29 @@ details.client .cli-cols .cc-bal{width:74px;font-weight:600}
  </div>
 </div>
 
+<div class="modal-bg" id="grpPrnModal">
+ <div class="modal" style="max-width:640px">
+  <h3>🖨 Печать списка групп</h3>
+  <p style="font-size:13px;color:var(--muted);margin-bottom:10px">Отметьте столбцы — выбор запоминается. По умолчанию печатается то, что сейчас на экране, с вашими фильтрами.</p>
+  <div class="hd-actions" style="margin-bottom:10px">
+   <button class="btn ghost sm" onclick="gprnPreset('work')">Рабочий список</button>
+   <button class="btn ghost sm" onclick="gprnPreset('nabor')">Про набор</button>
+   <button class="btn ghost sm" onclick="gprnPreset('alfa')">С Alfa</button>
+   <button class="btn ghost sm" onclick="gprnPreset('all')">Всё</button>
+   <span style="margin-left:auto;font-size:12px;color:var(--muted)" id="gprnCnt"></span>
+  </div>
+  <div id="gprnColList" style="display:grid;grid-template-columns:1fr 1fr;gap:4px 14px;margin-bottom:12px"></div>
+  <label style="display:flex;align-items:center;gap:6px;font-size:13px;margin:0 0 4px"><input type="checkbox" id="gprnAll" style="width:auto;margin:0" onchange="gprnToggleAll()"> Печатать все группы, не только показанные</label>
+  <label style="display:flex;align-items:center;gap:6px;font-size:13px;margin:0 0 4px"><input type="checkbox" id="gprnLand" style="width:auto;margin:0" checked> Альбомный лист (шире, влезает больше столбцов)</label>
+  <label style="display:flex;align-items:center;gap:6px;font-size:13px;margin:0 0 8px"><input type="checkbox" id="gprnTot" style="width:auto;margin:0" checked> Строка «Итого» внизу</label>
+  <div style="font-size:12px;color:var(--muted);margin-bottom:6px" id="gprnWhat"></div>
+  <div class="hd-actions" style="margin-top:14px">
+   <button class="btn sm" onclick="doPrintGroups()"><i data-ic="print"></i>Печать</button>
+   <button class="btn gray sm" onclick="closeGroupsPrint()">Отмена</button>
+  </div>
+ </div>
+</div>
+
 <div class="modal-bg" id="prnColModal">
  <div class="modal" style="max-width:560px">
   <h3>Печать таблицы курсов</h3>
@@ -9477,6 +9500,9 @@ function saveViberTpl(){
 
 /* ===== ВКЛАДКА «ГРУППЫ» — обзор групп, собранный из расписания ===== */
 let _groupsQuery="", _groupsSort={col:"course",dir:1}, _groupsHideDone=false, _groupsShown=[], _groupsCourse="";
+/* Полный список групп — тот же, что и на экране, но ДО фильтров. Нужен печати:
+   обычно печатают то, что видно, но иногда — весь список целиком. */
+let _groupsAll=[];
 function grpRerenderKeepFocus(){ renderGroups(); const el=document.getElementById("grpQ"); if(el){ const v=el.value; el.focus(); el.value=""; el.value=v; } }
 function grpSort(col){ if(_groupsSort.col===col) _groupsSort.dir*=-1; else _groupsSort={col,dir:1}; renderGroups(); }
 /* отметка «группа набрана» — общая для вкладки «Группы» и сетки, поэтому перерисовываем обе */
@@ -9563,7 +9589,7 @@ function renderGroups(){
   let shown = q.length>=2 ? groups.filter(g=>_ksNorm(g.course+" "+g.name).includes(q)) : groups.slice();
   if(_groupsCourse) shown=shown.filter(g=>g.course===_groupsCourse);
   if(_groupsHideDone) shown=shown.filter(g=>!g.done);
-  _groupsShown=shown;
+  _groupsShown=shown; _groupsAll=groups;
   const totKids=groups.reduce((a,g)=>a+g.kids,0), totPaid=groups.reduce((a,g)=>a+g.paid,0), doneCount=groups.filter(g=>g.done).length;
   let html=`<div class="callout" style="margin-bottom:10px">Групп: <b>${groups.length}</b> · детей вписано: <b>${totKids}</b> · с 💰: <b style="color:var(--green)">${totPaid}</b> · набрано: <b style="color:var(--green)">${doneCount}</b></div>
     <div class="hd-actions" style="margin-bottom:8px">
@@ -9572,7 +9598,8 @@ function renderGroups(){
       <span class="hd-sep"></span>
       <span class="hd-grp"><button class="btn ${_groupsHideDone?'':'ghost'} sm" onclick="_groupsHideDone=!_groupsHideDone;renderGroups()" title="Спрятать/показать набранные группы">${_groupsHideDone?'👁 Показать набранные':'✓ Скрыть набранные'} (${doneCount})</button></span>
       <span class="hd-grp"><button class="btn sm" onclick="openAddKid()" title="Создать нового ребёнка и вписать в группу">➕ Новый ребёнок</button>
-        <button class="btn ghost sm" onclick="openRosterPrint()" title="Списки детей по педагогам: выбрать педагогов и столбцы, у каждого свой лист">🖨 Составы по педагогам</button></span>
+        <button class="btn ghost sm" onclick="openRosterPrint()" title="Списки детей по педагогам: выбрать педагогов и столбцы, у каждого свой лист">🖨 Составы по педагогам</button>
+        <button class="btn ghost sm" onclick="openGroupsPrint()" title="Напечатать этот список групп: столбцы на выбор">🖨 Печать списка</button></span>
       ${_fbIsAdmin?`<span class="hd-grp"><button class="btn ghost sm" onclick="pubSyncGroups(this)" title="Прочитать список групп AlfaCRM и показать в столбце «Alfa», какие из наших там уже есть">⟳ Сверить с Alfa</button>
         <button class="btn sm" onclick="openPublish()" title="Массовое создание групп и расписания в AlfaCRM (сначала сухой прогон)">📤 Опубликовать в Alfa</button></span>`:""}
     </div>
@@ -9603,6 +9630,159 @@ function renderGroups(){
   if(!shown.length) html+=`<tr><td colspan="17" style="padding:12px;color:var(--muted)">${_groupsHideDone&&doneCount?'Все группы под фильтром набраны. Нажмите «Показать набранные».':'Групп не найдено.'}</td></tr>`;
   html+=`</tbody></table></div>`;
   box.innerHTML=html;
+}
+
+/* ===== ПЕЧАТЬ СПИСКА ГРУПП =====
+   Столбцы описаны ОДНИМ списком: из него строятся и галочки в окне, и шапка
+   печати, и ячейки. Разведи их по разным местам — они разъедутся при первой же
+   правке (так уже было с составами по педагогам, ROSTER_COLS).
+   Печатаем то, что на экране: поиск, фильтр по курсу и «скрыть набранные»
+   применяются к печати ровно так же — иначе распечатка не сходится с тем, что
+   директор видит, и доверия к ней нет. */
+const GROUPS_PRINT_COLS=[
+  {k:"num",   lab:"№",                       th:"№",          al:"center", w:26,  get:(g,i)=>String(i+1)},
+  {k:"name",  lab:"Группа",                  th:"Группа",     al:"left",   w:0,   get:g=>esc(g.name)+(g.newIntake?" (новый набор)":"")},
+  {k:"course",lab:"Курс",                    th:"Курс",       al:"left",   w:0,   get:g=>esc(g.course)},
+  {k:"teacher",lab:"Педагог",                th:"Педагог",    al:"left",   w:0,   get:g=>esc(g.teacherText||"—")},
+  {k:"sched", lab:"Расписание",              th:"Расписание", al:"left",   w:0,   get:g=>esc(g.schedText||"—")},
+  {k:"room",  lab:"Кабинет",                 th:"Каб.",       al:"center", w:44,  get:g=>esc(g.roomText||"—")},
+  {k:"age",   lab:"Возраст",                 th:"Возраст",    al:"center", w:52,  get:g=>esc(g.age||"—")},
+  {k:"klass", lab:"Класс",                   th:"Класс",      al:"center", w:44,  get:g=>esc(g.klass||"—")},
+  {k:"kids",  lab:"Детей (и мест)",          th:"Детей",      al:"center", w:52,  get:g=>String(g.kids)+(g.cap?(" / "+g.cap):"")},
+  {k:"paid",  lab:"С оплатой 💰",            th:"Оплатили",   al:"center", w:52,  get:g=>String(g.paid||0)},
+  {k:"ryes",  lab:"Ответ: подтвердили",      th:"Да",         al:"center", w:38,  get:g=>String(g.rYes||0)},
+  {k:"rno",   lab:"Ответ: отказ",            th:"Отказ",      al:"center", w:44,  get:g=>String(g.rNo||0)},
+  {k:"rmaybe",lab:"Ответ: думают",           th:"Думают",     al:"center", w:50,  get:g=>String(g.rMaybe||0)},
+  {k:"rnone", lab:"Молчат",                  th:"Молчат",     al:"center", w:50,  get:g=>String(g.rNone||0)},
+  {k:"make",  lab:"Делать? (да/нет)",        th:"Делать?",    al:"center", w:52,  get:g=>g.make==="yes"?"да":(g.make==="no"?"нет":"—")},
+  {k:"done",  lab:"Набрана",                 th:"Набрана",    al:"center", w:52,  get:g=>g.done?"✓":""},
+  {k:"alfa",  lab:"Статус в Alfa",           th:"Alfa",       al:"center", w:64,  get:g=>esc((g.pub&&g.pub.lab)||"")},
+  {k:"alfakids",lab:"Детей заведено в Alfa", th:"В Alfa",     al:"center", w:52,  get:g=>g.kidsAlfa?(g.kidsAlfa+"/"+g.kids):"—"},
+  {k:"note",  lab:"Пустая графа для отметок",th:"Отметки",    al:"left",   w:110, get:()=>""}
+];
+const GROUPS_PRINT_PRESETS={
+  work:   ["num","name","course","teacher","sched","room","kids"],
+  nabor:  ["num","name","course","kids","paid","ryes","rno","rmaybe","rnone","make"],
+  alfa:   ["num","name","course","teacher","sched","room","kids","alfa","alfakids"],
+  all:    GROUPS_PRINT_COLS.map(c=>c.k)
+};
+function _gprnCols(){
+  try{ const v=JSON.parse(localStorage.getItem("fm_groups_prn_cols")||"null");
+    if(Array.isArray(v)&&v.length) return v; }catch(e){}
+  return GROUPS_PRINT_PRESETS.work.slice();
+}
+function _gprnOpts(){
+  let o={}; try{ o=JSON.parse(localStorage.getItem("fm_groups_prn_opts")||"{}")||{}; }catch(e){}
+  return {land:o.land!==false, tot:o.tot!==false, all:!!o.all};   // альбомная и итоги — по умолчанию
+}
+function _gprnRenderList(sel){
+  document.getElementById("gprnColList").innerHTML=GROUPS_PRINT_COLS.map(c=>
+    `<label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--coal);font-weight:500;margin:0">
+      <input type="checkbox" class="gprn-col" value="${c.k}" style="width:auto;margin:0" ${sel.includes(c.k)?"checked":""} onchange="_gprnCount()"> ${esc(c.lab)}
+    </label>`).join("");
+  _gprnCount();
+}
+function _gprnCount(){
+  const n=document.querySelectorAll(".gprn-col:checked").length;
+  const el=document.getElementById("gprnCnt");
+  if(el) el.textContent="столбцов: "+n;
+}
+function gprnPreset(p){ _gprnRenderList(GROUPS_PRINT_PRESETS[p]||[]); }
+function openGroupsPrint(){
+  if(!_groupsAll.length){ toast("В расписании нет групп"); return; }
+  _gprnRenderList(_gprnCols());
+  const o=_gprnOpts();
+  const set=(id,v)=>{ const e=document.getElementById(id); if(e) e.checked=v; };
+  set("gprnLand",o.land); set("gprnTot",o.tot); set("gprnAll",o.all);
+  // Сколько строк уйдёт в печать — видно ДО нажатия: на экране может стоять
+  // фильтр по курсу, и «почему тут только шесть групп» иначе выясняется уже
+  // на бумаге.
+  const hint=document.getElementById("gprnWhat");
+  if(hint) hint.textContent=_gprnWhatText();
+  document.getElementById("grpPrnModal").classList.add("show");
+}
+function closeGroupsPrint(){ document.getElementById("grpPrnModal").classList.remove("show"); }
+function _gprnWhatText(){
+  const all=document.getElementById("gprnAll");
+  if(all&&all.checked) return "Напечатаем все группы: "+_groupsAll.length+".";
+  const ф=[];
+  if(_groupsQuery) ф.push("поиск «"+_groupsQuery+"»");
+  if(_groupsCourse) ф.push("курс «"+_groupsCourse+"»");
+  if(_groupsHideDone) ф.push("без набранных");
+  return "Напечатаем то, что на экране: "+_groupsShown.length+" из "+_groupsAll.length
+    + (ф.length?" · "+ф.join(", "):"");
+}
+function gprnToggleAll(){
+  const hint=document.getElementById("gprnWhat");
+  if(hint) hint.textContent=_gprnWhatText();
+}
+function doPrintGroups(){
+  const keys=[...document.querySelectorAll(".gprn-col:checked")].map(x=>x.value);
+  if(!keys.length){ toast("Выберите хотя бы один столбец"); return; }
+  const land=document.getElementById("gprnLand").checked;
+  const tot=document.getElementById("gprnTot").checked;
+  const all=document.getElementById("gprnAll").checked;
+  try{ localStorage.setItem("fm_groups_prn_cols",JSON.stringify(keys));
+       localStorage.setItem("fm_groups_prn_opts",JSON.stringify({land,tot,all})); }catch(e){}
+  const cols=GROUPS_PRINT_COLS.filter(c=>keys.includes(c.k));
+  const list=all?_groupsAll:_groupsShown;
+  if(!list.length){ toast("Под фильтром нет ни одной группы"); return; }
+  closeGroupsPrint();
+
+  const d=new Date(), z=n=>String(n).padStart(2,"0");
+  const dd=z(d.getDate())+"."+z(d.getMonth()+1)+"."+d.getFullYear();
+  const ф=[];
+  if(!all){
+    if(_groupsQuery) ф.push("поиск: «"+_groupsQuery+"»");
+    if(_groupsCourse) ф.push("курс: "+_groupsCourse);
+    if(_groupsHideDone) ф.push("без набранных");
+  }
+  const head=`<tr>${cols.map(c=>`<th class="a-${c.al}"${c.w?` style="width:${c.w}px"`:""}>${c.th}</th>`).join("")}</tr>`;
+  const rows=list.map((g,i)=>`<tr>${cols.map(c=>`<td class="a-${c.al}">${c.get(g,i)}</td>`).join("")}</tr>`).join("");
+  let totRow="";
+  if(tot){
+    const V={
+      num:"", name:"ИТОГО: "+list.length+" гр.",
+      kids:String(list.reduce((a,g)=>a+g.kids,0)),
+      paid:String(list.reduce((a,g)=>a+(g.paid||0),0)),
+      ryes:String(list.reduce((a,g)=>a+(g.rYes||0),0)),
+      rno:String(list.reduce((a,g)=>a+(g.rNo||0),0)),
+      rmaybe:String(list.reduce((a,g)=>a+(g.rMaybe||0),0)),
+      rnone:String(list.reduce((a,g)=>a+(g.rNone||0),0)),
+      done:String(list.filter(g=>g.done).length),
+      alfakids:String(list.reduce((a,g)=>a+(g.kidsAlfa||0),0))
+    };
+    totRow=`<tr class="pr-tot">${cols.map(c=>`<td class="a-${c.al}">${V[c.k]||""}</td>`).join("")}</tr>`;
+  }
+  const css=`
+    @page{size:${land?"landscape":"portrait"};margin:10mm}
+    *{box-sizing:border-box;font-family:Arial,Helvetica,sans-serif}
+    body{margin:0;color:#1c1410}
+    h1{font-size:16px;margin:0 0 3px;border-bottom:2px solid #b5532a;padding-bottom:4px}
+    .pr-sub{font-size:10px;color:#666;margin:0 0 8px}
+    table{border-collapse:collapse;width:100%}
+    th,td{border:1px solid #ccc;font-size:10px;padding:3px 6px;text-align:center}
+    th{background:#2a211b;color:#fff}
+    th.a-left,td.a-left{text-align:left}
+    /* шапка повторяется на каждом листе: в списке на 139 групп без неё со
+       второй страницы непонятно, где какой столбец */
+    thead{display:table-header-group}
+    tr{page-break-inside:avoid}
+    tbody tr:nth-child(even) td{background:#faf7f3}
+    tr.pr-tot td{background:#f3ece4;font-weight:700}
+  `;
+  const html=`<!doctype html><html><head><meta charset="utf-8"><title>Список групп</title><style>${css}</style></head><body>
+    <h1>Группы${_groupsCourse&&!all?(" · "+esc(_groupsCourse)):""}</h1>
+    <div class="pr-sub">Прознание + CODDY · учебный год 2026/2027 · групп: ${list.length}${
+      ф.length?" · "+esc(ф.join(" · ")):""} · напечатано ${dd}</div>
+    <table><thead>${head}</thead><tbody>${rows}${totRow}</tbody></table>
+  </body></html>`;
+  const w=window.open("","_printGroups");
+  if(!w){ toast("Разрешите всплывающие окна для печати"); return; }
+  w.document.open();
+  w.document.write(html);
+  w.document.close();
+  setTimeout(()=>{ try{ w.focus(); w.print(); }catch(e){} },300);
 }
 
 /* ===== ЭТАП 3: ПУБЛИКАЦИЯ ГРУПП ФИНМОДЕЛИ В ALFACRM =====
