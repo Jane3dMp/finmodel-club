@@ -10383,8 +10383,12 @@ async function progSnapshot(week){
 async function progPull(){
   if(_realBusy) return;
   const btn=document.getElementById("progPullBtn"), prog=document.getElementById("progPullProg");
-  const dates=[]; const base=new Date();
-  for(let i=-7;i<=35;i++){ const d=new Date(base); d.setDate(d.getDate()+i); dates.push(_dIso(d)); }
+  const set={}; const base=new Date();
+  for(let i=-7;i<=35;i++){ const d=new Date(base); d.setDate(d.getDate()+i); set[_dIso(d)]=1; }
+  // плюс уже подтянутые будущие дни — расписание могло измениться, иначе цифра «зависнет»
+  const today=_todayIso(), horizon=(function(){ const d=new Date(base); d.setDate(d.getDate()+90); return _dIso(d); })();
+  Object.keys(_realStore||{}).forEach(k=>{ if(k>today && k<=horizon) set[k]=1; });
+  const dates=Object.keys(set).sort();
   _realBusy=true; if(btn) btn.disabled=true;
   try{
     _realStore=_realStore||{};

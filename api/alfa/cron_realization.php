@@ -27,16 +27,31 @@ if (!$branches) {
     exit;
 }
 
+@set_time_limit(0);
 $days  = (int)($_GET['days']  ?? ($argv[1] ?? 7));    // сколько дней НАЗАД пересчитать (факт)
-$ahead = (int)($_GET['ahead'] ?? ($argv[2] ?? 14));   // сколько дней ВПЕРЁД (прогноз по расписанию)
+$ahead = (int)($_GET['ahead'] ?? ($argv[2] ?? 14));   // минимум дней ВПЕРЁД (прогноз по расписанию)
 $days  = max(1, min(60, $days));
-$ahead = max(0, min(60, $ahead));
+$ahead = max(0, min(90, $ahead));
+
+$today = date('Y-m-d');
+$dates = [];
+for ($i = 0; $i < $days; $i++)  $dates[date('Y-m-d', strtotime("-$i day"))] = 1;   // назад: факт
+for ($i = 1; $i <= $ahead; $i++) $dates[date('Y-m-d', strtotime("+$i day"))] = 1;  // вперёд: прогноз
+/* ⚠️ Обновляем и ВСЕ будущие дни, которые уже есть в хранилище: расписание меняется
+   (занятия отменяют, детей дописывают), иначе однажды подтянутый день «зависнет»
+   со старой суммой и прогноз будет врать. Ограничиваем горизонтом +90 дней. */
+$horizon = date('Y-m-d', strtotime('+90 day'));
+foreach (array_keys(alfa_realization_store_read()) as $d) {
+    if ($d > $today && $d <= $horizon) $dates[$d] = 1;
+}
+$dates = array_keys($dates);
+sort($dates);
+
 $done = [];
-for ($i = -$ahead; $i < $days; $i++) {
-    $d = $i >= 0 ? date('Y-m-d', strtotime("-$i day")) : date('Y-m-d', strtotime('+' . (-$i) . ' day'));
+foreach ($dates as $d) {
     $r = alfa_realization_upsert($d, $branches);
     $done[$d] = ['present' => $r['present'], 'all' => $r['all'], 'planned' => $r['planned'], 'lessons' => $r['lessons']];
 }
-ksort($done);
 header('Content-Type: application/json; charset=utf-8');
-echo json_encode(['ok' => true, 'ranAt' => date('c'), 'branches' => $branches, 'back' => $days, 'ahead' => $ahead, 'days' => $done], JSON_UNESCAPED_UNICODE);
+echo json_encode(['ok' => true, 'ranAt' => date('c'), 'branches' => $branches,
+                  'back' => $days, 'ahead' => $ahead, 'recalculated' => count($done), 'days' => $done], JSON_UNESCAPED_UNICODE);
