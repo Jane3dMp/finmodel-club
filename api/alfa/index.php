@@ -1335,6 +1335,30 @@ switch ($action) {
         json_out(['ok' => true] + alfa_forecast_plan((string)($in['week'] ?? date('Y-m-d')), $br));
         break;
 
+    // --- ДИАГНОСТИКА ЦЕНЫ: что лежит в абонементах у детей, для которых цену вывести не удалось ---
+    case 'priceDebug':
+        @set_time_limit(90);
+        $ids = is_array($in['ids'] ?? null) ? array_slice($in['ids'], 0, 6) : [];
+        if (!$ids) json_out(['ok' => false, 'error' => 'Не переданы ученики']);
+        $host = 'https://' . alfa_host(); $token = alfa_token();
+        $out = [];
+        foreach ($ids as $x) {
+            $cid = (int)($x['id'] ?? $x); $bid = (int)($x['branch'] ?? 0) ?: alfa_branch();
+            if (!$cid) continue;
+            $ct = alfa_http('POST', "$host/v2api/$bid/customer-tariff/index?customer_id=" . $cid,
+                            ['page' => 0, 'count' => 50], $token, true, 10);
+            $cu = alfa_http('POST', "$host/v2api/$bid/customer/index", ['id' => $cid, 'page' => 0, 'count' => 1], $token, true, 10);
+            $c0 = ($cu['items'] ?? [null])[0] ?? null;
+            $out[] = ['customer_id' => $cid, 'branch' => $bid,
+                      'name' => $c0['name'] ?? null, 'balance' => $c0['balance'] ?? null,
+                      'paid_till' => $c0['paid_till'] ?? null, 'paid_count' => $c0['paid_count'] ?? null,
+                      'tariffErr' => $ct['__err'] ?? null,
+                      'tariffCount' => is_array($ct['items'] ?? null) ? count($ct['items']) : null,
+                      'tariffs' => array_slice((array)($ct['items'] ?? []), 0, 3)];
+        }
+        json_out(['ok' => true, 'items' => $out]);
+        break;
+
     // --- шаг 2: прогноз по ПАЧКЕ групп (клиент шлёт чанками, чтобы не ловить таймаут шлюза) ---
     case 'forecastGroups':
         @set_time_limit(120);

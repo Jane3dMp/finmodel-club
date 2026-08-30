@@ -567,7 +567,7 @@ function alfa_forecast_groups(string $mondayIso, array $groups): array {
     $sun = date('Y-m-d', strtotime('+6 day', strtotime($mon)));
     $host = 'https://' . alfa_host(); $token = alfa_token();
     $priceCache = alfa_price_cache_read(); $before = count($priceCache);
-    $sum = 0.0; $lessons = 0; $students = 0; $noPrice = 0; $dbg = [];
+    $sum = 0.0; $lessons = 0; $students = 0; $noPrice = 0; $dbg = []; $noPriceIds = [];
     foreach ($groups as $g) {
         $gid = (int)($g['id'] ?? 0); $bid = (int)($g['branch'] ?? 0); $times = (int)($g['times'] ?? 1);
         if (!$gid || !$bid) continue;
@@ -588,13 +588,14 @@ function alfa_forecast_groups(string $mondayIso, array $groups): array {
         }
         foreach (array_keys($seen) as $cid) {
             $p = alfa_lesson_price_of($bid, (int)$cid, $priceCache, $dbg);
-            if ($p <= 0) $noPrice++;
+            if ($p <= 0) { $noPrice++; if (count($noPriceIds) < 8) $noPriceIds[] = ['id' => (int)$cid, 'branch' => $bid]; }
             $sum += $p * $times; $lessons += $times; $students++;
         }
     }
     if (count($priceCache) !== $before) alfa_price_cache_write($priceCache);
     return ['week' => $mon, 'forecast' => round($sum, 2), 'lessons' => $lessons,
-            'students' => $students, 'withoutPrice' => $noPrice, 'sampleTariffs' => $dbg];
+            'students' => $students, 'withoutPrice' => $noPrice, 'noPriceIds' => $noPriceIds,
+            'sampleTariffs' => $dbg];
 }
 /* Прогноз на неделю целиком (для cron: там ограничения по времени мягче). */
 function alfa_forecast_week(string $mondayIso, ?array $branches = null): array {

@@ -10426,16 +10426,21 @@ async function progForecastWeek(week){
     const plan=await _pubCall("forecastPlan",{week:wk});
     const gs=plan.groups||[];
     if(!gs.length){ if(prog) prog.textContent="В Alfa нет регулярных занятий на эту неделю"; return; }
-    let sum=0, les=0, stud=0, noPrice=0, samples=null;
+    let sum=0, les=0, stud=0, noPrice=0, samples=null, noIds=[];
     for(let i=0;i<gs.length;i+=10){
       if(prog) prog.textContent="Считаю по Alfa… групп "+Math.min(i+10,gs.length)+"/"+gs.length;
       const j=await _pubCall("forecastGroups",{week:wk, groups:gs.slice(i,i+10)});
       sum+=+j.forecast||0; les+=+j.lessons||0; stud+=+j.students||0; noPrice+=+j.withoutPrice||0;
       if(!samples && (j.sampleTariffs||[]).length) samples=j.sampleTariffs;
+      if(noIds.length<6) noIds=noIds.concat(j.noPriceIds||[]).slice(0,6);
     }
-    console.log("📤 forecast как в Alfa:",{week:wk,sum,les,stud,noPrice,samples});
+    // если у части детей цену вывести не удалось — сразу смотрим, что у них в абонементах
+    let dbg=null;
+    if(noIds.length){ try{ dbg=await _pubCall("priceDebug",{ids:noIds}); }catch(e){} }
+    console.log("📤 forecast как в Alfa:",{week:wk,sum,les,stud,noPrice,samples,priceDebug:dbg});
     if(prog) prog.innerHTML=`Неделя ${esc(plan.week)}–${esc(plan.to)}: <b>${_gm(sum)}</b> · уроков ${les} · детей ${stud} · групп ${gs.length}`+
-      (noPrice?` · <span style="color:var(--terra)">без цены: ${noPrice}</span>`:'');
+      (noPrice?` · <span style="color:var(--terra)">без цены: ${noPrice}</span>`:'')+
+      (dbg?`<details style="margin-top:6px"><summary style="cursor:pointer">Почему нет цены (примеры) — покажите мне</summary><pre style="white-space:pre-wrap;font-size:11px;background:var(--paper);padding:6px;border-radius:6px;max-height:40vh;overflow:auto">${esc(JSON.stringify(dbg.items,null,1))}</pre></details>`:'');
     toast("Прогноз как в Alfa: "+_gm(sum)+" (уроков "+les+")");
   }catch(e){ if(prog) prog.textContent=""; const b=document.getElementById("rukBody"); if(b){ const d=document.createElement('div'); d.innerHTML=_pubErrHtml(e,"прогноз как в Alfa"); b.insertBefore(d.firstChild,b.firstChild); } }
   finally{ _realBusy=false; if(btn) btn.disabled=false; }
