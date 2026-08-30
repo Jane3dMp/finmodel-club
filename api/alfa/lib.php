@@ -504,33 +504,64 @@ function alfa_price_cache_path(): string {
 /* Справочник шаблонов тарифов: id => [цена, число уроков, тип]. Цена занятия ученика берётся
    именно отсюда: у абонементов на новый год balance=0 (деньги ещё не внесены), поэтому
    «остаток / число уроков» не работает. Кэшируем на сутки. */
+/* Разбор одной записи справочника: поля подтверждены ответом Alfa —
+   price («264.00») и lessons_count (8) → цена занятия = 264/8 = 33. */
+function alfa_tariff_row(array $t): array {
+    $price = (isset($t['price']) && is_numeric($t['price'])) ? (float)$t['price'] : null;
+    $cnt = 0;
+    foreach (['lessons_count', 'lesson_count', 'count'] as $k) {
+        if (isset($t[$k]) && is_numeric($t[$k]) && (float)$t[$k] > 0) { $cnt = (float)$t[$k]; break; }
+    }
+    return ['price' => $price, 'count' => $cnt, 'name' => (string)($t['name'] ?? ''),
+            'per' => ($price !== null && $price > 0) ? ($cnt > 0 ? $price / $cnt : $price) : null];
+}
 function alfa_tariff_map(int $branch): array {
     static $memo = null;
     if ($memo !== null) return $memo;
-    $f = alfa_store_dir() . '/tariffs_' . substr(hash('sha256', __DIR__ . '|tariffs'), 0, 20) . '.json';
+    $f = alfa_store_dir() . '/tariffs_' . substr(hash('sha256', __DIR__ . '|tariffs2'), 0, 20) . '.json';
     if (is_file($f)) {
         $j = json_decode((string)@file_get_contents($f), true);
-        if (is_array($j) && (int)($j['ts'] ?? 0) > time() - 86400 && is_array($j['m'] ?? null)) return $memo = $j['m'];
+        // ⚠️ пустой кэш не принимаем: один неудачный обход иначе «залипал» бы на сутки
+        if (is_array($j) && (int)($j['ts'] ?? 0) > time() - 86400 && is_array($j['m'] ?? null) && count($j['m']) > 5) return $memo = $j['m'];
     }
     $map = [];
     foreach (alfa_all_branch_ids() as $bid) {
-        $r = alfa_index_all((int)$bid, 'tariff', [], 20, 12);
+        $r = alfa_index_all((int)$bid, 'tariff', [], 30, 12);
         foreach ($r['items'] as $t) {
             $id = (int)($t['id'] ?? 0); if (!$id || isset($map[$id])) continue;
-            $price = null;
-            foreach (['price', 'cost', 'amount', 'sum'] as $k) {
-                if (isset($t[$k]) && is_numeric($t[$k]) && (float)$t[$k] > 0) { $price = (float)$t[$k]; break; }
-            }
-            $cnt = 0;
-            foreach (['lesson_count', 'lessons_count', 'count'] as $k) {
-                if (isset($t[$k]) && is_numeric($t[$k]) && (float)$t[$k] > 0) { $cnt = (float)$t[$k]; break; }
-            }
-            $map[$id] = ['price' => $price, 'count' => $cnt, 'name' => (string)($t['name'] ?? ''),
-                         'per' => ($price !== null ? ($cnt > 0 ? $price / $cnt : $price) : null)];
+            $map[$id] = alfa_tariff_row($t);
         }
     }
-    @file_put_contents($f, json_encode(['ts' => time(), 'm' => $map], JSON_UNESCAPED_UNICODE), LOCK_EX);
+    if (count($map) > 5) @file_put_contents($f, json_encode(['ts' => time(), 'm' => $map], JSON_UNESCAPED_UNICODE), LOCK_EX);
     return $memo = $map;
+}
+/* Справочник тарифов ПО ССЫЛКЕ: догруженные точечно тарифы должны оставаться доступными
+   всем последующим ученикам в этом же запросе. */
+function &alfa_tariff_map_ref(int $branch = 0): array {
+    static $m = null;
+    if ($m === null) $m = alfa_tariff_map($branch);
+    return $m;
+}
+/* Догрузка тарифа, которого не оказалось в общем обходе (архивные/чужой филиал).
+   Alfa игнорирует фильтр id в теле, поэтому ищем нужный id среди страниц сами. */
+function alfa_tariff_one(int $branch, int $tariffId, array &$map): ?array {
+    if (isset($map[$tariffId])) return $map[$tariffId];
+    $host = 'https://' . alfa_host(); $token = alfa_token();
+    foreach ([$branch] + alfa_all_branch_ids() as $bid) {
+        $bid = (int)$bid;
+        for ($p = 0; $p < 30; $p++) {
+            $r = alfa_http('POST', "$host/v2api/$bid/tariff/index", ['page' => $p, 'count' => 50], $token, true, 10);
+            if (isset($r['__err'])) break;
+            $items = $r['items'] ?? [];
+            foreach ($items as $t) {
+                $id = (int)($t['id'] ?? 0); if (!$id) continue;
+                if (!isset($map[$id])) $map[$id] = alfa_tariff_row($t);
+                if ($id === $tariffId) return $map[$tariffId];
+            }
+            if (count($items) < 50) break;
+        }
+    }
+    return null;
 }
 function alfa_price_cache_read(): array {
     $f = alfa_price_cache_path();
@@ -552,12 +583,13 @@ function alfa_lesson_price_of(int $branch, int $customerId, array &$cache, array
     $ck = $customerId . '|' . $subjectId;
     if (isset($cache[$ck])) return (float)$cache[$ck];
     $r = alfa_customer_tariffs($branch, $customerId);
-    $tm = alfa_tariff_map($branch);
+    $tm = &alfa_tariff_map_ref($branch);   // по ссылке: догруженные тарифы копятся на весь запрос
     $onDate = $onDate !== '' ? alfa_iso($onDate) : date('Y-m-d');
     $bySubject = null; $anyActive = null; $anyAtAll = null;
     foreach ($r['items'] as $t) {
         if (!is_array($t) || !empty($t['is_archive'])) continue;
         $tid = (int)($t['tariff_id'] ?? 0); if (!$tid) continue;
+        if (!isset($tm[$tid])) alfa_tariff_one($branch, $tid, $tm);   // нет в обходе — догружаем
         $per = $tm[$tid]['per'] ?? null; if ($per === null || $per <= 0) continue;
         if ($anyAtAll === null) $anyAtAll = (float)$per;
         $b = alfa_iso((string)($t['b_date'] ?? '')); $e = alfa_iso((string)($t['e_date'] ?? ''));
@@ -631,9 +663,10 @@ function alfa_forecast_groups(string $mondayIso, array $groups): array {
         }
     }
     if (count($priceCache) !== $before) alfa_price_cache_write($priceCache);
+    $tmRef = &alfa_tariff_map_ref();
     return ['week' => $mon, 'forecast' => round($sum, 2), 'lessons' => $lessons,
             'students' => $students, 'withoutPrice' => $noPrice, 'noPriceIds' => $noPriceIds,
-            'sampleTariffs' => $dbg];
+            'tariffMapSize' => count($tmRef), 'sampleTariffs' => $dbg];
 }
 /* Прогноз на неделю целиком (для cron: там ограничения по времени мягче). */
 function alfa_forecast_week(string $mondayIso, ?array $branches = null): array {
