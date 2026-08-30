@@ -1274,8 +1274,28 @@ switch ($action) {
         $host = 'https://' . alfa_host(); $token = alfa_token();
         $branches = alfa_all_branch_ids();
         $PER = 50; $MAXP = 60;
-        $r0 = alfa_realization_day($date);
-        json_out(['ok' => true] + $r0);
+        $bf = isset($in['branches']) ? (array)$in['branches'] : null;   // null = все (разведка по филиалам)
+        $r0 = alfa_realization_day($date, $bf);
+        json_out(['ok' => true, 'realizationBranches' => alfa_realization_branches()] + $r0);
+        break;
+
+    // --- ХРАНИЛИЩЕ РЕАЛИЗАЦИИ (READ): посчитанные по дням суммы (клуб = Пожарный) ---
+    case 'realizationStore':
+        json_out(['ok' => true, 'store' => alfa_realization_store_read(),
+                  'branches' => alfa_realization_branches(), 'branchNames' => alfa_branch_names()]);
+        break;
+
+    // --- ПЕРЕСЧИТАТЬ РЕАЛИЗАЦИЮ за день/несколько дней и записать в хранилище (клуб = Пожарный) ---
+    //     Тяжёлые месяцы клиент тянет по одному дню (чанками) — тут максимум 7 дат за вызов.
+    case 'realizationPull':
+        @set_time_limit(180);
+        $branches = alfa_realization_branches();
+        if (!$branches) json_out(['ok' => false, 'error' => 'В Alfa не нашёлся филиал «Пожарный» (проверьте название филиала). По всем филиалам вслепую не считаем.'], 400);
+        $dates = is_array($in['dates'] ?? null) ? $in['dates'] : [(string)($in['date'] ?? date('Y-m-d'))];
+        $dates = array_slice(array_values(array_filter(array_map('strval', $dates))), 0, 7);
+        $upd = [];
+        foreach ($dates as $dd) { $row = alfa_realization_upsert(alfa_iso($dd), $branches); $upd[$row['date']] = $row; }
+        json_out(['ok' => true, 'updated' => $upd, 'branches' => $branches, 'branchNames' => alfa_branch_names()]);
         break;
 
     default:

@@ -361,10 +361,11 @@ function alfa_index_all(int $branch, string $entity, array $filter = [], int $ma
    present (без пропусков) = только is_attend=1; all (с пропусками) = все участники.
    ⚠️ lesson/index без фильтра НЕ отдаёт details — они приходят при фильтре по customer_id,
    поэтому по каждому занятию добираем детали запросом по одному из его учеников. */
-function alfa_realization_day(string $date): array {
+function alfa_realization_day(string $date, ?array $branchFilter = null): array {
     $date = alfa_iso($date);
     $host = 'https://' . alfa_host(); $token = alfa_token();
-    $branches = alfa_all_branch_ids();
+    $branchFilter = $branchFilter ? array_values(array_filter(array_map('intval', $branchFilter))) : null;
+    $branches = $branchFilter ?: alfa_all_branch_ids();   // null = все филиалы (для разведки); иначе только выбранные
     $PER = 50; $MAXP = 60;
     $les = []; $statusHist = []; $perBranch = [];
     foreach ($branches as $bid) {
@@ -388,12 +389,15 @@ function alfa_realization_day(string $date): array {
         $perBranch[$bid] = count($les) - $before;
     }
     $present = 0.0; $all = 0.0; $nPresent = 0; $nAll = 0; $processed = 0; $noDet = 0;
-    $sampleDetail = null; $cache = [];
+    $sampleDetail = null; $cache = []; $byBranch = [];   // разбивка реализации по филиалам
     foreach ($les as $L) {
+        $bid = (int)$L['branch'];
+        if (!isset($byBranch[$bid])) $byBranch[$bid] = ['present' => 0.0, 'all' => 0.0, 'lessons' => 0];
+        $byBranch[$bid]['lessons']++;
         $cid = (int)($L['cids'][0] ?? 0); if (!$cid) { $noDet++; continue; }
-        $ck = $L['branch'] . ':' . $cid;
+        $ck = $bid . ':' . $cid;
         if (!isset($cache[$ck])) {
-            $rr = alfa_http('POST', "$host/v2api/{$L['branch']}/lesson/index",
+            $rr = alfa_http('POST', "$host/v2api/$bid/lesson/index",
                 ['customer_id' => $cid, 'date_from' => $date, 'date_to' => $date, 'page' => 0, 'count' => 50], $token, true, 12);
             $cache[$ck] = isset($rr['__err']) ? [] : ($rr['items'] ?? []);
         }
@@ -404,16 +408,73 @@ function alfa_realization_day(string $date): array {
             if (!is_array($dt)) continue;
             $c = (float)($dt['commission'] ?? 0);
             $att = !empty($dt['is_attend']);
-            $all += $c; $nAll++;
-            if ($att) { $present += $c; $nPresent++; }
+            $all += $c; $nAll++; $byBranch[$bid]['all'] += $c;
+            if ($att) { $present += $c; $nPresent++; $byBranch[$bid]['present'] += $c; }
             if ($sampleDetail === null) $sampleDetail = $dt;
         }
     }
+    foreach ($byBranch as &$b) { $b['present'] = round($b['present'], 2); $b['all'] = round($b['all'], 2); } unset($b);
     return ['date' => $date, 'lessons' => count($les), 'perBranch' => $perBranch, 'statusHist' => $statusHist,
+            'branchesUsed' => array_values($branches), 'branchNames' => alfa_branch_names(), 'byBranch' => $byBranch,
             'realizationPresent' => round($present, 2), 'realizationAll' => round($all, 2),
             'attendedCount' => $nPresent, 'chargedCount' => $nAll,
             'lessonsProcessed' => $processed, 'lessonsNoDetails' => $noDet, 'sampleDetail' => $sampleDetail];
 }
+
+/* --- Хранилище посчитанной реализации по дням ---
+   Файл лежит рядом с прокси, но с непредсказуемым (солёным) именем — прямой веб-доступ
+   к нему нереален, а данные — только суммы за день (не персональные). Переживает деплой
+   (в git не коммитим). Пишем атомарно. */
+function alfa_store_dir(): string {
+    $d = __DIR__ . '/store';
+    if (!is_dir($d)) { @mkdir($d, 0770, true); @file_put_contents($d . '/.htaccess', "Require all denied\nDeny from all\n"); }
+    return $d;
+}
+function alfa_realization_store_path(): string {
+    $salt = substr(hash('sha256', __DIR__ . '|realization'), 0, 24);
+    return alfa_store_dir() . '/realization_' . $salt . '.json';
+}
+function alfa_realization_store_read(): array {
+    $f = alfa_realization_store_path();
+    if (!is_file($f)) return [];
+    $j = json_decode((string)@file_get_contents($f), true);
+    return is_array($j) ? $j : [];
+}
+function alfa_realization_store_write(array $data): void {
+    $f = alfa_realization_store_path();
+    $tmp = $f . '.' . getmypid() . '.tmp';
+    $json = json_encode($data, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
+    if (@file_put_contents($tmp, $json, LOCK_EX) !== false) { @chmod($tmp, 0660); @rename($tmp, $f); }
+    else @file_put_contents($f, $json, LOCK_EX);
+}
+/* Филиалы, входящие в клубную реализацию. По умолчанию — «Пожарный» (по названию, не по id:
+   id разнятся между копиями CRM). «Детали» (взрослое) и прочее сюда НЕ входят. Настройка —
+   config['realization_branch_names'] (список подстрок). Возвращает id филиалов Alfa. */
+function alfa_branch_ids_by_name(array $needles): array {
+    $names = alfa_branch_names();   // [id => name]
+    $out = [];
+    foreach ($names as $id => $nm) {
+        foreach ($needles as $nd) { $nd = trim((string)$nd);
+            if ($nd !== '' && mb_stripos((string)$nm, $nd) !== false) { $out[] = (int)$id; break; } }
+    }
+    return array_values(array_unique($out));
+}
+function alfa_realization_branches(): array {
+    $n = cfg()['realization_branch_names'] ?? ['Пожарный'];
+    return alfa_branch_ids_by_name(is_array($n) ? $n : ['Пожарный']);
+}
+/* Посчитать реализацию за день по выбранным филиалам и записать в хранилище. */
+function alfa_realization_upsert(string $date, ?array $branches = null): array {
+    $r = alfa_realization_day($date, $branches);
+    $row = ['present' => $r['realizationPresent'], 'all' => $r['realizationAll'],
+            'lessons' => $r['lessons'], 'ts' => date('c')];
+    $s = alfa_realization_store_read();
+    $s[$r['date']] = $row;
+    ksort($s);
+    alfa_realization_store_write($s);
+    return ['date' => $r['date']] + $row;
+}
+function alfa_cron_key(): string { return (string)(cfg()['cron_key'] ?? ''); }
 
 /* Форма полей периода по РЕАЛЬНОЙ записи: у части сущностей Alfa строковая дата лежит в
    b_date_v, а в b_date — внутреннее число (так у regular-lesson). Определяем по образцу. */

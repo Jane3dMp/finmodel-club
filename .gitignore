@@ -3,3 +3,5 @@ config.php
 .DS_Store
 Thumbs.db
 node_modules/
+
+api/alfa/store/
