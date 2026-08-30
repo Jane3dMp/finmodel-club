@@ -9965,6 +9965,7 @@ function renderRuk(){
   nav.innerHTML=RUK_SECTIONS.map(s=>`<button class="btn ${s[0]===_rukSec?'':'ghost'} sm" onclick="rukGo('${s[0]}')">${esc(s[1])}</button>`).join("");
   const body=document.getElementById("rukBody"); if(!body) return;
   if(_rukSec==="links"){ body.innerHTML=_bizLinksHtml(); return; }
+  if(_rukSec==="god"){ body.innerHTML=_godHtml(); return; }
   const lab=(RUK_SECTIONS.find(x=>x[0]===_rukSec)||[])[1]||"";
   body.innerHTML=`<div class="callout">Раздел «${esc(lab)}» — 🔧 в разработке, построим следующим.</div>`;
 }
@@ -10006,6 +10007,78 @@ function bizAdd(){ _bizLinks().push({n:'',u:''}); _bizSave(); renderRuk();
 function bizDel(i){ const r=_bizLinks(); if(r[i]===undefined) return; if(!confirm('Удалить ссылку «'+(r[i].n||'')+'»?')) return; r.splice(i,1); _bizSave(); renderRuk(); }
 function bizMove(i,d){ const r=_bizLinks(); const j=i+d; if(j<0||j>=r.length) return; const t=r[i]; r[i]=r[j]; r[j]=t; _bizSave(); renderRuk(); }
 function bizOpen(i){ const r=_bizLinks(); let u=((r[i]&&r[i].u)||'').trim(); if(!u){ toast('Пустая ссылка'); return; } if(!/^https?:\/\//i.test(u)) u='https://'+u; window.open(u,'_blank','noopener'); }
+
+/* ---- Годовые итоги: оборот по годам + сценарии роста + помесячный прогноз ---- */
+function _gm(n){ n=+n||0; return Math.round(n).toLocaleString('ru-RU'); }
+function _rukGod(){
+  if(!S.rukGod) S.rukGod={
+    years:[{y:2026,t:0},{y:2025,t:710673},{y:2024,t:530653},{y:2023,t:386188},{y:2022,t:226924},{y:2021,t:133090},{y:2020,t:68002},{y:2019,t:0}],
+    base:2025,
+    scen:[{n:"Высокий",p:145},{n:"Средний",p:135},{n:"Консервативный",p:125}],
+    fc:[{m:"Сентябрь",plan:95000,pct:100},{m:"Октябрь",plan:131250,pct:95},{m:"Ноябрь",plan:150000,pct:87.7},{m:"Декабрь",plan:112500,pct:91},
+        {m:"Январь",plan:102012,pct:91},{m:"Февраль",plan:120630,pct:92},{m:"Март",plan:132594,pct:88},{m:"Апрель",plan:124769,pct:85},{m:"Май",plan:137893,pct:87}]
+  };
+  return S.rukGod;
+}
+function _godSave(){ persistLocal(); if(typeof fbSchedulePush==="function") fbSchedulePush(); }
+function _godHtml(){
+  const G=_rukGod();
+  const turnByYear={}; G.years.forEach(r=>{ if(r&&r.y) turnByYear[r.y]=+r.t||0; });
+  const yrows=G.years.map((r,i)=>{
+    const prev=turnByYear[r.y-1];
+    const gr=(prev>0 && (+r.t||0)>0)?(100*(+r.t)/prev):null;
+    return `<tr>
+      <td><input class="cell" type="number" style="width:74px;text-align:center" value="${r.y}" onchange="godYear(${i},'y',this.value)"></td>
+      <td style="text-align:right"><input class="cell" type="number" style="width:120px;text-align:right" value="${r.t||''}" placeholder="—" onchange="godYear(${i},'t',this.value)"></td>
+      <td style="text-align:right">${gr!=null?('<b style="color:var(--green)">'+gr.toFixed(1)+'%</b>'):'<span style="color:var(--muted)">—</span>'}</td>
+      <td style="text-align:center"><span class="k-del" title="Удалить год" onclick="godDelYear(${i})">×</span></td>
+    </tr>`;
+  }).join("");
+  const baseTurn=turnByYear[G.base]||0;
+  const baseOpts=G.years.filter(r=>r&&r.y).map(r=>`<option value="${r.y}" ${r.y===G.base?'selected':''}>${r.y} (${_gm(turnByYear[r.y])})</option>`).join("");
+  const scrows=G.scen.map((s,i)=>`<tr>
+      <td><input class="cell" style="width:150px" value="${esc(s.n)}" onchange="godScen(${i},'n',this.value)"></td>
+      <td style="text-align:right"><input class="cell" type="number" style="width:64px;text-align:right" value="${s.p}" onchange="godScen(${i},'p',this.value)"> %</td>
+      <td style="text-align:right"><b>${_gm(baseTurn*(+s.p||0)/100)}</b></td>
+    </tr>`).join("");
+  let fcPlan=0, fcExp=0;
+  const fcrows=G.fc.map((f,i)=>{ const exp=(+f.plan||0)*(+f.pct||0)/100; fcPlan+=(+f.plan||0); fcExp+=exp;
+    return `<tr>
+      <td><input class="cell" style="width:110px" value="${esc(f.m)}" onchange="godFc(${i},'m',this.value)"></td>
+      <td style="text-align:right"><input class="cell" type="number" style="width:104px;text-align:right" value="${f.plan||''}" onchange="godFc(${i},'plan',this.value)"></td>
+      <td style="text-align:right"><input class="cell" type="number" step="0.1" style="width:64px;text-align:right" value="${f.pct}" onchange="godFc(${i},'pct',this.value)"> %</td>
+      <td style="text-align:right"><b>${_gm(exp)}</b></td>
+      <td style="text-align:center"><span class="k-del" title="Удалить месяц" onclick="godDelFc(${i})">×</span></td>
+    </tr>`; }).join("");
+  return `
+  <div class="row2" style="align-items:flex-start">
+    <div class="card"><h3>Валовый оборот по годам</h3>
+      <div style="font-size:12px;color:var(--muted);margin-bottom:8px">Оборот за учебный год и рост к предыдущему году. Оборот 2026 подтянется из «Все показатели» позже.</div>
+      <table><thead><tr><th>Год</th><th style="text-align:right">Оборот, BYN</th><th style="text-align:right">Рост к пред.</th><th></th></tr></thead><tbody>${yrows}</tbody></table>
+      <button class="btn ghost sm" style="margin-top:8px" onclick="godAddYear()">+ год</button>
+    </div>
+    <div class="card"><h3>Сценарии роста на след. год</h3>
+      <div style="font-size:12px;color:var(--muted);margin-bottom:8px">База — оборот года: <select class="cell" style="width:auto" onchange="godBase(this.value)">${baseOpts}</select>. Ожидаемый оборот = база × %.</div>
+      <table><thead><tr><th>Сценарий</th><th style="text-align:right">Рост</th><th style="text-align:right">Ожидаемый оборот</th></tr></thead><tbody>${scrows}</tbody></table>
+    </div>
+  </div>
+  <div class="card" style="margin-top:14px;max-width:640px"><h3>Прогноз по месяцам</h3>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:8px">План на месяц и ожидаемый % выполнения (по опыту) → ожидаемая оплата.</div>
+    <table><thead><tr><th>Месяц</th><th style="text-align:right">План</th><th style="text-align:right">% вып.</th><th style="text-align:right">Ожидается</th><th></th></tr></thead>
+      <tbody>${fcrows}
+        <tr style="border-top:2px solid var(--line)"><td><b>Год</b></td><td style="text-align:right"><b>${_gm(fcPlan)}</b></td><td></td><td style="text-align:right"><b style="color:var(--green)">${_gm(fcExp)}</b></td><td></td></tr>
+      </tbody></table>
+    <button class="btn ghost sm" style="margin-top:8px" onclick="godAddFc()">+ месяц</button>
+  </div>`;
+}
+function godYear(i,f,v){ const G=_rukGod(); if(!G.years[i])return; G.years[i][f]=(f==='y'?(parseInt(v,10)||0):(parseFloat(v)||0)); _godSave(); renderRuk(); }
+function godDelYear(i){ const G=_rukGod(); if(G.years[i]===undefined)return; G.years.splice(i,1); _godSave(); renderRuk(); }
+function godAddYear(){ const G=_rukGod(); const mn=G.years.reduce((a,r)=>Math.min(a,r.y||9999),9999); G.years.push({y:(mn<9999?mn-1:2019),t:0}); _godSave(); renderRuk(); }
+function godBase(v){ const G=_rukGod(); G.base=parseInt(v,10)||G.base; _godSave(); renderRuk(); }
+function godScen(i,f,v){ const G=_rukGod(); if(!G.scen[i])return; G.scen[i][f]=(f==='p'?(parseFloat(v)||0):v); _godSave(); renderRuk(); }
+function godFc(i,f,v){ const G=_rukGod(); if(!G.fc[i])return; G.fc[i][f]=((f==='plan'||f==='pct')?(parseFloat(v)||0):v); _godSave(); renderRuk(); }
+function godDelFc(i){ const G=_rukGod(); if(G.fc[i]===undefined)return; G.fc.splice(i,1); _godSave(); renderRuk(); }
+function godAddFc(){ const G=_rukGod(); G.fc.push({m:'',plan:0,pct:100}); _godSave(); renderRuk(); }
 
 /* ===== ЭТАП 3: ПУБЛИКАЦИЯ ГРУПП ФИНМОДЕЛИ В ALFACRM =====
    Создаём в Альфе ПУСТЫЕ группы + их регулярное расписание (regular-lesson). Состав детей —
