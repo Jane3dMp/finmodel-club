@@ -10103,7 +10103,11 @@ async function realProbe(){
     const brows=Object.keys(bb).map(id=>{ const b=bb[id]; const isClub=rb.map(String).includes(String(id));
       return `<tr${isClub?' style="background:var(--paper)"':''}><td>${esc(bn[id]||('#'+id))}${isClub?' <b style="color:var(--green)">← Пожарный</b>':''}</td><td style="text-align:right"><b>${_gm(b.present)}</b></td><td style="text-align:right">${_gm(b.all)}</td><td style="text-align:center;color:var(--muted)">${b.lessons}</td></tr>`;
     }).join("");
-    let h=`<div class="callout">Проведённых занятий за ${esc(j.date)} (все филиалы): <b>${j.lessons}</b> · посчитано по <b>${j.lessonsProcessed}</b>${j.lessonsNoDetails?` · без деталей: ${j.lessonsNoDetails}`:''}. В клубную реализацию идёт только «Пожарный».</div>
+    let h=`<div class="callout">За ${esc(j.date)} (все филиалы): проведённых <b>${j.lessons}</b>, запланированных <b>${j.plannedLessons||0}</b> · посчитано по <b>${j.lessonsProcessed}</b>${j.lessonsNoDetails?` · без участников: ${j.lessonsNoDetails}`:''}.<br>
+      Ожидается по расписанию (прогноз): <b style="color:var(--terra-d)">${_gm(j.realizationPlanned||0)}</b> · записей: ${j.plannedCount||0}<br>
+      <span style="font-size:12px;color:var(--muted)">Статусы занятий: ${esc(JSON.stringify(j.statusHist||{}))} (3 = проведено)</span></div>
+      ${(j.plannedLessons&&!j.plannedCount)?'<div class="callout" style="border-color:var(--terra)">⚠️ Запланированные занятия есть, но Alfa не отдаёт по ним участников/суммы — прогноз нужно считать иначе (по составу групп и цене). Покажите мне этот экран.</div>':''}
+      ${j.samplePlanned?('<details style="margin:6px 0"><summary style="cursor:pointer;font-size:12px;color:var(--muted)">Пример запланированного участника</summary><pre style="white-space:pre-wrap;font-size:11px;background:var(--paper);padding:6px;border-radius:6px">'+esc(JSON.stringify(j.samplePlanned,null,1))+'</pre></details>'):''}
       <table style="margin-top:8px"><thead><tr><th>Филиал</th><th style="text-align:right">Без пропусков</th><th style="text-align:right">С пропусками</th><th style="text-align:center">Занятий</th></tr></thead>
       <tbody>${brows||'<tr><td colspan="4" style="color:var(--muted)">нет данных</td></tr>'}</tbody></table>
       <details style="margin-top:8px"><summary style="cursor:pointer;font-size:12px;color:var(--muted)">Пример участника</summary>
