@@ -2740,7 +2740,9 @@ function _updateTabVisibility(){
   TAB_DEFS.forEach(function(t){
     const btn=document.querySelector('.tab[data-t="'+t[0]+'"]');
     if(!btn) return;
-    btn.style.display = (_tabAllowed(t[0]) && (TAB_MODES[t[0]]===navMode || TAB_BOTH_MODES[t[0]])) ? "" : "none";
+    // в одиночных режимах-дашбордах (ruk/adm) «двухрежимные» вкладки (О курсах) не показываем —
+    // иначе они остаются активными и перекрывают панель дашборда
+    btn.style.display = (_tabAllowed(t[0]) && (TAB_MODES[t[0]]===navMode || (TAB_BOTH_MODES[t[0]] && !SOLO_MODES[navMode]))) ? "" : "none";
   });
   // переключатель режимов: каждая кнопка видна, только если в её режиме есть доступные вкладки
   // (для не-владельца режимы ruk/adm пусты → кнопки скрыты). Сам блок прячем, если режим один.
