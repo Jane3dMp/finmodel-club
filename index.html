@@ -10313,6 +10313,25 @@ function _progWeeks(){
   }
   return out;
 }
+/* Прогноз недели по РАСПИСАНИЮ финмодели: Alfa не хранит будущие занятия (создаёт их
+   по мере наступления дат), поэтому ожидаемую выручку недели считаем сами:
+   по каждому занятию сетки — сколько детей вписано (без «не придёт») × цена занятия курса.
+   Сетка недельная, поэтому это и есть план на одну учебную неделю. */
+function _progGridPlan(){
+  if(_progGridCache!=null) return _progGridCache;
+  const price={}; (S.courses||[]).forEach(c=>{ if(c&&c.name!=null) price[String(c.name)]=+c.price||0; });
+  let sum=0, kidsTot=0, les=0;
+  (S.grid||[]).forEach(l=>{
+    if(!l||!l.course) return;
+    const p=price[String(l.course)]||0; if(!p) return;
+    const n=kidsOf(l).filter(k=>k&&k.n&&!k.no).length;
+    if(!n) return;
+    sum+=n*p; kidsTot+=n; les++;
+  });
+  _progGridCache={sum:sum, kids:kidsTot, lessons:les};
+  return _progGridCache;
+}
+let _progGridCache=null;
 /* Неделя из Alfa: факт = среднее без/с пропусками по проведённым (как в «Все показатели»);
    прогноз = факт + ожидаемые списания по ещё не проведённым занятиям недели. */
 function _progWeekAlfa(w){
@@ -10331,8 +10350,12 @@ function _progHtml(){
   weeks.forEach((w,i)=>{
     const A=_progWeekAlfa(w);
     const manual=+(G.plans[w.key]||0);
-    const snap=(_weekPlans||{})[w.key];    // зафиксированный в вс 23:00 прогноз — главный
-    const auto=snap?(+snap.plan||0):(A?A.plan:null);
+    const snap=(_weekPlans||{})[w.key];    // зафиксированный в вс 23:00 прогноз
+    const snapV=snap?(+snap.plan||0):0;
+    const alfaV=A?(+A.plan||0):0;
+    const gridV=_progGridPlan().sum;       // расчёт по нашему расписанию и прайсу
+    const auto=snapV||alfaV||gridV||null;  // снимок → Alfa → расписание
+    const src=snapV?'snap':(alfaV?'alfa':(gridV?'grid':''));
     const plan=manual||auto||0;            // ручной план перебивает всё
     const fact=A?A.fact:null;
     if(plan) tPlan+=plan; if(fact!=null) tFact+=fact;
@@ -10345,7 +10368,7 @@ function _progHtml(){
     rows+=`<tr${future?' style="opacity:.5"':''}>
       <td style="color:var(--muted)">${showMon?esc(monName):''}</td>
       <td style="white-space:nowrap">${range}</td>
-      <td style="text-align:right">${auto!=null?('<span style="color:var(--terra-d)" title="'+(snap?('Зафиксирован '+String(snap.ts||'').slice(0,16).replace("T"," ")):'Живой расчёт (ещё не зафиксирован)')+'">'+_gm(auto)+(snap?' 🔒':'')+'</span>'):'<span style="color:var(--muted)">—</span>'}</td>
+      <td style="text-align:right">${auto!=null?('<span style="color:var(--terra-d)" title="'+(src==='snap'?('Зафиксирован '+String(snap.ts||'').slice(0,16).replace("T"," ")):(src==='alfa'?'По занятиям в Alfa':'По расписанию и прайсу финмодели'))+'">'+_gm(auto)+(src==='snap'?' 🔒':(src==='grid'?' 📋':''))+'</span>'):'<span style="color:var(--muted)">—</span>'}</td>
       <td style="text-align:right"><input class="cell" type="number" style="width:88px;text-align:right;font-size:12px" value="${manual||''}" placeholder="${auto!=null?'авто':'—'}" title="Свой план — перебивает прогноз из Alfa" onchange="progPlan('${w.key}',this.value)"></td>
       <td style="text-align:right">${fact!=null?('<b>'+_gm(fact)+'</b>'):'<span style="color:var(--muted)">—</span>'}</td>
       <td style="text-align:right">${pct!=null?('<b style="color:'+(pct>=100?'var(--green)':(pct>=85?'#C9922E':'var(--red)'))+'">'+pct.toFixed(0)+'%</b>'):'<span style="color:var(--muted)">—</span>'}</td>
@@ -10353,7 +10376,8 @@ function _progHtml(){
   });
   const tPct=(tPlan>0&&tFact>0)?(100*tFact/tPlan):null;
   const haveAny=weeks.some(w=>_progWeekAlfa(w)!=null);
-  return `<div class="callout" style="margin-bottom:10px;font-size:12px">Недели учебного года (пн–вс). <b>Прогноз Alfa</b> = уже проведённое + ожидаемые списания по расписанию. <b>Свой план</b> — если впишете, он перебивает прогноз. <b>Выполнение</b> — фактическая реализация.</div>
+  const gp=_progGridPlan();
+  return `<div class="callout" style="margin-bottom:10px;font-size:12px">Недели учебного года (пн–вс). <b>Прогноз</b>: 🔒 зафиксированный · без значка — по занятиям в Alfa · 📋 по расписанию и прайсу финмодели (${_gm(gp.sum)} за неделю: ${gp.lessons} занятий, ${gp.kids} детей). Alfa не хранит будущие занятия — их уроки создаются ближе к дате, поэтому вперёд считаем по нашему расписанию. <b>Свой план</b> перебивает прогноз. <b>Выполнение</b> — фактическая реализация из Alfa.</div>
   <div class="hd-actions" style="margin-bottom:10px">
     <button class="btn sm" id="progPullBtn" onclick="progPull()">🔄 Подтянуть из Alfa (7 дней назад + 5 недель вперёд)</button>
     <button class="btn ghost sm" id="progSnapBtn" onclick="progSnapshot()" title="Зафиксировать прогноз на текущую неделю (обычно это делает cron в вс 23:00)">🔒 Зафиксировать эту неделю</button>
