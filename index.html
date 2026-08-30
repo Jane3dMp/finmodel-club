@@ -9835,6 +9835,11 @@ async function alfaRosterRun(){
     await _pubEnsureCustomers(false);
     const custById=new Map(); (_pubCustomers||[]).forEach(c=>custById.set(+c.id,c));
     const teachById=new Map(); _pubRefList("teachers").forEach(t=>teachById.set(+t.id,t.name));
+    // расписание берём из финмодели по совпадению названия (в Alfa группы заведены из неё) —
+    // это уже готовый текст «Сб 10:00», без риска ошибиться в нумерации дней Alfa
+    const _arKey=s=>String(s||"").toLowerCase().replace(/[«»"'`]/g,"").replace(/\s+/g," ").trim();
+    const schedByName=new Map();
+    (_groupsAll||[]).forEach(g=>{ const k=_arKey(g.name); if(k&&g.schedText) schedByName.set(k,g.schedText); });
     let groups=(_pubAlfaGroups||[]).filter(g=>!g.is_archive);
     if(!allActive) groups=groups.filter(g=>_alfaIso(g.b_date)===start);
     groups.sort((a,b)=>String(a.name).localeCompare(String(b.name),"ru",{numeric:true}));
@@ -9864,7 +9869,8 @@ async function alfaRosterRun(){
           return {name:(c&&c.name)||("Клиент id "+m.customer_id), dob:(c&&c.dob)||"", b:m.b_date}; })
         .sort((a,b)=>String(a.name).localeCompare(String(b.name),"ru"));
       const teacher=(g.teacher_ids||[]).map(id=>teachById.get(+id)).filter(Boolean).join(", ");
-      return {name:g.name, teacher, kids};
+      const sched=schedByName.get(_arKey(g.name))||"";
+      return {name:g.name, teacher, sched, kids};
     });
     const totKids=data.reduce((a,d)=>a+d.kids.length,0);
     if(!totKids){
@@ -9899,15 +9905,16 @@ function _alfaRosterPrint(){
       ? gr.kids.map((k,i)=>`<tr><td class="c">${i+1}</td><td>${esc(k.name)}</td>${withDob?`<td class="c">${esc(_ddmmyyyy(k.dob))}</td>`:''}${withMark?'<td></td>':''}</tr>`).join("")
       : `<tr><td colspan="${nCols}" class="empty">В Alfa в эту группу пока никто не зачислён.</td></tr>`;
     return `<div class="t"><h1>${esc(gr.name)}</h1>
-      <div class="sub">${gr.teacher?("Педагог: "+esc(gr.teacher)+" · "):""}детей: ${gr.kids.length} · старт ${esc(_ddmmyyyy(start))} · из AlfaCRM на ${dd}</div>
+      <div class="sub">${gr.sched?("Расписание: "+esc(gr.sched)+" · "):""}${gr.teacher?("Педагог: "+esc(gr.teacher)+" · "):""}детей: ${gr.kids.length} · старт ${esc(_ddmmyyyy(start))} · из AlfaCRM на ${dd}</div>
       <table><thead>${head}</thead><tbody>${rows}</tbody></table></div>`;
   }).join("");
   const css=`@page{size:portrait;margin:12mm}
     *{box-sizing:border-box;font-family:Arial,Helvetica,sans-serif}
     body{margin:0;color:#1c1410}
-    .t{page-break-after:always} .t:last-child{page-break-after:auto}
-    h1{font-size:16px;margin:0 0 2px;border-bottom:2px solid #b5532a;padding-bottom:4px}
-    .sub{font-size:10px;color:#666;margin:0 0 8px}
+    /* группы идут подряд, но одна группа не разрывается между листами (если влезает на лист) */
+    .t{page-break-inside:avoid;margin-bottom:16px}
+    h1{font-size:15px;margin:0 0 2px;border-bottom:2px solid #b5532a;padding-bottom:3px}
+    .sub{font-size:10px;color:#666;margin:0 0 6px}
     table{border-collapse:collapse;width:100%}
     th,td{border:1px solid #ccc;font-size:11px;padding:4px 7px;text-align:center}
     th{background:#2a211b;color:#fff}
