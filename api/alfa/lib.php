@@ -357,6 +357,64 @@ function alfa_index_all(int $branch, string $entity, array $filter = [], int $ma
     return ['items' => $out, 'ok' => $ok, 'pages' => $page];
 }
 
+/* Реализация за день = сумма commission по участникам ПРОВЕДЁННЫХ занятий (status=3).
+   present (без пропусков) = только is_attend=1; all (с пропусками) = все участники.
+   ⚠️ lesson/index без фильтра НЕ отдаёт details — они приходят при фильтре по customer_id,
+   поэтому по каждому занятию добираем детали запросом по одному из его учеников. */
+function alfa_realization_day(string $date): array {
+    $date = alfa_iso($date);
+    $host = 'https://' . alfa_host(); $token = alfa_token();
+    $branches = alfa_all_branch_ids();
+    $PER = 50; $MAXP = 60;
+    $les = []; $statusHist = []; $perBranch = [];
+    foreach ($branches as $bid) {
+        $before = count($les);
+        for ($p = 0; $p < $MAXP; $p++) {
+            $r = alfa_http('POST', "$host/v2api/$bid/lesson/index",
+                ['date_from' => $date, 'date_to' => $date, 'b_date' => $date, 'e_date' => $date, 'page' => $p, 'count' => $PER], $token, true, 15);
+            $items = isset($r['__err']) ? [] : ($r['items'] ?? []);
+            foreach ($items as $ls) {
+                if (!is_array($ls)) continue;
+                $d = substr((string)($ls['date'] ?? ''), 0, 10);
+                if ($d !== '' && $d !== $date) continue;
+                $st = isset($ls['status']) ? (int)$ls['status'] : -1;
+                $statusHist[(string)$st] = ($statusHist[(string)$st] ?? 0) + 1;
+                if ($st !== 3) continue;    // 3 = проведён; реализация только по проведённым
+                $les[] = ['branch' => (int)$bid, 'id' => (int)($ls['id'] ?? 0),
+                          'cids' => array_values(array_map('intval', (array)($ls['customer_ids'] ?? [])))];
+            }
+            if (count($items) < $PER) break;
+        }
+        $perBranch[$bid] = count($les) - $before;
+    }
+    $present = 0.0; $all = 0.0; $nPresent = 0; $nAll = 0; $processed = 0; $noDet = 0;
+    $sampleDetail = null; $cache = [];
+    foreach ($les as $L) {
+        $cid = (int)($L['cids'][0] ?? 0); if (!$cid) { $noDet++; continue; }
+        $ck = $L['branch'] . ':' . $cid;
+        if (!isset($cache[$ck])) {
+            $rr = alfa_http('POST', "$host/v2api/{$L['branch']}/lesson/index",
+                ['customer_id' => $cid, 'date_from' => $date, 'date_to' => $date, 'page' => 0, 'count' => 50], $token, true, 12);
+            $cache[$ck] = isset($rr['__err']) ? [] : ($rr['items'] ?? []);
+        }
+        $found = null; foreach ($cache[$ck] as $x) { if ((int)($x['id'] ?? 0) === $L['id']) { $found = $x; break; } }
+        if (!$found) { $noDet++; continue; }
+        $processed++;
+        foreach ((array)($found['details'] ?? []) as $dt) {
+            if (!is_array($dt)) continue;
+            $c = (float)($dt['commission'] ?? 0);
+            $att = !empty($dt['is_attend']);
+            $all += $c; $nAll++;
+            if ($att) { $present += $c; $nPresent++; }
+            if ($sampleDetail === null) $sampleDetail = $dt;
+        }
+    }
+    return ['date' => $date, 'lessons' => count($les), 'perBranch' => $perBranch, 'statusHist' => $statusHist,
+            'realizationPresent' => round($present, 2), 'realizationAll' => round($all, 2),
+            'attendedCount' => $nPresent, 'chargedCount' => $nAll,
+            'lessonsProcessed' => $processed, 'lessonsNoDetails' => $noDet, 'sampleDetail' => $sampleDetail];
+}
+
 /* Форма полей периода по РЕАЛЬНОЙ записи: у части сущностей Alfa строковая дата лежит в
    b_date_v, а в b_date — внутреннее число (так у regular-lesson). Определяем по образцу. */
 function alfa_date_shape(?array $item): array {
