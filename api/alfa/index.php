@@ -872,12 +872,15 @@ switch ($action) {
             $gid = (int)($gg['id'] ?? 0); if (!$gid) continue;
             $bid = (int)($gg['branch'] ?? 0) ?: (alfa_group_branch($gid) ?: alfa_branch());
             $seen = []; $mem = []; $gotOk = false;
+            // ⚠️ cgi/index требует group_id именно В АДРЕСЕ (в теле Alfa его игнорит → 400
+            //    «Отсутствуют обязательные параметры: group_id»). Как в alfa_cgi_find/customer-tariff.
             foreach ([
-                ['group_id' => $gid],
-                ['group_id' => $gid, 'date_from' => $today, 'date_to' => $winTo, 'b_date' => $today, 'e_date' => $winTo],
-            ] as $q) {
-                $r = alfa_http('POST', "$host/v2api/$bid/cgi/index", array_merge($q, ['page' => 0, 'count' => 200]), $token, true, 15);
-                if (isset($r['__err'])) { if ($diag === null) $diag = ['group' => $gid, 'branch' => $bid, 'query' => $q, 'alfa' => $r]; continue; }
+                ['?group_id=' . $gid, ['group_id' => $gid]],
+                ['?group_id=' . $gid . '&date_from=' . $today . '&date_to=' . $winTo,
+                 ['group_id' => $gid, 'date_from' => $today, 'date_to' => $winTo, 'b_date' => $today, 'e_date' => $winTo]],
+            ] as $v) {
+                $r = alfa_http('POST', "$host/v2api/$bid/cgi/index" . $v[0], array_merge($v[1], ['page' => 0, 'count' => 200]), $token, true, 15);
+                if (isset($r['__err'])) { if ($diag === null) $diag = ['group' => $gid, 'branch' => $bid, 'query' => $v[0], 'alfa' => $r]; continue; }
                 $gotOk = true; $okAny = true;
                 foreach (($r['items'] ?? []) as $it) {
                     if ((int)($it['group_id'] ?? 0) !== $gid) continue;   // Alfa может проигнорировать фильтр
