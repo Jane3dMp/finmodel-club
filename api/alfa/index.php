@@ -1265,7 +1265,53 @@ switch ($action) {
                               'err' => $errNote, 'sample_keys' => $sampleKeys, 'sample_records' => $sampleRecords]]);
         break;
 
-    // (диагностический action 'probe' убран из прода после аудита — свою задачу выполнил)
+    // --- ЗОНД РЕАЛИЗАЦИИ (READ): за один день собрать проведённые занятия и суммы по всем
+    //     «денежным» полям (на уровне урока и участника), отдельно «все» и «только пришедшие».
+    //     Нужен, чтобы найти, какое поле × какое подмножество = отчёт «Реализация» в Alfa.
+    case 'realizationProbe':
+        @set_time_limit(240);
+        $date = alfa_iso((string)($in['date'] ?? date('Y-m-d')));
+        $host = 'https://' . alfa_host(); $token = alfa_token();
+        $branches = alfa_all_branch_ids();
+        $PER = 50; $MAXP = 60;
+        $lessons = 0; $statusHist = []; $sampleLesson = null; $sampleDetail = null; $lessonKeys = null; $detailKeys = null;
+        $detSums = []; $lesSums = []; $perBranch = [];
+        $rx = '/price|cost|amount|sum|pay|money|total|realiz|debit|charge|balance|nominal|discount/i';
+        foreach ($branches as $bid) {
+            $before = $lessons;
+            for ($p = 0; $p < $MAXP; $p++) {
+                $r = alfa_http('POST', "$host/v2api/$bid/lesson/index",
+                    ['date_from' => $date, 'date_to' => $date, 'b_date' => $date, 'e_date' => $date, 'page' => $p, 'count' => $PER], $token, true, 15);
+                $items = isset($r['__err']) ? [] : ($r['items'] ?? []);
+                foreach ($items as $ls) {
+                    if (!is_array($ls)) continue;
+                    $d = substr((string)($ls['date'] ?? ($ls['lesson_date'] ?? '')), 0, 10);
+                    if ($d !== '' && $d !== $date) continue;
+                    $lessons++;
+                    $st = isset($ls['status']) ? (int)$ls['status'] : -1;
+                    $statusHist[(string)$st] = ($statusHist[(string)$st] ?? 0) + 1;
+                    if ($sampleLesson === null) { $sampleLesson = $ls; $lessonKeys = array_keys($ls); }
+                    foreach ($ls as $k => $v) { if (is_numeric($v) && preg_match($rx, (string)$k)) $lesSums[$k] = ($lesSums[$k] ?? 0) + (0 + $v); }
+                    foreach ((array)($ls['details'] ?? $ls['participants'] ?? []) as $dt) {
+                        if (!is_array($dt)) continue;
+                        if ($sampleDetail === null) { $sampleDetail = $dt; $detailKeys = array_keys($dt); }
+                        $present = !((isset($dt['is_attend']) && !$dt['is_attend']) || (isset($dt['is_present']) && !$dt['is_present']) || (isset($dt['is_missed']) && $dt['is_missed']));
+                        foreach ($dt as $k => $v) {
+                            if (!is_numeric($v) || !preg_match($rx, (string)$k)) continue;
+                            if (!isset($detSums[$k])) $detSums[$k] = ['all' => 0, 'present' => 0];
+                            $detSums[$k]['all'] += (0 + $v); if ($present) $detSums[$k]['present'] += (0 + $v);
+                        }
+                    }
+                }
+                if (count($items) < $PER) break;
+            }
+            $perBranch[$bid] = $lessons - $before;
+        }
+        json_out(['ok' => true, 'date' => $date, 'lessons' => $lessons, 'perBranch' => $perBranch,
+                  'statusHist' => $statusHist, 'detailFieldSums' => $detSums, 'lessonFieldSums' => $lesSums,
+                  'sampleLessonKeys' => $lessonKeys, 'sampleDetailKeys' => $detailKeys,
+                  'sampleLesson' => $sampleLesson, 'sampleDetail' => $sampleDetail]);
+        break;
 
     default:
         json_out(['ok' => false, 'error' => 'Неизвестное действие: ' . $action], 400);
