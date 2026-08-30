@@ -9966,6 +9966,7 @@ function renderRuk(){
   const body=document.getElementById("rukBody"); if(!body) return;
   if(_rukSec==="links"){ body.innerHTML=_bizLinksHtml(); return; }
   if(_rukSec==="god"){ body.innerHTML=_godHtml(); return; }
+  if(_rukSec==="pokaz"){ body.innerHTML=_pokazHtml(); return; }
   const lab=(RUK_SECTIONS.find(x=>x[0]===_rukSec)||[])[1]||"";
   body.innerHTML=`<div class="callout">Раздел «${esc(lab)}» — 🔧 в разработке, построим следующим.</div>`;
 }
@@ -10079,6 +10080,58 @@ function godScen(i,f,v){ const G=_rukGod(); if(!G.scen[i])return; G.scen[i][f]=(
 function godFc(i,f,v){ const G=_rukGod(); if(!G.fc[i])return; G.fc[i][f]=((f==='plan'||f==='pct')?(parseFloat(v)||0):v); _godSave(); renderRuk(); }
 function godDelFc(i){ const G=_rukGod(); if(G.fc[i]===undefined)return; G.fc.splice(i,1); _godSave(); renderRuk(); }
 function godAddFc(){ const G=_rukGod(); G.fc.push({m:'',plan:0,pct:100}); _godSave(); renderRuk(); }
+
+/* ---- Все показатели: помесячная выручка (текущий год + история) + план/факт ----
+   Текущий год и расходы позже автозаполнятся из админских «Реализация»/«Расходы». */
+const POKAZ_MONTHS=["сентябрь","октябрь","ноябрь","декабрь","январь","февраль","март","апрель","май"];
+const POKAZ_HISTORY={
+  "2025/26":[81805.5,96619.5,104471.5,75727.5,80867.5,105559.5,123213.625,100810.75,110785],
+  "2024/25":[54475.74,64965,64764,51670,54203,69793.5,75876,65837,72764.5],
+  "2023/24":[49236,60535,59178,48697,49555,64732,73941,64389,51674],
+  "2022/23":[26360.98,37615.6,34276.3,25039,28096,35462,37431,37327,32158],
+  "2021/22":[15396,21433,19971,16389,15420,18945,22836,22525,20583]
+};
+function _rukPokaz(){
+  if(!S.rukPokaz) S.rukPokaz={ curYear:"2026/27", baseYear:"2025/26",
+    cur:POKAZ_MONTHS.map(()=>0), planPct:[135,135,135,130,135,140,145,145,130] };
+  return S.rukPokaz;
+}
+function _pokazSave(){ persistLocal(); if(typeof fbSchedulePush==="function") fbSchedulePush(); }
+function _sum(a){ return a.reduce((s,x)=>s+(+x||0),0); }
+function _pokazHtml(){
+  const P=_rukPokaz();
+  const base=POKAZ_HISTORY[P.baseYear]||POKAZ_MONTHS.map(()=>0);
+  const th=`<th style="text-align:left">Показатель</th>`+POKAZ_MONTHS.map(m=>`<th style="text-align:right">${m.slice(0,3)}</th>`).join("")+`<th style="text-align:right">Итог</th>`;
+  // строка текущего года — редактируемая
+  const curRow=`<tr><td><b>Выручка ${esc(P.curYear)}</b></td>`+
+    P.cur.map((v,i)=>`<td style="text-align:right"><input class="cell" type="number" style="width:74px;text-align:right;font-size:12px" value="${v||''}" placeholder="—" onchange="pokazCur(${i},this.value)"></td>`).join("")+
+    `<td style="text-align:right"><b>${_gm(_sum(P.cur))}</b></td></tr>`;
+  // рост текущего к базовому
+  const growRow=`<tr><td style="color:var(--muted)">Рост к ${esc(P.baseYear)}</td>`+
+    POKAZ_MONTHS.map((m,i)=>{ const b=+base[i]||0, c=+P.cur[i]||0; const g=(b>0&&c>0)?(100*c/b):null;
+      return `<td style="text-align:right">${g!=null?('<span style="color:var(--green)">'+g.toFixed(0)+'%</span>'):'<span style="color:var(--muted)">—</span>'}</td>`; }).join("")+
+    `<td style="text-align:right">${(_sum(base)>0&&_sum(P.cur)>0)?('<b style="color:var(--green)">'+(100*_sum(P.cur)/_sum(base)).toFixed(0)+'%</b>'):'—'}</td></tr>`;
+  // исторические годы
+  const histRows=Object.keys(POKAZ_HISTORY).map(y=>{ const a=POKAZ_HISTORY[y];
+    return `<tr><td>Выручка ${esc(y)}</td>`+a.map(v=>`<td style="text-align:right;color:var(--muted)">${_gm(v)}</td>`).join("")+`<td style="text-align:right"><b>${_gm(_sum(a))}</b></td></tr>`;
+  }).join("");
+  // план/факт
+  let planTot=0, factTot=0;
+  const planRows=`<tr><td>План %</td>`+P.planPct.map((p,i)=>`<td style="text-align:right"><input class="cell" type="number" style="width:52px;text-align:right;font-size:12px" value="${p}" onchange="pokazPlan(${i},this.value)"></td>`).join("")+`<td></td></tr>`+
+    `<tr><td>План, BYN</td>`+POKAZ_MONTHS.map((m,i)=>{ const pr=(+base[i]||0)*(+P.planPct[i]||0)/100; planTot+=pr; return `<td style="text-align:right">${_gm(pr)}</td>`; }).join("")+`<td style="text-align:right"><b>${_gm(planTot)}</b></td></tr>`+
+    `<tr><td>Выполнение</td>`+POKAZ_MONTHS.map((m,i)=>{ const pr=(+base[i]||0)*(+P.planPct[i]||0)/100; const c=+P.cur[i]||0; factTot+=c; const v=(pr>0&&c>0)?(100*c/pr):null; return `<td style="text-align:right">${v!=null?('<b style="color:'+(v>=100?'var(--green)':'var(--terra)')+'">'+v.toFixed(0)+'%</b>'):'<span style="color:var(--muted)">—</span>'}</td>`; }).join("")+`<td style="text-align:right">${(planTot>0&&factTot>0)?('<b>'+(100*factTot/planTot).toFixed(0)+'%</b>'):'—'}</td></tr>`;
+  return `
+  <div class="callout" style="margin-bottom:12px;font-size:12px">Выручка <b>${esc(P.curYear)}</b> — вводится вручную (позже автозаполнится из «Дашборд Администратора → Реализация», Alfa). Прошлые годы перенесены из старой таблицы. План строится от базового года × план %.</div>
+  <div class="tscroll" style="margin-bottom:16px"><table><thead><tr>${th}</tr></thead><tbody>
+    ${curRow}${growRow}${histRows}
+  </tbody></table></div>
+  <h3 style="margin:0 0 6px">План и выполнение (${esc(P.curYear)})</h3>
+  <div style="font-size:12px;color:var(--muted);margin-bottom:6px">План месяца = выручка ${esc(P.baseYear)} × план %. Выполнение = факт текущего года ÷ план.</div>
+  <div class="tscroll"><table><thead><tr>${th}</tr></thead><tbody>${planRows}</tbody></table></div>
+  <div class="callout" style="margin-top:14px;font-size:12px">🔧 Блоки «ЗП преподавателей» и «Постоянные расходы» появятся здесь, когда подключим «Дашборд Администратора → Реализация и Расходы».</div>`;
+}
+function pokazCur(i,v){ const P=_rukPokaz(); P.cur[i]=parseFloat(v)||0; _pokazSave(); renderRuk(); }
+function pokazPlan(i,v){ const P=_rukPokaz(); P.planPct[i]=parseFloat(v)||0; _pokazSave(); renderRuk(); }
 
 /* ===== ЭТАП 3: ПУБЛИКАЦИЯ ГРУПП ФИНМОДЕЛИ В ALFACRM =====
    Создаём в Альфе ПУСТЫЕ группы + их регулярное расписание (regular-lesson). Состав детей —
