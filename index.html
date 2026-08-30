@@ -10440,7 +10440,7 @@ async function progForecastWeek(week){
     console.log("📤 forecast как в Alfa:",{week:wk,sum,les,stud,noPrice,samples,priceDebug:dbg});
     if(prog) prog.innerHTML=`Неделя ${esc(plan.week)}–${esc(plan.to)}: <b>${_gm(sum)}</b> · уроков ${les} · детей ${stud} · групп ${gs.length}`+
       (noPrice?` · <span style="color:var(--terra)">без цены: ${noPrice}</span>`:'')+
-      (dbg?`<details style="margin-top:6px"><summary style="cursor:pointer">Почему нет цены (примеры) — покажите мне</summary><pre style="white-space:pre-wrap;font-size:11px;background:var(--paper);padding:6px;border-radius:6px;max-height:40vh;overflow:auto">${esc(JSON.stringify(dbg.items,null,1))}</pre></details>`:'');
+      (dbg?`<details style="margin-top:6px"><summary style="cursor:pointer">Почему нет цены (примеры) — покажите мне</summary><pre style="white-space:pre-wrap;font-size:11px;background:var(--paper);padding:6px;border-radius:6px;max-height:40vh;overflow:auto">${esc(JSON.stringify({шаблоныТарифов:dbg.tariffTemplates,образецСправочника:dbg.tariffSample,ошибкаСправочника:dbg.tariffListErr||dbg.tplErr},null,1))}</pre></details>`:'');
     toast("Прогноз как в Alfa: "+_gm(sum)+" (уроков "+les+")");
   }catch(e){ if(prog) prog.textContent=""; const b=document.getElementById("rukBody"); if(b){ const d=document.createElement('div'); d.innerHTML=_pubErrHtml(e,"прогноз как в Alfa"); b.insertBefore(d.firstChild,b.firstChild); } }
   finally{ _realBusy=false; if(btn) btn.disabled=false; }

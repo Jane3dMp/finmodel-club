@@ -1341,7 +1341,7 @@ switch ($action) {
         $ids = is_array($in['ids'] ?? null) ? array_slice($in['ids'], 0, 6) : [];
         if (!$ids) json_out(['ok' => false, 'error' => 'Не переданы ученики']);
         $host = 'https://' . alfa_host(); $token = alfa_token();
-        $out = [];
+        $out = []; $wantT = [];
         foreach ($ids as $x) {
             $cid = (int)($x['id'] ?? $x); $bid = (int)($x['branch'] ?? 0) ?: alfa_branch();
             if (!$cid) continue;
@@ -1355,8 +1355,22 @@ switch ($action) {
                       'tariffErr' => $ct['__err'] ?? null,
                       'tariffCount' => is_array($ct['items'] ?? null) ? count($ct['items']) : null,
                       'tariffs' => array_slice((array)($ct['items'] ?? []), 0, 3)];
+            foreach ((array)($ct['items'] ?? []) as $t) { $tid = (int)($t['tariff_id'] ?? 0); if ($tid) $wantT[$tid] = $bid; }
         }
-        json_out(['ok' => true, 'items' => $out]);
+        /* ⚠️ Главное: сами ШАБЛОНЫ тарифов (цена занятия живёт там). Отдаём их СЫРЫМИ —
+           имена полей цены в v2api не описаны, надо увидеть фактические. */
+        $tpl = []; $tplErr = null;
+        foreach (array_slice($wantT, 0, 6, true) as $tid => $bid) {
+            $r = alfa_http('POST', 'https://' . alfa_host() . "/v2api/$bid/tariff/index",
+                           ['id' => $tid, 'page' => 0, 'count' => 5], alfa_token(), true, 10);
+            if (isset($r['__err'])) { $tplErr = $r; continue; }
+            foreach (($r['items'] ?? []) as $row) { if ((int)($row['id'] ?? 0) === $tid) { $tpl[$tid] = $row; break; } }
+        }
+        // и просто первые записи справочника — вдруг фильтр по id игнорируется
+        $any = alfa_http('POST', 'https://' . alfa_host() . '/v2api/' . alfa_branch() . '/tariff/index',
+                         ['page' => 0, 'count' => 3], alfa_token(), true, 10);
+        json_out(['ok' => true, 'items' => $out, 'tariffTemplates' => $tpl, 'tplErr' => $tplErr,
+                  'tariffSample' => array_slice((array)($any['items'] ?? []), 0, 3), 'tariffListErr' => $any['__err'] ?? null]);
         break;
 
     // --- шаг 2: прогноз по ПАЧКЕ групп (клиент шлёт чанками, чтобы не ловить таймаут шлюза) ---
