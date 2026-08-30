@@ -1279,6 +1279,54 @@ switch ($action) {
         json_out(['ok' => true, 'realizationBranches' => alfa_realization_branches()] + $r0);
         break;
 
+    // --- РАЗВЕДКА: как в Alfa достаётся отчёт «Прогноз оплаты» (колонка «Расход») ---
+    //     В интерфейсе отчёт есть, значит Alfa считает будущие уроки. Пробуем кандидатов
+    //     эндпоинтов v2api и параллельно смотрим, что отдаёт lesson/index за тот же период.
+    case 'forecastProbe':
+        @set_time_limit(180);
+        $from = alfa_iso((string)($in['from'] ?? date('Y-m-d')));
+        $to   = alfa_iso((string)($in['to']   ?? date('Y-m-d', strtotime('+6 day'))));
+        $bids = alfa_realization_branches(); $bid = (int)($bids[0] ?? alfa_branch());
+        $host = 'https://' . alfa_host(); $token = alfa_token();
+        $body = ['date_from' => $from, 'date_to' => $to, 'b_date' => $from, 'e_date' => $to, 'page' => 0, 'count' => 50];
+        $cands = [
+            'report/pay-forecast/index', 'pay-forecast/index', 'report/payforecast/index',
+            'report/forecast/index', 'forecast/index', 'report/pay-forecast', 'pay-forecast',
+            'report/customer-forecast/index', 'customer-forecast/index',
+            'report/index', 'reports/index', 'dashboard/reports',
+        ];
+        $tried = [];
+        foreach ($cands as $c) {
+            $r = alfa_http('POST', "$host/v2api/$bid/$c", $body, $token, true, 10);
+            $err = $r['__err'] ?? null;
+            $row = ['path' => $c, 'err' => $err, 'code' => $r['code'] ?? null];
+            if ($err === null) {
+                $row['keys'] = array_slice(array_keys($r), 0, 12);
+                $row['total'] = $r['total'] ?? null;
+                $row['count'] = is_array($r['items'] ?? null) ? count($r['items']) : null;
+                $row['sample'] = is_array($r['items'] ?? null) ? ($r['items'][0] ?? null) : null;
+            } elseif ($err === 'http') {
+                $row['body'] = is_array($r['body'] ?? null) ? array_slice($r['body'], 0, 3, true) : null;
+            }
+            $tried[] = $row;
+        }
+        // что вообще есть в lesson/index за период (нужно понять, существуют ли будущие уроки)
+        $ls = alfa_http('POST', "$host/v2api/$bid/lesson/index", $body, $token, true, 12);
+        $lsInfo = ['err' => $ls['__err'] ?? null, 'total' => $ls['total'] ?? null,
+                   'count' => is_array($ls['items'] ?? null) ? count($ls['items']) : null];
+        $st = [];
+        foreach ((array)($ls['items'] ?? []) as $x) { $k = (string)($x['status'] ?? '?'); $st[$k] = ($st[$k] ?? 0) + 1; }
+        $lsInfo['statusHist'] = $st;
+        $lsInfo['sample'] = ($ls['items'] ?? [null])[0] ?? null;
+        // регулярное расписание филиала — по нему Alfa и знает о будущих занятиях
+        $rl = alfa_http('POST', "$host/v2api/$bid/regular-lesson/index", ['page' => 0, 'count' => 5], $token, true, 12);
+        $rlInfo = ['err' => $rl['__err'] ?? null, 'total' => $rl['total'] ?? null,
+                   'count' => is_array($rl['items'] ?? null) ? count($rl['items']) : null,
+                   'sample' => ($rl['items'] ?? [null])[0] ?? null];
+        json_out(['ok' => true, 'branch' => $bid, 'from' => $from, 'to' => $to,
+                  'tried' => $tried, 'lesson' => $lsInfo, 'regularLesson' => $rlInfo]);
+        break;
+
     // --- ХРАНИЛИЩЕ РЕАЛИЗАЦИИ (READ): посчитанные по дням суммы (клуб = Пожарный) ---
     case 'realizationStore':
         json_out(['ok' => true, 'store' => alfa_realization_store_read(),

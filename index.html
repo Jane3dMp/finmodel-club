@@ -10056,7 +10056,8 @@ function _realHtml(){
   <details style="margin-top:14px"><summary style="cursor:pointer;font-weight:600">🔍 Проверить один день (разведка по филиалам)</summary>
     <div style="padding:8px 0">
       <div class="hd-actions"><input type="date" id="realProbeDate" class="cell" style="width:auto" value="${todayIso}">
-        <button class="btn ghost sm" id="realProbeBtn" onclick="realProbe()">Проверить день (все филиалы)</button></div>
+        <button class="btn ghost sm" id="realProbeBtn" onclick="realProbe()">Проверить день (все филиалы)</button>
+        <button class="btn ghost sm" id="fcProbeBtn" onclick="forecastProbe()" title="Ищем, как в API достать отчёт Alfa «Прогноз оплаты»">🔎 Найти «Прогноз оплаты» в API</button></div>
       <div id="realProbeOut" style="margin-top:6px"></div>
     </div></details>
   <details style="margin-top:10px"><summary style="cursor:pointer;font-weight:600">⚙️ Настройка cron на HostFly (один раз)</summary>
@@ -10090,6 +10091,25 @@ async function realPullMonth(){
     const b=document.getElementById("admBody"); if(b) b.innerHTML=_realHtml();
   }catch(e){ if(prog) prog.innerHTML=""; const b=document.getElementById("admBody"); if(b){ const d=document.createElement('div'); d.innerHTML=_pubErrHtml(e,"пересчёт реализации"); b.insertBefore(d.firstChild,b.firstChild); } }
   finally{ _realBusy=false; if(btn) btn.disabled=false; }
+}
+async function forecastProbe(){
+  const out=document.getElementById("realProbeOut"), btn=document.getElementById("fcProbeBtn");
+  if(btn) btn.disabled=true; if(out) out.innerHTML="⏳ Пробую эндпоинты отчёта в Alfa…";
+  try{
+    const j=await _pubCall("forecastProbe",{});
+    console.log("📤 forecastProbe",j);
+    const ok=(j.tried||[]).filter(t=>!t.err);
+    const rows=(j.tried||[]).map(t=>`<tr><td style="font-family:monospace;font-size:11px">${esc(t.path)}</td>
+      <td style="text-align:center">${t.err?('<span style="color:var(--muted)">'+esc(t.err)+(t.code?(' '+t.code):'')+'</span>'):'<b style="color:var(--green)">ответил</b>'}</td>
+      <td style="font-size:11px">${t.err?'':esc(JSON.stringify({total:t.total,count:t.count,keys:t.keys}))}</td></tr>`).join("");
+    let h=`<div class="callout" style="border-color:${ok.length?'var(--green)':'var(--terra)'}">Период ${esc(j.from)}–${esc(j.to)}, филиал #${j.branch}. Эндпоинтов ответило: <b>${ok.length}</b>.<br>
+      Занятия в lesson/index за период: <b>${j.lesson&&j.lesson.count!=null?j.lesson.count:'—'}</b> (статусы: ${esc(JSON.stringify((j.lesson||{}).statusHist||{}))}) · регулярных занятий в филиале: <b>${(j.regularLesson||{}).count!=null?j.regularLesson.count:'—'}</b></div>
+      <table style="margin-top:8px"><thead><tr><th>Эндпоинт</th><th>Ответ</th><th>Что вернул</th></tr></thead><tbody>${rows}</tbody></table>
+      <details style="margin-top:8px"><summary style="cursor:pointer;font-size:12px;color:var(--muted)">Сырые ответы (для меня)</summary>
+      <pre style="white-space:pre-wrap;font-size:11px;background:var(--paper);padding:6px;border-radius:6px;max-height:40vh;overflow:auto">${esc(JSON.stringify(j,null,1))}</pre></details>`;
+    if(out) out.innerHTML=h;
+  }catch(e){ if(out) out.innerHTML=_pubErrHtml(e,"поиск отчёта"); }
+  finally{ if(btn) btn.disabled=false; }
 }
 async function realProbe(){
   const d=(document.getElementById("realProbeDate")||{}).value||"";
