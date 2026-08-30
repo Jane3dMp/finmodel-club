@@ -10397,10 +10397,11 @@ function _progHtml(){
   const tPct=(tPlan>0&&tFact>0)?(100*tFact/tPlan):null;
   const haveAny=weeks.some(w=>_progWeekAlfa(w)!=null);
   const gp=_progGridPlan();
-  return `<div class="callout" style="margin-bottom:10px;font-size:12px">Недели учебного года (пн–вс). <b>Прогноз</b>: 🔒 зафиксированный · без значка — по занятиям в Alfa · 📋 по расписанию и прайсу финмодели (${_gm(gp.sum)} за неделю: ${gp.lessons} занятий, ${gp.kids} детей). Alfa не хранит будущие занятия — их уроки создаются ближе к дате, поэтому вперёд считаем по нашему расписанию. <b>Свой план</b> перебивает прогноз. <b>Выполнение</b> — фактическая реализация из Alfa.</div>
+  return `<div class="callout" style="margin-bottom:10px;font-size:12px">Недели учебного года (пн–вс). <b>Прогноз</b> берётся из Alfa (как отчёт «Прогноз оплаты»: регулярное расписание × зачисленные × цена абонемента) и фиксируется cron в вс 23:00 — значок 🔒. Значок 📋 = запасной расчёт по финмодели (${_gm(gp.sum)}/нед), он завышает, потому что считает всех вписанных, а не только зачисленных в Alfa; после заморозки модели останется только Alfa. <b>Свой план</b> перебивает прогноз. <b>Выполнение</b> — фактическая реализация из Alfa.</div>
   <div class="hd-actions" style="margin-bottom:10px">
     <button class="btn sm" id="progPullBtn" onclick="progPull()">🔄 Подтянуть из Alfa (7 дней назад + 5 недель вперёд)</button>
     <button class="btn ghost sm" id="progSnapBtn" onclick="progSnapshot()" title="Зафиксировать прогноз на текущую неделю (обычно это делает cron в вс 23:00)">🔒 Зафиксировать эту неделю</button>
+    <button class="btn ghost sm" id="fcWeekBtn" onclick="progForecastWeek()" title="Посчитать как отчёт Alfa «Прогноз оплаты»: регулярное расписание × зачисленные × цена абонемента">🧮 Прогноз как в Alfa (неделя)</button>
     <span id="progPullProg" style="font-size:12px;color:var(--muted)">${haveAny?'':'Пока пусто — нажмите «Подтянуть».'}</span>
   </div>
   <div style="font-size:12px;color:var(--muted);margin-bottom:8px">🔒 = прогноз зафиксирован до начала недели (иначе он «догоняет» факт и % всегда 100). Фиксирует cron в воскресенье 23:00. Прошлые месяцы целиком — в «Дашборд Администратора → Реализация».</div>
@@ -10414,6 +10415,21 @@ function _progHtml(){
   </tbody></table></div>`;
 }
 function progPlan(key,v){ const G=_rukProg(); const n=parseFloat(v)||0; if(n) G.plans[key]=n; else delete G.plans[key]; _progSave(); renderRuk(); }
+/* посчитать неделю по логике отчёта Alfa «Прогноз оплаты» — для сверки с самим отчётом */
+async function progForecastWeek(week){
+  if(_realBusy) return;
+  const btn=document.getElementById("fcWeekBtn"), prog=document.getElementById("progPullProg");
+  _realBusy=true; if(btn) btn.disabled=true;
+  if(prog) prog.textContent="Считаю по расписанию и абонементам Alfa… (до 2 минут)";
+  try{
+    const j=await _pubCall("forecastWeek",{week:week||_todayIso()});
+    console.log("📤 forecastWeek",j);
+    if(prog) prog.innerHTML=`Неделя ${esc(j.week)}–${esc(j.to)}: <b>${_gm(j.forecast)}</b> · уроков ${j.lessons} · групп ${j.groups}`+
+      (j.withoutPrice?` · <span style="color:var(--terra)">без цены: ${j.withoutPrice}</span>`:'');
+    toast("Прогноз как в Alfa: "+_gm(j.forecast)+" (уроков "+j.lessons+")");
+  }catch(e){ if(prog) prog.textContent=""; const b=document.getElementById("rukBody"); if(b){ const d=document.createElement('div'); d.innerHTML=_pubErrHtml(e,"прогноз как в Alfa"); b.insertBefore(d.firstChild,b.firstChild); } }
+  finally{ _realBusy=false; if(btn) btn.disabled=false; }
+}
 /* зафиксировать прогноз на текущую (или указанную) неделю вручную */
 async function progSnapshot(week){
   if(_realBusy) return;

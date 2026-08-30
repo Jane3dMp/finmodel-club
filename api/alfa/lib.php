@@ -488,6 +488,89 @@ function alfa_realization_upsert(string $date, ?array $branches = null): array {
 }
 function alfa_cron_key(): string { return (string)(cfg()['cron_key'] ?? ''); }
 
+/* ===== ПРОГНОЗ ОПЛАТЫ «как в Alfa» =====
+   В Alfa есть отчёт «Прогноз оплаты» (Расход за период), но наружу v2api его не отдаёт (404).
+   Механику повторяем: будущих уроков в lesson/index нет, зато есть РЕГУЛЯРНОЕ расписание.
+   За неделю каждое активное регулярное занятие проходит ровно 1 раз, поэтому:
+     уроки = Σ по группам (регулярных занятий группы × число зачисленных),
+     расход = Σ по каждому ученику (его уроки × цена его занятия по абонементу).
+   Цена берётся из абонемента ученика (customer-tariff): так учитываются скидки и майские цены. */
+function alfa_lesson_price_of(int $branch, int $customerId, array &$cache, array &$dbg): float {
+    if (isset($cache[$customerId])) return $cache[$customerId];
+    $r = alfa_customer_tariffs($branch, $customerId);
+    $price = 0.0;
+    foreach ($r['items'] as $t) {
+        if (!is_array($t)) continue;
+        if (!empty($t['is_archive'])) continue;
+        // прямые поля цены урока, если Alfa их отдаёт
+        foreach (['lesson_price', 'price_lesson', 'price'] as $k) {
+            if (isset($t[$k]) && is_numeric($t[$k]) && (float)$t[$k] > 0) { $price = (float)$t[$k]; break 2; }
+        }
+        // иначе выводим: остаток денег / остаток уроков
+        $bal = isset($t['balance']) && is_numeric($t['balance']) ? (float)$t['balance'] : 0;
+        $cnt = 0;
+        foreach (['balance_count', 'paid_count', 'lesson_count'] as $k) {
+            if (isset($t[$k]) && is_numeric($t[$k]) && (float)$t[$k] > 0) { $cnt = (float)$t[$k]; break; }
+        }
+        if ($bal > 0 && $cnt > 0) { $price = $bal / $cnt; break; }
+        if (count($dbg) < 3) $dbg[] = $t;   // образцы, если цену вывести не удалось
+    }
+    $cache[$customerId] = $price;
+    return $price;
+}
+/* Прогноз на неделю (пн–вс), считаем как Alfa. Возвращает сумму, число уроков и разбор. */
+function alfa_forecast_week(string $mondayIso, ?array $branches = null): array {
+    $mon = alfa_monday_of($mondayIso);
+    $sun = date('Y-m-d', strtotime('+6 day', strtotime($mon)));
+    $branches = $branches ?: alfa_realization_branches();
+    $host = 'https://' . alfa_host(); $token = alfa_token();
+    $sum = 0.0; $lessonsCount = 0; $groupsUsed = 0; $noPrice = 0; $priceCache = []; $dbg = [];
+    foreach ($branches as $bid) {
+        $bid = (int)$bid;
+        // 1) регулярные занятия филиала, действующие на этой неделе
+        $rr = alfa_index_all($bid, 'regular-lesson', [], 40, 15);
+        $perGroup = [];
+        foreach ($rr['items'] as $rl) {
+            if (!is_array($rl)) continue;
+            $gid = (int)($rl['related_id'] ?? 0); if (!$gid) continue;
+            $b = alfa_iso((string)($rl['b_date_v'] ?? ($rl['b_date'] ?? '')));
+            $e = alfa_iso((string)($rl['e_date_v'] ?? ($rl['e_date'] ?? '')));
+            if ($b !== '' && $b > $sun) continue;      // ещё не началось
+            if ($e !== '' && $e < $mon) continue;      // уже закончилось
+            $perGroup[$gid] = ($perGroup[$gid] ?? 0) + 1;   // за неделю каждое занятие = 1 раз
+        }
+        // 2) состав каждой группы (cgi) и цена занятия ученика
+        foreach ($perGroup as $gid => $timesPerWeek) {
+            $seen = []; $members = [];
+            foreach ([['?group_id=' . $gid, ['group_id' => $gid]],
+                      ['?group_id=' . $gid . '&date_from=' . $mon . '&date_to=' . $sun,
+                       ['group_id' => $gid, 'date_from' => $mon, 'date_to' => $sun]]] as $v) {
+                $r = alfa_http('POST', "$host/v2api/$bid/cgi/index" . $v[0], array_merge($v[1], ['page' => 0, 'count' => 200]), $token, true, 12);
+                if (isset($r['__err'])) continue;
+                foreach (($r['items'] ?? []) as $it) {
+                    if ((int)($it['group_id'] ?? 0) !== $gid) continue;
+                    $cid = (int)($it['customer_id'] ?? 0); if (!$cid || isset($seen[$cid])) continue;
+                    $bb = alfa_iso((string)($it['b_date'] ?? '')); $ee = alfa_iso((string)($it['e_date'] ?? ''));
+                    if ($bb !== '' && $bb > $sun) continue;    // членство ещё не началось
+                    if ($ee !== '' && $ee < $mon) continue;    // уже закончилось
+                    $seen[$cid] = 1; $members[] = $cid;
+                }
+            }
+            if (!$members) continue;
+            $groupsUsed++;
+            foreach ($members as $cid) {
+                $p = alfa_lesson_price_of($bid, $cid, $priceCache, $dbg);
+                if ($p <= 0) $noPrice++;
+                $sum += $p * $timesPerWeek;
+                $lessonsCount += $timesPerWeek;
+            }
+        }
+    }
+    return ['week' => $mon, 'to' => $sun, 'forecast' => round($sum, 2), 'lessons' => $lessonsCount,
+            'groups' => $groupsUsed, 'studentsPriced' => count($priceCache), 'withoutPrice' => $noPrice,
+            'sampleTariffs' => $dbg];
+}
+
 /* --- НЕДЕЛЬНЫЙ ПРОГНОЗ (снимок) ---
    Прогноз надо ЗАФИКСИРОВАТЬ до начала недели: если считать его «на лету», то по мере
    проведения занятий ожидаемое превращается в факт и прогноз сравнивается сам с собой
@@ -520,22 +603,24 @@ function alfa_monday_of(string $iso): string {
 function alfa_weekplan_snapshot(string $mondayIso, ?array $branches = null): array {
     $mon = alfa_monday_of($mondayIso);
     $branches = $branches ?: alfa_realization_branches();
-    $plan = 0.0; $planned = 0.0; $donePart = 0.0; $days = [];
+    /* Прогноз недели считаем по логике отчёта Alfa «Прогноз оплаты» (расписание × состав ×
+       цена абонемента) — источник только Alfa, чтобы работало и когда финмодель заморожена. */
+    $fc = alfa_forecast_week($mon, $branches);
+    // заодно обновим дневное хранилище реализации за эту неделю (факт)
+    $days = []; $donePart = 0.0;
     for ($i = 0; $i < 7; $i++) {
         $d = date('Y-m-d', strtotime("+$i day", strtotime($mon)));
-        $r = alfa_realization_upsert($d, $branches);      // заодно обновляем дневное хранилище
-        $avg = (((float)$r['present']) + ((float)$r['all'])) / 2;
-        $planned += (float)$r['planned']; $donePart += $avg;
-        $plan += $avg + (float)$r['planned'];
+        $r = alfa_realization_upsert($d, $branches);
+        $donePart += ((float)$r['present'] + (float)$r['all']) / 2;
         $days[$d] = ['present' => $r['present'], 'all' => $r['all'], 'planned' => $r['planned']];
     }
     $store = alfa_weekplan_read();
-    $store[$mon] = ['plan' => round($plan, 2), 'planned' => round($planned, 2),
-                    'alreadyDone' => round($donePart, 2), 'ts' => date('c')];
+    $store[$mon] = ['plan' => $fc['forecast'], 'lessons' => $fc['lessons'], 'groups' => $fc['groups'],
+                    'alreadyDone' => round($donePart, 2), 'src' => 'alfa', 'ts' => date('c')];
     ksort($store);
     alfa_weekplan_write($store);
-    return ['week' => $mon, 'plan' => round($plan, 2), 'planned' => round($planned, 2),
-            'alreadyDone' => round($donePart, 2), 'days' => $days];
+    return ['week' => $mon, 'plan' => $fc['forecast'], 'lessons' => $fc['lessons'],
+            'groups' => $fc['groups'], 'alreadyDone' => round($donePart, 2), 'days' => $days];
 }
 
 /* Форма полей периода по РЕАЛЬНОЙ записи: у части сущностей Alfa строковая дата лежит в

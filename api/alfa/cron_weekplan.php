@@ -26,10 +26,20 @@ if (!$branches) {
 
 /* Какую неделю фиксируем: по умолчанию БЛИЖАЙШУЮ БУДУЩУЮ (в вс 23:00 это завтрашний
    понедельник). Можно передать ?week=YYYY-MM-DD, чтобы зафиксировать конкретную. */
+@set_time_limit(0);
 $weekParam = (string)($_GET['week'] ?? ($argv[1] ?? ''));
 $target = $weekParam !== '' ? $weekParam : date('Y-m-d', strtotime('monday this week', strtotime('+1 day')));
+/* Сколько недель вперёд фиксировать. Прогноз живёт только на данных Alfa, поэтому имеет смысл
+   держать заполненными несколько недель вперёд (расписание уже известно). */
+$weeks = (int)($_GET['weeks'] ?? ($argv[2] ?? 1));
+$weeks = max(1, min(12, $weeks));
 
-$snap = alfa_weekplan_snapshot($target, $branches);
+$snaps = [];
+for ($i = 0; $i < $weeks; $i++) {
+    $wk = date('Y-m-d', strtotime("+" . ($i * 7) . " day", strtotime(alfa_monday_of($target))));
+    $s = alfa_weekplan_snapshot($wk, $branches);
+    $snaps[$wk] = ['plan' => $s['plan'], 'lessons' => $s['lessons'], 'groups' => $s['groups']];
+}
 
 header('Content-Type: application/json; charset=utf-8');
-echo json_encode(['ok' => true, 'ranAt' => date('c'), 'branches' => $branches, 'snapshot' => $snap], JSON_UNESCAPED_UNICODE);
+echo json_encode(['ok' => true, 'ranAt' => date('c'), 'branches' => $branches, 'weeks' => $weeks, 'snapshots' => $snaps], JSON_UNESCAPED_UNICODE);

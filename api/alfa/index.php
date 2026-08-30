@@ -1327,6 +1327,15 @@ switch ($action) {
                   'tried' => $tried, 'lesson' => $lsInfo, 'regularLesson' => $rlInfo]);
         break;
 
+    // --- ПРОГНОЗ ОПЛАТЫ НА НЕДЕЛЮ «как в Alfa» (регулярное расписание × состав × цена абонемента) ---
+    case 'forecastWeek':
+        @set_time_limit(300);
+        $br = alfa_realization_branches();
+        if (!$br) json_out(['ok' => false, 'error' => 'Филиал «Пожарный» не найден в Alfa'], 400);
+        $r = alfa_forecast_week((string)($in['week'] ?? date('Y-m-d')), $br);
+        json_out(['ok' => true] + $r);
+        break;
+
     // --- ХРАНИЛИЩЕ РЕАЛИЗАЦИИ (READ): посчитанные по дням суммы (клуб = Пожарный) ---
     case 'realizationStore':
         json_out(['ok' => true, 'store' => alfa_realization_store_read(),
