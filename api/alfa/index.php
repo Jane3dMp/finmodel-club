@@ -853,6 +853,52 @@ switch ($action) {
         json_out(['ok' => true, 'groupId' => $gid, 'branch' => $bid, 'count' => count($members), 'members' => $members]);
         break;
 
+    // --- ВСЕ ЧЛЕНСТВА СРАЗУ (READ): cgi по всем филиалам одним обходом, сгруппировано по group_id.
+    //     Зачем отдельно от groupMembers: печать составов на 100+ групп по одному запросу на группу
+    //     = 200+ обращений к Alfa пачкой → таймауты шлюза/лимиты, всё падает. Здесь один обход с
+    //     пагинацией (как customers/groupsList) — и быстро, и надёжно. Наши членства с 02.09 —
+    //     БУДУЩИЕ, дефолт их не отдаёт, поэтому второй заход с диапазоном дат (как в groupMembers).
+    case 'membershipsAll':
+        @set_time_limit(240);
+        $today = date('Y-m-d');
+        $winTo = alfa_iso((string)($in['e_date'] ?? '')) ?: '2027-08-31';
+        if ($winTo < $today) $winTo = '2027-08-31';
+        $want = array_values(array_filter(array_map('intval', (array)($in['branches'] ?? []))));
+        $branches = $want ?: alfa_all_branch_ids();
+        $token = alfa_token(); $host = 'https://' . alfa_host();
+        $per = 50; $maxPages = 400;
+        $seen = []; $byGroup = []; $readOk = false; $scanned = 0; $perBranch = []; $failed = [];
+        foreach ($branches as $bid) {
+            $before = count($seen);
+            foreach ([
+                [],
+                ['date_from' => $today, 'date_to' => $winTo, 'b_date' => $today, 'e_date' => $winTo],
+            ] as $q) {
+                $page = 0; $items = [];
+                do {
+                    $r = alfa_http('POST', "$host/v2api/$bid/cgi/index", array_merge($q, ['page' => $page, 'count' => $per]), $token, true, 20);
+                    if (isset($r['__err'])) { $failed[] = ['branch' => (int)$bid, 'page' => $page, 'why' => $r['__err']]; break; }
+                    $readOk = true;
+                    $items = $r['items'] ?? [];
+                    foreach ($items as $it) {
+                        $scanned++;
+                        $cid = (int)($it['customer_id'] ?? 0); $g = (int)($it['group_id'] ?? 0);
+                        if (!$cid || !$g) continue;
+                        $key = $g . ':' . $cid;
+                        if (isset($seen[$key])) continue;   // одна связь может прийти в обоих заходах / филиалах
+                        $seen[$key] = 1;
+                        $byGroup[(string)$g][] = ['customer_id' => $cid, 'b_date' => $it['b_date'] ?? null, 'e_date' => $it['e_date'] ?? null];
+                    }
+                    $page++;
+                } while (count($items) === $per && $page < $maxPages);
+            }
+            $perBranch[$bid] = count($seen) - $before;
+        }
+        if (!$readOk) json_out(['ok' => false, 'error' => 'Не удалось прочитать членства (cgi) из Alfa — попробуйте ещё раз.'], 502);
+        json_out(['ok' => true, 'groups' => count($byGroup), 'links' => count($seen), 'scanned' => $scanned,
+                  'perBranch' => $perBranch, 'incomplete' => !empty($failed), 'failed' => $failed, 'byGroup' => $byGroup]);
+        break;
+
     // --- ДОБАВИТЬ ДЕТЕЙ В ГРУППУ (WRITE, dryRun по умолчанию). Сущность cgi = членство:
     //     customer_id, group_id, b_date, e_date — и всё. Период участия задаём как у группы.
     case 'addToGroup':

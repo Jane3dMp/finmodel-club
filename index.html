@@ -9815,16 +9815,6 @@ function _alfaIso(d){ d=String(d||"");
   m=d.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})/);   if(m) return m[3]+"-"+String(m[2]).padStart(2,"0")+"-"+String(m[1]).padStart(2,"0");
   return d.slice(0,10); }
 function _ddmmyyyy(v){ const m=_alfaIso(v).match(/^(\d{4})-(\d{2})-(\d{2})/); return m?(m[3]+"."+m[2]+"."+m[1]):""; }
-/* очередь с ограничением параллельности: 100+ групп по одному запросу иначе либо висят долго
-   последовательно, либо заваливают шлюз пачкой. По ~5 за раз — и быстро, и безопасно. */
-async function _alfaPool(items,worker,limit,onProg){
-  const out=new Array(items.length); let i=0, done=0;
-  async function run(){ while(i<items.length){ const idx=i++;
-    try{ out[idx]=await worker(items[idx],idx); }catch(e){ out[idx]={__err:(e&&e.message)||String(e)}; }
-    done++; if(onProg) onProg(done,items.length); } }
-  const rs=[]; for(let k=0;k<Math.min(limit,items.length);k++) rs.push(run());
-  await Promise.all(rs); return out;
-}
 function openAlfaRosters(){ if(!_fbIsAdmin){ toast("Только для админа"); return; }
   document.getElementById("alfaRosterModal").classList.add("show");
   const p=document.getElementById("alfaRosterProg"); if(p) p.innerHTML=""; }
@@ -9853,25 +9843,28 @@ async function alfaRosterRun(){
       say(`<div class="callout" style="border-color:var(--terra)">Групп со стартом ${esc(_ddmmyyyy(start))} в Alfa не нашлось (активных всего: ${act}). Проверьте дату или включите «Все активные группы».</div>`);
       _alfaRosterBusy=false; if(btn) btn.disabled=false; return;
     }
-    say(`Групп: ${groups.length}. Читаю состав из Alfa… 0/${groups.length}`);
-    const results=await _alfaPool(groups, async g=>{
-      const j=await _pubCall("groupMembers",{groupId:g.id, branch:g.branch, e_date:"2027-08-31"});
-      return {g, members:j.members||[]};
-    }, 5, (d,t)=>say(`Групп: ${groups.length}. Читаю состав из Alfa… ${d}/${t}`));
-    const data=results.map(r=>{
-      if(!r||r.__err) return null;
-      let mem=r.members||[];
+    say(`Групп: ${groups.length}. Читаю состав из Alfa одним запросом…`);
+    // ОДИН обход cgi по всем филиалам вместо запроса на каждую группу (200+ обращений пачкой
+    // валили шлюз). Прокси отдаёт членства, сгруппированные по group_id.
+    const j=await _pubCall("membershipsAll",{branches:_pubCfg().branches||[], e_date:"2027-08-31"});
+    const byGroup=j.byGroup||{};
+    console.log("📤 Alfa членства: групп с детьми",j.groups,"· связей",j.links,"· просмотрено",j.scanned,"· по филиалам",j.perBranch,j.incomplete?("· НЕПОЛНО: "+JSON.stringify(j.failed)):"");
+    const data=groups.map(g=>{
+      let mem=byGroup[String(g.id)]||[];
       if(onlyDate) mem=mem.filter(m=>_alfaIso(m.b_date)===start);
       const kids=mem.map(m=>{ const c=custById.get(+m.customer_id);
           return {name:(c&&c.name)||("Клиент id "+m.customer_id), dob:(c&&c.dob)||"", b:m.b_date}; })
         .sort((a,b)=>String(a.name).localeCompare(String(b.name),"ru"));
-      const teacher=(r.g.teacher_ids||[]).map(id=>teachById.get(+id)).filter(Boolean).join(", ");
-      return {name:r.g.name, teacher, kids};
-    }).filter(Boolean);
-    const errs=results.filter(r=>r&&r.__err).length;
+      const teacher=(g.teacher_ids||[]).map(id=>teachById.get(+id)).filter(Boolean).join(", ");
+      return {name:g.name, teacher, kids};
+    });
     const totKids=data.reduce((a,d)=>a+d.kids.length,0);
+    if(!totKids){
+      say(`<div class="callout" style="border-color:var(--terra)">Группы нашлись (${data.length}), но зачисленных с ${esc(_ddmmyyyy(start))} детей в них нет.${j.incomplete?" ⚠️ Часть филиалов не дочиталась (см. консоль F12).":""}<br><span style="font-size:11px;color:var(--muted)">Снимите галочку «Только дети, зачисленные с этой даты», если детей вносили другой датой.</span></div>`);
+      _alfaRosterBusy=false; if(btn) btn.disabled=false; return;
+    }
     _alfaRoster={data, start, withDob, withMark};
-    say(`<div class="callout" style="border-color:var(--green)">Готово: групп ${data.length}, детей ${totKids}${errs?` · не удалось прочитать групп: ${errs}`:""}. Открываю печать…</div>`);
+    say(`<div class="callout" style="border-color:var(--green)">Готово: групп ${data.length}, детей ${totKids}${j.incomplete?" · ⚠️ часть филиалов не дочиталась (F12)":""}. Открываю печать…</div>`);
     _alfaRosterPrint();
   }catch(e){ say(_pubErrHtml(e,"составы из Alfa")); }
   finally{ _alfaRosterBusy=false; if(btn) btn.disabled=false; }
