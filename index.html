@@ -1658,6 +1658,7 @@ details.client .cli-cols .cc-bal{width:74px;font-weight:600}
   <label style="display:block;font-size:13px;margin-bottom:8px">Старт учебного года: <input type="date" id="arStart" class="cell" value="2026-09-02" style="width:auto"></label>
   <label style="display:flex;align-items:center;gap:6px;font-size:13px;margin:0 0 4px"><input type="checkbox" id="arOnlyDate" checked style="width:auto;margin:0"> Только дети, зачисленные с этой даты</label>
   <label style="display:flex;align-items:center;gap:6px;font-size:13px;margin:0 0 4px"><input type="checkbox" id="arAllActive" style="width:auto;margin:0"> Все активные группы (не только с этим стартом)</label>
+  <label style="display:flex;align-items:center;gap:6px;font-size:13px;margin:0 0 4px"><input type="checkbox" id="arPhone" checked style="width:auto;margin:0"> Столбец «Телефон» (из карточки ребёнка в Alfa)</label>
   <label style="display:flex;align-items:center;gap:6px;font-size:13px;margin:0 0 4px"><input type="checkbox" id="arDob" style="width:auto;margin:0"> Столбец «Дата рождения»</label>
   <label style="display:flex;align-items:center;gap:6px;font-size:13px;margin:0 0 8px"><input type="checkbox" id="arMark" checked style="width:auto;margin:0"> Пустой столбец «Отметки»</label>
   <div id="alfaRosterProg" style="font-size:12px;margin:8px 0;min-height:18px"></div>
@@ -9824,6 +9825,7 @@ async function alfaRosterRun(){
   const start=(document.getElementById("arStart").value||"2026-09-02");
   const onlyDate=document.getElementById("arOnlyDate").checked;
   const allActive=document.getElementById("arAllActive").checked;
+  const withPhone=document.getElementById("arPhone").checked;
   const withDob=document.getElementById("arDob").checked;
   const withMark=document.getElementById("arMark").checked;
   const prog=document.getElementById("alfaRosterProg"), btn=document.getElementById("arRunBtn");
@@ -9866,7 +9868,8 @@ async function alfaRosterRun(){
       let mem=byGroup[String(g.id)]||[];
       if(onlyDate) mem=mem.filter(m=>_alfaIso(m.b_date)===start);
       const kids=mem.map(m=>{ const c=custById.get(+m.customer_id);
-          return {name:(c&&c.name)||("Клиент id "+m.customer_id), dob:(c&&c.dob)||"", b:m.b_date}; })
+          const ph=(c&&Array.isArray(c.phones))?c.phones.filter(Boolean).join(", "):"";
+          return {name:(c&&c.name)||("Клиент id "+m.customer_id), dob:(c&&c.dob)||"", phone:ph, b:m.b_date}; })
         .sort((a,b)=>String(a.name).localeCompare(String(b.name),"ru"));
       const teacher=(g.teacher_ids||[]).map(id=>teachById.get(+id)).filter(Boolean).join(", ");
       const sched=schedByName.get(_arKey(g.name))||"";
@@ -9880,7 +9883,7 @@ async function alfaRosterRun(){
       say(`<div class="callout" style="border-color:var(--terra)">Группы нашлись (${data.length}), но детей${onlyDate?(" с зачислением от "+esc(_ddmmyyyy(start))):""} в них не найдено.<br><span style="font-size:11px;color:var(--muted)">${hint}</span></div>`);
       _alfaRosterBusy=false; if(btn) btn.disabled=false; return;
     }
-    _alfaRoster={data, start, withDob, withMark};
+    _alfaRoster={data, start, withPhone, withDob, withMark};
     say(`<div class="callout" style="border-color:var(--green)">Готово: групп ${data.length}, детей ${totKids}${errN?` · ⚠️ ${errN} групп(ы) не дочиталось (F12)`:""}. Открываю печать…</div>`);
     _alfaRosterPrint();
   }catch(e){
@@ -9895,14 +9898,14 @@ async function alfaRosterRun(){
 }
 function _alfaRosterPrint(){
   const D=_alfaRoster; if(!D||!D.data.length){ toast("Нечего печатать"); return; }
-  const {data, withDob, withMark, start}=D;
+  const {data, withPhone, withDob, withMark, start}=D;
   const now=new Date(), z=n=>String(n).padStart(2,"0");
   const dd=z(now.getDate())+"."+z(now.getMonth()+1)+"."+now.getFullYear();
-  const nCols=2+(withDob?1:0)+(withMark?1:0);
-  const head=`<tr><th style="width:30px">№</th><th class="l">ФИО</th>${withDob?'<th style="width:92px">Дата рождения</th>':''}${withMark?'<th class="l" style="width:130px">Отметки</th>':''}</tr>`;
+  const nCols=2+(withPhone?1:0)+(withDob?1:0)+(withMark?1:0);
+  const head=`<tr><th style="width:30px">№</th><th class="l">ФИО</th>${withPhone?'<th class="l" style="width:120px">Телефон</th>':''}${withDob?'<th style="width:92px">Дата рождения</th>':''}${withMark?'<th class="l" style="width:130px">Отметки</th>':''}</tr>`;
   const body=data.map(gr=>{
     const rows=gr.kids.length
-      ? gr.kids.map((k,i)=>`<tr><td class="c">${i+1}</td><td>${esc(k.name)}</td>${withDob?`<td class="c">${esc(_ddmmyyyy(k.dob))}</td>`:''}${withMark?'<td></td>':''}</tr>`).join("")
+      ? gr.kids.map((k,i)=>`<tr><td class="c">${i+1}</td><td>${esc(k.name)}</td>${withPhone?`<td class="l">${esc(k.phone||"")}</td>`:''}${withDob?`<td class="c">${esc(_ddmmyyyy(k.dob))}</td>`:''}${withMark?'<td></td>':''}</tr>`).join("")
       : `<tr><td colspan="${nCols}" class="empty">В Alfa в эту группу пока никто не зачислён.</td></tr>`;
     return `<div class="t"><h1>${esc(gr.name)}</h1>
       <div class="sub">${gr.sched?("Расписание: "+esc(gr.sched)+" · "):""}${gr.teacher?("Педагог: "+esc(gr.teacher)+" · "):""}детей: ${gr.kids.length} · старт ${esc(_ddmmyyyy(start))} · из AlfaCRM на ${dd}</div>
@@ -9918,7 +9921,7 @@ function _alfaRosterPrint(){
     table{border-collapse:collapse;width:100%}
     th,td{border:1px solid #ccc;font-size:11px;padding:4px 7px;text-align:center}
     th{background:#2a211b;color:#fff}
-    th.l,td:nth-child(2){text-align:left}
+    th.l,td.l,td:nth-child(2){text-align:left}
     thead{display:table-header-group} tr{page-break-inside:avoid}
     tbody tr:nth-child(even) td{background:#faf7f3}
     .empty{color:#777;font-style:italic}`;
