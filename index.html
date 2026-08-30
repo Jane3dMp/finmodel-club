@@ -9843,12 +9843,20 @@ async function alfaRosterRun(){
       say(`<div class="callout" style="border-color:var(--terra)">Групп со стартом ${esc(_ddmmyyyy(start))} в Alfa не нашлось (активных всего: ${act}). Проверьте дату или включите «Все активные группы».</div>`);
       _alfaRosterBusy=false; if(btn) btn.disabled=false; return;
     }
-    say(`Групп: ${groups.length}. Читаю состав из Alfa одним запросом…`);
-    // ОДИН обход cgi по всем филиалам вместо запроса на каждую группу (200+ обращений пачкой
-    // валили шлюз). Прокси отдаёт членства, сгруппированные по group_id.
-    const j=await _pubCall("membershipsAll",{branches:_pubCfg().branches||[], e_date:"2027-08-31"});
-    const byGroup=j.byGroup||{};
-    console.log("📤 Alfa членства: групп с детьми",j.groups,"· связей",j.links,"· просмотрено",j.scanned,"· по филиалам",j.perBranch,j.incomplete?("· НЕПОЛНО: "+JSON.stringify(j.failed)):"");
+    // cgi/index без фильтра Alfa не отдаёт, а запрос на каждую группу с клиента = залп из 200+.
+    // Поэтому шлём группы ПАЧКАМИ по 25: прокси внутри перебирает их по group_id. Запросов мало,
+    // залпа нет. Диагностику первой ошибки (сырой ответ Alfa) забираем для показа.
+    const byGroup={}; let diag=null, errN=0; const CH=25;
+    for(let i=0;i<groups.length;i+=CH){
+      say(`Читаю состав из Alfa… ${Math.min(i+CH,groups.length)}/${groups.length}`);
+      const chunk=groups.slice(i,i+CH).map(g=>({id:g.id, branch:g.branch}));
+      const j=await _pubCall("membersByGroups",{groups:chunk, e_date:"2027-08-31"});
+      Object.assign(byGroup, j.byGroup||{});
+      if(j.diag&&!diag) diag=j.diag;
+      errN+=(j.errors||[]).length;
+    }
+    if(diag) console.warn("📤 Alfa cgi — образец ошибки чтения состава:",diag);
+    if(errN) console.warn("📤 Alfa: не прочитан состав групп:",errN);
     const data=groups.map(g=>{
       let mem=byGroup[String(g.id)]||[];
       if(onlyDate) mem=mem.filter(m=>_alfaIso(m.b_date)===start);
@@ -9860,13 +9868,23 @@ async function alfaRosterRun(){
     });
     const totKids=data.reduce((a,d)=>a+d.kids.length,0);
     if(!totKids){
-      say(`<div class="callout" style="border-color:var(--terra)">Группы нашлись (${data.length}), но зачисленных с ${esc(_ddmmyyyy(start))} детей в них нет.${j.incomplete?" ⚠️ Часть филиалов не дочиталась (см. консоль F12).":""}<br><span style="font-size:11px;color:var(--muted)">Снимите галочку «Только дети, зачисленные с этой даты», если детей вносили другой датой.</span></div>`);
+      const hint = errN
+        ? `⚠️ Состав ${errN} групп(ы) Alfa не отдала (см. консоль F12).`
+        : `Снимите галочку «Только дети, зачисленные с этой даты», если детей вносили другой датой.`;
+      say(`<div class="callout" style="border-color:var(--terra)">Группы нашлись (${data.length}), но детей${onlyDate?(" с зачислением от "+esc(_ddmmyyyy(start))):""} в них не найдено.<br><span style="font-size:11px;color:var(--muted)">${hint}</span></div>`);
       _alfaRosterBusy=false; if(btn) btn.disabled=false; return;
     }
     _alfaRoster={data, start, withDob, withMark};
-    say(`<div class="callout" style="border-color:var(--green)">Готово: групп ${data.length}, детей ${totKids}${j.incomplete?" · ⚠️ часть филиалов не дочиталась (F12)":""}. Открываю печать…</div>`);
+    say(`<div class="callout" style="border-color:var(--green)">Готово: групп ${data.length}, детей ${totKids}${errN?` · ⚠️ ${errN} групп(ы) не дочиталось (F12)`:""}. Открываю печать…</div>`);
     _alfaRosterPrint();
-  }catch(e){ say(_pubErrHtml(e,"составы из Alfa")); }
+  }catch(e){
+    const dg=(e&&e.data&&e.data.diag)||null;
+    if(dg) console.warn("📤 Alfa cgi — что именно ответила Alfa:",dg);
+    let h=_pubErrHtml(e,"составы из Alfa");
+    if(dg) h+=`<details style="margin-top:6px"><summary style="cursor:pointer;font-size:12px;color:var(--muted)">Что ответила Alfa на запрос состава</summary>
+      <pre style="white-space:pre-wrap;font-size:11px;background:var(--paper);padding:6px;border-radius:6px;max-height:30vh;overflow:auto">${esc(JSON.stringify(dg,null,1))}</pre></details>`;
+    say(h);
+  }
   finally{ _alfaRosterBusy=false; if(btn) btn.disabled=false; }
 }
 function _alfaRosterPrint(){
