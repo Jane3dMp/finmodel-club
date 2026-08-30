@@ -10422,11 +10422,21 @@ async function progForecastWeek(week){
   _realBusy=true; if(btn) btn.disabled=true;
   if(prog) prog.textContent="Считаю по расписанию и абонементам Alfa… (до 2 минут)";
   try{
-    const j=await _pubCall("forecastWeek",{week:week||_todayIso()});
-    console.log("📤 forecastWeek",j);
-    if(prog) prog.innerHTML=`Неделя ${esc(j.week)}–${esc(j.to)}: <b>${_gm(j.forecast)}</b> · уроков ${j.lessons} · групп ${j.groups}`+
-      (j.withoutPrice?` · <span style="color:var(--terra)">без цены: ${j.withoutPrice}</span>`:'');
-    toast("Прогноз как в Alfa: "+_gm(j.forecast)+" (уроков "+j.lessons+")");
+    const wk=week||_todayIso();
+    const plan=await _pubCall("forecastPlan",{week:wk});
+    const gs=plan.groups||[];
+    if(!gs.length){ if(prog) prog.textContent="В Alfa нет регулярных занятий на эту неделю"; return; }
+    let sum=0, les=0, stud=0, noPrice=0, samples=null;
+    for(let i=0;i<gs.length;i+=10){
+      if(prog) prog.textContent="Считаю по Alfa… групп "+Math.min(i+10,gs.length)+"/"+gs.length;
+      const j=await _pubCall("forecastGroups",{week:wk, groups:gs.slice(i,i+10)});
+      sum+=+j.forecast||0; les+=+j.lessons||0; stud+=+j.students||0; noPrice+=+j.withoutPrice||0;
+      if(!samples && (j.sampleTariffs||[]).length) samples=j.sampleTariffs;
+    }
+    console.log("📤 forecast как в Alfa:",{week:wk,sum,les,stud,noPrice,samples});
+    if(prog) prog.innerHTML=`Неделя ${esc(plan.week)}–${esc(plan.to)}: <b>${_gm(sum)}</b> · уроков ${les} · детей ${stud} · групп ${gs.length}`+
+      (noPrice?` · <span style="color:var(--terra)">без цены: ${noPrice}</span>`:'');
+    toast("Прогноз как в Alfa: "+_gm(sum)+" (уроков "+les+")");
   }catch(e){ if(prog) prog.textContent=""; const b=document.getElementById("rukBody"); if(b){ const d=document.createElement('div'); d.innerHTML=_pubErrHtml(e,"прогноз как в Alfa"); b.insertBefore(d.firstChild,b.firstChild); } }
   finally{ _realBusy=false; if(btn) btn.disabled=false; }
 }

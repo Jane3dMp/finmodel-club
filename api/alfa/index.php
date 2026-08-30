@@ -1327,13 +1327,20 @@ switch ($action) {
                   'tried' => $tried, 'lesson' => $lsInfo, 'regularLesson' => $rlInfo]);
         break;
 
-    // --- ПРОГНОЗ ОПЛАТЫ НА НЕДЕЛЮ «как в Alfa» (регулярное расписание × состав × цена абонемента) ---
-    case 'forecastWeek':
-        @set_time_limit(300);
+    // --- ПРОГНОЗ ОПЛАТЫ «как в Alfa»: шаг 1 — какие группы и сколько раз занимаются на неделе ---
+    case 'forecastPlan':
+        @set_time_limit(120);
         $br = alfa_realization_branches();
         if (!$br) json_out(['ok' => false, 'error' => 'Филиал «Пожарный» не найден в Alfa'], 400);
-        $r = alfa_forecast_week((string)($in['week'] ?? date('Y-m-d')), $br);
-        json_out(['ok' => true] + $r);
+        json_out(['ok' => true] + alfa_forecast_plan((string)($in['week'] ?? date('Y-m-d')), $br));
+        break;
+
+    // --- шаг 2: прогноз по ПАЧКЕ групп (клиент шлёт чанками, чтобы не ловить таймаут шлюза) ---
+    case 'forecastGroups':
+        @set_time_limit(120);
+        $gs = is_array($in['groups'] ?? null) ? $in['groups'] : [];
+        if (!$gs) json_out(['ok' => false, 'error' => 'Не переданы группы']);
+        json_out(['ok' => true] + alfa_forecast_groups((string)($in['week'] ?? date('Y-m-d')), array_slice($gs, 0, 12)));
         break;
 
     // --- ХРАНИЛИЩЕ РЕАЛИЗАЦИИ (READ): посчитанные по дням суммы (клуб = Пожарный) ---
