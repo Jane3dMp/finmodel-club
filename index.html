@@ -1651,6 +1651,23 @@ details.client .cli-cols .cc-bal{width:74px;font-weight:600}
  </div>
 </div>
 
+<div class="modal-bg" id="alfaRosterModal">
+ <div class="modal" style="max-width:580px">
+  <h3>🖨 Печать составов из Alfa</h3>
+  <p style="font-size:13px;color:var(--muted);margin-bottom:10px">Списки читаются <b>прямо из AlfaCRM</b>, а не из финмодели: берём группы со стартом с указанной даты и тех, кто в них зачислён. Финмодель после публикации могла устареть — здесь актуальный состав.</p>
+  <label style="display:block;font-size:13px;margin-bottom:8px">Старт учебного года: <input type="date" id="arStart" class="cell" value="2026-09-02" style="width:auto"></label>
+  <label style="display:flex;align-items:center;gap:6px;font-size:13px;margin:0 0 4px"><input type="checkbox" id="arOnlyDate" checked style="width:auto;margin:0"> Только дети, зачисленные с этой даты</label>
+  <label style="display:flex;align-items:center;gap:6px;font-size:13px;margin:0 0 4px"><input type="checkbox" id="arAllActive" style="width:auto;margin:0"> Все активные группы (не только с этим стартом)</label>
+  <label style="display:flex;align-items:center;gap:6px;font-size:13px;margin:0 0 4px"><input type="checkbox" id="arDob" style="width:auto;margin:0"> Столбец «Дата рождения»</label>
+  <label style="display:flex;align-items:center;gap:6px;font-size:13px;margin:0 0 8px"><input type="checkbox" id="arMark" checked style="width:auto;margin:0"> Пустой столбец «Отметки»</label>
+  <div id="alfaRosterProg" style="font-size:12px;margin:8px 0;min-height:18px"></div>
+  <div class="hd-actions" style="margin-top:12px">
+   <button class="btn sm" id="arRunBtn" onclick="alfaRosterRun()"><i data-ic="print"></i>Загрузить из Alfa и печатать</button>
+   <button class="btn gray sm" onclick="closeAlfaRosters()">Закрыть</button>
+  </div>
+ </div>
+</div>
+
 <div class="modal-bg" id="prnColModal">
  <div class="modal" style="max-width:560px">
   <h3>Печать таблицы курсов</h3>
@@ -9601,6 +9618,7 @@ function renderGroups(){
         <button class="btn ghost sm" onclick="openRosterPrint()" title="Списки детей по педагогам: выбрать педагогов и столбцы, у каждого свой лист">🖨 Составы по педагогам</button>
         <button class="btn ghost sm" onclick="openGroupsPrint()" title="Напечатать этот список групп: столбцы на выбор">🖨 Печать списка</button></span>
       ${_fbIsAdmin?`<span class="hd-grp"><button class="btn ghost sm" onclick="pubSyncGroups(this)" title="Прочитать список групп AlfaCRM и показать в столбце «Alfa», какие из наших там уже есть">⟳ Сверить с Alfa</button>
+        <button class="btn ghost sm" onclick="openAlfaRosters()" title="Печать актуальных списков детей прямо из AlfaCRM (не из финмодели)">🖨 Составы из Alfa</button>
         <button class="btn sm" onclick="openPublish()" title="Массовое создание групп и расписания в AlfaCRM (сначала сухой прогон)">📤 Опубликовать в Alfa</button></span>`:""}
     </div>
     <div class="tscroll"><table id="groupsTable"><thead><tr>
@@ -9781,6 +9799,114 @@ function doPrintGroups(){
   if(!w){ toast("Разрешите всплывающие окна для печати"); return; }
   w.document.open();
   w.document.write(html);
+  w.document.close();
+  setTimeout(()=>{ try{ w.focus(); w.print(); }catch(e){} },300);
+}
+
+/* ===== ПЕЧАТЬ СОСТАВОВ ГРУПП ПРЯМО ИЗ ALFA (живые данные) =====
+   Зачем: после публикации групп в Alfa финмодель заморожена (админ дальше вписывал детей ПРЯМО
+   в Alfa), поэтому списки в модели могут быть неполными. Alfa же на «сегодня» состав не печатает —
+   все зачислены с 02.09, т.е. по её меркам ещё не начали ходить. Поэтому читаем состав из Alfa
+   напрямую: группы со стартом 02.09.2026 и их членства (cgi) с той же даты — и печатаем.
+   Прокси уже умеет: groupsList (все группы), groupMembers (в т.ч. будущие членства), customers. */
+let _alfaRoster=null, _alfaRosterBusy=false;
+function _alfaIso(d){ d=String(d||"");
+  let m=d.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/); if(m) return m[1]+"-"+String(m[2]).padStart(2,"0")+"-"+String(m[3]).padStart(2,"0");
+  m=d.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})/);   if(m) return m[3]+"-"+String(m[2]).padStart(2,"0")+"-"+String(m[1]).padStart(2,"0");
+  return d.slice(0,10); }
+function _ddmmyyyy(v){ const m=_alfaIso(v).match(/^(\d{4})-(\d{2})-(\d{2})/); return m?(m[3]+"."+m[2]+"."+m[1]):""; }
+/* очередь с ограничением параллельности: 100+ групп по одному запросу иначе либо висят долго
+   последовательно, либо заваливают шлюз пачкой. По ~5 за раз — и быстро, и безопасно. */
+async function _alfaPool(items,worker,limit,onProg){
+  const out=new Array(items.length); let i=0, done=0;
+  async function run(){ while(i<items.length){ const idx=i++;
+    try{ out[idx]=await worker(items[idx],idx); }catch(e){ out[idx]={__err:(e&&e.message)||String(e)}; }
+    done++; if(onProg) onProg(done,items.length); } }
+  const rs=[]; for(let k=0;k<Math.min(limit,items.length);k++) rs.push(run());
+  await Promise.all(rs); return out;
+}
+function openAlfaRosters(){ if(!_fbIsAdmin){ toast("Только для админа"); return; }
+  document.getElementById("alfaRosterModal").classList.add("show");
+  const p=document.getElementById("alfaRosterProg"); if(p) p.innerHTML=""; }
+function closeAlfaRosters(){ document.getElementById("alfaRosterModal").classList.remove("show"); }
+async function alfaRosterRun(){
+  if(_alfaRosterBusy) return;
+  const start=(document.getElementById("arStart").value||"2026-09-02");
+  const onlyDate=document.getElementById("arOnlyDate").checked;
+  const allActive=document.getElementById("arAllActive").checked;
+  const withDob=document.getElementById("arDob").checked;
+  const withMark=document.getElementById("arMark").checked;
+  const prog=document.getElementById("alfaRosterProg"), btn=document.getElementById("arRunBtn");
+  const say=h=>{ if(prog) prog.innerHTML=h; };
+  _alfaRosterBusy=true; if(btn) btn.disabled=true;
+  try{
+    say("⏳ Читаю группы и клиентов из Alfa… (до минуты)");
+    await _pubEnsureLoaded(false);
+    await _pubEnsureCustomers(false);
+    const custById=new Map(); (_pubCustomers||[]).forEach(c=>custById.set(+c.id,c));
+    const teachById=new Map(); _pubRefList("teachers").forEach(t=>teachById.set(+t.id,t.name));
+    let groups=(_pubAlfaGroups||[]).filter(g=>!g.is_archive);
+    if(!allActive) groups=groups.filter(g=>_alfaIso(g.b_date)===start);
+    groups.sort((a,b)=>String(a.name).localeCompare(String(b.name),"ru",{numeric:true}));
+    if(!groups.length){
+      const act=(_pubAlfaGroups||[]).filter(g=>!g.is_archive).length;
+      say(`<div class="callout" style="border-color:var(--terra)">Групп со стартом ${esc(_ddmmyyyy(start))} в Alfa не нашлось (активных всего: ${act}). Проверьте дату или включите «Все активные группы».</div>`);
+      _alfaRosterBusy=false; if(btn) btn.disabled=false; return;
+    }
+    say(`Групп: ${groups.length}. Читаю состав из Alfa… 0/${groups.length}`);
+    const results=await _alfaPool(groups, async g=>{
+      const j=await _pubCall("groupMembers",{groupId:g.id, branch:g.branch, e_date:"2027-08-31"});
+      return {g, members:j.members||[]};
+    }, 5, (d,t)=>say(`Групп: ${groups.length}. Читаю состав из Alfa… ${d}/${t}`));
+    const data=results.map(r=>{
+      if(!r||r.__err) return null;
+      let mem=r.members||[];
+      if(onlyDate) mem=mem.filter(m=>_alfaIso(m.b_date)===start);
+      const kids=mem.map(m=>{ const c=custById.get(+m.customer_id);
+          return {name:(c&&c.name)||("Клиент id "+m.customer_id), dob:(c&&c.dob)||"", b:m.b_date}; })
+        .sort((a,b)=>String(a.name).localeCompare(String(b.name),"ru"));
+      const teacher=(r.g.teacher_ids||[]).map(id=>teachById.get(+id)).filter(Boolean).join(", ");
+      return {name:r.g.name, teacher, kids};
+    }).filter(Boolean);
+    const errs=results.filter(r=>r&&r.__err).length;
+    const totKids=data.reduce((a,d)=>a+d.kids.length,0);
+    _alfaRoster={data, start, withDob, withMark};
+    say(`<div class="callout" style="border-color:var(--green)">Готово: групп ${data.length}, детей ${totKids}${errs?` · не удалось прочитать групп: ${errs}`:""}. Открываю печать…</div>`);
+    _alfaRosterPrint();
+  }catch(e){ say(_pubErrHtml(e,"составы из Alfa")); }
+  finally{ _alfaRosterBusy=false; if(btn) btn.disabled=false; }
+}
+function _alfaRosterPrint(){
+  const D=_alfaRoster; if(!D||!D.data.length){ toast("Нечего печатать"); return; }
+  const {data, withDob, withMark, start}=D;
+  const now=new Date(), z=n=>String(n).padStart(2,"0");
+  const dd=z(now.getDate())+"."+z(now.getMonth()+1)+"."+now.getFullYear();
+  const nCols=2+(withDob?1:0)+(withMark?1:0);
+  const head=`<tr><th style="width:30px">№</th><th class="l">ФИО</th>${withDob?'<th style="width:92px">Дата рождения</th>':''}${withMark?'<th class="l" style="width:130px">Отметки</th>':''}</tr>`;
+  const body=data.map(gr=>{
+    const rows=gr.kids.length
+      ? gr.kids.map((k,i)=>`<tr><td class="c">${i+1}</td><td>${esc(k.name)}</td>${withDob?`<td class="c">${esc(_ddmmyyyy(k.dob))}</td>`:''}${withMark?'<td></td>':''}</tr>`).join("")
+      : `<tr><td colspan="${nCols}" class="empty">В Alfa в эту группу пока никто не зачислён.</td></tr>`;
+    return `<div class="t"><h1>${esc(gr.name)}</h1>
+      <div class="sub">${gr.teacher?("Педагог: "+esc(gr.teacher)+" · "):""}детей: ${gr.kids.length} · старт ${esc(_ddmmyyyy(start))} · из AlfaCRM на ${dd}</div>
+      <table><thead>${head}</thead><tbody>${rows}</tbody></table></div>`;
+  }).join("");
+  const css=`@page{size:portrait;margin:12mm}
+    *{box-sizing:border-box;font-family:Arial,Helvetica,sans-serif}
+    body{margin:0;color:#1c1410}
+    .t{page-break-after:always} .t:last-child{page-break-after:auto}
+    h1{font-size:16px;margin:0 0 2px;border-bottom:2px solid #b5532a;padding-bottom:4px}
+    .sub{font-size:10px;color:#666;margin:0 0 8px}
+    table{border-collapse:collapse;width:100%}
+    th,td{border:1px solid #ccc;font-size:11px;padding:4px 7px;text-align:center}
+    th{background:#2a211b;color:#fff}
+    th.l,td:nth-child(2){text-align:left}
+    thead{display:table-header-group} tr{page-break-inside:avoid}
+    tbody tr:nth-child(even) td{background:#faf7f3}
+    .empty{color:#777;font-style:italic}`;
+  const w=window.open("","_printAlfaRosters"); if(!w){ toast("Разрешите всплывающие окна для печати"); return; }
+  w.document.open();
+  w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Составы групп из Alfa</title><style>${css}</style></head><body>${body}</body></html>`);
   w.document.close();
   setTimeout(()=>{ try{ w.focus(); w.print(); }catch(e){} },300);
 }
