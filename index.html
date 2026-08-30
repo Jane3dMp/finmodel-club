@@ -888,6 +888,8 @@ details.client .cli-cols .cc-bal{width:74px;font-weight:600}
  <div class="navmode" id="navMode">
   <button class="nm" data-m="work" onclick="setNavMode('work')">Работа</button>
   <button class="nm" data-m="fin" onclick="setNavMode('fin')">Финмодель</button>
+  <button class="nm" data-m="ruk" onclick="setNavMode('ruk')" style="display:none">Дашборд Руководителя</button>
+  <button class="nm" data-m="adm" onclick="setNavMode('adm')" style="display:none">Дашборд Администратора</button>
  </div>
  <div class="tabstrip" id="tabStrip">
  <button class="tab active" data-t="dash">Дашборд</button>
@@ -2719,16 +2721,20 @@ const OWNER_EMAILS=["smalprince@gmail.com","proznanie.mogilev@gmail.com"];
 let _fbIsOwner=false;
 function _defaultTabsMap(){ const m={}; MANAGER_DEFAULT_TABS.forEach(function(k){ m[k]=true; }); return m; }
 /* ---- режимы навигации: «Работа» (ежедневное) и «Финмодель» (финансы) ---- */
-const TAB_MODES={grid:"work",groups:"work",compos:"work",clients:"work",price:"work",cards:"work",may:"work",goals:"work",dash:"fin",report:"fin",courses:"fin",real:"fin",planner:"fin",staff:"fin",fixed:"fin",tax:"fin","break":"fin",scenario:"fin",settings:"fin",ruk:"fin",adm:"fin"};
+const TAB_MODES={grid:"work",groups:"work",compos:"work",clients:"work",price:"work",cards:"work",may:"work",goals:"work",dash:"fin",report:"fin",courses:"fin",real:"fin",planner:"fin",staff:"fin",fixed:"fin",tax:"fin","break":"fin",scenario:"fin",settings:"fin",ruk:"ruk",adm:"adm"};
 // вкладки, видимые в ОБОИХ режимах: «О курсах» заполняет Жанна из «Финмодели»,
 // а менеджеры читают в «Работе» — без этого админу приходилось переключать режим
-const TAB_BOTH_MODES={cards:1,ruk:1,adm:1};   // дашборды владельца видны в обоих режимах
+const TAB_BOTH_MODES={cards:1};
+// Дашборды владельца — это отдельные режимы навигации (как «Работа»/«Финмодель»), рядом с ними
+const NAV_MODES=["work","fin","ruk","adm"];
+// В этих режимах всего одна панель = сам дашборд; ленту вкладок прячем (режим и есть выбор)
+const SOLO_MODES={ruk:1,adm:1};
 let _tabAccess=null;   // null = все вкладки (админ / до входа), иначе {tabKey:true}
 let navMode=(function(){ try{ return localStorage.getItem("navMode")||"work"; }catch(e){ return "work"; } })();
 function _tabAllowed(k){ if(OWNER_TABS[k]) return _fbIsOwner; if(ADMIN_TABS[k]) return _fbIsAdmin; return ALWAYS_TABS[k]===1 || !_tabAccess || _tabAccess[k]===true; }
 function _updateTabVisibility(){
   // если в текущем режиме не осталось доступных вкладок — перескочить в другой
-  const modes=["work","fin"];
+  const modes=NAV_MODES;
   const hasTabs={}; modes.forEach(function(m){ hasTabs[m]=TAB_DEFS.some(function(t){ return TAB_MODES[t[0]]===m && _tabAllowed(t[0]); }); });
   if(!hasTabs[navMode]){ const other=modes.find(function(m){ return hasTabs[m]; }); if(other) navMode=other; }
   TAB_DEFS.forEach(function(t){
@@ -2736,18 +2742,24 @@ function _updateTabVisibility(){
     if(!btn) return;
     btn.style.display = (_tabAllowed(t[0]) && (TAB_MODES[t[0]]===navMode || TAB_BOTH_MODES[t[0]])) ? "" : "none";
   });
-  // переключатель режимов: активный + прятать, если доступен только один режим
+  // переключатель режимов: каждая кнопка видна, только если в её режиме есть доступные вкладки
+  // (для не-владельца режимы ruk/adm пусты → кнопки скрыты). Сам блок прячем, если режим один.
   const box=document.getElementById("navMode");
   if(box){
-    const both=hasTabs.work&&hasTabs.fin;
-    box.style.display=both?"":"none";
-    box.querySelectorAll(".nm").forEach(function(b){ b.classList.toggle("on", b.dataset.m===navMode); });
+    let shown=0;
+    box.querySelectorAll(".nm").forEach(function(b){ const on=!!hasTabs[b.dataset.m];
+      b.style.display=on?"":"none"; if(on) shown++;
+      b.classList.toggle("on", b.dataset.m===navMode); });
+    box.style.display=shown>1?"":"none";
   }
   const active=document.querySelector('.tab.active');
   if(!active || active.style.display==="none"){
     const vis=[...document.querySelectorAll('.tab')].find(function(b){ return b.style.display!=="none"; });
     if(vis) vis.click();
   }
+  // в «одиночных» режимах-дашбордах ленту вкладок прячем: сам режим и есть выбор
+  const strip=document.getElementById("tabStrip");
+  if(strip) strip.style.display=SOLO_MODES[navMode]?"none":"";
 }
 function setNavMode(m){
   navMode=m;
