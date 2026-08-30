@@ -10346,7 +10346,13 @@ function _progHtml(){
     </tr>`;
   });
   const tPct=(tPlan>0&&tFact>0)?(100*tFact/tPlan):null;
-  return `<div class="callout" style="margin-bottom:10px;font-size:12px">Недели учебного года (пн–вс). <b>Прогноз Alfa</b> = уже проведённое + ожидаемые списания по расписанию. <b>Свой план</b> — если впишете, он перебивает прогноз. <b>Выполнение</b> — фактическая реализация. Данные из «Дашборд Администратора → Реализация» (и cron в 20:00).</div>
+  const haveAny=weeks.some(w=>_progWeekAlfa(w)!=null);
+  return `<div class="callout" style="margin-bottom:10px;font-size:12px">Недели учебного года (пн–вс). <b>Прогноз Alfa</b> = уже проведённое + ожидаемые списания по расписанию. <b>Свой план</b> — если впишете, он перебивает прогноз. <b>Выполнение</b> — фактическая реализация.</div>
+  <div class="hd-actions" style="margin-bottom:10px">
+    <button class="btn sm" id="progPullBtn" onclick="progPull()">🔄 Подтянуть из Alfa (7 дней назад + 5 недель вперёд)</button>
+    <span id="progPullProg" style="font-size:12px;color:var(--muted)">${haveAny?'':'Пока пусто — нажмите, чтобы посчитать.'}</span>
+  </div>
+  <div style="font-size:12px;color:var(--muted);margin-bottom:8px">Прошлые месяцы целиком — в «Дашборд Администратора → Реализация» (выбрать месяц → «Обновить месяц»). Дальше это будет делать cron в 20:00 сам.</div>
   <div class="tscroll" style="max-width:760px"><table><thead><tr>
     <th style="text-align:left">Месяц</th><th style="text-align:left">Неделя</th><th style="text-align:right">Прогноз Alfa</th><th style="text-align:right">Свой план</th><th style="text-align:right">Выполнение</th><th style="text-align:right">%</th>
   </tr></thead><tbody>${rows}
@@ -10357,6 +10363,25 @@ function _progHtml(){
   </tbody></table></div>`;
 }
 function progPlan(key,v){ const G=_rukProg(); const n=parseFloat(v)||0; if(n) G.plans[key]=n; else delete G.plans[key]; _progSave(); renderRuk(); }
+/* посчитать окно вокруг сегодня: 7 дней назад (факт) + 35 вперёд (прогноз по расписанию) */
+async function progPull(){
+  if(_realBusy) return;
+  const btn=document.getElementById("progPullBtn"), prog=document.getElementById("progPullProg");
+  const dates=[]; const base=new Date();
+  for(let i=-7;i<=35;i++){ const d=new Date(base); d.setDate(d.getDate()+i); dates.push(_dIso(d)); }
+  _realBusy=true; if(btn) btn.disabled=true;
+  try{
+    _realStore=_realStore||{};
+    for(let i=0;i<dates.length;i+=5){
+      if(prog) prog.textContent="Считаю из Alfa… "+Math.min(i+5,dates.length)+"/"+dates.length;
+      const j=await _pubCall("realizationPull",{dates:dates.slice(i,i+5)});
+      Object.assign(_realStore, j.updated||{});
+    }
+    if(prog) prog.textContent="Готово ✓";
+    const b=document.getElementById("rukBody"); if(b) b.innerHTML=_progHtml();
+  }catch(e){ const b=document.getElementById("rukBody"); if(b){ const d=document.createElement('div'); d.innerHTML=_pubErrHtml(e,"прогноз из Alfa"); b.insertBefore(d.firstChild,b.firstChild); } }
+  finally{ _realBusy=false; if(btn) btn.disabled=false; }
+}
 
 function pokazPullAlfa(){
   const P=_rukPokaz(); let n=0;
