@@ -909,6 +909,8 @@ details.client .cli-cols .cc-bal{width:74px;font-weight:600}
  <button class="tab" data-t="break">Точка безубыточности</button>
  <button class="tab" data-t="scenario">Сценарии</button>
  <button class="tab" data-t="settings">Параметры</button>
+ <button class="tab" data-t="ruk">Дашборд Руководителя</button>
+ <button class="tab" data-t="adm">Дашборд Администратора</button>
  </div>
 </div></nav>
 
@@ -1267,6 +1269,20 @@ details.client .cli-cols .cc-bal{width:74px;font-weight:600}
  <div class="row2">
   <div class="card"><h3>Расчётные допущения</h3><div id="assumptions"></div></div>
  </div>
+</section>
+
+<section class="panel" id="ruk">
+ <h2 class="sec">Дашборд Руководителя 26/27</h2>
+ <div class="sec-desc">Сводка для руководителя. Видно только вам. Строим по разделам.</div>
+ <div id="rukNav" class="hd-actions" style="margin:6px 0 12px;flex-wrap:wrap"></div>
+ <div id="rukBody"></div>
+</section>
+
+<section class="panel" id="adm">
+ <h2 class="sec">Дашборд Администратора 26/27</h2>
+ <div class="sec-desc">Ежедневная сводка администратора. Видно только вам. Строим по разделам.</div>
+ <div id="admNav" class="hd-actions" style="margin:6px 0 12px;flex-wrap:wrap"></div>
+ <div id="admBody"></div>
 </section>
 
 </div>
@@ -2684,7 +2700,7 @@ function fbStart(){
   // вход помнится в браузере до явного «Выйти» (иначе после закрытия вкладки просят пароль заново)
   try{ if(firebase.auth.Auth && firebase.auth.Auth.Persistence) auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL); }catch(e){}
   auth.onAuthStateChanged(function(user){
-    _fbGranted=false; _fbIsAdmin=false;
+    _fbGranted=false; _fbIsAdmin=false; _fbIsOwner=false;
     if(_fbApprRef){ try{_fbApprRef.off();}catch(e){} _fbApprRef=null; }
     if(_fbAccRef){ try{_fbAccRef.off();}catch(e){} _fbAccRef=null; }
     if(!user){ _fbUpdateAdminUI(); _fbShowLogin(); return; }
@@ -2693,19 +2709,23 @@ function fbStart(){
   });
 }
 /* ---- вкладки по ролям ---- */
-const TAB_DEFS=[["dash","Дашборд"],["report","Отчёт по набору"],["courses","Курсы и маржа"],["real","Реальный оборот"],["planner","Планировщик загрузки"],["goals","Набор"],["grid","Расписание (сетка)"],["groups","Группы"],["compos","Состав групп"],["clients","Клиенты"],["price","Прайс"],["cards","О курсах"],["may","Майский"],["staff","Педсостав и ФОТ"],["fixed","Постоянные расходы"],["tax","Налоги РБ и ФОТ"],["break","Точка безубыточности"],["scenario","Сценарии"],["settings","Параметры"]];
+const TAB_DEFS=[["dash","Дашборд"],["report","Отчёт по набору"],["courses","Курсы и маржа"],["real","Реальный оборот"],["planner","Планировщик загрузки"],["goals","Набор"],["grid","Расписание (сетка)"],["groups","Группы"],["compos","Состав групп"],["clients","Клиенты"],["price","Прайс"],["cards","О курсах"],["may","Майский"],["staff","Педсостав и ФОТ"],["fixed","Постоянные расходы"],["tax","Налоги РБ и ФОТ"],["break","Точка безубыточности"],["scenario","Сценарии"],["settings","Параметры"],["ruk","Дашборд Руководителя"],["adm","Дашборд Администратора"]];
 const MANAGER_DEFAULT_TABS=["grid","groups","clients","may","goals"];
 const ALWAYS_TABS={clients:1,price:1,goals:1,cards:1};   // видны всем ролям, даже если не отмечены в доступах
 const ADMIN_TABS={report:1};     // только для админа, не назначаются менеджерам
+// Дашборды руководителя/администратора — ТОЛЬКО владельцу (Жанне), не всем админам
+const OWNER_TABS={ruk:1,adm:1};
+const OWNER_EMAILS=["smalprince@gmail.com","proznanie.mogilev@gmail.com"];
+let _fbIsOwner=false;
 function _defaultTabsMap(){ const m={}; MANAGER_DEFAULT_TABS.forEach(function(k){ m[k]=true; }); return m; }
 /* ---- режимы навигации: «Работа» (ежедневное) и «Финмодель» (финансы) ---- */
-const TAB_MODES={grid:"work",groups:"work",compos:"work",clients:"work",price:"work",cards:"work",may:"work",goals:"work",dash:"fin",report:"fin",courses:"fin",real:"fin",planner:"fin",staff:"fin",fixed:"fin",tax:"fin","break":"fin",scenario:"fin",settings:"fin"};
+const TAB_MODES={grid:"work",groups:"work",compos:"work",clients:"work",price:"work",cards:"work",may:"work",goals:"work",dash:"fin",report:"fin",courses:"fin",real:"fin",planner:"fin",staff:"fin",fixed:"fin",tax:"fin","break":"fin",scenario:"fin",settings:"fin",ruk:"fin",adm:"fin"};
 // вкладки, видимые в ОБОИХ режимах: «О курсах» заполняет Жанна из «Финмодели»,
 // а менеджеры читают в «Работе» — без этого админу приходилось переключать режим
-const TAB_BOTH_MODES={cards:1};
+const TAB_BOTH_MODES={cards:1,ruk:1,adm:1};   // дашборды владельца видны в обоих режимах
 let _tabAccess=null;   // null = все вкладки (админ / до входа), иначе {tabKey:true}
 let navMode=(function(){ try{ return localStorage.getItem("navMode")||"work"; }catch(e){ return "work"; } })();
-function _tabAllowed(k){ if(ADMIN_TABS[k]) return _fbIsAdmin; return ALWAYS_TABS[k]===1 || !_tabAccess || _tabAccess[k]===true; }
+function _tabAllowed(k){ if(OWNER_TABS[k]) return _fbIsOwner; if(ADMIN_TABS[k]) return _fbIsAdmin; return ALWAYS_TABS[k]===1 || !_tabAccess || _tabAccess[k]===true; }
 function _updateTabVisibility(){
   // если в текущем режиме не осталось доступных вкладок — перескочить в другой
   const modes=["work","fin"];
@@ -2816,6 +2836,7 @@ function fbRecheckAccess(){
 }
 function _fbGrant(isAdmin, tabs){
   _fbIsAdmin=isAdmin;
+  { const au=_fbAuth(); const em=(au&&au.currentUser&&au.currentUser.email)||""; _fbIsOwner=OWNER_EMAILS.indexOf(em)>=0; }
   _fbHideLogin();
   _fbUpdateAdminUI();
   _applyTabAccess(isAdmin ? null : (tabs||_defaultTabsMap()));
@@ -9932,6 +9953,60 @@ function _alfaRosterPrint(){
   setTimeout(()=>{ try{ w.focus(); w.print(); }catch(e){} },300);
 }
 
+/* ==================== ДАШБОРД РУКОВОДИТЕЛЯ / АДМИНИСТРАТОРА (только владельцу) ====================
+   Две вкладки-сводки. Строим по разделам. Первый готовый раздел — «Важные ссылки»
+   (редактируемый список, синхронизируется как остальные данные модели). */
+const RUK_SECTIONS=[["links","🔗 Важные ссылки"],["pokaz","📊 Все показатели"],["god","📅 Годовые итоги"],["prognoz","🔮 Прогноз по всем"],["formula","🧮 Формула 26/27"],["rating","🏆 Рейтинг педагогов"]];
+let _rukSec=(function(){ try{ return localStorage.getItem("rukSec")||"links"; }catch(e){ return "links"; } })();
+function rukGo(s){ _rukSec=s; try{ localStorage.setItem("rukSec",s); }catch(e){} renderRuk(); }
+function renderRuk(){
+  if(!_fbIsOwner) return;
+  const nav=document.getElementById("rukNav"); if(!nav) return;
+  nav.innerHTML=RUK_SECTIONS.map(s=>`<button class="btn ${s[0]===_rukSec?'':'ghost'} sm" onclick="rukGo('${s[0]}')">${esc(s[1])}</button>`).join("");
+  const body=document.getElementById("rukBody"); if(!body) return;
+  if(_rukSec==="links"){ body.innerHTML=_bizLinksHtml(); return; }
+  const lab=(RUK_SECTIONS.find(x=>x[0]===_rukSec)||[])[1]||"";
+  body.innerHTML=`<div class="callout">Раздел «${esc(lab)}» — 🔧 в разработке, построим следующим.</div>`;
+}
+function renderAdm(){
+  if(!_fbIsOwner) return;
+  const nav=document.getElementById("admNav"); if(!nav) return;
+  const secs=[["real","📈 Реализация"],["rashod","💸 Расходы ежедневно"],["zp","🧹 ЗП админы и уборка"]];
+  nav.innerHTML=secs.map(s=>`<button class="btn ghost sm" disabled title="в разработке">${esc(s[1])}</button>`).join("");
+  const body=document.getElementById("admBody"); if(body) body.innerHTML=`<div class="callout">Дашборд администратора — 🔧 в разработке. Начали с «Дашборд Руководителя → Важные ссылки». Следующими сделаем «Реализацию» (автозабор из Alfa), «Расходы ежедневно» и «ЗП админы».</div>`;
+}
+/* ---- Важные ссылки: редактируемый список (S.bizLinks = [{n,u}]) ---- */
+const BIZ_LINKS_SEED=[{"n":"Дашборд админа 25/26","u":"https://docs.google.com/spreadsheets/d/1-g6xql3to-UAlOL4J6TSjlavAZhrQRhEnzFGj09rfQU/edit?gid=946546833#gid=946546833"},{"n":"Лагеря 2019-2026","u":"https://docs.google.com/spreadsheets/d/1qmuCyhtsO2KtmTa2GDABYgb3_iJA4ZlT9sB-Qd476UI/edit"},{"n":"ЗП по альфа","u":"https://docs.google.com/spreadsheets/d/1ksKSXfXf4kkBSSpamx0x3XMLvPKhUJG1iC3wmSl-nDA/edit#gid=1145723565"},{"n":"Запуск 25/26","u":"https://docs.google.com/spreadsheets/d/1DG81xg6cjBk9gMqHpZOcQXfs2fSMxmEIfGSSuvbIZ_s/edit?gid=33813177#gid=33813177"},{"n":"Лиды 25/26","u":"https://docs.google.com/spreadsheets/d/1s7cpEMD9gRjxEBP6z_96328eCexlEdhftroqTDcgMn0/edit?gid=464548212#gid=464548212"},{"n":"КП Прознание","u":"https://docs.google.com/spreadsheets/d/1RkP2eNAAcXUnnCj0XMKkU9hhEdHHvzApoOueA_miPr4/edit?gid=0#gid=0"},{"n":"КП CODDY","u":"https://docs.google.com/spreadsheets/d/12x3e6BtewJAHN5rpexjcQph8i4DAYEa9aey_Z5W8SRE/edit?gid=1346607578#gid=1346607578"},{"n":"КП Уикенд","u":"https://docs.google.com/spreadsheets/d/1lbfGKggjqii3BFVT1NFi0vVP5Jt3pcmQ-DS-JGA4Frc/edit?gid=0#gid=0"},{"n":"Работа по Ганту","u":"https://docs.google.com/spreadsheets/d/1MY54YaqVVdAJCdOSIspRszOYxbm_qOMvHP_SjQDHZMY/edit"},{"n":"Фин модель лагеря 2024","u":"https://docs.google.com/spreadsheets/d/1muk1xorBW0rKoI87xYF94YGPeZXXOMcm24jxxgyk-uY/edit?usp=sharing"},{"n":"Лиды/продажи","u":"https://docs.google.com/spreadsheets/d/1ksYhNmNNb-frcB9qVAzCoQ2rXK2OTqnlD4ncNcp-gEY/edit"},{"n":"Таня и Оля","u":"https://docs.google.com/spreadsheets/d/1pW7kPQ2pOmYCy1ibgVaehraIdEvRdoeAOr6bagzFQvU/edit#gid=687995415"},{"n":"Работа в директ","u":"https://docs.google.com/spreadsheets/d/15WOaJa3yklgoOo9065ZhOGsRXAwk8nkqtENBjc26pSA/edit#gid=1506261730"},{"n":"Контент планы","u":"https://docs.google.com/spreadsheets/d/1lKuXqQDz2-hvRF5v35MWHLljPItPlhIB/edit#gid=412364114"},{"n":"Подготовка к запуску онлайн","u":"https://docs.google.com/spreadsheets/d/1SAH2qEytyHP7Na33gtxajWnxTyCusx3hEwzAVCQBHh0/edit#gid=2026816275"},{"n":"ФА лагерь 22/23","u":"https://docs.google.com/spreadsheets/d/1cgys77Y2wB_ukn4GmMpVq7X3Dv1Oo3srYhNp7gVpmfU/edit#gid=0"},{"n":"Запись за бонусы","u":"https://docs.google.com/spreadsheets/d/1UwEYzY6AkXmvXI32uql30vOmftwTqqanBtwPv2Q5Fms/edit#gid=0"},{"n":"Рекламная активность запуска 2021","u":"https://docs.google.com/spreadsheets/d/1CfjA__6p4Cw2fngGEgQoVRMqjprO5wzMVI3TNW2FT4I/edit#gid=386244767"},{"n":"Бюджетные ЗП","u":"https://docs.google.com/spreadsheets/u/1/d/1AgxO-u-ulcleqpgh2_zvAC27jlXNnAGGadjkEJku2mw/edit?ouid=104124518695863465229&usp=sheets_home&ths=true"},{"n":"Запуск 2024","u":"https://docs.google.com/spreadsheets/d/1j7xAtaalUZWY7xNGpnj2DuoR46QkZmYFoYwSRbPr-Bo/edit?usp=sharing"},{"n":"Запуск 2023","u":"https://docs.google.com/spreadsheets/u/2/d/1pW7kPQ2pOmYCy1ibgVaehraIdEvRdoeAOr6bagzFQvU/edit?fromCopy=true"},{"n":"Прайс 24-25","u":"https://docs.google.com/spreadsheets/d/1twrFK9KltFNHZHzH4OPbZ3_umPqc2Tti/edit#gid=1617174292"},{"n":"Дашборд админа 23/24","u":"https://docs.google.com/spreadsheets/d/1dDap8uKnPGLSfjp9V2VDPw0joJqLQtWgpfhopTZoAmg/edit#gid=0"},{"n":"Дашборд админа","u":"https://docs.google.com/spreadsheets/d/1_JSUhx6-tN8im5EBuN52ioZcZqmMA2Uat4pIew9uwv0/edit#gid=0"},{"n":"Расчет оплат","u":"https://docs.google.com/spreadsheets/d/1XBgAHkG87i3FE8UJg6IrmNv8Spfl3ItN8SjwIpuwQ-I/edit?pli=1#gid=44727830"},{"n":"Программы","u":"https://docs.google.com/spreadsheets/d/1DMQpBoTTzAOhO8NDaooIKG8FJof3jHEGEB82oCbVwIc/edit#gid=0"},{"n":"Нейронки/Ценность для сторис","u":"https://docs.google.com/spreadsheets/d/1e4ALaI4nBDYnLchXzLvkufsvfN5S51iDHwmlkCEvuwM/edit#gid=1031448484"},{"n":"3+","u":"https://docs.google.com/spreadsheets/d/1rT1Q3XZlfFr0rMw3pedmIbiBYGbCm9Ba-kHUsjvxhGw/edit#gid=1609810387"},{"n":"Прайс от 1.02.2024","u":"https://docs.google.com/spreadsheets/d/1twrFK9KltFNHZHzH4OPbZ3_umPqc2Tti/edit#gid=1734350713"},{"n":"Страт 2024","u":"https://docs.google.com/spreadsheets/d/15czSEYCfcpzmKJf38JWoU242vRmpIkyzTvAX_vROhQw/edit#gid=0"},{"n":"Онлайн проекты","u":"https://docs.google.com/spreadsheets/d/1SZEvYoySuLot3QhhtYqVOfr6DajOKf3Ix3nzHk28QXg/edit?usp=sharing"},{"n":"Контент-план онлайн-курсов Прознания","u":"https://docs.google.com/spreadsheets/d/1ZQw3b604tSQSIVUuxVyWP8KT98xH8zXeKeqfzTGmpLM/edit?gid=0#gid=0"},{"n":"Админы 24/25","u":"https://docs.google.com/spreadsheets/d/1Es8SIoc0nQXB20OCNFcJ2bRqozhT2OGX-hzJtulU7uQ/edit"},{"n":"CODDY СММ","u":"https://docs.google.com/spreadsheets/d/1s7h_qkwEVPEF7uHnIDmChyLGbig7jzsnTQF0on4Cg8k/edit?gid=1655405128#gid=1655405128"},{"n":"Мамин ресурс (Мой)","u":"https://docs.google.com/spreadsheets/d/1cr2h6CpJmWnZy7T5HXlcM2S-hIzz84jmjV0u-RFeHtE/edit?gid=412777986#gid=412777986"},{"n":"Мотивашки онлайн","u":"https://docs.google.com/document/d/1aAyPNrnJ3erHWpHAzfZq6UW1-unOnPlAKUOQGb6oTUQ/edit"},{"n":"Скрипты в вибер","u":"https://docs.google.com/document/d/1L8e4MFdZDuGzW_BGdayAlzuKuyKFotxGUm2OtlAYFsI/edit"},{"n":"Письма марафона","u":"https://docs.google.com/document/d/15_2g8tgRQ3AWGYD-5iIWpeBNJJtrra3oyuTYjWwP8sU/edit"},{"n":"Содержание книги админа","u":"https://docs.google.com/document/d/115dWUfuN-9ByYMMlF18ia0Xu4moTJdCzzjMY7uQ4EmM/edit"},{"n":"Письма рассылки детя клуба","u":"https://docs.google.com/document/d/1V7gu5zKU5J68MQ3sUnoKI2SgO8nzCqwycrqQ3CKmG6Q/edit"},{"n":"Договор ООО","u":"https://docs.google.com/document/d/1IymmHzJydeJ7tgq598xAE_QL3y_AqDIS/edit?usp=drive_web&ouid=104155574451411693488&rtpof=true"},{"n":"Заявление на прием на курс","u":"https://docs.google.com/document/d/13bkRQA9gazYpocJh29gwFs43nEMEMWG8/edit?usp=drive_web&ouid=104155574451411693488&rtpof=true"},{"n":"Посты","u":"https://docs.google.com/document/d/1gu42U0WYBH0kBUFsJuvJM2kMIjCe7P5zWDwra3oMU3Y/edit"},{"n":"Нейро сети для пед состава \"Прознание\"","u":"https://docs.google.com/document/d/1iNMiPZWkbGu6D7E5JbjWDzU7-AojkW0BnsKztPQRgks/edit"},{"n":"Таплинк","u":"https://taplink.ru/profile/1336331/pages/"},{"n":"БЕЛИНВЕСТ","u":"https://biz.belinvestbank.by/"},{"n":"Маркетинг с GPT","u":"https://docs.google.com/spreadsheets/d/1s57-yKyQcb-DxvtIPBhMd0zaW20UbHQYmh_fgBEo2Xs/edit#gid=0"},{"n":"ИИ для админа","u":"https://docs.google.com/spreadsheets/d/1X4QPEUARHFpAi8bVQdBdTjOeAe0quBOZ02tAsaXIuik/edit#gid=0"},{"n":"Buyer Persona для покупателя","u":"https://docs.google.com/spreadsheets/d/1Y4YA-PPC1tX_g0Ke-kSK2lpfKACMjDESPGlF9t3jLVc/edit?usp=drive_web&ouid=104155574451411693488"},{"n":"Minecraft","u":"https://signup.microsoft.com/get-started/signup?products=ed55d69e-0d7b-41e4-9e25-d0891565cd56&brandingId=28b276fb-d2a0-4379-a7c0-57dce33da0f9&ali=1"},{"n":"СМС Белтелеком","u":"https://sms.beltelecom.by/content/sms-btcby?destination=node/17"},{"n":"Рекламный кабинет","u":"https://adsmanager.facebook.com/adsmanager/manage/adsets/edit?act=188611296094607"},{"n":"Могилевский государственный областной институт развития образования","u":"https://www.mogileviro.by/"}];
+function _bizLinks(){ if(!Array.isArray(S.bizLinks)) S.bizLinks=BIZ_LINKS_SEED.map(x=>({n:x.n,u:x.u})); return S.bizLinks; }
+function _bizLinksHtml(){
+  const rows=_bizLinks();
+  const list=rows.map((r,i)=>`<tr data-bl="${i}" data-s="${esc((r.n||'').toLowerCase())}">
+    <td style="text-align:center;color:var(--muted)">${i+1}</td>
+    <td><input class="cell" style="width:100%;box-sizing:border-box" value="${esc(r.n||'')}" placeholder="название" onchange="bizUpd(${i},'n',this.value)"></td>
+    <td><input class="cell" style="width:100%;box-sizing:border-box;font-size:12px" value="${esc(r.u||'')}" placeholder="https://…" onchange="bizUpd(${i},'u',this.value)"></td>
+    <td style="white-space:nowrap;text-align:center">
+      <button class="btn sm" title="Открыть в новой вкладке" onclick="bizOpen(${i})">↗</button>
+      <button class="btn ghost sm" title="Выше" onclick="bizMove(${i},-1)">↑</button>
+      <button class="btn ghost sm" title="Ниже" onclick="bizMove(${i},1)">↓</button>
+      <span class="k-del" title="Удалить" onclick="bizDel(${i})">×</span>
+    </td></tr>`).join("");
+  return `<div class="hd-actions" style="margin-bottom:8px">
+      <input type="search" class="cell" style="width:260px" placeholder="🔍 Поиск по названию" oninput="_bizFilter(this.value)">
+      <button class="btn sm" onclick="bizAdd()">+ ссылка</button>
+      <span style="margin-left:auto;font-size:12px;color:var(--muted)">Всего: ${rows.length}. Изменения сохраняются автоматически.</span>
+    </div>
+    <div class="callout" style="margin-bottom:10px;font-size:12px">Логины и пароли из старой таблицы сюда НЕ переносил — модель синхронизируется в облако, хранить их здесь небезопасно.</div>
+    <div class="tscroll"><table id="bizTable"><thead><tr><th style="width:34px">#</th><th style="text-align:left">Название</th><th style="text-align:left">Ссылка</th><th style="width:160px"></th></tr></thead><tbody>${list||'<tr><td colspan="4" style="padding:12px;color:var(--muted)">Пусто. Нажмите «+ ссылка».</td></tr>'}</tbody></table></div>`;
+}
+function _bizFilter(v){ v=(v||'').toLowerCase().trim(); document.querySelectorAll('#bizTable tbody tr[data-bl]').forEach(tr=>{ tr.style.display=(!v||(tr.getAttribute('data-s')||'').includes(v))?'':'none'; }); }
+function _bizSave(){ persistLocal(); if(typeof fbSchedulePush==="function") fbSchedulePush(); }
+function bizUpd(i,f,val){ const r=_bizLinks(); if(!r[i]) return; r[i][f]=String(val||'').trim(); if(f==='n'){ const tr=document.querySelector('#bizTable tbody tr[data-bl="'+i+'"]'); if(tr) tr.setAttribute('data-s',(r[i].n||'').toLowerCase()); } _bizSave(); }
+function bizAdd(){ _bizLinks().push({n:'',u:''}); _bizSave(); renderRuk();
+  const inps=document.querySelectorAll('#bizTable tbody tr td:nth-child(2) input'); if(inps.length) inps[inps.length-1].focus(); }
+function bizDel(i){ const r=_bizLinks(); if(r[i]===undefined) return; if(!confirm('Удалить ссылку «'+(r[i].n||'')+'»?')) return; r.splice(i,1); _bizSave(); renderRuk(); }
+function bizMove(i,d){ const r=_bizLinks(); const j=i+d; if(j<0||j>=r.length) return; const t=r[i]; r[i]=r[j]; r[j]=t; _bizSave(); renderRuk(); }
+function bizOpen(i){ const r=_bizLinks(); let u=((r[i]&&r[i].u)||'').trim(); if(!u){ toast('Пустая ссылка'); return; } if(!/^https?:\/\//i.test(u)) u='https://'+u; window.open(u,'_blank','noopener'); }
+
 /* ===== ЭТАП 3: ПУБЛИКАЦИЯ ГРУПП ФИНМОДЕЛИ В ALFACRM =====
    Создаём в Альфе ПУСТЫЕ группы + их регулярное расписание (regular-lesson). Состав детей —
    отдельным переносом позже (галочка «привязать детей» по умолчанию выключена).
@@ -13684,6 +13759,8 @@ document.querySelectorAll(".tab").forEach(tb=>tb.onclick=()=>{
   if(tb.dataset.t==="goals" && typeof renderGoals==="function") renderGoals();
   if(tb.dataset.t==="cards" && typeof renderCards==="function") renderCards();
   if(tb.dataset.t==="compos" && typeof renderCompos==="function") renderCompos();
+  if(tb.dataset.t==="ruk" && typeof renderRuk==="function") renderRuk();
+  if(tb.dataset.t==="adm" && typeof renderAdm==="function") renderAdm();
   _scrollTabIntoView(tb);
   updateNavHeightDelayed();
 });
