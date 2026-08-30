@@ -488,6 +488,56 @@ function alfa_realization_upsert(string $date, ?array $branches = null): array {
 }
 function alfa_cron_key(): string { return (string)(cfg()['cron_key'] ?? ''); }
 
+/* --- НЕДЕЛЬНЫЙ ПРОГНОЗ (снимок) ---
+   Прогноз надо ЗАФИКСИРОВАТЬ до начала недели: если считать его «на лету», то по мере
+   проведения занятий ожидаемое превращается в факт и прогноз сравнивается сам с собой
+   (% выполнения всегда 100). Поэтому в вс 23:00 снимаем прогноз на новую неделю и храним. */
+function alfa_weekplan_store_path(): string {
+    $salt = substr(hash('sha256', __DIR__ . '|weekplan'), 0, 24);
+    return alfa_store_dir() . '/weekplan_' . $salt . '.json';
+}
+function alfa_weekplan_read(): array {
+    $f = alfa_weekplan_store_path();
+    if (!is_file($f)) return [];
+    $j = json_decode((string)@file_get_contents($f), true);
+    return is_array($j) ? $j : [];
+}
+function alfa_weekplan_write(array $d): void {
+    $f = alfa_weekplan_store_path();
+    $tmp = $f . '.' . getmypid() . '.tmp';
+    $json = json_encode($d, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
+    if (@file_put_contents($tmp, $json, LOCK_EX) !== false) { @chmod($tmp, 0660); @rename($tmp, $f); }
+    else @file_put_contents($f, $json, LOCK_EX);
+}
+/* Понедельник недели, в которую попадает дата (ISO). */
+function alfa_monday_of(string $iso): string {
+    $ts = strtotime(alfa_iso($iso));
+    $wd = (int)date('N', $ts);              // 1=пн … 7=вс
+    return date('Y-m-d', strtotime('-' . ($wd - 1) . ' day', $ts));
+}
+/* Снимок прогноза на неделю: считаем 7 дней и складываем
+   ожидаемое (planned) + уже проведённое (среднее без/с пропусками). */
+function alfa_weekplan_snapshot(string $mondayIso, ?array $branches = null): array {
+    $mon = alfa_monday_of($mondayIso);
+    $branches = $branches ?: alfa_realization_branches();
+    $plan = 0.0; $planned = 0.0; $donePart = 0.0; $days = [];
+    for ($i = 0; $i < 7; $i++) {
+        $d = date('Y-m-d', strtotime("+$i day", strtotime($mon)));
+        $r = alfa_realization_upsert($d, $branches);      // заодно обновляем дневное хранилище
+        $avg = (((float)$r['present']) + ((float)$r['all'])) / 2;
+        $planned += (float)$r['planned']; $donePart += $avg;
+        $plan += $avg + (float)$r['planned'];
+        $days[$d] = ['present' => $r['present'], 'all' => $r['all'], 'planned' => $r['planned']];
+    }
+    $store = alfa_weekplan_read();
+    $store[$mon] = ['plan' => round($plan, 2), 'planned' => round($planned, 2),
+                    'alreadyDone' => round($donePart, 2), 'ts' => date('c')];
+    ksort($store);
+    alfa_weekplan_write($store);
+    return ['week' => $mon, 'plan' => round($plan, 2), 'planned' => round($planned, 2),
+            'alreadyDone' => round($donePart, 2), 'days' => $days];
+}
+
 /* Форма полей периода по РЕАЛЬНОЙ записи: у части сущностей Alfa строковая дата лежит в
    b_date_v, а в b_date — внутреннее число (так у regular-lesson). Определяем по образцу. */
 function alfa_date_shape(?array $item): array {

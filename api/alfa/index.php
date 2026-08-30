@@ -1282,7 +1282,18 @@ switch ($action) {
     // --- ХРАНИЛИЩЕ РЕАЛИЗАЦИИ (READ): посчитанные по дням суммы (клуб = Пожарный) ---
     case 'realizationStore':
         json_out(['ok' => true, 'store' => alfa_realization_store_read(),
+                  'weekPlans' => alfa_weekplan_read(),
                   'branches' => alfa_realization_branches(), 'branchNames' => alfa_branch_names()]);
+        break;
+
+    // --- ЗАФИКСИРОВАТЬ ПРОГНОЗ НА НЕДЕЛЮ (снимок; обычно делает cron в вс 23:00) ---
+    case 'weekPlanSnapshot':
+        @set_time_limit(180);
+        $branches = alfa_realization_branches();
+        if (!$branches) json_out(['ok' => false, 'error' => 'Филиал «Пожарный» не найден в Alfa'], 400);
+        $wk = (string)($in['week'] ?? date('Y-m-d'));
+        $snap = alfa_weekplan_snapshot($wk, $branches);
+        json_out(['ok' => true] + $snap + ['weekPlans' => alfa_weekplan_read(), 'store' => alfa_realization_store_read()]);
         break;
 
     // --- ПЕРЕСЧИТАТЬ РЕАЛИЗАЦИЮ за день/несколько дней и записать в хранилище (клуб = Пожарный) ---

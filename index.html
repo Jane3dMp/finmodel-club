@@ -10008,7 +10008,8 @@ function _todayIso(){ const d=new Date(),z=n=>String(n).padStart(2,'0'); return 
 const _RU_MON=["январь","февраль","март","апрель","май","июнь","июль","август","сентябрь","октябрь","ноябрь","декабрь"];
 let _realStore=null, _realBranches=null, _realBranchNames=null, _realBusy=false;
 let _realMonth=(function(){ const d=new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0'); })();
-async function _realLoadStore(){ const j=await _pubCall("realizationStore",{}); _realStore=j.store||{}; _realBranches=j.branches||[]; _realBranchNames=j.branchNames||{}; }
+let _weekPlans=null;
+async function _realLoadStore(){ const j=await _pubCall("realizationStore",{}); _realStore=j.store||{}; _weekPlans=j.weekPlans||{}; _realBranches=j.branches||[]; _realBranchNames=j.branchNames||{}; }
 function _realBranchLabel(){
   if(!_realBranches||!_realBranches.length) return '<span style="color:var(--terra)">филиал «Пожарный» в Alfa не найден — проверьте название</span>';
   return _realBranches.map(id=>esc((_realBranchNames||{})[id]||('#'+id))).join(', ');
@@ -10326,8 +10327,9 @@ function _progHtml(){
   weeks.forEach((w,i)=>{
     const A=_progWeekAlfa(w);
     const manual=+(G.plans[w.key]||0);
-    const auto=A?A.plan:null;
-    const plan=manual||auto||0;            // ручной план имеет приоритет над прогнозом из Alfa
+    const snap=(_weekPlans||{})[w.key];    // зафиксированный в вс 23:00 прогноз — главный
+    const auto=snap?(+snap.plan||0):(A?A.plan:null);
+    const plan=manual||auto||0;            // ручной план перебивает всё
     const fact=A?A.fact:null;
     if(plan) tPlan+=plan; if(fact!=null) tFact+=fact;
     const pct=(plan>0&&fact!=null)?(100*fact/plan):null;
@@ -10339,7 +10341,7 @@ function _progHtml(){
     rows+=`<tr${future?' style="opacity:.5"':''}>
       <td style="color:var(--muted)">${showMon?esc(monName):''}</td>
       <td style="white-space:nowrap">${range}</td>
-      <td style="text-align:right">${auto!=null?('<span style="color:var(--terra-d)" title="Прогноз из Alfa: проведённое + ожидаемое по расписанию">'+_gm(auto)+'</span>'):'<span style="color:var(--muted)">—</span>'}</td>
+      <td style="text-align:right">${auto!=null?('<span style="color:var(--terra-d)" title="'+(snap?('Зафиксирован '+String(snap.ts||'').slice(0,16).replace("T"," ")):'Живой расчёт (ещё не зафиксирован)')+'">'+_gm(auto)+(snap?' 🔒':'')+'</span>'):'<span style="color:var(--muted)">—</span>'}</td>
       <td style="text-align:right"><input class="cell" type="number" style="width:88px;text-align:right;font-size:12px" value="${manual||''}" placeholder="${auto!=null?'авто':'—'}" title="Свой план — перебивает прогноз из Alfa" onchange="progPlan('${w.key}',this.value)"></td>
       <td style="text-align:right">${fact!=null?('<b>'+_gm(fact)+'</b>'):'<span style="color:var(--muted)">—</span>'}</td>
       <td style="text-align:right">${pct!=null?('<b style="color:'+(pct>=100?'var(--green)':(pct>=85?'#C9922E':'var(--red)'))+'">'+pct.toFixed(0)+'%</b>'):'<span style="color:var(--muted)">—</span>'}</td>
@@ -10350,9 +10352,10 @@ function _progHtml(){
   return `<div class="callout" style="margin-bottom:10px;font-size:12px">Недели учебного года (пн–вс). <b>Прогноз Alfa</b> = уже проведённое + ожидаемые списания по расписанию. <b>Свой план</b> — если впишете, он перебивает прогноз. <b>Выполнение</b> — фактическая реализация.</div>
   <div class="hd-actions" style="margin-bottom:10px">
     <button class="btn sm" id="progPullBtn" onclick="progPull()">🔄 Подтянуть из Alfa (7 дней назад + 5 недель вперёд)</button>
-    <span id="progPullProg" style="font-size:12px;color:var(--muted)">${haveAny?'':'Пока пусто — нажмите, чтобы посчитать.'}</span>
+    <button class="btn ghost sm" id="progSnapBtn" onclick="progSnapshot()" title="Зафиксировать прогноз на текущую неделю (обычно это делает cron в вс 23:00)">🔒 Зафиксировать эту неделю</button>
+    <span id="progPullProg" style="font-size:12px;color:var(--muted)">${haveAny?'':'Пока пусто — нажмите «Подтянуть».'}</span>
   </div>
-  <div style="font-size:12px;color:var(--muted);margin-bottom:8px">Прошлые месяцы целиком — в «Дашборд Администратора → Реализация» (выбрать месяц → «Обновить месяц»). Дальше это будет делать cron в 20:00 сам.</div>
+  <div style="font-size:12px;color:var(--muted);margin-bottom:8px">🔒 = прогноз зафиксирован до начала недели (иначе он «догоняет» факт и % всегда 100). Фиксирует cron в воскресенье 23:00. Прошлые месяцы целиком — в «Дашборд Администратора → Реализация».</div>
   <div class="tscroll" style="max-width:760px"><table><thead><tr>
     <th style="text-align:left">Месяц</th><th style="text-align:left">Неделя</th><th style="text-align:right">Прогноз Alfa</th><th style="text-align:right">Свой план</th><th style="text-align:right">Выполнение</th><th style="text-align:right">%</th>
   </tr></thead><tbody>${rows}
@@ -10363,6 +10366,19 @@ function _progHtml(){
   </tbody></table></div>`;
 }
 function progPlan(key,v){ const G=_rukProg(); const n=parseFloat(v)||0; if(n) G.plans[key]=n; else delete G.plans[key]; _progSave(); renderRuk(); }
+/* зафиксировать прогноз на текущую (или указанную) неделю вручную */
+async function progSnapshot(week){
+  if(_realBusy) return;
+  const btn=document.getElementById("progSnapBtn"), prog=document.getElementById("progPullProg");
+  _realBusy=true; if(btn) btn.disabled=true; if(prog) prog.textContent="Фиксирую прогноз недели…";
+  try{
+    const j=await _pubCall("weekPlanSnapshot",{week:week||_todayIso()});
+    _weekPlans=j.weekPlans||_weekPlans; _realStore=j.store||_realStore;
+    if(prog) prog.textContent="Зафиксировано ✓ ("+_gm(j.plan)+")";
+    const b=document.getElementById("rukBody"); if(b) b.innerHTML=_progHtml();
+  }catch(e){ const b=document.getElementById("rukBody"); if(b){ const d=document.createElement('div'); d.innerHTML=_pubErrHtml(e,"фиксация прогноза"); b.insertBefore(d.firstChild,b.firstChild); } }
+  finally{ _realBusy=false; if(btn) btn.disabled=false; }
+}
 /* посчитать окно вокруг сегодня: 7 дней назад (факт) + 35 вперёд (прогноз по расписанию) */
 async function progPull(){
   if(_realBusy) return;
