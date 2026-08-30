@@ -380,8 +380,10 @@ function alfa_realization_day(string $date, ?array $branchFilter = null): array 
                 if ($d !== '' && $d !== $date) continue;
                 $st = isset($ls['status']) ? (int)$ls['status'] : -1;
                 $statusHist[(string)$st] = ($statusHist[(string)$st] ?? 0) + 1;
-                if ($st !== 3) continue;    // 3 = проведён; реализация только по проведённым
-                $les[] = ['branch' => (int)$bid, 'id' => (int)($ls['id'] ?? 0),
+                // 3 = проведён (факт реализации). Остальные (запланированные) считаем отдельно —
+                // это «прогноз по Alfa»: сколько ожидается списаний по расписанию.
+                if ($st !== 3 && $st !== 1 && $st !== 2) continue;   // отменённые/удалённые не берём
+                $les[] = ['branch' => (int)$bid, 'id' => (int)($ls['id'] ?? 0), 'done' => ($st === 3),
                           'cids' => array_values(array_map('intval', (array)($ls['customer_ids'] ?? [])))];
             }
             if (count($items) < $PER) break;
@@ -389,11 +391,12 @@ function alfa_realization_day(string $date, ?array $branchFilter = null): array 
         $perBranch[$bid] = count($les) - $before;
     }
     $present = 0.0; $all = 0.0; $nPresent = 0; $nAll = 0; $processed = 0; $noDet = 0;
-    $sampleDetail = null; $cache = []; $byBranch = [];   // разбивка реализации по филиалам
+    $planned = 0.0; $nPlanned = 0; $plannedLessons = 0; $doneLessons = 0;
+    $sampleDetail = null; $samplePlanned = null; $cache = []; $byBranch = [];   // разбивка по филиалам
     foreach ($les as $L) {
         $bid = (int)$L['branch'];
         if (!isset($byBranch[$bid])) $byBranch[$bid] = ['present' => 0.0, 'all' => 0.0, 'lessons' => 0];
-        $byBranch[$bid]['lessons']++;
+        if ($L['done']) { $doneLessons++; $byBranch[$bid]['lessons']++; } else $plannedLessons++;
         $cid = (int)($L['cids'][0] ?? 0); if (!$cid) { $noDet++; continue; }
         $ck = $bid . ':' . $cid;
         if (!isset($cache[$ck])) {
@@ -407,6 +410,11 @@ function alfa_realization_day(string $date, ?array $branchFilter = null): array 
         foreach ((array)($found['details'] ?? []) as $dt) {
             if (!is_array($dt)) continue;
             $c = (float)($dt['commission'] ?? 0);
+            if (!$L['done']) {   // запланированное занятие — ожидаемое списание (прогноз)
+                $planned += $c; $nPlanned++;
+                if ($samplePlanned === null) $samplePlanned = $dt;
+                continue;
+            }
             $att = !empty($dt['is_attend']);
             $all += $c; $nAll++; $byBranch[$bid]['all'] += $c;
             if ($att) { $present += $c; $nPresent++; $byBranch[$bid]['present'] += $c; }
@@ -414,11 +422,14 @@ function alfa_realization_day(string $date, ?array $branchFilter = null): array 
         }
     }
     foreach ($byBranch as &$b) { $b['present'] = round($b['present'], 2); $b['all'] = round($b['all'], 2); } unset($b);
-    return ['date' => $date, 'lessons' => count($les), 'perBranch' => $perBranch, 'statusHist' => $statusHist,
+    return ['date' => $date, 'lessons' => $doneLessons, 'plannedLessons' => $plannedLessons,
+            'perBranch' => $perBranch, 'statusHist' => $statusHist,
             'branchesUsed' => array_values($branches), 'branchNames' => alfa_branch_names(), 'byBranch' => $byBranch,
             'realizationPresent' => round($present, 2), 'realizationAll' => round($all, 2),
+            'realizationPlanned' => round($planned, 2), 'plannedCount' => $nPlanned,
             'attendedCount' => $nPresent, 'chargedCount' => $nAll,
-            'lessonsProcessed' => $processed, 'lessonsNoDetails' => $noDet, 'sampleDetail' => $sampleDetail];
+            'lessonsProcessed' => $processed, 'lessonsNoDetails' => $noDet,
+            'sampleDetail' => $sampleDetail, 'samplePlanned' => $samplePlanned];
 }
 
 /* --- Хранилище посчитанной реализации по дням ---
@@ -467,7 +478,8 @@ function alfa_realization_branches(): array {
 function alfa_realization_upsert(string $date, ?array $branches = null): array {
     $r = alfa_realization_day($date, $branches);
     $row = ['present' => $r['realizationPresent'], 'all' => $r['realizationAll'],
-            'lessons' => $r['lessons'], 'ts' => date('c')];
+            'planned' => $r['realizationPlanned'], 'lessons' => $r['lessons'],
+            'plannedLessons' => $r['plannedLessons'], 'ts' => date('c')];
     $s = alfa_realization_store_read();
     $s[$r['date']] = $row;
     ksort($s);

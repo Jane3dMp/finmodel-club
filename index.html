@@ -10024,19 +10024,20 @@ function _realHtml(){
   const [Y,M]=_realMonth.split('-').map(Number);
   const dim=new Date(Y,M,0).getDate();
   const todayIso=_todayIso();
-  let cum=0, tp=0, ta=0, tl=0, days=0;
+  let cum=0, tp=0, ta=0, tl=0, tpl=0, days=0;
   let rows="";
   for(let d=1;d<=dim;d++){
     const key=Y+'-'+String(M).padStart(2,'0')+'-'+String(d).padStart(2,'0');
     const r=(_realStore||{})[key];
     const future = key>todayIso;
-    if(r){ cum+=(+r.present||0); tp+=(+r.present||0); ta+=(+r.all||0); tl+=(+r.lessons||0); days++; }
-    rows+=`<tr${future?' style="opacity:.45"':''}>
+    if(r){ cum+=(+r.present||0); tp+=(+r.present||0); ta+=(+r.all||0); tl+=(+r.lessons||0); tpl+=(+r.planned||0); if(r.lessons) days++; }
+    rows+=`<tr${future?' style="opacity:.6"':''}>
       <td style="text-align:center">${d}</td>
-      <td style="text-align:right">${r?('<b>'+_gm(r.present)+'</b>'):(future?'':'<span style="color:var(--muted)">—</span>')}</td>
-      <td style="text-align:right">${r?_gm(r.all):''}</td>
-      <td style="text-align:right;color:var(--muted)">${r?_gm(cum):''}</td>
-      <td style="text-align:center;color:var(--muted)">${r?r.lessons:''}</td></tr>`;
+      <td style="text-align:right">${(r&&r.lessons)?('<b>'+_gm(r.present)+'</b>'):'<span style="color:var(--muted)">—</span>'}</td>
+      <td style="text-align:right">${(r&&r.lessons)?_gm(r.all):''}</td>
+      <td style="text-align:right;color:var(--terra-d)">${(r&&+r.planned)?_gm(r.planned):''}</td>
+      <td style="text-align:right;color:var(--muted)">${(r&&r.lessons)?_gm(cum):''}</td>
+      <td style="text-align:center;color:var(--muted)">${r?((r.lessons||0)+((+r.plannedLessons)?('+'+r.plannedLessons):'')):''}</td></tr>`;
   }
   const monLabel=(_RU_MON[M-1]||'')+' '+Y;
   return `<div class="callout" style="margin-bottom:10px;font-size:13px">Считается из Alfa: сумма списаний (<b>commission</b>) по проведённым занятиям филиала <b>${_realBranchLabel()}</b>. «Без пропусков» — только пришедшие, «с пропусками» — все.</div>
@@ -10045,12 +10046,12 @@ function _realHtml(){
     <button class="btn sm" id="realPullBtn" onclick="realPullMonth()">🔄 Обновить месяц из Alfa</button>
     <span id="realPullProg" style="font-size:12px;color:var(--muted)"></span>
   </div>
-  <div class="tscroll" style="max-width:640px"><table><thead><tr>
-    <th>Дн</th><th style="text-align:right">Без пропусков</th><th style="text-align:right">С пропусками</th><th style="text-align:right">Накопительно</th><th style="text-align:center">Занятий</th>
+  <div class="tscroll" style="max-width:720px"><table><thead><tr>
+    <th>Дн</th><th style="text-align:right">Без пропусков</th><th style="text-align:right">С пропусками</th><th style="text-align:right" title="Ожидаемые списания по ещё не проведённым занятиям">Ожидается</th><th style="text-align:right">Накопительно</th><th style="text-align:center">Занятий</th>
   </tr></thead><tbody>${rows}
-    <tr style="border-top:2px solid var(--line)"><td><b>${esc(monLabel)}</b></td><td style="text-align:right"><b style="color:var(--green)">${_gm(tp)}</b></td><td style="text-align:right"><b>${_gm(ta)}</b></td><td style="text-align:right"></td><td style="text-align:center"><b>${tl}</b></td></tr>
+    <tr style="border-top:2px solid var(--line)"><td><b>${esc(monLabel)}</b></td><td style="text-align:right"><b style="color:var(--green)">${_gm(tp)}</b></td><td style="text-align:right"><b>${_gm(ta)}</b></td><td style="text-align:right"><b style="color:var(--terra-d)">${_gm(tpl)}</b></td><td style="text-align:right"></td><td style="text-align:center"><b>${tl}</b></td></tr>
   </tbody></table></div>
-  <div style="font-size:12px;color:var(--muted);margin-top:6px">Дней с данными: ${days}. «Обновить месяц» пересчитывает дни этого месяца из Alfa (по одному, с прогрессом). Автоматически это будет делать cron на HostFly в 20:00.</div>
+  <div style="font-size:12px;color:var(--muted);margin-top:6px">Дней с проведёнными занятиями: ${days}. «Обновить месяц» пересчитывает <b>весь</b> месяц (включая будущие дни — по ним считается «Ожидается», это и есть прогноз). Автоматически — cron в 20:00.</div>
   <details style="margin-top:14px"><summary style="cursor:pointer;font-weight:600">🔍 Проверить один день (разведка по филиалам)</summary>
     <div style="padding:8px 0">
       <div class="hd-actions"><input type="date" id="realProbeDate" class="cell" style="width:auto" value="${todayIso}">
@@ -10070,9 +10071,10 @@ async function realPullMonth(){
   if(_realBusy) return;
   const [Y,M]=_realMonth.split('-').map(Number);
   const dim=new Date(Y,M,0).getDate(), todayIso=_todayIso();
+  // берём ВЕСЬ месяц, включая будущие дни: по ним считается прогноз (ожидаемые списания по расписанию)
   const dates=[];
-  for(let d=1;d<=dim;d++){ const key=Y+'-'+String(M).padStart(2,'0')+'-'+String(d).padStart(2,'0'); if(key<=todayIso) dates.push(key); }
-  if(!dates.length){ toast("В этом месяце ещё нет прошедших дней"); return; }
+  for(let d=1;d<=dim;d++) dates.push(Y+'-'+String(M).padStart(2,'0')+'-'+String(d).padStart(2,'0'));
+  if(!dates.length){ toast("Пустой месяц"); return; }
   const btn=document.getElementById("realPullBtn"), prog=document.getElementById("realPullProg");
   _realBusy=true; if(btn) btn.disabled=true;
   try{
@@ -10306,20 +10308,27 @@ function _progWeeks(){
   }
   return out;
 }
-/* факт недели из Alfa = среднее без/с пропусками за дни недели (как в «Все показатели») */
-function _progFact(w){
+/* Неделя из Alfa: факт = среднее без/с пропусками по проведённым (как в «Все показатели»);
+   прогноз = факт + ожидаемые списания по ещё не проведённым занятиям недели. */
+function _progWeekAlfa(w){
   if(!_realStore) return null;
-  let p=0,a=0,n=0;
+  let p=0,a=0,pl=0,n=0;
   for(let i=0;i<7;i++){ const d=new Date(w.mon); d.setDate(d.getDate()+i);
-    const r=_realStore[_dIso(d)]; if(r){ p+=(+r.present||0); a+=(+r.all||0); n++; } }
-  return n?((p+a)/2):null;
+    const r=_realStore[_dIso(d)]; if(r){ p+=(+r.present||0); a+=(+r.all||0); pl+=(+r.planned||0); n++; } }
+  if(!n) return null;
+  const fact=(p+a)/2;
+  return {fact:fact, plan:fact+pl, planned:pl};
 }
 function _progHtml(){
   const G=_rukProg(), weeks=_progWeeks(), today=_todayIso();
   let tPlan=0,tFact=0, rows="";
   let lastMon="";
   weeks.forEach((w,i)=>{
-    const plan=+(G.plans[w.key]||0), fact=_progFact(w);
+    const A=_progWeekAlfa(w);
+    const manual=+(G.plans[w.key]||0);
+    const auto=A?A.plan:null;
+    const plan=manual||auto||0;            // ручной план имеет приоритет над прогнозом из Alfa
+    const fact=A?A.fact:null;
     if(plan) tPlan+=plan; if(fact!=null) tFact+=fact;
     const pct=(plan>0&&fact!=null)?(100*fact/plan):null;
     const monName=_RU_MON[w.mon.getMonth()];
@@ -10330,17 +10339,18 @@ function _progHtml(){
     rows+=`<tr${future?' style="opacity:.5"':''}>
       <td style="color:var(--muted)">${showMon?esc(monName):''}</td>
       <td style="white-space:nowrap">${range}</td>
-      <td style="text-align:right"><input class="cell" type="number" style="width:92px;text-align:right;font-size:12px" value="${plan||''}" placeholder="—" onchange="progPlan('${w.key}',this.value)"></td>
+      <td style="text-align:right">${auto!=null?('<span style="color:var(--terra-d)" title="Прогноз из Alfa: проведённое + ожидаемое по расписанию">'+_gm(auto)+'</span>'):'<span style="color:var(--muted)">—</span>'}</td>
+      <td style="text-align:right"><input class="cell" type="number" style="width:88px;text-align:right;font-size:12px" value="${manual||''}" placeholder="${auto!=null?'авто':'—'}" title="Свой план — перебивает прогноз из Alfa" onchange="progPlan('${w.key}',this.value)"></td>
       <td style="text-align:right">${fact!=null?('<b>'+_gm(fact)+'</b>'):'<span style="color:var(--muted)">—</span>'}</td>
       <td style="text-align:right">${pct!=null?('<b style="color:'+(pct>=100?'var(--green)':(pct>=85?'#C9922E':'var(--red)'))+'">'+pct.toFixed(0)+'%</b>'):'<span style="color:var(--muted)">—</span>'}</td>
     </tr>`;
   });
   const tPct=(tPlan>0&&tFact>0)?(100*tFact/tPlan):null;
-  return `<div class="callout" style="margin-bottom:10px;font-size:12px">Недели учебного года (пн–вс). <b>План</b> вписываете вы, <b>факт</b> — из Alfa (реализация за дни недели, среднее без/с пропусками). Факт появляется по мере наполнения в «Дашборд Администратора → Реализация» (и cron в 20:00).</div>
-  <div class="tscroll" style="max-width:660px"><table><thead><tr>
-    <th style="text-align:left">Месяц</th><th style="text-align:left">Неделя</th><th style="text-align:right">План</th><th style="text-align:right">Выполнение</th><th style="text-align:right">%</th>
+  return `<div class="callout" style="margin-bottom:10px;font-size:12px">Недели учебного года (пн–вс). <b>Прогноз Alfa</b> = уже проведённое + ожидаемые списания по расписанию. <b>Свой план</b> — если впишете, он перебивает прогноз. <b>Выполнение</b> — фактическая реализация. Данные из «Дашборд Администратора → Реализация» (и cron в 20:00).</div>
+  <div class="tscroll" style="max-width:760px"><table><thead><tr>
+    <th style="text-align:left">Месяц</th><th style="text-align:left">Неделя</th><th style="text-align:right">Прогноз Alfa</th><th style="text-align:right">Свой план</th><th style="text-align:right">Выполнение</th><th style="text-align:right">%</th>
   </tr></thead><tbody>${rows}
-    <tr style="border-top:2px solid var(--line)"><td colspan="2"><b>Итого за год</b></td>
+    <tr style="border-top:2px solid var(--line)"><td colspan="3"><b>Итого за год</b></td>
       <td style="text-align:right"><b>${_gm(tPlan)}</b></td>
       <td style="text-align:right"><b style="color:var(--green)">${_gm(tFact)}</b></td>
       <td style="text-align:right">${tPct!=null?('<b>'+tPct.toFixed(0)+'%</b>'):'—'}</td></tr>
