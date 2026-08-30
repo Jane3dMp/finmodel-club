@@ -10018,16 +10018,17 @@ async function realProbe(){
   try{
     const j=await _pubCall("realizationProbe",{date:d});
     console.log("📤 realizationProbe",j);
-    const df=j.detailFieldSums||{}, lf=j.lessonFieldSums||{};
-    const drows=Object.keys(df).map(k=>`<tr><td>${esc(k)}</td><td style="text-align:right"><b>${_gm(df[k].present)}</b></td><td style="text-align:right">${_gm(df[k].all)}</td></tr>`).join("");
-    const lrows=Object.keys(lf).map(k=>`<tr><td>${esc(k)}</td><td style="text-align:right">${_gm(lf[k])}</td></tr>`).join("");
-    let h=`<div class="callout" style="border-color:var(--green)">Проведённых занятий за ${esc(j.date)}: <b>${j.lessons}</b>. Сверь суммы с отчётом «Реализация» в Alfa за этот день.</div>`;
-    h+=`<h4 style="margin:10px 0 4px">Денежные поля участников (сумма за день)</h4>
-      <table><thead><tr><th>Поле Alfa</th><th style="text-align:right">только пришедшие</th><th style="text-align:right">все (с пропусками)</th></tr></thead>
-      <tbody>${drows||'<tr><td colspan="3" style="color:var(--muted)">числовых денежных полей у участников не нашлось</td></tr>'}</tbody></table>`;
-    if(lrows) h+=`<h4 style="margin:10px 0 4px">Денежные поля урока</h4><table><thead><tr><th>Поле Alfa</th><th style="text-align:right">сумма</th></tr></thead><tbody>${lrows}</tbody></table>`;
-    h+=`<details style="margin-top:10px"><summary style="cursor:pointer;font-size:12px;color:var(--muted)">Сырой пример урока/участника + статусы (для меня)</summary>
-      <pre style="white-space:pre-wrap;font-size:11px;background:var(--paper);padding:6px;border-radius:6px;max-height:40vh;overflow:auto">${esc(JSON.stringify({statusHist:j.statusHist,perBranch:j.perBranch,sampleLessonKeys:j.sampleLessonKeys,sampleDetailKeys:j.sampleDetailKeys,sampleLesson:j.sampleLesson,sampleDetail:j.sampleDetail},null,1))}</pre></details>`;
+    const ln=j.lessonNumericSums||{}, com=j.commodity||{}, cn=com.numericSums||{};
+    const lrows=Object.keys(ln).map(k=>`<tr><td>${esc(k)}</td><td style="text-align:right">${_gm(ln[k])}</td></tr>`).join("");
+    const crows=Object.keys(cn).map(k=>`<tr><td>${esc(k)}</td><td style="text-align:right"><b>${_gm(cn[k])}</b></td></tr>`).join("");
+    let h=`<div class="callout" style="border-color:var(--green)">Проведённых занятий за ${esc(j.date)}: <b>${j.lessons}</b>. Найди сумму, совпадающую с отчётом «Реализация» в Alfa за этот день.</div>`;
+    h+=`<h4 style="margin:10px 0 4px">🧾 Реализация услуг (commodity) — записей за день: ${com.count||0}</h4>
+      <table><thead><tr><th>Поле Alfa</th><th style="text-align:right">сумма за день</th></tr></thead>
+      <tbody>${crows||'<tr><td colspan="2" style="color:var(--muted)">'+(com.err?'commodity не прочитался (см. сырой блок ниже)':'записей нет')+'</td></tr>'}</tbody></table>`;
+    h+=`<h4 style="margin:12px 0 4px">Числовые поля занятий (сумма за день)</h4>
+      <table><thead><tr><th>Поле Alfa</th><th style="text-align:right">сумма</th></tr></thead><tbody>${lrows||'<tr><td colspan="2" style="color:var(--muted)">нет</td></tr>'}</tbody></table>`;
+    h+=`<details style="margin-top:10px"><summary style="cursor:pointer;font-size:12px;color:var(--muted)">Сырые примеры (урок, детали, commodity) — для меня, пришли скрин при необходимости</summary>
+      <pre style="white-space:pre-wrap;font-size:11px;background:var(--paper);padding:6px;border-radius:6px;max-height:44vh;overflow:auto">${esc(JSON.stringify({statusHist:j.statusHist,perBranch:j.perBranch,sampleLessonKeys:j.sampleLessonKeys,detailKeys:j.detailKeys,commodityKeys:com.keys,commoditySample:com.sample,detailSample:j.detailSample,lessonWithDetails:j.lessonWithDetails,sampleLesson:j.sampleLesson},null,1))}</pre></details>`;
     if(out) out.innerHTML=h;
   }catch(e){ if(out) out.innerHTML=_pubErrHtml(e,"зонд реализации"); }
   finally{ if(btn) btn.disabled=false; }

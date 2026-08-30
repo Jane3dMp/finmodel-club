@@ -1274,9 +1274,8 @@ switch ($action) {
         $host = 'https://' . alfa_host(); $token = alfa_token();
         $branches = alfa_all_branch_ids();
         $PER = 50; $MAXP = 60;
-        $lessons = 0; $statusHist = []; $sampleLesson = null; $sampleDetail = null; $lessonKeys = null; $detailKeys = null;
-        $detSums = []; $lesSums = []; $perBranch = [];
-        $rx = '/price|cost|amount|sum|pay|money|total|realiz|debit|charge|balance|nominal|discount/i';
+        $lessons = 0; $statusHist = []; $sampleLesson = null; $lessonKeys = null;
+        $lesNumAll = []; $perBranch = []; $firstLes = null;
         foreach ($branches as $bid) {
             $before = $lessons;
             for ($p = 0; $p < $MAXP; $p++) {
@@ -1290,27 +1289,39 @@ switch ($action) {
                     $lessons++;
                     $st = isset($ls['status']) ? (int)$ls['status'] : -1;
                     $statusHist[(string)$st] = ($statusHist[(string)$st] ?? 0) + 1;
-                    if ($sampleLesson === null) { $sampleLesson = $ls; $lessonKeys = array_keys($ls); }
-                    foreach ($ls as $k => $v) { if (is_numeric($v) && preg_match($rx, (string)$k)) $lesSums[$k] = ($lesSums[$k] ?? 0) + (0 + $v); }
-                    foreach ((array)($ls['details'] ?? $ls['participants'] ?? []) as $dt) {
-                        if (!is_array($dt)) continue;
-                        if ($sampleDetail === null) { $sampleDetail = $dt; $detailKeys = array_keys($dt); }
-                        $present = !((isset($dt['is_attend']) && !$dt['is_attend']) || (isset($dt['is_present']) && !$dt['is_present']) || (isset($dt['is_missed']) && $dt['is_missed']));
-                        foreach ($dt as $k => $v) {
-                            if (!is_numeric($v) || !preg_match($rx, (string)$k)) continue;
-                            if (!isset($detSums[$k])) $detSums[$k] = ['all' => 0, 'present' => 0];
-                            $detSums[$k]['all'] += (0 + $v); if ($present) $detSums[$k]['present'] += (0 + $v);
-                        }
-                    }
+                    if ($sampleLesson === null) { $sampleLesson = $ls; $lessonKeys = array_keys($ls); $firstLes = ['branch' => (int)$bid, 'id' => (int)($ls['id'] ?? 0), 'cids' => array_values(array_map('intval', (array)($ls['customer_ids'] ?? [])))]; }
+                    foreach ($ls as $k => $v) { if (is_numeric($v)) $lesNumAll[$k] = ($lesNumAll[$k] ?? 0) + (0 + $v); }   // ВСЕ числовые поля урока
                 }
                 if (count($items) < $PER) break;
             }
             $perBranch[$bid] = $lessons - $before;
         }
-        json_out(['ok' => true, 'date' => $date, 'lessons' => $lessons, 'perBranch' => $perBranch,
-                  'statusHist' => $statusHist, 'detailFieldSums' => $detSums, 'lessonFieldSums' => $lesSums,
-                  'sampleLessonKeys' => $lessonKeys, 'sampleDetailKeys' => $detailKeys,
-                  'sampleLesson' => $sampleLesson, 'sampleDetail' => $sampleDetail]);
+        // 1) детали занятия: lesson/index обычно отдаёт details только при фильтре по customer_id
+        $lessonWithDetails = null; $detailSample = null; $detailKeys = null;
+        if ($firstLes && !empty($firstLes['cids'])) {
+            $cid = (int)$firstLes['cids'][0];
+            $rr = alfa_http('POST', "$host/v2api/{$firstLes['branch']}/lesson/index",
+                ['customer_id' => $cid, 'date_from' => $date, 'date_to' => $date, 'page' => 0, 'count' => 50], $token, true, 12);
+            foreach (($rr['items'] ?? []) as $x) { if ((int)($x['id'] ?? 0) === $firstLes['id']) { $lessonWithDetails = $x; break; } }
+            if (!$lessonWithDetails && !empty($rr['items'])) $lessonWithDetails = $rr['items'][0];
+            $det = (array)(($lessonWithDetails['details'] ?? $lessonWithDetails['participants'] ?? [])[0] ?? []);
+            if ($det) { $detailSample = $det; $detailKeys = array_keys($det); }
+        }
+        // 2) сущность commodity (в Alfa это «реализация»/проданные услуги) за день — суммы всех числовых полей
+        $comCount = 0; $comSample = null; $comNum = []; $comKeys = null; $comErr = null;
+        foreach ($branches as $bid) {
+            $rr = alfa_http('POST', "$host/v2api/$bid/commodity/index",
+                ['date_from' => $date, 'date_to' => $date, 'page' => 0, 'count' => $PER], $token, true, 12);
+            if (isset($rr['__err'])) { if ($comErr === null) $comErr = $rr; continue; }
+            foreach (($rr['items'] ?? []) as $c) { if (!is_array($c)) continue; $comCount++;
+                if ($comSample === null) { $comSample = $c; $comKeys = array_keys($c); }
+                foreach ($c as $k => $v) { if (is_numeric($v)) $comNum[$k] = ($comNum[$k] ?? 0) + (0 + $v); }
+            }
+        }
+        json_out(['ok' => true, 'date' => $date, 'lessons' => $lessons, 'perBranch' => $perBranch, 'statusHist' => $statusHist,
+                  'lessonNumericSums' => $lesNumAll, 'sampleLessonKeys' => $lessonKeys, 'sampleLesson' => $sampleLesson,
+                  'lessonWithDetails' => $lessonWithDetails, 'detailKeys' => $detailKeys, 'detailSample' => $detailSample,
+                  'commodity' => ['count' => $comCount, 'numericSums' => $comNum, 'keys' => $comKeys, 'sample' => $comSample, 'err' => $comErr]]);
         break;
 
     default:
