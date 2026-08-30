@@ -9980,6 +9980,9 @@ function renderRuk(){
   const body=document.getElementById("rukBody"); if(!body) return;
   if(_rukSec==="links"){ body.innerHTML=_bizLinksHtml(); return; }
   if(_rukSec==="god"){ body.innerHTML=_godHtml(); return; }
+  if(_rukSec==="prognoz"){ body.innerHTML=_progHtml();
+    if(!_realStore){ _realLoadStore().then(()=>{ if(_rukSec==="prognoz"){ const b=document.getElementById("rukBody"); if(b) b.innerHTML=_progHtml(); } }).catch(()=>{}); }
+    return; }
   if(_rukSec==="pokaz"){ body.innerHTML=_pokazHtml();
     // реализацию из Alfa подгружаем один раз и перерисовываем — чтобы строка «из Alfa» ожила
     if(!_realStore){ _realLoadStore().then(()=>{ if(_rukSec==="pokaz") { const b=document.getElementById("rukBody"); if(b) b.innerHTML=_pokazHtml(); } }).catch(()=>{}); }
@@ -10286,6 +10289,65 @@ function _pokazAlfaMonth(i){
   Object.keys(_realStore).forEach(k=>{ if(k.indexOf(pref)!==0) return; const r=_realStore[k]; p+=(+r.present||0); a+=(+r.all||0); n++; });
   return n?((p+a)/2):null;
 }
+/* ---- Прогноз по всем: недели учебного года, план — руками, факт — из Alfa ---- */
+function _rukProg(){ if(!S.rukProg) S.rukProg={plans:{}}; if(!S.rukProg.plans) S.rukProg.plans={}; return S.rukProg; }
+function _progSave(){ persistLocal(); if(typeof fbSchedulePush==="function") fbSchedulePush(); }
+function _dIso(d){ const z=n=>String(n).padStart(2,'0'); return d.getFullYear()+'-'+z(d.getMonth()+1)+'-'+z(d.getDate()); }
+/* недели (пн–вс) учебного года: от недели с 1 сентября до недели с 31 мая */
+function _progWeeks(){
+  const P=_rukPokaz(); const y0=parseInt(String(P.curYear).slice(0,4),10)||new Date().getFullYear();
+  const start=new Date(y0,8,1), end=new Date(y0+1,4,31);
+  const cur=new Date(start); const wd=cur.getDay()===0?7:cur.getDay(); cur.setDate(cur.getDate()-(wd-1));   // к понедельнику
+  const out=[];
+  while(cur<=end){
+    const mon=new Date(cur), sun=new Date(cur); sun.setDate(sun.getDate()+6);
+    out.push({key:_dIso(mon), mon:mon, sun:sun});
+    cur.setDate(cur.getDate()+7);
+  }
+  return out;
+}
+/* факт недели из Alfa = среднее без/с пропусками за дни недели (как в «Все показатели») */
+function _progFact(w){
+  if(!_realStore) return null;
+  let p=0,a=0,n=0;
+  for(let i=0;i<7;i++){ const d=new Date(w.mon); d.setDate(d.getDate()+i);
+    const r=_realStore[_dIso(d)]; if(r){ p+=(+r.present||0); a+=(+r.all||0); n++; } }
+  return n?((p+a)/2):null;
+}
+function _progHtml(){
+  const G=_rukProg(), weeks=_progWeeks(), today=_todayIso();
+  let tPlan=0,tFact=0, rows="";
+  let lastMon="";
+  weeks.forEach((w,i)=>{
+    const plan=+(G.plans[w.key]||0), fact=_progFact(w);
+    if(plan) tPlan+=plan; if(fact!=null) tFact+=fact;
+    const pct=(plan>0&&fact!=null)?(100*fact/plan):null;
+    const monName=_RU_MON[w.mon.getMonth()];
+    const showMon=(monName!==lastMon); lastMon=monName;
+    const z=n=>String(n).padStart(2,'0');
+    const range=z(w.mon.getDate())+'.'+z(w.mon.getMonth()+1)+'–'+z(w.sun.getDate())+'.'+z(w.sun.getMonth()+1);
+    const future=w.key>today;
+    rows+=`<tr${future?' style="opacity:.5"':''}>
+      <td style="color:var(--muted)">${showMon?esc(monName):''}</td>
+      <td style="white-space:nowrap">${range}</td>
+      <td style="text-align:right"><input class="cell" type="number" style="width:92px;text-align:right;font-size:12px" value="${plan||''}" placeholder="—" onchange="progPlan('${w.key}',this.value)"></td>
+      <td style="text-align:right">${fact!=null?('<b>'+_gm(fact)+'</b>'):'<span style="color:var(--muted)">—</span>'}</td>
+      <td style="text-align:right">${pct!=null?('<b style="color:'+(pct>=100?'var(--green)':(pct>=85?'#C9922E':'var(--red)'))+'">'+pct.toFixed(0)+'%</b>'):'<span style="color:var(--muted)">—</span>'}</td>
+    </tr>`;
+  });
+  const tPct=(tPlan>0&&tFact>0)?(100*tFact/tPlan):null;
+  return `<div class="callout" style="margin-bottom:10px;font-size:12px">Недели учебного года (пн–вс). <b>План</b> вписываете вы, <b>факт</b> — из Alfa (реализация за дни недели, среднее без/с пропусками). Факт появляется по мере наполнения в «Дашборд Администратора → Реализация» (и cron в 20:00).</div>
+  <div class="tscroll" style="max-width:660px"><table><thead><tr>
+    <th style="text-align:left">Месяц</th><th style="text-align:left">Неделя</th><th style="text-align:right">План</th><th style="text-align:right">Выполнение</th><th style="text-align:right">%</th>
+  </tr></thead><tbody>${rows}
+    <tr style="border-top:2px solid var(--line)"><td colspan="2"><b>Итого за год</b></td>
+      <td style="text-align:right"><b>${_gm(tPlan)}</b></td>
+      <td style="text-align:right"><b style="color:var(--green)">${_gm(tFact)}</b></td>
+      <td style="text-align:right">${tPct!=null?('<b>'+tPct.toFixed(0)+'%</b>'):'—'}</td></tr>
+  </tbody></table></div>`;
+}
+function progPlan(key,v){ const G=_rukProg(); const n=parseFloat(v)||0; if(n) G.plans[key]=n; else delete G.plans[key]; _progSave(); renderRuk(); }
+
 function pokazPullAlfa(){
   const P=_rukPokaz(); let n=0;
   POKAZ_MONTHS.forEach((m,i)=>{ const v=_pokazAlfaMonth(i); if(v!=null){ P.cur[i]=Math.round(v*100)/100; n++; } });
