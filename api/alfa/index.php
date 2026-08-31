@@ -697,7 +697,8 @@ switch ($action) {
                         // имя поля цены в v2api не описано — отдаём первое непустое из вероятных,
                         // а разбирает значение уже клиент (Alfa шлёт строкой, бывает с запятой)
                         'price'        => $t['price'] ?? ($t['cost'] ?? ($t['amount'] ?? ($t['sum'] ?? null))),
-                        'lesson_count' => $t['lesson_count'] ?? ($t['lessons_count'] ?? ($t['count'] ?? null)),
+                        // ⚠️ в Alfa поле называется lessons_count (с «s») — оно и приоритетное
+                        'lesson_count' => $t['lessons_count'] ?? ($t['lesson_count'] ?? ($t['count'] ?? null)),
                         'duration'     => $t['duration'] ?? null,
                         'branch'       => (int)$bid,
                         'branch_ids'   => array_values(array_map('intval', (array)($t['branch_ids'] ?? []))),
@@ -1325,6 +1326,39 @@ switch ($action) {
                    'sample' => ($rl['items'] ?? [null])[0] ?? null];
         json_out(['ok' => true, 'branch' => $bid, 'from' => $from, 'to' => $to,
                   'tried' => $tried, 'lesson' => $lsInfo, 'regularLesson' => $rlInfo]);
+        break;
+
+    // --- ЗАПЛАНИРОВАННЫЕ ЗАНЯТИЯ (status=1). По документации lesson/index по умолчанию отдаёт
+    //     только проведённые (status=3) — поэтому будущие «не находились». Проверяем, что есть.
+    case 'plannedLessons':
+        @set_time_limit(180);
+        $from = alfa_iso((string)($in['from'] ?? date('Y-m-d')));
+        $to   = alfa_iso((string)($in['to']   ?? date('Y-m-d', strtotime('+6 day'))));
+        $br = alfa_realization_branches(); $bid = (int)($br[0] ?? alfa_branch());
+        $host = 'https://' . alfa_host(); $token = alfa_token();
+        $PER = 50; $lessons = 0; $withDet = 0; $participants = 0; $sumCommission = 0.0;
+        $sample = null; $sampleDet = null; $byStatus = [];
+        for ($p = 0; $p < 40; $p++) {
+            $r = alfa_http('POST', "$host/v2api/$bid/lesson/index",
+                ['status' => 1, 'date_from' => $from, 'date_to' => $to, 'page' => $p, 'count' => $PER], $token, true, 15);
+            $items = isset($r['__err']) ? [] : ($r['items'] ?? []);
+            foreach ($items as $ls) {
+                if (!is_array($ls)) continue;
+                $d = substr((string)($ls['date'] ?? ''), 0, 10);
+                if ($d !== '' && ($d < $from || $d > $to)) continue;
+                $lessons++;
+                $st = (string)($ls['status'] ?? '?'); $byStatus[$st] = ($byStatus[$st] ?? 0) + 1;
+                if ($sample === null) $sample = $ls;
+                $det = (array)($ls['details'] ?? []);
+                if ($det) { $withDet++; if ($sampleDet === null) $sampleDet = $det[0] ?? null; }
+                foreach ($det as $dt) { if (!is_array($dt)) continue; $participants++; $sumCommission += (float)($dt['commission'] ?? 0); }
+            }
+            if (count($items) < $PER) break;
+        }
+        json_out(['ok' => true, 'branch' => $bid, 'from' => $from, 'to' => $to,
+                  'plannedLessons' => $lessons, 'withDetails' => $withDet, 'participants' => $participants,
+                  'sumCommission' => round($sumCommission, 2), 'byStatus' => $byStatus,
+                  'sampleLesson' => $sample, 'sampleDetail' => $sampleDet]);
         break;
 
     // --- ПРОГНОЗ ОПЛАТЫ «как в Alfa»: шаг 1 — какие группы и сколько раз занимаются на неделе ---

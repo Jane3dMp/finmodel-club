@@ -10402,6 +10402,7 @@ function _progHtml(){
     <button class="btn sm" id="progPullBtn" onclick="progPull()">🔄 Подтянуть из Alfa (7 дней назад + 5 недель вперёд)</button>
     <button class="btn ghost sm" id="progSnapBtn" onclick="progSnapshot()" title="Зафиксировать прогноз на текущую неделю (обычно это делает cron в вс 23:00)">🔒 Зафиксировать эту неделю</button>
     <button class="btn ghost sm" id="fcWeekBtn" onclick="progForecastWeek()" title="Посчитать как отчёт Alfa «Прогноз оплаты»: регулярное расписание × зачисленные × цена абонемента">🧮 Прогноз как в Alfa (неделя)</button>
+    <button class="btn ghost sm" id="plBtn" onclick="checkPlanned()" title="Запланированные занятия недели (status=1) — их суммы списаний">📆 Занятия недели из Alfa</button>
     <span id="progPullProg" style="font-size:12px;color:var(--muted)">${haveAny?'':'Пока пусто — нажмите «Подтянуть».'}</span>
   </div>
   <div style="font-size:12px;color:var(--muted);margin-bottom:8px">🔒 = прогноз зафиксирован до начала недели (иначе он «догоняет» факт и % всегда 100). Фиксирует cron в воскресенье 23:00. Прошлые месяцы целиком — в «Дашборд Администратора → Реализация».</div>
@@ -10415,6 +10416,22 @@ function _progHtml(){
   </tbody></table></div>`;
 }
 function progPlan(key,v){ const G=_rukProg(); const n=parseFloat(v)||0; if(n) G.plans[key]=n; else delete G.plans[key]; _progSave(); renderRuk(); }
+/* Запланированные занятия недели (status=1) — по документации lesson/index по умолчанию
+   отдаёт только проведённые, поэтому будущие раньше «не находились». */
+async function checkPlanned(){
+  if(_realBusy) return;
+  const btn=document.getElementById("plBtn"), prog=document.getElementById("progPullProg");
+  const mon=(function(){ const d=new Date(); const wd=d.getDay()===0?7:d.getDay(); d.setDate(d.getDate()-(wd-1)); return _dIso(d); })();
+  const sun=(function(){ const d=new Date(mon); d.setDate(d.getDate()+6); return _dIso(d); })();
+  _realBusy=true; if(btn) btn.disabled=true; if(prog) prog.textContent="Спрашиваю Alfa про запланированные занятия…";
+  try{
+    const j=await _pubCall("plannedLessons",{from:mon,to:sun});
+    console.log("📤 plannedLessons",j);
+    if(prog) prog.innerHTML=`Неделя ${esc(j.from)}–${esc(j.to)}: запланировано занятий <b>${j.plannedLessons}</b> · с участниками ${j.withDetails} · записей ${j.participants} · сумма списаний <b>${_gm(j.sumCommission)}</b>`+
+      `<details style="margin-top:6px"><summary style="cursor:pointer">Образец занятия/участника</summary><pre style="white-space:pre-wrap;font-size:11px;background:var(--paper);padding:6px;border-radius:6px;max-height:40vh;overflow:auto">${esc(JSON.stringify({byStatus:j.byStatus,sampleDetail:j.sampleDetail,sampleLesson:j.sampleLesson},null,1))}</pre></details>`;
+  }catch(e){ if(prog) prog.textContent=""; const b=document.getElementById("rukBody"); if(b){ const d=document.createElement('div'); d.innerHTML=_pubErrHtml(e,"запланированные занятия"); b.insertBefore(d.firstChild,b.firstChild); } }
+  finally{ _realBusy=false; if(btn) btn.disabled=false; }
+}
 /* посчитать неделю по логике отчёта Alfa «Прогноз оплаты» — для сверки с самим отчётом */
 async function progForecastWeek(week){
   if(_realBusy) return;
