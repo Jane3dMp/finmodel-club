@@ -1406,9 +1406,27 @@ switch ($action) {
             foreach (($rr['items'] ?? []) as $it) { if (isset($it['id'])) $m[(int)$it['id']] = (string)($it['name'] ?? ''); }
             if ($m) $refs[$key] = $m;
         }
+        /* Если по фильтру дат пусто — Alfa могла его проигнорировать или дата лежит в другом поле.
+           Берём несколько платежей БЕЗ фильтра и показываем их «датовые» поля, чтобы настроить. */
+        $diag = null;
+        if (!$rows) {
+            $rr = alfa_http('POST', "$host/v2api/" . (int)$branches[0] . "/pay/index", ['page' => 0, 'count' => 5], $token, true, 15);
+            $items = is_array($rr['items'] ?? null) ? $rr['items'] : [];
+            $dates = [];
+            foreach ($items as $x) {
+                if (!is_array($x)) continue;
+                $row = [];
+                foreach ($x as $k => $v) { if (is_scalar($v) && preg_match('/date|added|creat|updat|dt_/i', (string)$k)) $row[$k] = $v; }
+                $row['income'] = $x['income'] ?? null;
+                $dates[] = $row;
+            }
+            $diag = ['err' => $rr['__err'] ?? null, 'total' => $rr['total'] ?? null,
+                     'keys' => $items ? array_keys($items[0]) : null, 'dateFields' => $dates,
+                     'sample' => $items[0] ?? null];
+        }
         $sum = 0.0; foreach ($rows as $x) $sum += $x['income'];
         json_out(['ok' => true, 'date' => $date, 'count' => count($rows), 'total' => round($sum, 2),
-                  'payments' => $rows, 'refs' => $refs, 'sampleKeys' => $keys, 'sample' => $sample]);
+                  'payments' => $rows, 'refs' => $refs, 'sampleKeys' => $keys, 'sample' => $sample, 'diag' => $diag]);
         break;
 
     // --- ТОЧНЫЙ ПРОГНОЗ ЗА ДЕНЬ: по запланированным занятиям Alfa (status=1), как её отчёт ---

@@ -10033,6 +10033,8 @@ function _kassaHtml(){
     <span id="kassaProg" style="font-size:12px;color:var(--muted)"></span>
   </div>`;
   if(!D) return head+`<div class="callout">Выберите день и нажмите «Загрузить из Alfa».</div>`;
+  if(D.diag) return head+`<div class="callout" style="border-color:var(--terra)">За ${esc(_kassaDate)} платежей не нашлось. Возможно, Alfa не приняла фильтр дат — ниже видно, какие поля дат есть у платежей. Покажите мне это, и я настрою.</div>
+    <pre style="white-space:pre-wrap;font-size:11px;background:var(--paper);padding:6px;border-radius:6px;max-height:44vh;overflow:auto">${esc(JSON.stringify(D.diag,null,1))}</pre>`;
   const rows=D.payments||[], refs=D.refs||{};
   const g=_kassaGroupKey(rows);
   const nameOf=(f,v)=>{ if(v==null||v==="") return "Без кассы"; const m=refs[g.ref]||{}; return m[v]||("#"+v); };
