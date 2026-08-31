@@ -10733,7 +10733,8 @@ function _ratesSheetData(){
   });
   return out;
 }
-function openRatesSheet(){
+let _alfaRates=null;
+async function openRatesSheet(){
   const data=_ratesSheetData();
   const body=document.getElementById("grpChatBody"), title=document.getElementById("grpChatTitle");
   if(!body||!title) return;
@@ -10747,16 +10748,51 @@ function openRatesSheet(){
         return r.sums.map(v=>{ total++; return `${r.dur}: Групповой / ${courses} — ${v.toFixed(2)} р.`; }).join("\n");
       }).join("\n");
       const kids=d.rows[0]?d.rows[0].tiers.map((v,idx)=>v?((idx+4)+"→"+v):null).filter(Boolean).join(", "):"";
-      return `<details ${i<2?'open':''} style="margin-bottom:8px;border:1px solid var(--line);border-radius:8px;padding:8px 10px">
-        <summary style="cursor:pointer;font-weight:700">${esc(d.teacher)} <span style="font-weight:400;color:var(--muted)">— строк: ${d.rows.reduce((a,r)=>a+r.sums.length,0)}</span></summary>
+      return `<details data-rt="1" ${i<2?'open':''} style="margin-bottom:8px;border:1px solid var(--line);border-radius:8px;padding:8px 10px">
+        <summary style="cursor:pointer;font-weight:700">${esc(d.teacher)} <span style="font-weight:400;color:var(--muted)">— строк: ${d.rows.reduce((a,r)=>a+r.sums.length,0)}</span> <span class="rt-badge" style="font-weight:400;font-size:12px">⏳</span></summary>
         <div style="font-size:11px;color:var(--muted);margin:6px 0">По числу детей: ${esc(kids)}</div>
         <pre style="white-space:pre-wrap;font-size:12px;background:var(--paper);padding:8px;border-radius:6px;margin:0">${esc(lines)}</pre>
         <button class="btn ghost sm" style="margin-top:6px" onclick="_copyText(${_jsStr(JSON.stringify(lines))}).then(ok=>toast(ok?'Скопировано':'Не удалось'))">📋 Копировать</button>
       </details>`;
     }).join("");
-    body.innerHTML=`<div class="callout" style="margin-bottom:10px;font-size:12px">Ставок ЗП в API Alfa нет — их заводят руками в карточке педагога («Зарплатные ставки» → «добавить»). Здесь готовые строки по вашему справочнику: длительность, тип, курсы и сумма для каждого числа детей. Курсы с одинаковой сеткой объединены в одну строку, как в Alfa.<br>Всего строк к вводу: <b>${total}</b> у ${data.length} педагогов.</div>${html}`;
+    body.innerHTML=`<div class="callout" style="margin-bottom:10px;font-size:12px">Ставок ЗП в API Alfa нет — их заводят руками в карточке педагога («Зарплатные ставки» → «добавить»). Здесь готовые строки по вашему справочнику: длительность, тип, курсы и сумма для каждого числа детей. Курсы с одинаковой сеткой объединены в одну строку, как в Alfa.<br>Всего строк: <b>${total}</b> у ${data.length} педагогов.<div class="rt-total" style="margin-top:4px">⏳ Сверяю с тем, что уже заведено в Alfa…</div></div>${html}`;
   }
   document.getElementById("grpChatModal").classList.add("show");
+  // ставки, уже заведённые в Alfa (читать API умеет), — чтобы отметить, что осталось внести
+  try{
+    if(!_alfaRates){ const j=await _pubCall("ratesProbe",{}); _alfaRates=j; }
+    _ratesMark(data);
+  }catch(e){ console.warn("ставки Alfa не прочитались",e); }
+}
+/* Отметить в открытом листе, какие ставки в Alfa уже есть (по педагогу, длительности и сумме) */
+function _ratesMark(data){
+  const j=_alfaRates; if(!j||!j.rates) return;
+  const tmap=(_pubMap().teacher)||{};                 // имя педагога → id в Alfa
+  const have={};                                      // "teacherId|duration|сумма" → true
+  (j.rates||[]).forEach(r=>{
+    const tid=+r.teacher_id||0, dur=+r.duration||0, rate=Math.round((+r.rate||0)*100)/100;
+    have[tid+"|"+dur+"|"+rate]=true;
+    if(!dur) have[tid+"|*|"+rate]=true;               // длительность не задана — считаем подходящей
+  });
+  const box=document.getElementById("grpChatBody"); if(!box) return;
+  let totalNeed=0, totalHave=0;
+  const blocks=box.querySelectorAll("details[data-rt]");
+  data.forEach((d,i)=>{
+    const tid=+tmap[d.teacher]||0;
+    const el=blocks[i]; if(!el) return;
+    let need=0, ok=0;
+    d.rows.forEach(r=>r.sums.forEach(v=>{
+      const key=tid+"|"+r.dur+"|"+(Math.round(v*100)/100);
+      if(tid && (have[key]||have[tid+"|*|"+(Math.round(v*100)/100)])) ok++; else need++;
+    }));
+    totalNeed+=need; totalHave+=ok;
+    const badge=el.querySelector(".rt-badge");
+    if(badge) badge.innerHTML = !tid ? '<span style="color:var(--muted)">педагог не сопоставлен с Alfa</span>'
+      : (need===0 ? '<b style="color:var(--green)">всё заведено ✓</b>'
+                  : ('<b style="color:var(--terra-d)">внести: '+need+'</b>'+(ok?(' · уже есть: '+ok):'')));
+  });
+  const head=box.querySelector(".rt-total");
+  if(head) head.innerHTML = `Из ${totalNeed+totalHave} строк уже заведено в Alfa: <b style="color:var(--green)">${totalHave}</b>, осталось внести: <b style="color:var(--terra-d)">${totalNeed}</b>.`;
 }
 /* Разведка: доступны ли ставки ЗП педагогов через API Alfa (чтобы проставлять их из финмодели) */
 async function ratesProbe(){

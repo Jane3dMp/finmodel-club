@@ -1367,49 +1367,30 @@ switch ($action) {
         $br = alfa_realization_branches() ?: [alfa_branch()];
         $bid = (int)$br[0];
         $host = 'https://' . alfa_host(); $token = alfa_token();
-        $cands = ['teacher-rate/index', 'teacher-rates/index', 'rate/index', 'rates/index',
-                  'salary/index', 'salaries/index', 'teacher-salary/index', 'payroll/index',
-                  'teacher-tariff/index', 'employee-rate/index', 'wage/index',
-                  // вторая волна догадок: другие варианты именования
-                  'teacher_rate/index', 'salary-rate/index', 'salary-scheme/index', 'rate-scheme/index',
-                  'user-rate/index', 'lesson-rate/index', 'teacher-price/index', 'price/index',
-                  'remuneration/index', 'payment-rate/index', 'teacher-payment/index', 'staff-rate/index',
-                  'salary-tariff/index', 'teacher-wage/index', 'wage-rate/index', 'employee-salary/index'];
-        $tried = [];
-        foreach ($cands as $c) {
-            $r = alfa_http('POST', "$host/v2api/$bid/$c", ['page' => 0, 'count' => 5], $token, true, 8);
-            $row = ['path' => $c, 'err' => $r['__err'] ?? null, 'code' => $r['code'] ?? null];
-            if (!isset($r['__err'])) {
-                $row['total'] = $r['total'] ?? null;
-                $row['count'] = is_array($r['items'] ?? null) ? count($r['items']) : null;
-                $row['sample'] = is_array($r['items'] ?? null) ? ($r['items'][0] ?? null) : null;
-            }
-            $tried[] = $row;
+        /* 🔑 Ставки ЗП — НЕ отдельная сущность, а экшен контроллера teacher:
+           POST /v2api/{branch}/teacher/teacher-rate  (без /index на конце).
+           Поэтому перебор имён вида teacher-rate/index давал 404. Появилось в Alfa 2.1.3.
+           Доступно ТОЛЬКО чтение: create/update/delete в API нет — ставки заводятся руками. */
+        $rows = []; $err = null;
+        for ($p = 0; $p < 20; $p++) {
+            $r = alfa_http('POST', "$host/v2api/$bid/teacher/teacher-rate", ['page' => $p, 'count' => 50], $token, true, 15);
+            if (isset($r['__err'])) { $err = $r; break; }
+            $items = is_array($r['items'] ?? null) ? $r['items'] : [];
+            foreach ($items as $x) { if (is_array($x)) $rows[] = $x; }
+            if (count($items) < 50) break;
         }
-        // глобальные (без филиала) и вложенные пути
-        foreach (['teacher-rate/index', 'rate/index', 'salary/index'] as $c) {
-            $r = alfa_http('POST', "$host/v2api/$c", ['page' => 0, 'count' => 5], $token, true, 8);
-            $tried[] = ['path' => '(без филиала) ' . $c, 'err' => $r['__err'] ?? null, 'code' => $r['code'] ?? null,
-                        'count' => is_array($r['items'] ?? null) ? count($r['items']) : null,
-                        'sample' => is_array($r['items'] ?? null) ? ($r['items'][0] ?? null) : null];
+        // справочники для расшифровки: предметы и типы занятий, имена педагогов
+        $refs = [];
+        foreach (['subject' => 'subjects', 'lesson-type' => 'lessonTypes', 'teacher' => 'teachers'] as $ent => $key) {
+            $rr = alfa_http('POST', "$host/v2api/$bid/$ent/index", ['page' => 0, 'count' => 200], $token, true, 10);
+            if (isset($rr['__err'])) continue;
+            $m = [];
+            foreach (($rr['items'] ?? []) as $it) { if (isset($it['id'])) $m[(int)$it['id']] = (string)($it['name'] ?? ''); }
+            if ($m) $refs[$key] = $m;
         }
-        $tid0 = 0;
-        $tt = alfa_http('POST', "$host/v2api/$bid/teacher/index", ['page' => 0, 'count' => 1], $token, true, 8);
-        if (isset($tt['items'][0]['id'])) $tid0 = (int)$tt['items'][0]['id'];
-        if ($tid0) {
-            foreach (["teacher/$tid0/rate/index", "teacher/rate/index?teacher_id=$tid0", "rate/index?teacher_id=$tid0"] as $c) {
-                $r = alfa_http('POST', "$host/v2api/$bid/$c", ['page' => 0, 'count' => 5, 'teacher_id' => $tid0], $token, true, 8);
-                $tried[] = ['path' => $c, 'err' => $r['__err'] ?? null, 'code' => $r['code'] ?? null,
-                            'count' => is_array($r['items'] ?? null) ? count($r['items']) : null,
-                            'sample' => is_array($r['items'] ?? null) ? ($r['items'][0] ?? null) : null];
-            }
-        }
-        // как выглядит сам педагог — вдруг ставка лежит в его карточке
-        $t = alfa_http('POST', "$host/v2api/$bid/teacher/index", ['page' => 0, 'count' => 3], $token, true, 10);
-        $u = alfa_http('POST', "$host/v2api/$bid/user/index", ['page' => 0, 'count' => 3], $token, true, 10);
-        json_out(['ok' => true, 'branch' => $bid, 'tried' => $tried,
-                  'teacher' => ['err' => $t['__err'] ?? null, 'keys' => isset($t['items'][0]) ? array_keys($t['items'][0]) : null, 'sample' => $t['items'][0] ?? null],
-                  'user' => ['err' => $u['__err'] ?? null, 'keys' => isset($u['items'][0]) ? array_keys($u['items'][0]) : null, 'sample' => $u['items'][0] ?? null]]);
+        json_out(['ok' => true, 'branch' => $bid, 'count' => count($rows), 'rates' => $rows,
+                  'refs' => $refs, 'err' => $err, 'sample' => $rows[0] ?? null,
+                  'keys' => isset($rows[0]) ? array_keys($rows[0]) : null]);
         break;
 
     // --- ПЛАТЕЖИ ЗА ДЕНЬ ПО КАССАМ (READ): для сверки с бумажными листами админов ---
