@@ -9983,6 +9983,10 @@ function renderRuk(){
   if(_rukSec==="prognoz"){ body.innerHTML=_progHtml();
     if(!_realStore){ _realLoadStore().then(()=>{ if(_rukSec==="prognoz"){ const b=document.getElementById("rukBody"); if(b) b.innerHTML=_progHtml(); } }).catch(()=>{}); }
     return; }
+  if(_rukSec==="rating"){ body.innerHTML=_ratingHtml();
+    if(!_realStore){ _realLoadStore().then(()=>{ if(_rukSec==="rating"){ const b=document.getElementById("rukBody"); if(b) b.innerHTML=_ratingHtml(); } }).catch(()=>{}); }
+    if(!_pubRefs){ _pubEnsureLoaded(false).then(()=>{ if(_rukSec==="rating"){ const b=document.getElementById("rukBody"); if(b) b.innerHTML=_ratingHtml(); } }).catch(()=>{}); }
+    return; }
   if(_rukSec==="pokaz"){ body.innerHTML=_pokazHtml();
     // реализацию из Alfa подгружаем один раз и перерисовываем — чтобы строка «из Alfa» ожила
     if(!_realStore){ _realLoadStore().then(()=>{ if(_rukSec==="pokaz") { const b=document.getElementById("rukBody"); if(b) b.innerHTML=_pokazHtml(); } }).catch(()=>{}); }
@@ -10563,6 +10567,117 @@ function _pokazAlfaMonth(i){
   Object.keys(_realStore).forEach(k=>{ if(k.indexOf(pref)!==0) return; const r=_realStore[k]; p+=(+r.present||0); a+=(+r.all||0); n++; });
   return n?((p+a)/2):null;
 }
+/* ---- РЕЙТИНГ ПЕДАГОГОВ (из Alfa) ----
+   Считается из тех же дневных снимков реализации: там копится разбивка по педагогам
+   (уроки, минуты, посещения, выручка). ЗП вписывается вручную — в Alfa её нет. */
+let _ratFrom=null, _ratTo=null, _ratBusy=false;
+function _ratRange(){
+  if(!_ratFrom||!_ratTo){
+    const P=_rukPokaz(); const y0=parseInt(String(P.curYear).slice(0,4),10)||new Date().getFullYear();
+    _ratFrom=_ratFrom||(y0+"-09-01"); _ratTo=_ratTo||_todayIso();
+  }
+  return [_ratFrom,_ratTo];
+}
+function ratSet(which,v){ if(which==="from") _ratFrom=v; else _ratTo=v; const b=document.getElementById("rukBody"); if(b) b.innerHTML=_ratingHtml(); }
+function _ratZp(){ if(!S.rukZp) S.rukZp={}; return S.rukZp; }
+function ratZpSet(id,val){ const Z=_ratZp(); const n=parseFloat(String(val).replace(",","."))||0;
+  if(n) Z[id]=n; else delete Z[id];
+  persistLocal(); if(typeof fbSchedulePush==="function") fbSchedulePush();
+  const b=document.getElementById("rukBody"); if(b) b.innerHTML=_ratingHtml(); }
+function _ratTeacherName(id){
+  const t=(typeof _pubRefList==="function")?_pubRefList("teachers").find(x=>+x.id===+id):null;
+  return t?t.name:("Педагог #"+id);
+}
+function _ratingHtml(){
+  const R=_ratRange(), from=R[0], to=R[1];
+  const store=_realStore||{};
+  const agg={}; let days=0;
+  Object.keys(store).forEach(d=>{
+    if(d<from||d>to) return;
+    const bt=store[d].byTeacher; if(!bt||!Object.keys(bt).length) return;
+    days++;
+    Object.keys(bt).forEach(tid=>{
+      const v=bt[tid]; if(!agg[tid]) agg[tid]={lessons:0,minutes:0,seats:0,revenue:0};
+      agg[tid].lessons+=+v.lessons||0; agg[tid].minutes+=+v.minutes||0;
+      agg[tid].seats+=+v.seats||0; agg[tid].revenue+=+v.revenue||0;
+    });
+  });
+  const Z=_ratZp();
+  const rows=Object.keys(agg).map(tid=>{
+    const a=agg[tid], zp=+(Z[tid]||0), hours=a.minutes/60;
+    return {tid:tid, name:_ratTeacherName(tid), lessons:a.lessons, minutes:a.minutes, seats:a.seats, revenue:a.revenue, hours:hours,
+      perLesson:(a.lessons?a.revenue/a.lessons:0), perHour:(hours?a.revenue/hours:0), perKid:(a.seats?a.revenue/a.seats:0),
+      zp:zp, left:a.revenue-zp, zpPct:(a.revenue?100*zp/a.revenue:0)};
+  }).sort((x,y)=>y.revenue-x.revenue);
+  const head=`<div class="callout" style="margin-bottom:10px;font-size:12px">Считается из проведённых занятий Alfa за период: уроки, часы нагрузки, посещения детей и выручка (сумма списаний). <b>ЗП</b> впишите вручную — в Alfa её нет; тогда посчитаются остаток и % ЗП от оборота.</div>
+  <div class="hd-actions" style="margin-bottom:10px">
+    <label style="font-size:13px">с <input type="date" class="cell" style="width:auto" value="${esc(from)}" onchange="ratSet('from',this.value)"></label>
+    <label style="font-size:13px">по <input type="date" class="cell" style="width:auto" value="${esc(to)}" onchange="ratSet('to',this.value)"></label>
+    <button class="btn sm" id="ratBtn" onclick="ratPull()">🔄 Посчитать период из Alfa</button>
+    <span id="ratProg" style="font-size:12px;color:var(--muted)">${days?("дней с данными: "+days):""}</span>
+  </div>`;
+  if(!rows.length) return head+`<div class="callout">За период нет посчитанных дней. Нажмите «Посчитать период из Alfa» — он пройдёт по дням и соберёт статистику (дальше её копит cron сам).</div>`;
+  let tL=0,tH=0,tS=0,tR=0,tZ=0;
+  const trs=rows.map((r,i)=>{ tL+=r.lessons; tH+=r.hours; tS+=r.seats; tR+=r.revenue; tZ+=r.zp;
+    return `<tr>
+      <td style="text-align:center;color:var(--muted)">${i+1}</td>
+      <td><b>${esc(r.name)}</b></td>
+      <td style="text-align:center">${r.lessons}</td>
+      <td style="text-align:center">${r.hours.toFixed(1)}</td>
+      <td style="text-align:center">${r.seats}</td>
+      <td style="text-align:right"><b style="color:var(--green)">${_gm(r.revenue)}</b></td>
+      <td style="text-align:right">${_gm(r.perLesson)}</td>
+      <td style="text-align:right">${_gm(r.perHour)}</td>
+      <td style="text-align:right">${r.perKid.toFixed(1)}</td>
+      <td style="text-align:right"><input class="cell" type="number" step="0.01" style="width:92px;text-align:right;font-size:12px" value="${r.zp||''}" placeholder="—" onchange="ratZpSet('${_jsStr(r.tid)}',this.value)"></td>
+      <td style="text-align:right">${r.zp?_gm(r.left):'<span style="color:var(--muted)">—</span>'}</td>
+      <td style="text-align:right">${r.zp?('<b style="color:'+(r.zpPct>40?'var(--red)':(r.zpPct>30?'#C9922E':'var(--green)'))+'">'+r.zpPct.toFixed(0)+'%</b>'):'<span style="color:var(--muted)">—</span>'}</td>
+    </tr>`;
+  }).join("");
+  return head+`<div class="tscroll"><table><thead><tr>
+    <th>#</th><th style="text-align:left">Педагог</th>
+    <th title="Проведённых занятий">Уроков</th><th title="Часы нагрузки">Часов</th>
+    <th title="Посещений детей за период">Детей</th>
+    <th style="text-align:right">Выручка</th>
+    <th style="text-align:right" title="Выручка одного занятия">За урок</th>
+    <th style="text-align:right" title="Выручка за час нагрузки">За час</th>
+    <th style="text-align:right" title="Выручка с одного посещения">С ребёнка</th>
+    <th style="text-align:right">ЗП</th><th style="text-align:right">Остаток</th><th style="text-align:right">% ЗП</th>
+  </tr></thead><tbody>${trs}
+    <tr style="border-top:2px solid var(--line)"><td></td><td><b>Итого (${rows.length})</b></td>
+      <td style="text-align:center"><b>${tL}</b></td><td style="text-align:center"><b>${tH.toFixed(1)}</b></td>
+      <td style="text-align:center"><b>${tS}</b></td>
+      <td style="text-align:right"><b style="color:var(--green)">${_gm(tR)}</b></td>
+      <td></td><td></td><td></td>
+      <td style="text-align:right"><b>${tZ?_gm(tZ):'—'}</b></td>
+      <td style="text-align:right"><b>${tZ?_gm(tR-tZ):'—'}</b></td>
+      <td style="text-align:right"><b>${(tZ&&tR)?((100*tZ/tR).toFixed(0)+'%'):'—'}</b></td></tr>
+  </tbody></table></div>
+  <div style="font-size:12px;color:var(--muted);margin-top:8px">«Детей» — количество посещений за период (один ребёнок на 10 занятиях = 10). Дальше данные копятся сами: cron считает каждый день в 22:00.</div>`;
+}
+/* пройти период по дням и собрать статистику (дальше её копит cron) */
+async function ratPull(){
+  if(_ratBusy) return;
+  const R=_ratRange(), from=R[0], to=R[1];
+  const dates=[]; const d0=new Date(from), d1=new Date(to);
+  for(let d=new Date(d0); d<=d1; d.setDate(d.getDate()+1)){ const k=_dIso(d); if(k<=_todayIso()) dates.push(k); }
+  if(!dates.length){ toast("Пустой период"); return; }
+  if(dates.length>120 && !confirm("Период "+dates.length+" дней — это займёт несколько минут. Продолжить?")) return;
+  const btn=document.getElementById("ratBtn"), prog=document.getElementById("ratProg");
+  _ratBusy=true; if(btn) btn.disabled=true;
+  try{
+    _realStore=_realStore||{};
+    for(let i=0;i<dates.length;i+=5){
+      if(prog) prog.textContent="Считаю… "+Math.min(i+5,dates.length)+"/"+dates.length;
+      const j=await _pubCall("realizationPull",{dates:dates.slice(i,i+5)});
+      Object.assign(_realStore, j.updated||{});
+    }
+    if(prog) prog.textContent="Готово ✓";
+    const b=document.getElementById("rukBody"); if(b) b.innerHTML=_ratingHtml();
+  }catch(e){ const b=document.getElementById("rukBody"); if(b){ const x=document.createElement('div'); x.innerHTML=_pubErrHtml(e,"рейтинг педагогов"); b.insertBefore(x.firstChild,b.firstChild); } }
+  finally{ _ratBusy=false; if(btn) btn.disabled=false; }
+}
+
 /* ---- Прогноз по всем: недели учебного года, план — руками, факт — из Alfa ---- */
 function _rukProg(){ if(!S.rukProg) S.rukProg={plans:{}}; if(!S.rukProg.plans) S.rukProg.plans={}; return S.rukProg; }
 function _progSave(){ persistLocal(); if(typeof fbSchedulePush==="function") fbSchedulePush(); }
