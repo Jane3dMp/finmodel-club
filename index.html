@@ -10584,6 +10584,28 @@ function ratZpSet(id,val){ const Z=_ratZp(); const n=parseFloat(String(val).repl
   if(n) Z[id]=n; else delete Z[id];
   persistLocal(); if(typeof fbSchedulePush==="function") fbSchedulePush();
   const b=document.getElementById("rukBody"); if(b) b.innerHTML=_ratingHtml(); }
+/* ЗП по справочнику ставок финмодели: у нас есть каждое занятие (курс + сколько детей пришло),
+   поэтому считаем точно по сетке, а не по усреднённой ставке. Ставки в Alfa через API недоступны
+   (проверено: все эндпоинты 404), но для расчёта они и не нужны. */
+function _ratSubjToCourse(){
+  const m=(_pubMap().subj)||{}, out={};
+  Object.keys(m).forEach(course=>{ const sid=+m[course]||0; if(sid) out[sid]=course; });
+  return out;
+}
+function _ratWage(rows){
+  // rows: {"subjectId|детей|минуты": сколько таких занятий}
+  if(!rows) return null;
+  const map=_ratSubjToCourse(); let sum=0, known=0, unknown=0;
+  Object.keys(rows).forEach(k=>{
+    const p=k.split("|"), sid=+p[0]||0, kids=+p[1]||0, cnt=+rows[k]||0;
+    const course=map[sid];
+    if(!course){ unknown+=cnt; return; }
+    const rate=(typeof wageForLesson==="function")?wageForLesson(course, kids):0;
+    if(!rate){ unknown+=cnt; return; }
+    sum+=rate*cnt; known+=cnt;
+  });
+  return {sum:Math.round(sum*100)/100, known:known, unknown:unknown};
+}
 function _ratTeacherName(id){
   const t=(typeof _pubRefList==="function")?_pubRefList("teachers").find(x=>+x.id===+id):null;
   return t?t.name:("Педагог #"+id);
@@ -10597,19 +10619,21 @@ function _ratingHtml(){
     const bt=store[d].byTeacher; if(!bt||!Object.keys(bt).length) return;
     days++;
     Object.keys(bt).forEach(tid=>{
-      const v=bt[tid]; if(!agg[tid]) agg[tid]={lessons:0,minutes:0,seats:0,revenue:0};
+      const v=bt[tid]; if(!agg[tid]) agg[tid]={lessons:0,minutes:0,seats:0,revenue:0,rows:{}};
       agg[tid].lessons+=+v.lessons||0; agg[tid].minutes+=+v.minutes||0;
       agg[tid].seats+=+v.seats||0; agg[tid].revenue+=+v.revenue||0;
+      Object.keys(v.rows||{}).forEach(k=>{ agg[tid].rows[k]=(agg[tid].rows[k]||0)+(+v.rows[k]||0); });
     });
   });
   const Z=_ratZp();
   const rows=Object.keys(agg).map(tid=>{
-    const a=agg[tid], zp=+(Z[tid]||0), hours=a.minutes/60;
-    return {tid:tid, name:_ratTeacherName(tid), lessons:a.lessons, minutes:a.minutes, seats:a.seats, revenue:a.revenue, hours:hours,
+    const a=agg[tid], calc=_ratWage(a.rows), zpMan=+(Z[tid]||0);
+    const zp=zpMan||((calc&&calc.sum)?calc.sum:0), hours=a.minutes/60;
+    return {tid:tid, name:_ratTeacherName(tid), calc:calc, zpMan:zpMan, lessons:a.lessons, minutes:a.minutes, seats:a.seats, revenue:a.revenue, hours:hours,
       perLesson:(a.lessons?a.revenue/a.lessons:0), perHour:(hours?a.revenue/hours:0), perKid:(a.seats?a.revenue/a.seats:0),
       zp:zp, left:a.revenue-zp, zpPct:(a.revenue?100*zp/a.revenue:0)};
   }).sort((x,y)=>y.revenue-x.revenue);
-  const head=`<div class="callout" style="margin-bottom:10px;font-size:12px">Считается из проведённых занятий Alfa за период: уроки, часы нагрузки, посещения детей и выручка (сумма списаний). <b>ЗП</b> впишите вручную — в Alfa её нет; тогда посчитаются остаток и % ЗП от оборота.</div>
+  const head=`<div class="callout" style="margin-bottom:10px;font-size:12px">Считается из проведённых занятий Alfa за период: уроки, часы нагрузки, посещения детей и выручка (сумма списаний). <b>ЗП</b> считается по вашему справочнику ставок (курс × число пришедших детей на каждом занятии) — в Alfa ставки через API недоступны, но нам они и не нужны. Можно вписать свою сумму, она перебьёт расчёт.</div>
   <div class="hd-actions" style="margin-bottom:10px">
     <label style="font-size:13px">с <input type="date" class="cell" style="width:auto" value="${esc(from)}" onchange="ratSet('from',this.value)"></label>
     <label style="font-size:13px">по <input type="date" class="cell" style="width:auto" value="${esc(to)}" onchange="ratSet('to',this.value)"></label>
@@ -10630,7 +10654,8 @@ function _ratingHtml(){
       <td style="text-align:right">${_gm(r.perLesson)}</td>
       <td style="text-align:right">${_gm(r.perHour)}</td>
       <td style="text-align:right">${r.perKid.toFixed(1)}</td>
-      <td style="text-align:right"><input class="cell" type="number" step="0.01" style="width:92px;text-align:right;font-size:12px" value="${r.zp||''}" placeholder="—" onchange="ratZpSet('${_jsStr(r.tid)}',this.value)"></td>
+      <td style="text-align:right">${(r.calc&&r.calc.sum)?`<div style="font-size:11px;color:var(--terra-d)" title="По вашему справочнику ставок${r.calc.unknown?(' · без ставки занятий: '+r.calc.unknown):''}">по сетке ${_gm(r.calc.sum)}</div>`:''}
+        <input class="cell" type="number" step="0.01" style="width:92px;text-align:right;font-size:12px" value="${r.zpMan||''}" placeholder="${(r.calc&&r.calc.sum)?_gm(r.calc.sum):'—'}" title="Своя сумма перебивает расчёт по сетке" onchange="ratZpSet('${_jsStr(r.tid)}',this.value)"></td>
       <td style="text-align:right">${r.zp?_gm(r.left):'<span style="color:var(--muted)">—</span>'}</td>
       <td style="text-align:right">${r.zp?('<b style="color:'+(r.zpPct>40?'var(--red)':(r.zpPct>30?'#C9922E':'var(--green)'))+'">'+r.zpPct.toFixed(0)+'%</b>'):'<span style="color:var(--muted)">—</span>'}</td>
     </tr>`;

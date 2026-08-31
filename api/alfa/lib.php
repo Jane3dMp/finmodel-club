@@ -388,7 +388,7 @@ function alfa_realization_day(string $date, ?array $branchFilter = null): array 
                 if ($tf && $tt && $tt > $tf) $mins = (int)round(($tt - $tf) / 60);
                 $les[] = ['branch' => (int)$bid, 'id' => (int)($ls['id'] ?? 0), 'done' => ($st === 3),
                           'teachers' => array_values(array_map('intval', (array)($ls['teacher_ids'] ?? []))),
-                          'minutes' => $mins,
+                          'minutes' => $mins, 'subject' => (int)($ls['subject_id'] ?? 0),
                           'cids' => array_values(array_map('intval', (array)($ls['customer_ids'] ?? [])))];
             }
             if (count($items) < $PER) break;
@@ -397,7 +397,7 @@ function alfa_realization_day(string $date, ?array $branchFilter = null): array 
     }
     $present = 0.0; $all = 0.0; $nPresent = 0; $nAll = 0; $processed = 0; $noDet = 0;
     $planned = 0.0; $nPlanned = 0; $plannedLessons = 0; $doneLessons = 0;
-    $sampleDetail = null; $samplePlanned = null; $cache = []; $byBranch = []; $byTeacher = [];
+    $sampleDetail = null; $samplePlanned = null; $cache = []; $byBranch = []; $byTeacher = []; $wageRows = [];
     foreach ($les as $L) {
         $bid = (int)$L['branch'];
         if (!isset($byBranch[$bid])) $byBranch[$bid] = ['present' => 0.0, 'all' => 0.0, 'lessons' => 0];
@@ -412,6 +412,16 @@ function alfa_realization_day(string $date, ?array $branchFilter = null): array 
         $found = null; foreach ($cache[$ck] as $x) { if ((int)($x['id'] ?? 0) === $L['id']) { $found = $x; break; } }
         if (!$found) { $noDet++; continue; }
         $processed++;
+        // сколько детей реально пришло на это занятие — нужно для расчёта ЗП по сетке ставок
+        if ($L['done']) {
+            $att = 0;
+            foreach ((array)($found['details'] ?? []) as $d2) { if (is_array($d2) && !empty($d2['is_attend'])) $att++; }
+            foreach (($L['teachers'] ?? []) as $tid0) {
+                if (!isset($wageRows[$tid0])) $wageRows[$tid0] = [];
+                $k2 = ((int)$L['subject']) . '|' . $att . '|' . ((int)$L['minutes']);
+                $wageRows[$tid0][$k2] = ($wageRows[$tid0][$k2] ?? 0) + 1;
+            }
+        }
         foreach ((array)($found['details'] ?? []) as $dt) {
             if (!is_array($dt)) continue;
             $c = (float)($dt['commission'] ?? 0);
@@ -465,6 +475,7 @@ function alfa_realization_day(string $date, ?array $branchFilter = null): array 
     }
     foreach ($byBranch as &$b) { $b['present'] = round($b['present'], 2); $b['all'] = round($b['all'], 2); } unset($b);
     foreach ($byTeacher as &$t) { unset($t['_les']); $t['revenue'] = round($t['revenue'], 2); } unset($t);
+    foreach ($wageRows as $tid0 => $rows0) { if (isset($byTeacher[$tid0])) $byTeacher[$tid0]['rows'] = $rows0; }
     return ['date' => $date, 'lessons' => $doneLessons, 'plannedLessons' => $plannedLessons, 'byTeacher' => $byTeacher,
             'perBranch' => $perBranch, 'statusHist' => $statusHist,
             'branchesUsed' => array_values($branches), 'branchNames' => alfa_branch_names(), 'byBranch' => $byBranch,
