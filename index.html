@@ -10593,18 +10593,23 @@ function _ratSubjToCourse(){
   return out;
 }
 function _ratWage(rows){
-  // rows: {"subjectId|детей|минуты": сколько таких занятий}
+  /* rows: {"subjectId|детей|минуты": сколько таких занятий}
+     Делим ЗП на две части, как в справочнике («база на 4 детей + надбавка за каждого следующего»):
+       ставка = база курса (при 4 детях) × занятий  — «голая» ЗП;
+       KPI    = всё, что сверх базы за наполняемость. */
   if(!rows) return null;
-  const map=_ratSubjToCourse(); let sum=0, known=0, unknown=0;
+  const map=_ratSubjToCourse(); let base=0, kpi=0, known=0, unknown=0, lessons=0;
   Object.keys(rows).forEach(k=>{
     const p=k.split("|"), sid=+p[0]||0, kids=+p[1]||0, cnt=+rows[k]||0;
     const course=map[sid];
     if(!course){ unknown+=cnt; return; }
     const rate=(typeof wageForLesson==="function")?wageForLesson(course, kids):0;
     if(!rate){ unknown+=cnt; return; }
-    sum+=rate*cnt; known+=cnt;
+    const b=(typeof wageForLesson==="function")?wageForLesson(course, 4):rate;   // база = 4 ребёнка
+    base+=b*cnt; kpi+=Math.max(0, rate-b)*cnt; known+=cnt; lessons+=cnt;
   });
-  return {sum:Math.round(sum*100)/100, known:known, unknown:unknown};
+  const r2=x=>Math.round(x*100)/100;
+  return {base:r2(base), kpi:r2(kpi), sum:r2(base+kpi), known:known, unknown:unknown, lessons:lessons};
 }
 function _ratTeacherName(id){
   const t=(typeof _pubRefList==="function")?_pubRefList("teachers").find(x=>+x.id===+id):null;
@@ -10633,7 +10638,7 @@ function _ratingHtml(){
       perLesson:(a.lessons?a.revenue/a.lessons:0), perHour:(hours?a.revenue/hours:0), perKid:(a.seats?a.revenue/a.seats:0),
       zp:zp, left:a.revenue-zp, zpPct:(a.revenue?100*zp/a.revenue:0)};
   }).sort((x,y)=>y.revenue-x.revenue);
-  const head=`<div class="callout" style="margin-bottom:10px;font-size:12px">Считается из проведённых занятий Alfa за период: уроки, часы нагрузки, посещения детей и выручка (сумма списаний). <b>ЗП</b> считается по вашему справочнику ставок (курс × число пришедших детей на каждом занятии) — в Alfa ставки через API недоступны, но нам они и не нужны. Можно вписать свою сумму, она перебьёт расчёт.</div>
+  const head=`<div class="callout" style="margin-bottom:10px;font-size:12px">Считается из проведённых занятий Alfa за период: уроки, часы нагрузки, посещения детей и выручка (сумма списаний). <b>ЗП</b> считается по вашему справочнику ставок (курс × число пришедших детей на каждом занятии) — в Alfa ставки через API недоступны, но нам они и не нужны. Делится на <b>ставку</b> (база курса при 4 детях) и <b>KPI</b> — надбавку за каждого ребёнка сверх базы. Можно вписать свою сумму, она перебьёт расчёт.</div>
   <div class="hd-actions" style="margin-bottom:10px">
     <label style="font-size:13px">с <input type="date" class="cell" style="width:auto" value="${esc(from)}" onchange="ratSet('from',this.value)"></label>
     <label style="font-size:13px">по <input type="date" class="cell" style="width:auto" value="${esc(to)}" onchange="ratSet('to',this.value)"></label>
@@ -10642,8 +10647,9 @@ function _ratingHtml(){
     <span id="ratProg" style="font-size:12px;color:var(--muted)">${days?("дней с данными: "+days):""}</span>
   </div>`;
   if(!rows.length) return head+`<div class="callout">За период нет посчитанных дней. Нажмите «Посчитать период из Alfa» — он пройдёт по дням и соберёт статистику (дальше её копит cron сам).</div>`;
-  let tL=0,tH=0,tS=0,tR=0,tZ=0;
+  let tL=0,tH=0,tS=0,tR=0,tZ=0,tB=0,tK=0;
   const trs=rows.map((r,i)=>{ tL+=r.lessons; tH+=r.hours; tS+=r.seats; tR+=r.revenue; tZ+=r.zp;
+    if(r.calc){ tB+=r.calc.base||0; tK+=r.calc.kpi||0; }
     return `<tr>
       <td style="text-align:center;color:var(--muted)">${i+1}</td>
       <td><b>${esc(r.name)}</b></td>
@@ -10654,8 +10660,10 @@ function _ratingHtml(){
       <td style="text-align:right">${_gm(r.perLesson)}</td>
       <td style="text-align:right">${_gm(r.perHour)}</td>
       <td style="text-align:right">${r.perKid.toFixed(1)}</td>
-      <td style="text-align:right">${(r.calc&&r.calc.sum)?`<div style="font-size:11px;color:var(--terra-d)" title="По вашему справочнику ставок${r.calc.unknown?(' · без ставки занятий: '+r.calc.unknown):''}">по сетке ${_gm(r.calc.sum)}</div>`:''}
-        <input class="cell" type="number" step="0.01" style="width:92px;text-align:right;font-size:12px" value="${r.zpMan||''}" placeholder="${(r.calc&&r.calc.sum)?_gm(r.calc.sum):'—'}" title="Своя сумма перебивает расчёт по сетке" onchange="ratZpSet('${_jsStr(r.tid)}',this.value)"></td>
+      <td style="text-align:right">${(r.calc&&r.calc.base)?_gm(r.calc.base):'<span style="color:var(--muted)">—</span>'}</td>
+      <td style="text-align:right">${(r.calc&&r.calc.kpi)?('<b style="color:var(--terra-d)">'+_gm(r.calc.kpi)+'</b>'):'<span style="color:var(--muted)">—</span>'}</td>
+      <td style="text-align:right">${(r.calc&&r.calc.sum)?`<div style="font-size:11px;color:var(--muted)" title="Ставка + KPI${r.calc.unknown?(' · без ставки занятий: '+r.calc.unknown):''}">${_gm(r.calc.sum)}</div>`:''}
+        <input class="cell" type="number" step="0.01" style="width:88px;text-align:right;font-size:12px" value="${r.zpMan||''}" placeholder="${(r.calc&&r.calc.sum)?_gm(r.calc.sum):'—'}" title="Своя сумма перебивает расчёт" onchange="ratZpSet('${_jsStr(r.tid)}',this.value)"></td>
       <td style="text-align:right">${r.zp?_gm(r.left):'<span style="color:var(--muted)">—</span>'}</td>
       <td style="text-align:right">${r.zp?('<b style="color:'+(r.zpPct>40?'var(--red)':(r.zpPct>30?'#C9922E':'var(--green)'))+'">'+r.zpPct.toFixed(0)+'%</b>'):'<span style="color:var(--muted)">—</span>'}</td>
     </tr>`;
@@ -10668,6 +10676,8 @@ function _ratingHtml(){
     <th style="text-align:right" title="Выручка одного занятия">За урок</th>
     <th style="text-align:right" title="Выручка за час нагрузки">За час</th>
     <th style="text-align:right" title="Выручка с одного посещения">С ребёнка</th>
+    <th style="text-align:right" title="Голая ставка: база курса (4 ребёнка) × занятий">Ставка</th>
+    <th style="text-align:right" title="Надбавка за наполняемость — всё, что сверх базы">KPI</th>
     <th style="text-align:right">ЗП</th><th style="text-align:right">Остаток</th><th style="text-align:right">% ЗП</th>
   </tr></thead><tbody>${trs}
     <tr style="border-top:2px solid var(--line)"><td></td><td><b>Итого (${rows.length})</b></td>
@@ -10675,6 +10685,8 @@ function _ratingHtml(){
       <td style="text-align:center"><b>${tS}</b></td>
       <td style="text-align:right"><b style="color:var(--green)">${_gm(tR)}</b></td>
       <td></td><td></td><td></td>
+      <td style="text-align:right"><b>${tB?_gm(tB):'—'}</b></td>
+      <td style="text-align:right"><b style="color:var(--terra-d)">${tK?_gm(tK):'—'}</b></td>
       <td style="text-align:right"><b>${tZ?_gm(tZ):'—'}</b></td>
       <td style="text-align:right"><b>${tZ?_gm(tR-tZ):'—'}</b></td>
       <td style="text-align:right"><b>${(tZ&&tR)?((100*tZ/tR).toFixed(0)+'%'):'—'}</b></td></tr>
