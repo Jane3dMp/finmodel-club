@@ -1327,3 +1327,313 @@ function alfa_payments_day(string $date, ?array $branches = null): array {
     }
     return ['date' => $date, 'rows' => $rows, 'scanned' => $scanned, 'pages' => $pagesUsed];
 }
+
+/* ===================== ОТЧЁТ ДЛЯ ОТДЕЛА ПРОДАЖ (вс 22:00) =====================
+   Каждое воскресенье в 22:00 cron ЗАМОРАЖИВАЕТ цифры недели: оборот (факт), прогноз на
+   следующую неделю и число активных клиентов. Заморозка обязательна: прогноз по мере
+   проведения занятий превращается в факт (и сравнивался бы сам с собой), а активные
+   клиенты меняются каждый день — «как было в воскресенье» через неделю уже не восстановить.
+   Сам ТЕКСТ сообщения собирает клиент: рейтинг педагогов считается по справочнику ставок
+   финмодели, которого на сервере нет. Цифры при этом берутся только из этого снимка. */
+
+function alfa_sales_store_path(): string {
+    $salt = substr(hash('sha256', __DIR__ . '|salesreport'), 0, 24);
+    return alfa_store_dir() . '/salesreport_' . $salt . '.json';
+}
+function alfa_sales_read(): array {
+    $f = alfa_sales_store_path();
+    if (!is_file($f)) return ['reports' => [], 'activeLog' => [], 'settings' => []];
+    $j = json_decode((string)@file_get_contents($f), true);
+    if (!is_array($j)) $j = [];
+    $j['reports']   = is_array($j['reports']   ?? null) ? $j['reports']   : [];
+    $j['activeLog'] = is_array($j['activeLog'] ?? null) ? $j['activeLog'] : [];
+    $j['settings']  = is_array($j['settings']  ?? null) ? $j['settings']  : [];
+    return $j;
+}
+function alfa_sales_write(array $d): void {
+    $f = alfa_sales_store_path();
+    $tmp = $f . '.' . getmypid() . '.tmp';
+    $json = json_encode($d, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
+    if (@file_put_contents($tmp, $json, LOCK_EX) !== false) { @chmod($tmp, 0660); @rename($tmp, $f); }
+    else @file_put_contents($f, $json, LOCK_EX);
+}
+
+/* --- Активные клиенты ---
+   «Активный» = учащийся (is_study=1), не в архиве (removed=0), в клубных филиалах.
+   Если в Alfa этот счёт считается иначе — фильтр меняется в config: active_customer_filter. */
+function alfa_sales_active_filter(): array {
+    $f = cfg()['active_customer_filter'] ?? null;
+    return (is_array($f) && $f) ? $f : ['is_study' => 1, 'removed' => 0];
+}
+function alfa_active_count(?array $branches = null): array {
+    $branches = $branches ?: (alfa_realization_branches() ?: [alfa_branch()]);
+    $filter = alfa_sales_active_filter();
+    // один филиал — хватает total с первой страницы (один запрос вместо полутора десятков)
+    if (count($branches) === 1) {
+        $r = alfa_call_branch((int)$branches[0], 'customer', 'index', $filter + ['page' => 0, 'count' => 1]);
+        $t = (int)($r['total'] ?? 0);
+        if ($t > 0) return ['count' => $t, 'src' => 'total', 'branches' => $branches, 'filter' => $filter];
+    }
+    // несколько филиалов — листаем и дедуплицируем по id (один ребёнок бывает в двух филиалах)
+    $ids = [];
+    foreach ($branches as $bid) {
+        for ($p = 0; $p < 200; $p++) {
+            $r = alfa_call_branch((int)$bid, 'customer', 'index', $filter + ['page' => $p, 'count' => 50]);
+            $items = is_array($r['items'] ?? null) ? $r['items'] : [];
+            foreach ($items as $c) { if (isset($c['id'])) $ids[(int)$c['id']] = 1; }
+            if (count($items) < 50) break;
+        }
+    }
+    return ['count' => count($ids), 'src' => 'scan', 'branches' => $branches, 'filter' => $filter];
+}
+
+/* Доход дня: прошедший — факт (среднее без/с пропусками, как во всех разделах),
+   будущий — ожидаемые списания по расписанию Alfa. */
+function alfa_sales_day_val(array $store, string $iso, string $today): float {
+    $r = $store[$iso] ?? null;
+    if (!$r) return 0.0;
+    if ($iso <= $today) return ((float)($r['present'] ?? 0) + (float)($r['all'] ?? 0)) / 2;
+    return (float)($r['planned'] ?? 0);
+}
+/* В отчёте какого воскресенья закрывается месяц: первое вс, которое не раньше последнего дня
+   месяца. Правило детерминированное — не зависит от того, запускался ли cron. */
+function alfa_sales_month_sunday(string $ym): string {
+    $last = date('Y-m-t', strtotime($ym . '-01'));
+    $wd = (int)date('N', strtotime($last));               // 1=пн … 7=вс
+    return $wd === 7 ? $last : date('Y-m-d', strtotime('+' . (7 - $wd) . ' day', strtotime($last)));
+}
+/* Профиль дня недели: сколько ожидается в пн, вт, … Нужен для прогноза на месяц вперёд —
+   Alfa создаёт занятия только на ближайшие недели, дальше данных просто нет.
+   Берём ожидаемое по ближайшим двум неделям, чего не хватило — средний факт того же дня
+   недели за последние 4 недели. Праздники и каникулы профиль не знает (о чём написано в UI).
+   $weekTotal — недельный прогноз из «Прогноза по всем»: если он есть, профиль масштабируется
+   так, чтобы сумма за неделю равнялась ему. Иначе получилось бы два источника правды: неделя
+   считалась бы одним способом (снимок Alfa), а месяц — другим (дневное «ожидается»). */
+function alfa_sales_weekday_profile(array $store, string $fromMon, string $today, float $weekTotal = 0.0): array {
+    $prof = [];
+    for ($w = 0; $w < 2; $w++) {
+        for ($i = 0; $i < 7; $i++) {
+            $d = date('Y-m-d', strtotime('+' . ($w * 7 + $i) . ' day', strtotime($fromMon)));
+            if ($d <= $today) continue;
+            $wd = (int)date('N', strtotime($d));
+            $v = (float)($store[$d]['planned'] ?? 0);
+            if ($v > 0 && empty($prof[$wd])) $prof[$wd] = $v;
+        }
+    }
+    $hist = [];
+    for ($i = 1; $i <= 28; $i++) {
+        $d = date('Y-m-d', strtotime("-$i day", strtotime($today)));
+        $r = $store[$d] ?? null;
+        if (!$r || empty($r['lessons'])) continue;
+        $wd = (int)date('N', strtotime($d));
+        $hist[$wd][] = ((float)($r['present'] ?? 0) + (float)($r['all'] ?? 0)) / 2;
+    }
+    for ($wd = 1; $wd <= 7; $wd++) {
+        if (!empty($prof[$wd])) continue;
+        $a = $hist[$wd] ?? [];
+        $prof[$wd] = $a ? round(array_sum($a) / count($a), 2) : 0.0;
+    }
+    // подгоняем «типовую неделю» под недельный прогноз — чтобы месяц считался от той же цифры
+    $sum = array_sum($prof);
+    if ($weekTotal > 0 && $sum > 0) {
+        $k = $weekTotal / $sum;
+        foreach ($prof as $wd => $v) $prof[$wd] = round($v * $k, 2);
+    }
+    ksort($prof);
+    return $prof;
+}
+/* Прогноз на месяц: по каждому дню — факт (если день прошёл), ожидаемое из Alfa (если занятия
+   уже созданы) или профиль дня недели. Так учитывается разное число учебных дней в месяцах —
+   то самое «в сентябре учились 29 дней, в октябре 31». */
+function alfa_sales_month_forecast(string $ym, array $store, array $prof, string $today): array {
+    $days = (int)date('t', strtotime($ym . '-01'));
+    $sum = 0.0; $fFact = 0; $fPlan = 0; $fProf = 0; $studyDays = 0;
+    for ($d = 1; $d <= $days; $d++) {
+        $iso = $ym . '-' . str_pad((string)$d, 2, '0', STR_PAD_LEFT);
+        $r = $store[$iso] ?? null;
+        if ($iso <= $today) {
+            $v = $r ? (((float)($r['present'] ?? 0) + (float)($r['all'] ?? 0)) / 2) : 0.0;
+            if ($v > 0) { $sum += $v; $fFact++; $studyDays++; }
+            continue;
+        }
+        $pl = (float)($r['planned'] ?? 0);
+        if ($pl > 0) { $sum += $pl; $fPlan++; $studyDays++; continue; }
+        $v = (float)($prof[(int)date('N', strtotime($iso))] ?? 0);
+        if ($v > 0) { $sum += $v; $fProf++; $studyDays++; }
+    }
+    return ['sum' => round($sum, 2), 'days' => $days, 'studyDays' => $studyDays,
+            'fromFact' => $fFact, 'fromPlanned' => $fPlan, 'fromProfile' => $fProf];
+}
+/* Факт месяца по дневному хранилищу. */
+function alfa_sales_month_fact(string $ym, array $store, string $today): array {
+    $days = (int)date('t', strtotime($ym . '-01'));
+    $sum = 0.0; $have = 0;
+    for ($d = 1; $d <= $days; $d++) {
+        $iso = $ym . '-' . str_pad((string)$d, 2, '0', STR_PAD_LEFT);
+        $r = $store[$iso] ?? null;
+        if (!$r) continue;
+        $sum += ((float)($r['present'] ?? 0) + (float)($r['all'] ?? 0)) / 2;
+        if (!empty($r['lessons'])) $have++;
+    }
+    return ['sum' => round($sum, 2), 'daysWithLessons' => $have, 'days' => $days];
+}
+/* Медиана «факт ÷ прогноз» по прошлым неделям — по ней предлагаем реалистичное «идём на»
+   (прогноз всегда оптимистичнее факта: часть детей не приходит и списание не проходит). */
+function alfa_sales_ratio(array $reports, int $limit = 8): float {
+    $keys = array_keys($reports); sort($keys);
+    $r = [];
+    foreach (array_reverse($keys) as $k) {
+        $rep = $reports[$k];
+        $f = (float)($rep['fact'] ?? 0);
+        $p = (float)($rep['prevForecast'] ?? 0);          // прогноз, который делали НА эту неделю
+        if ($f > 0 && $p > 0) $r[] = $f / $p;
+        if (count($r) >= $limit) break;
+    }
+    if (!$r) return 0.9;
+    sort($r);
+    $n = count($r);
+    $m = ($n % 2) ? $r[(int)(($n - 1) / 2)] : (($r[$n / 2 - 1] + $r[$n / 2]) / 2);
+    return max(0.5, min(1.2, $m));
+}
+/* Собрать (и сохранить) отчёт за неделю, которая заканчивается в $runDate (обычно — вс).
+   $deep=true: пересчитать дни недели из Alfa и зафиксировать прогноз на следующую неделю. */
+function alfa_sales_build(string $runDate, ?array $branches = null, bool $deep = true): array {
+    $branches = $branches ?: alfa_realization_branches();
+    $run   = alfa_iso($runDate);
+    $mon   = alfa_monday_of($run);
+    $sun   = date('Y-m-d', strtotime('+6 day', strtotime($mon)));
+    $nMon  = date('Y-m-d', strtotime('+7 day', strtotime($mon)));
+    $today = date('Y-m-d');
+
+    // 1) факт недели пересчитываем из Alfa: посещаемость правят задним числом
+    if ($deep) {
+        for ($i = 0; $i < 7; $i++) {
+            $d = date('Y-m-d', strtotime("+$i day", strtotime($mon)));
+            if ($d > $today) break;
+            alfa_realization_upsert($d, $branches);
+        }
+    }
+    // 2) прогноз на следующую неделю — снимок (он же заполнит «ожидается» по её дням)
+    $wp = alfa_weekplan_read();
+    if ($deep && empty($wp[$nMon]['plan'])) { alfa_weekplan_snapshot($nMon, $branches); $wp = alfa_weekplan_read(); }
+
+    $sales = alfa_sales_read();
+    $reports = $sales['reports'];
+    $store = alfa_realization_store_read();
+
+    // --- неделя ---
+    $fact = 0.0; $daysWith = 0;
+    for ($i = 0; $i < 7; $i++) {
+        $d = date('Y-m-d', strtotime("+$i day", strtotime($mon)));
+        $fact += alfa_sales_day_val($store, $d, $today);
+        if (!empty($store[$d]['lessons'])) $daysWith++;
+    }
+    $fact = round($fact, 2);
+
+    $nf = round((float)($wp[$nMon]['plan'] ?? 0), 2); $nfSrc = 'snapshot';
+    if ($nf <= 0) {
+        $nfSrc = 'planned'; $nf = 0.0;
+        for ($i = 0; $i < 7; $i++) {
+            $d = date('Y-m-d', strtotime("+$i day", strtotime($nMon)));
+            $nf += (float)($store[$d]['planned'] ?? 0);
+        }
+        $nf = round($nf, 2);
+    }
+
+    // предыдущий отчёт: из него «шли на» (что обещали на эту неделю) и прошлое число клиентов
+    $prevKey = ''; foreach (array_keys($reports) as $k) { if ($k < $mon && $k > $prevKey) $prevKey = (string)$k; }
+    $prev = $prevKey !== '' ? $reports[$prevKey] : null;
+    $goal = $prev ? (float)($prev['man']['nextGoal'] ?? 0) : 0.0;
+    $goalSrc = $goal > 0 ? 'prev' : '';
+    // если цель руками не вписали — берём ту, что предлагали в прошлом отчёте (она и уходила в чат)
+    if ($goal <= 0 && $prev) { $goal = (float)($prev['next']['suggest'] ?? 0); $goalSrc = $goal > 0 ? 'suggest' : ''; }
+    if ($goal <= 0) { $goal = round((float)($wp[$mon]['plan'] ?? 0), 2); $goalSrc = $goal > 0 ? 'snapshot' : ''; }
+    // прогноз, который делали НА эту неделю — нужен для медианы «факт ÷ прогноз»
+    $prevForecast = $prev ? (float)($prev['next']['forecast'] ?? 0) : round((float)($wp[$mon]['plan'] ?? 0), 2);
+
+    // --- активные клиенты ---
+    $act = ['count' => 0, 'src' => 'skip'];
+    try { $act = alfa_active_count($branches); } catch (Throwable $e) { $act['err'] = $e->getMessage(); }
+    $log = $sales['activeLog']; if ((int)$act['count'] > 0) $log[$run] = (int)$act['count'];
+    $actPrev = $prev ? (int)($prev['active'] ?? 0) : 0;
+
+    // --- месяц, если он закрылся этим воскресеньем ---
+    $month = null;
+    $cands = [date('Y-m', strtotime($run)), date('Y-m', strtotime('-1 month', strtotime(date('Y-m-15', strtotime($run)))))];
+    foreach ($cands as $ym) {
+        if (alfa_sales_month_sunday($ym) !== $sun) continue;
+        $mf  = alfa_sales_month_fact($ym, $store, $today);
+        $nYm = date('Y-m', strtotime('+1 month', strtotime($ym . '-15')));
+        // профиль подогнан под недельный прогноз $nf — месяц и неделя считаются от одной цифры
+        $prof = alfa_sales_weekday_profile($store, $nMon, $today, $nf);
+        $nfc = alfa_sales_month_forecast($nYm, $store, $prof, $today);
+        // «шли на» по месяцу и прошлое число клиентов — из последнего отчёта с месячным блоком
+        $mGoal = 0.0; $mActPrev = 0;
+        foreach (array_reverse(array_keys($reports)) as $k) {
+            $pm = $reports[$k]['month']['ym'] ?? '';
+            if ($pm === '' || $pm === $ym) continue;
+            $mGoal = (float)($reports[$k]['man']['monthNextGoal'] ?? 0);
+            if ($mGoal <= 0) $mGoal = (float)($reports[$k]['month']['suggest'] ?? 0);
+            $mActPrev = (int)($reports[$k]['active'] ?? 0);
+            break;
+        }
+        $month = ['ym' => $ym, 'fact' => $mf['sum'], 'daysWithLessons' => $mf['daysWithLessons'],
+                  'goal' => $mGoal, 'nextYm' => $nYm, 'forecast' => $nfc['sum'],
+                  'nextDays' => $nfc['days'], 'nextStudyDays' => $nfc['studyDays'],
+                  'src' => ['fact' => $nfc['fromFact'], 'planned' => $nfc['fromPlanned'], 'profile' => $nfc['fromProfile']],
+                  'activePrev' => $mActPrev];
+        break;
+    }
+
+    $ratio = alfa_sales_ratio($reports);
+    $suggest  = $nf > 0 ? floor($nf * $ratio / 100) * 100 : 0;
+    $mSuggest = ($month && $month['forecast'] > 0) ? floor($month['forecast'] * $ratio / 1000) * 1000 : 0;
+
+    $old = $reports[$mon] ?? [];
+    $rep = [
+        'week' => $mon, 'to' => $sun, 'runAt' => $run,
+        'fact' => $fact, 'daysWithLessons' => $daysWith,
+        'goal' => $goal, 'goalSrc' => $goalSrc, 'prevForecast' => round((float)$prevForecast, 2),
+        'next' => ['week' => $nMon, 'forecast' => $nf, 'src' => $nfSrc, 'suggest' => $suggest],
+        'active' => (int)$act['count'], 'activePrev' => $actPrev,
+        'activeSrc' => (string)$act['src'] . (isset($act['err']) ? (': ' . $act['err']) : ''),
+        'ratio' => round($ratio, 4),
+        'month' => $month,
+        // ручные поля (что вписала Жанна) переживают пересборку
+        'man' => is_array($old['man'] ?? null) ? $old['man'] : [],
+        'ts' => date('c'),
+    ];
+    if ($month && $mSuggest > 0) $rep['month']['suggest'] = $mSuggest;
+
+    $reports[$mon] = $rep;
+    ksort($reports);
+    if (count($reports) > 120) $reports = array_slice($reports, -120, null, true);
+    ksort($log);
+    if (count($log) > 200) $log = array_slice($log, -200, null, true);
+    $sales['reports'] = $reports; $sales['activeLog'] = $log;
+    $sales['settings']['lastRun'] = date('c');
+    alfa_sales_write($sales);
+    return $rep;
+}
+/* Сохранить ручные поля отчёта («идём на», комментарий). Пересборка их не затирает. */
+function alfa_sales_set_manual(string $week, array $man): array {
+    $sales = alfa_sales_read();
+    $key = alfa_monday_of($week);
+    if (!isset($sales['reports'][$key])) return ['ok' => false, 'error' => 'Отчёта за эту неделю ещё нет'];
+    $cur = is_array($sales['reports'][$key]['man'] ?? null) ? $sales['reports'][$key]['man'] : [];
+    foreach (['nextGoal', 'monthNextGoal', 'nextForecast', 'monthForecast'] as $f) {
+        if (array_key_exists($f, $man)) {
+            $v = (float)$man[$f];
+            if ($v > 0) $cur[$f] = round($v, 2); else unset($cur[$f]);
+        }
+    }
+    foreach (['note', 'monthNote'] as $f) {
+        if (array_key_exists($f, $man)) {
+            $v = trim((string)$man[$f]);
+            if ($v !== '') $cur[$f] = mb_substr($v, 0, 2000); else unset($cur[$f]);
+        }
+    }
+    $sales['reports'][$key]['man'] = $cur;
+    alfa_sales_write($sales);
+    return ['ok' => true, 'week' => $key, 'man' => $cur];
+}

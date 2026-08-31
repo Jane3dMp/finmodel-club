@@ -1522,6 +1522,44 @@ switch ($action) {
         json_out(['ok' => true, 'updated' => $upd, 'branches' => $branches, 'branchNames' => alfa_branch_names()]);
         break;
 
+    // --- ОТЧЁТ ДЛЯ ОТДЕЛА ПРОДАЖ: прочитать замороженные снимки недель (READ) ---
+    case 'salesReport':
+        $s = alfa_sales_read();
+        json_out(['ok' => true, 'reports' => $s['reports'], 'activeLog' => $s['activeLog'],
+                  'settings' => $s['settings'], 'today' => date('Y-m-d')]);
+        break;
+
+    // --- ПЕРЕСОБРАТЬ отчёт за неделю (обычно это делает cron в вс 22:00) ---
+    //     week=YYYY-MM-DD — любая дата внутри нужной недели. Без неё — текущая неделя.
+    case 'salesReportBuild':
+        @set_time_limit(600);
+        $branches = alfa_realization_branches();
+        if (!$branches) json_out(['ok' => false, 'error' => 'Филиал «Пожарный» не найден в Alfa'], 400);
+        $wk = (string)($in['week'] ?? date('Y-m-d'));
+        // deep=false — только пересчитать цифры по уже собранным дням, не дёргая Alfa по кругу
+        $deep = !array_key_exists('deep', $in) || $in['deep'] !== false;
+        $rep = alfa_sales_build($wk, $branches, $deep);
+        $s = alfa_sales_read();
+        json_out(['ok' => true, 'report' => $rep, 'reports' => $s['reports'], 'activeLog' => $s['activeLog']]);
+        break;
+
+    // --- Сохранить ручные поля отчёта: «идём на» и комментарий ---
+    case 'salesReportSet':
+        $wk = (string)($in['week'] ?? '');
+        if ($wk === '') json_out(['ok' => false, 'error' => 'Не передана неделя'], 400);
+        $man = is_array($in['man'] ?? null) ? $in['man'] : [];
+        $r = alfa_sales_set_manual($wk, $man);
+        if (empty($r['ok'])) json_out($r, 400);
+        json_out(['ok' => true] + $r);
+        break;
+
+    // --- Сколько сейчас активных клиентов (для сверки фильтра с Alfa) ---
+    case 'activeCount':
+        @set_time_limit(120);
+        json_out(['ok' => true] + alfa_active_count(alfa_realization_branches() ?: null)
+                 + ['branchNames' => alfa_branch_names()]);
+        break;
+
     default:
         json_out(['ok' => false, 'error' => 'Неизвестное действие: ' . $action], 400);
 }

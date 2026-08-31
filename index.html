@@ -5184,9 +5184,15 @@ function lessonDurMin(les){
 /* фикс-ставка для занятия по паре (педагог, длительность) */
 function fixRateFor(les){
   if(!les || !les.teacher) return 0;
-  const fr = (S._fixRates||{})[les.teacher];
+  return fixRateByName(les.teacher, lessonDurMin(les));
+}
+/* Та же ставка, но по имени педагога и длительности в минутах — занятие не нужно.
+   Так её берут отчёты, которые считают по данным Alfa (там нет занятий модели):
+   «Рейтинг педагогов» и «Отчёт для отдела продаж». */
+function fixRateByName(name, dur){
+  const fr = (S._fixRates||{})[name];
   if(!fr) return 0;
-  const dur = lessonDurMin(les);
+  dur = +dur || 60;
   if(fr[dur]!=null && fr[dur]!=="") return +fr[dur]||0;
   const keys=Object.keys(fr).map(Number).filter(k=>fr[k]!=null && fr[k]!=="").sort((a,b)=>a-b);
   if(!keys.length) return 0;
@@ -9970,7 +9976,7 @@ function _alfaRosterPrint(){
 /* ==================== ДАШБОРД РУКОВОДИТЕЛЯ / АДМИНИСТРАТОРА (только владельцу) ====================
    Две вкладки-сводки. Строим по разделам. Первый готовый раздел — «Важные ссылки»
    (редактируемый список, синхронизируется как остальные данные модели). */
-const RUK_SECTIONS=[["links","🔗 Важные ссылки"],["pokaz","📊 Все показатели"],["god","📅 Годовые итоги"],["prognoz","🔮 Прогноз по всем"],["formula","🧮 Формула 26/27"],["rating","🏆 Рейтинг педагогов"]];
+const RUK_SECTIONS=[["links","🔗 Важные ссылки"],["sales","📣 Отчёт для отдела продаж"],["pokaz","📊 Все показатели"],["god","📅 Годовые итоги"],["prognoz","🔮 Прогноз по всем"],["formula","🧮 Формула 26/27"],["rating","🏆 Рейтинг педагогов"]];
 let _rukSec=(function(){ try{ return localStorage.getItem("rukSec")||"links"; }catch(e){ return "links"; } })();
 function rukGo(s){ _rukSec=s; try{ localStorage.setItem("rukSec",s); }catch(e){} renderRuk(); }
 function renderRuk(){
@@ -9986,6 +9992,12 @@ function renderRuk(){
   if(_rukSec==="rating"){ body.innerHTML=_ratingHtml();
     if(!_realStore){ _realLoadStore().then(()=>{ if(_rukSec==="rating"){ const b=document.getElementById("rukBody"); if(b) b.innerHTML=_ratingHtml(); } }).catch(()=>{}); }
     if(!_pubRefs){ _pubEnsureLoaded(false).then(()=>{ if(_rukSec==="rating"){ const b=document.getElementById("rukBody"); if(b) b.innerHTML=_ratingHtml(); } }).catch(()=>{}); }
+    return; }
+  if(_rukSec==="sales"){ body.innerHTML=_salesHtml();
+    // снимки отчётов + дневная реализация (для рейтинга педагогов) + имена педагогов
+    if(!_salesStore){ _salesLoad().then(_salesRefresh).catch(e=>{ _salesErr=e; _salesRefresh(); }); }
+    if(!_realStore){ _realLoadStore().then(_salesRefresh).catch(()=>{}); }
+    if(!_pubRefs){ _pubEnsureLoaded(false).then(_salesRefresh).catch(()=>{}); }
     return; }
   if(_rukSec==="pokaz"){ body.innerHTML=_pokazHtml();
     // реализацию из Alfa подгружаем один раз и перерисовываем — чтобы строка «из Alfa» ожила
@@ -10592,12 +10604,30 @@ function _ratSubjToCourse(){
   Object.keys(m).forEach(course=>{ const sid=+m[course]||0; if(sid) out[sid]=course; });
   return out;
 }
-function _ratWage(rows){
+/* Имя педагога в модели по его id в Alfa (обратное сопоставление S.alfaMap.teacher). */
+function _ratModelTeacher(tid){
+  const m=(_pubMap().teacher)||{};
+  return Object.keys(m).find(name=>String(m[name])===String(tid))||"";
+}
+function _ratWage(rows, tid){
   /* rows: {"subjectId|детей|минуты": сколько таких занятий}
      Делим ЗП на две части, как в справочнике («база на 4 детей + надбавка за каждого следующего»):
        ставка = база курса (при 4 детях) × занятий  — «голая» ЗП;
        KPI    = всё, что сверх базы за наполняемость. */
   if(!rows) return null;
+  /* Фикс-режим ЗП: ставка не зависит от числа детей, она у педагога за занятие такой
+     длительности. Без этой ветки расчёт молча уезжал бы на KPI-сетку — и в отчёт для
+     отдела продаж уходила бы неверная прибыль. */
+  if(S._wageMode==="fix"){
+    const name=_ratModelTeacher(tid); const r2=x=>Math.round(x*100)/100;
+    let sum=0, known=0, unknown=0;
+    Object.keys(rows).forEach(k=>{
+      const p=k.split("|"), mins=+p[2]||0, cnt=+rows[k]||0;
+      const rate=name?fixRateByName(name,mins):0;
+      if(rate>0){ sum+=rate*cnt; known+=cnt; } else unknown+=cnt;
+    });
+    return {base:r2(sum), kpi:0, sum:r2(sum), known:known, unknown:unknown, lessons:known+unknown, mode:"fix"};
+  }
   const map=_ratSubjToCourse(); let base=0, kpi=0, known=0, unknown=0, lessons=0;
   Object.keys(rows).forEach(k=>{
     const p=k.split("|"), sid=+p[0]||0, kids=+p[1]||0, cnt=+rows[k]||0;
@@ -10615,24 +10645,29 @@ function _ratTeacherName(id){
   const t=(typeof _pubRefList==="function")?_pubRefList("teachers").find(x=>+x.id===+id):null;
   return t?t.name:("Педагог #"+id);
 }
-function _ratingHtml(){
-  const R=_ratRange(), from=R[0], to=R[1];
-  const store=_realStore||{};
-  const agg={}; let days=0;
+/* Свод по педагогам за период из дневных снимков реализации. Общий для «Рейтинга педагогов»
+   и «Отчёта для отдела продаж» — чтобы обе таблицы считались из одного источника. */
+function _ratAgg(from,to){
+  const store=_realStore||{}, byTeacher={}; let days=0;
   Object.keys(store).forEach(d=>{
     if(d<from||d>to) return;
     const bt=store[d].byTeacher; if(!bt||!Object.keys(bt).length) return;
     days++;
     Object.keys(bt).forEach(tid=>{
-      const v=bt[tid]; if(!agg[tid]) agg[tid]={lessons:0,minutes:0,seats:0,revenue:0,rows:{}};
-      agg[tid].lessons+=+v.lessons||0; agg[tid].minutes+=+v.minutes||0;
-      agg[tid].seats+=+v.seats||0; agg[tid].revenue+=+v.revenue||0;
-      Object.keys(v.rows||{}).forEach(k=>{ agg[tid].rows[k]=(agg[tid].rows[k]||0)+(+v.rows[k]||0); });
+      const v=bt[tid]; if(!byTeacher[tid]) byTeacher[tid]={lessons:0,minutes:0,seats:0,revenue:0,rows:{}};
+      byTeacher[tid].lessons+=+v.lessons||0; byTeacher[tid].minutes+=+v.minutes||0;
+      byTeacher[tid].seats+=+v.seats||0; byTeacher[tid].revenue+=+v.revenue||0;
+      Object.keys(v.rows||{}).forEach(k=>{ byTeacher[tid].rows[k]=(byTeacher[tid].rows[k]||0)+(+v.rows[k]||0); });
     });
   });
+  return {byTeacher:byTeacher, days:days};
+}
+function _ratingHtml(){
+  const R=_ratRange(), from=R[0], to=R[1];
+  const A=_ratAgg(from,to), agg=A.byTeacher, days=A.days;
   const Z=_ratZp();
   const rows=Object.keys(agg).map(tid=>{
-    const a=agg[tid], calc=_ratWage(a.rows), zpMan=+(Z[tid]||0);
+    const a=agg[tid], calc=_ratWage(a.rows, tid), zpMan=+(Z[tid]||0);
     const zp=zpMan||((calc&&calc.sum)?calc.sum:0), hours=a.minutes/60;
     return {tid:tid, name:_ratTeacherName(tid), calc:calc, zpMan:zpMan, lessons:a.lessons, minutes:a.minutes, seats:a.seats, revenue:a.revenue, hours:hours,
       perLesson:(a.lessons?a.revenue/a.lessons:0), perHour:(hours?a.revenue/hours:0), perKid:(a.seats?a.revenue/a.seats:0),
@@ -10838,6 +10873,246 @@ async function ratPull(){
     const b=document.getElementById("rukBody"); if(b) b.innerHTML=_ratingHtml();
   }catch(e){ const b=document.getElementById("rukBody"); if(b){ const x=document.createElement('div'); x.innerHTML=_pubErrHtml(e,"рейтинг педагогов"); b.insertBefore(x.firstChild,b.firstChild); } }
   finally{ _ratBusy=false; if(btn) btn.disabled=false; }
+}
+
+/* ---- ОТЧЁТ ДЛЯ ОТДЕЛА ПРОДАЖ ----
+   Каждое воскресенье в 22:00 cron на сервере замораживает цифры недели (оборот, прогноз
+   на следующую неделю, активных клиентов) — иначе их не восстановить: прогноз по мере
+   проведения занятий превращается в факт, а число клиентов меняется каждый день.
+   Здесь из этого снимка собирается готовый текст сообщения в чат отдела продаж.
+   Рейтинг педагогов считается уже тут — по справочнику ставок финмодели (на сервере его нет). */
+let _salesStore=null, _salesWeek=null, _salesBusy=false, _salesErr=null;
+async function _salesLoad(){ const j=await _pubCall("salesReport",{}); _salesStore=j; _salesErr=null; }
+function _salesReports(){ return (_salesStore&&_salesStore.reports)||{}; }
+function _salesCfg(){
+  if(!S.salesCfg) S.salesCfg={};
+  const c=S.salesCfg;
+  if(!c.metric) c.metric="profit";            // по прибыли (выручка − ЗП) или по выручке
+  if(!c.top) c.top=10;                        // сколько педагогов в каждом рейтинге
+  if(c.minLessons==null) c.minLessons=4;      // порог для рейтинга «за одно занятие»
+  return c;
+}
+function salesCfgSet(k,v){ const c=_salesCfg();
+  if(k==="metric") c.metric=v; else c[k]=Math.max(0,parseInt(v,10)||0);
+  persistLocal(); if(typeof fbSchedulePush==="function") fbSchedulePush(); _salesRefresh(); }
+/* Числа как в сообщениях Жанны: 22.578, 102.117 (точка — разделитель тысяч). */
+function _salesNum(n){ return Math.round(+n||0).toLocaleString('ru-RU').replace(/[\s  ]/g,'.'); }
+function _salesRefresh(){ if(_rukSec!=="sales") return; const b=document.getElementById("rukBody"); if(b) b.innerHTML=_salesHtml(); }
+function salesGo(w){ _salesWeek=w||null; _salesRefresh(); }
+/* Последний (или выбранный) отчёт. */
+function _salesCur(){
+  const R=_salesReports(), keys=Object.keys(R).sort();
+  if(!keys.length) return null;
+  const k=(_salesWeek && R[_salesWeek])?_salesWeek:keys[keys.length-1];
+  return Object.assign({},R[k],{key:k});
+}
+function _salesDate(iso){ const z=n=>String(n).padStart(2,'0'); const d=new Date(iso); return z(d.getDate())+'.'+z(d.getMonth()+1); }
+function _salesMonName(ym){ const m=parseInt(String(ym).slice(5,7),10)||1; return (_RU_MON[m-1]||"")+" "+String(ym).slice(0,4); }
+
+/* --- РЕЙТИНГ ПЕДАГОГОВ за период (из тех же дневных снимков, что и «Рейтинг педагогов») --- */
+function _salesTops(from,to){
+  const agg=_ratAgg(from,to), C=_salesCfg();
+  const rows=Object.keys(agg.byTeacher).map(tid=>{
+    const a=agg.byTeacher[tid], calc=_ratWage(a.rows, tid);
+    const zp=(calc&&calc.sum)?calc.sum:0;
+    const val=(C.metric==="revenue")?a.revenue:(a.revenue-zp);
+    return {tid:tid, name:_ratTeacherName(tid), lessons:a.lessons, revenue:a.revenue, zp:zp,
+            noRate:(calc?calc.unknown:a.lessons), val:val, perLesson:(a.lessons?val/a.lessons:0)};
+  });
+  const noRate=rows.reduce((s,r)=>s+(+r.noRate||0),0), lessons=rows.reduce((s,r)=>s+(+r.lessons||0),0);
+  return {
+    perLesson:rows.filter(r=>r.lessons>=C.minLessons).sort((a,b)=>b.perLesson-a.perLesson).slice(0,C.top),
+    perMonth:rows.slice().sort((a,b)=>b.val-a.val).slice(0,C.top),
+    days:agg.days, noRate:noRate, lessons:lessons, all:rows.length
+  };
+}
+/* --- ТЕКСТ СООБЩЕНИЯ --- */
+function _salesWeekText(rep){
+  const man=rep.man||{}, L=[];
+  L.push("Оборот недели: "+_salesNum(rep.fact)+".");
+  if(+rep.goal) L.push("Шли на "+_salesNum(rep.goal)+".");
+  const nf=+(man.nextForecast||((rep.next&&rep.next.forecast)||0));
+  const ng=+(man.nextGoal||((rep.next&&rep.next.suggest)||0));
+  if(nf||ng){ L.push("");
+    if(nf) L.push("Прогноз на след неделю: "+_salesNum(nf)+".");
+    if(ng) L.push("Идем на "+_salesNum(ng)+"."); }
+  if(+rep.active){ L.push("");
+    const d=(+rep.active)-(+rep.activePrev||0);
+    L.push("Активных клиентов: "+rep.active+((+rep.activePrev)?(" ("+(d>=0?"+":"")+d+")"):"")+"."); }
+  if(man.note) { L.push(""); L.push(String(man.note).trim()); }
+  return L.join("\n");
+}
+function _salesMonthText(rep,tops){
+  const m=rep.month; if(!m) return "";
+  const man=rep.man||{}, L=[];
+  if(+m.goal) L.push("Шли на "+_salesNum(m.goal)+".");
+  L.push("Оборот месяца: "+_salesNum(m.fact)+".");
+  const nf=+(man.monthForecast||m.forecast||0);
+  const ng=+(man.monthNextGoal||m.suggest||0);
+  if(nf||ng){ L.push("");
+    if(nf) L.push("Прогноз на след месяц: "+_salesNum(nf)+".");
+    if(ng) L.push("Идем на "+_salesNum(ng)+"."); }
+  if(+rep.active){ L.push("");
+    const d=(+rep.active)-(+m.activePrev||0);
+    L.push("Активных клиентов: "+rep.active+((+m.activePrev)?(" ("+(d>=0?"+":"")+d+")"):"")+"."); }
+  if(man.monthNote){ L.push(""); L.push(String(man.monthNote).trim()); }
+  if(tops&&tops.perLesson.length){ L.push("");
+    L.push("Рейтинг педагогов, которые приносят максимальную прибыль за одно занятие (по убыванию от максимума):");
+    tops.perLesson.forEach(r=>L.push(" "+r.name)); }
+  if(tops&&tops.perMonth.length){ L.push("");
+    L.push("Рейтинг педагогов, которые приносят максимальную прибыль за месяц (по убыванию от максимума):");
+    tops.perMonth.forEach(r=>L.push(" "+r.name)); }
+  return L.join("\n");
+}
+/* --- ДЕЙСТВИЯ --- */
+async function salesBuild(week){
+  if(_salesBusy) return;
+  const btn=document.getElementById("salesBtn"), prog=document.getElementById("salesProg");
+  _salesBusy=true; if(btn) btn.disabled=true;
+  if(prog) prog.textContent="Собираю отчёт: пересчитываю неделю из Alfa… (до 2 минут)";
+  try{
+    const j=await _pubCall("salesReportBuild",{week:week||_todayIso()});
+    _salesStore=Object.assign({},_salesStore||{},{reports:j.reports||{},activeLog:j.activeLog||{}});
+    _salesWeek=(j.report&&j.report.week)||null;
+    if(prog) prog.textContent="Готово ✓";
+    _salesRefresh();
+  }catch(e){ if(prog) prog.textContent=""; const b=document.getElementById("rukBody");
+    if(b){ const d=document.createElement('div'); d.innerHTML=_pubErrHtml(e,"отчёт для отдела продаж"); b.insertBefore(d.firstChild,b.firstChild); } }
+  finally{ _salesBusy=false; if(btn) btn.disabled=false; }
+}
+/* Ручные поля («идём на», комментарий) живут на сервере рядом со снимком: их читает
+   следующий отчёт — то, что вы обещали на эту неделю, станет в нём «Шли на». */
+async function salesSet(week,field,val){
+  const R=_salesReports(), rep=R[week]; if(!rep) return;
+  if(!rep.man) rep.man={};
+  const num=(field==="nextGoal"||field==="monthNextGoal"||field==="nextForecast"||field==="monthForecast");
+  const v=num?(parseFloat(String(val).replace(",","."))||0):String(val||"").trim();
+  if(num){ if(v>0) rep.man[field]=v; else delete rep.man[field]; }
+  else   { if(v)   rep.man[field]=v; else delete rep.man[field]; }
+  _salesRefresh();
+  try{ await _pubCall("salesReportSet",{week:week,man:rep.man}); }
+  catch(e){ toast("Не сохранилось на сервере: "+((e&&e.message)||e)); }
+}
+function salesCopy(which){
+  const rep=_salesCur(); if(!rep) return;
+  const t=(which==="month")?_salesMonthText(rep,rep.month?_salesTops(rep.month.ym+"-01",_salesMonthEnd(rep.month.ym)):null):_salesWeekText(rep);
+  _copyText(t).then(ok=>toast(ok?"Скопировано — вставляйте в чат":"Не удалось скопировать"));
+}
+function _salesMonthEnd(ym){ const y=+String(ym).slice(0,4), m=+String(ym).slice(5,7); const d=new Date(y,m,0); return _dIso(d); }
+/* Понедельник недели, в которую попала дата — ключ отчёта (как alfa_monday_of на сервере). */
+function _salesMonday(iso){ const d=new Date(iso); const w=d.getDay()===0?7:d.getDay(); d.setDate(d.getDate()-(w-1)); return _dIso(d); }
+
+function _salesHtml(){
+  const head=`<div class="callout" style="margin-bottom:10px;font-size:12px">Готовое сообщение в чат отдела продаж. Цифры замораживает cron <b>в воскресенье в 22:00</b>: оборот недели (факт из Alfa), прогноз на следующую неделю (снимок Alfa) и число активных клиентов. Позже их уже не восстановить — прогноз превращается в факт, а клиенты меняются каждый день. «Идём на» и комментарий вписываете вы: то, что впишете, станет «Шли на» в следующем отчёте.</div>`;
+  if(_salesErr) return head+_pubErrHtml(_salesErr,"отчёт для отдела продаж")+
+    `<div class="hd-actions" style="margin-top:10px"><button class="btn sm" id="salesBtn" onclick="salesBuild()">🧮 Собрать отчёт за эту неделю</button><span id="salesProg" style="font-size:12px;color:var(--muted)"></span></div>`;
+  if(!_salesStore) return head+`<div class="callout">⏳ Загружаю отчёты…</div>`;
+  const R=_salesReports(), keys=Object.keys(R).sort().reverse();
+  const rep=_salesCur(), curKey=rep?rep.key:"";
+  const bar=`<div class="hd-actions" style="margin-bottom:10px">
+    ${keys.length?`<select class="cell" style="width:auto" onchange="salesGo(this.value)">${
+      keys.map(k=>`<option value="${esc(k)}"${curKey===k?" selected":""}>Неделя ${esc(_salesDate(k))}–${esc(_salesDate(R[k].to))}${R[k].month?" · итоги месяца":""}</option>`).join("")}</select>`:''}
+    <button class="btn sm" id="salesBtn" onclick="salesBuild('${_jsStr(curKey)}')">🔄 Пересобрать эту неделю</button>
+    ${R[_salesMonday(_todayIso())]?'':`<button class="btn ghost sm" onclick="salesBuild()" title="Обычно это делает cron в воскресенье в 22:00">🧮 Собрать за текущую неделю</button>`}
+    <span id="salesProg" style="font-size:12px;color:var(--muted)">${_salesStore.settings&&_salesStore.settings.lastRun?("последний запуск: "+esc(String(_salesStore.settings.lastRun).slice(0,16).replace("T"," "))):""}</span>
+  </div>`;
+  if(!rep) return head+bar+`<div class="callout">Отчётов пока нет. Нажмите «Пересобрать» — соберём за текущую неделю, дальше это делает cron в воскресенье в 22:00 (настройка ниже).</div>`+_salesCronHtml();
+  const man=rep.man||{}, W=rep.week;
+  const nfSrc=(rep.next&&rep.next.src==="snapshot")
+    ?"тот же прогноз, что в «🔮 Прогноз по всем» — снимок Alfa, зафиксирован в вс 22:00"
+    :"снимка недели не было — сложили ожидаемые списания по дням (может чуть отличаться от «Прогноза по всем»)";
+  const goalSrc={prev:"ваша цель из прошлого отчёта",suggest:"предложенная в прошлом отчёте цель",snapshot:"прогноз Alfa на эту неделю (цель не вписывали)"}[rep.goalSrc]||"—";
+  const ratio=Math.round(100*(+rep.ratio||0.9));
+  const sug=+((rep.next&&rep.next.suggest)||0);
+  const dAct=(+rep.active||0)-(+rep.activePrev||0);
+  const weekText=_salesWeekText(rep);
+
+  const numRow=(lab,val,note)=>`<tr><td>${lab}</td><td style="text-align:right;white-space:nowrap"><b>${val}</b></td><td style="font-size:12px;color:var(--muted)">${note||""}</td></tr>`;
+  const wtab=`<table style="max-width:760px"><tbody>
+    ${numRow("Оборот недели "+esc(_salesDate(W))+"–"+esc(_salesDate(rep.to)),
+             '<span style="color:var(--green)">'+_gm(rep.fact)+'</span>',
+             "среднее дохода с пропусками и без пополам · дней с занятиями: "+(rep.daysWithLessons||0))}
+    ${numRow("Шли на", (+rep.goal)?_gm(rep.goal):'<span style="color:var(--muted)">—</span>', goalSrc)}
+    ${numRow("Прогноз на след. неделю "+esc(_salesDate((rep.next||{}).week||W)),
+             '<span style="color:var(--terra-d)">'+_gm((rep.next||{}).forecast||0)+'</span>', nfSrc)}
+    <tr><td>Идём на</td>
+      <td style="text-align:right"><input class="cell" type="number" step="1" style="width:110px;text-align:right"
+        value="${man.nextGoal||''}" placeholder="${sug?_gm(sug):'—'}" onchange="salesSet('${_jsStr(W)}','nextGoal',this.value)"></td>
+      <td style="font-size:12px;color:var(--muted)">${sug?("предлагаю <b>"+_gm(sug)+"</b> — по вашей истории факт ≈ "+ratio+"% прогноза"):"впишите цель, она станет «Шли на» в следующем отчёте"}</td></tr>
+    ${numRow("Активных клиентов", (+rep.active)?(rep.active+((+rep.activePrev)?(' <span style="color:'+(dAct>=0?'var(--green)':'var(--red)')+'">('+(dAct>=0?'+':'')+dAct+')</span>'):'')):'<span style="color:var(--muted)">—</span>',
+             (+rep.active)?("учащиеся Alfa в клубных филиалах"+((+rep.activePrev)?(" · неделю назад: "+rep.activePrev):"")):("не посчитались: "+esc(rep.activeSrc||"")))}
+    <tr><td>Комментарий</td><td colspan="2"><textarea class="cell" rows="2" style="width:100%;min-width:280px"
+      placeholder="Например: сейчас самое сложное — удержать тех, у кого закончились абонементы"
+      onchange="salesSet('${_jsStr(W)}','note',this.value)">${esc(man.note||"")}</textarea></td></tr>
+  </tbody></table>`;
+
+  const msg=(id,title,text,which)=>`<div style="margin:14px 0 6px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+      <h3 style="margin:0">${title}</h3>
+      <button class="btn sm" onclick="salesCopy('${which}')">📋 Копировать сообщение</button></div>
+    <pre id="${id}" style="white-space:pre-wrap;font-size:13px;line-height:1.5;background:var(--paper);border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin:0;max-width:760px">${esc(text)}</pre>`;
+
+  let h=head+bar+msg("salesMsgWeek","Сообщение за неделю",weekText,"week")+
+    `<h3 style="margin:16px 0 6px">Откуда цифры</h3>`+wtab;
+
+  /* ---- месячный блок ---- */
+  if(rep.month){
+    const m=rep.month, from=m.ym+"-01", to=_salesMonthEnd(m.ym);
+    const tops=_salesTops(from,to), C=_salesCfg();
+    const mSug=+(m.suggest||0), dActM=(+rep.active||0)-(+m.activePrev||0);
+    const monthText=_salesMonthText(rep,tops);
+    const srcNote=`дней фактом: ${(m.src||{}).fact||0}, по расписанию Alfa: ${(m.src||{}).planned||0}, из недельного прогноза: ${(m.src||{}).profile||0}`;
+    const mtab=`<table style="max-width:760px"><tbody>
+      ${numRow("Оборот "+esc(_salesMonName(m.ym)), '<span style="color:var(--green)">'+_gm(m.fact)+'</span>', "среднее дохода с пропусками и без пополам · дней с занятиями: "+(m.daysWithLessons||0))}
+      ${numRow("Шли на", (+m.goal)?_gm(m.goal):'<span style="color:var(--muted)">—</span>', (+m.goal)?"цель из прошлого месячного отчёта":"месячную цель ещё не ставили")}
+      ${numRow("Прогноз на "+esc(_salesMonName(m.nextYm)), '<span style="color:var(--terra-d)">'+_gm(m.forecast)+'</span>',
+               "недельный прогноз, разложенный по дням недели × число таких дней · учебных дней: "+(m.nextStudyDays||0)+" из "+(m.nextDays||0)+" · "+srcNote)}
+      <tr><td>Идём на</td>
+        <td style="text-align:right"><input class="cell" type="number" step="1" style="width:110px;text-align:right"
+          value="${man.monthNextGoal||''}" placeholder="${mSug?_gm(mSug):'—'}" onchange="salesSet('${_jsStr(W)}','monthNextGoal',this.value)"></td>
+        <td style="font-size:12px;color:var(--muted)">${mSug?("предлагаю <b>"+_gm(mSug)+"</b> — прогноз × "+ratio+"%"):"впишите цель месяца"}</td></tr>
+      ${numRow("Активных клиентов", (+rep.active)?(rep.active+((+m.activePrev)?(' <span style="color:'+(dActM>=0?'var(--green)':'var(--red)')+'">('+(dActM>=0?'+':'')+dActM+')</span>'):'')):'—',
+               (+m.activePrev)?("месяц назад: "+m.activePrev):"сравнить не с чем — это первый месячный отчёт")}
+      <tr><td>Комментарий</td><td colspan="2"><textarea class="cell" rows="2" style="width:100%;min-width:280px"
+        placeholder="Например: сейчас самое сложное — удержаться" onchange="salesSet('${_jsStr(W)}','monthNote',this.value)">${esc(man.monthNote||"")}</textarea></td></tr>
+    </tbody></table>`;
+    const topTab=(list,unit)=>list.length?`<table><thead><tr><th>#</th><th style="text-align:left">Педагог</th>
+        <th style="text-align:right">Уроков</th><th style="text-align:right">Выручка</th><th style="text-align:right">ЗП</th>
+        <th style="text-align:right">${C.metric==="revenue"?"Выручка":"Прибыль"}${unit==="lesson"?" за урок":" за месяц"}</th></tr></thead><tbody>`+
+      list.map((r,i)=>`<tr><td style="text-align:center;color:var(--muted)">${i+1}</td><td><b>${esc(r.name)}</b></td>
+        <td style="text-align:right">${r.lessons}</td><td style="text-align:right">${_gm(r.revenue)}</td>
+        <td style="text-align:right">${r.zp?_gm(r.zp):'<span style="color:var(--muted)">—</span>'}</td>
+        <td style="text-align:right"><b style="color:var(--green)">${_gm(unit==="lesson"?r.perLesson:r.val)}</b></td></tr>`).join("")+
+      `</tbody></table>`:`<div class="callout">За месяц нет посчитанных занятий. Откройте «🏆 Рейтинг педагогов» и нажмите «Посчитать период из Alfa».</div>`;
+    h+=msg("salesMsgMonth","Сообщение по итогам месяца ("+esc(_salesMonName(m.ym))+")",monthText,"month")+
+      `<h3 style="margin:16px 0 6px">Откуда цифры месяца</h3>`+mtab+
+      `<h3 style="margin:16px 0 6px">Рейтинг педагогов за ${esc(_salesMonName(m.ym))}</h3>
+       <div class="hd-actions" style="margin-bottom:8px">
+         <label style="font-size:13px">считать по
+           <select class="cell" style="width:auto" onchange="salesCfgSet('metric',this.value)">
+             <option value="profit"${C.metric==="profit"?" selected":""}>прибыли (выручка − ЗП)</option>
+             <option value="revenue"${C.metric==="revenue"?" selected":""}>выручке</option>
+           </select></label>
+         <label style="font-size:13px">в списке <input class="cell" type="number" min="1" max="30" style="width:64px" value="${C.top}" onchange="salesCfgSet('top',this.value)"> педагогов</label>
+         <label style="font-size:13px" title="Чтобы разовая подмена не попала в топ «за одно занятие»">от <input class="cell" type="number" min="0" max="50" style="width:60px" value="${C.minLessons}" onchange="salesCfgSet('minLessons',this.value)"> уроков за месяц</label>
+       </div>
+       <div style="font-size:12px;color:var(--muted);margin-bottom:6px">Выручка — сумма списаний Alfa за проведённые занятия. ЗП — ${S._wageMode==="fix"?"по фикс-ставкам педагогов (педагог + длительность занятия)":"по справочнику ставок: курс × число пришедших детей"}. В сообщение уходят только имена, в том же порядке.</div>
+       ${tops.noRate?`<div class="callout" style="border-color:var(--terra);font-size:12px;margin-bottom:8px">У ${tops.noRate} занятий из ${tops.lessons} не нашлась ставка (${S._wageMode==="fix"?"педагог не сопоставлен с Alfa или у него не заданы фикс-ставки":"курс не сопоставлен с предметом Alfa или его нет в справочнике ставок"}) — по ним ЗП считается нулевой, и прибыль завышена. Сопоставление: «Публикация групп → ${S._wageMode==="fix"?"педагоги":"предметы"}».</div>`:''}
+       <h4 style="margin:10px 0 4px">Максимальная прибыль за одно занятие</h4>${topTab(tops.perLesson,"lesson")}
+       <h4 style="margin:14px 0 4px">Максимальная прибыль за месяц</h4>${topTab(tops.perMonth,"month")}`;
+  }
+  h+=_salesCronHtml();
+  return h;
+}
+function _salesCronHtml(){
+  return `<details style="margin-top:18px"><summary style="cursor:pointer;font-weight:600">⚙️ Настройка cron на HostFly (один раз)</summary>
+    <div style="padding:8px 0;font-size:13px;line-height:1.6">
+      В панели HostFly → «Cron / Задания по расписанию» добавьте запуск <b>по воскресеньям в 22:00</b>:<br>
+      <b>Вариант CLI</b>: <code style="font-size:12px">php /путь-на-сервере/finmodel/api/alfa/cron_salesreport.php</code><br>
+      <b>Вариант URL</b> (нужен <code>cron_key</code> в <code>api/alfa/config.php</code>):<br>
+      <code style="font-size:12px;word-break:break-all">wget -qO- "${esc(location.origin)}/finmodel/api/alfa/cron_salesreport.php?key=ВАШ_КЛЮЧ"</code><br>
+      <span style="color:var(--muted)">Запускать после ежедневного <code>cron_realization.php</code> (тоже 22:00) — или на 10–15 минут позже, чтобы дневная реализация успела посчитаться. Отчёт всё равно пересчитывает дни недели сам, так что порядок не критичен.<br>
+      Пересобрать задним числом: добавьте <code>?week=2026-09-13</code> (любая дата внутри нужной недели).</span>
+    </div></details>`;
 }
 
 /* ---- Прогноз по всем: недели учебного года, план — руками, факт — из Alfa ---- */
