@@ -10052,7 +10052,7 @@ function _realHtml(){
   </tr></thead><tbody>${rows}
     <tr style="border-top:2px solid var(--line)"><td><b>${esc(monLabel)}</b></td><td style="text-align:right"><b style="color:var(--green)">${_gm(tp)}</b></td><td style="text-align:right"><b>${_gm(ta)}</b></td><td style="text-align:right"><b style="color:var(--terra-d)">${_gm(tpl)}</b></td><td style="text-align:right"></td><td style="text-align:center"><b>${tl}</b></td></tr>
   </tbody></table></div>
-  <div style="font-size:12px;color:var(--muted);margin-top:6px">Дней с проведёнными занятиями: ${days}. «Обновить месяц» пересчитывает <b>весь</b> месяц (включая будущие дни — по ним считается «Ожидается», это и есть прогноз). Автоматически — cron в 20:00.</div>
+  <div style="font-size:12px;color:var(--muted);margin-top:6px">Дней с проведёнными занятиями: ${days}. «Обновить месяц» пересчитывает <b>весь</b> месяц (включая будущие дни — по ним считается «Ожидается», это и есть прогноз). Автоматически — cron в 22:00.</div>
   <details style="margin-top:14px"><summary style="cursor:pointer;font-weight:600">🔍 Проверить один день (разведка по филиалам)</summary>
     <div style="padding:8px 0">
       <div class="hd-actions"><input type="date" id="realProbeDate" class="cell" style="width:auto" value="${todayIso}">
@@ -10062,7 +10062,7 @@ function _realHtml(){
     </div></details>
   <details style="margin-top:10px"><summary style="cursor:pointer;font-weight:600">⚙️ Настройка cron на HostFly (один раз)</summary>
     <div style="padding:8px 0;font-size:13px;line-height:1.6">
-      В панели HostFly → «Cron / Задания по расписанию» добавьте ежедневный запуск в 20:00.<br>
+      В панели HostFly → «Cron / Задания по расписанию» добавьте ежедневный запуск в 22:00.<br>
       <b>Вариант CLI</b> (команда, если хостинг разрешает): <code style="font-size:12px">php /путь-на-сервере/finmodel/api/alfa/cron_realization.php 7</code> — реальный путь к файлу подскажет HostFly; ключ не нужен.<br>
       <b>Вариант URL</b> (wget/curl): сначала впишите <code>cron_key</code> в <code>api/alfa/config.php</code>, потом задание:<br>
       <code style="font-size:12px;word-break:break-all">wget -qO- "${esc(location.origin)}/finmodel/api/alfa/cron_realization.php?key=ВАШ_КЛЮЧ&days=7"</code><br>
@@ -10289,7 +10289,7 @@ function _pokazHtml(){
   <div class="callout" style="margin-bottom:12px;font-size:12px">Выручка <b>${esc(P.curYear)}</b> — можно вписать вручную или подставить из Alfa (строка «Реализация из Alfa» = среднее «без пропусков» и «с пропусками» по филиалу «Пожарный», как считалось в старой таблице). Прошлые годы перенесены. План строится от базового года × план %.</div>
   <div class="hd-actions" style="margin-bottom:8px">
     <button class="btn sm" onclick="pokazPullAlfa()" ${alfaHas?'':'disabled title="Сначала наполните месяцы в Дашборде Администратора → Реализация"'}>↧ Подставить выручку из Alfa</button>
-    <span style="font-size:12px;color:var(--muted)">Наполняется в «Дашборд Администратора → Реализация» (и cron в 20:00).</span>
+    <span style="font-size:12px;color:var(--muted)">Наполняется в «Дашборд Администратора → Реализация» (и cron в 22:00).</span>
   </div>
   <div class="tscroll" style="margin-bottom:16px"><table><thead><tr>${th}</tr></thead><tbody>
     ${curRow}${alfaRow}${growRow}${histRows}
@@ -10369,12 +10369,11 @@ function _progHtml(){
   let lastMon="";
   weeks.forEach((w,i)=>{
     const A=_progWeekAlfa(w);
-    const manual=+(G.plans[w.key]||0);
     const snap=(_weekPlans||{})[w.key];    // зафиксированный в вс 23:00 прогноз (из Alfa)
     const snapV=snap?(+snap.plan||0):0;
     const auto=snapV||null;                // прогноз берём только из Alfa
     const src=snapV?'snap':'';
-    const plan=manual||auto||0;            // ручной план перебивает прогноз
+    const plan=auto||0;
     const fact=A?A.fact:null;
     if(plan) tPlan+=plan; if(fact!=null) tFact+=fact;
     const pct=(plan>0&&fact!=null)?(100*fact/plan):null;
@@ -10387,14 +10386,13 @@ function _progHtml(){
       <td style="color:var(--muted)">${showMon?esc(monName):''}</td>
       <td style="white-space:nowrap">${range}</td>
       <td style="text-align:right">${auto!=null?('<span style="color:var(--terra-d)" title="Из Alfa, зафиксирован '+esc(String(snap.ts||'').slice(0,16).replace("T"," "))+'">'+_gm(auto)+' 🔒</span>'):'<span style="color:var(--muted)">—</span>'}</td>
-      <td style="text-align:right"><input class="cell" type="number" style="width:88px;text-align:right;font-size:12px" value="${manual||''}" placeholder="${auto!=null?'авто':'—'}" title="Свой план — перебивает прогноз из Alfa" onchange="progPlan('${w.key}',this.value)"></td>
       <td style="text-align:right">${fact!=null?('<b>'+_gm(fact)+'</b>'):'<span style="color:var(--muted)">—</span>'}</td>
       <td style="text-align:right">${pct!=null?('<b style="color:'+(pct>=100?'var(--green)':(pct>=85?'#C9922E':'var(--red)'))+'">'+pct.toFixed(0)+'%</b>'):'<span style="color:var(--muted)">—</span>'}</td>
     </tr>`;
   });
   const tPct=(tPlan>0&&tFact>0)?(100*tFact/tPlan):null;
   const haveAny=weeks.some(w=>_progWeekAlfa(w)!=null);
-  return `<div class="callout" style="margin-bottom:10px;font-size:12px">Недели учебного года (пн–вс). <b>Прогноз</b> — сумма списаний по запланированным занятиям Alfa (сверено с её отчётом «Прогноз оплаты»: совпадает). Фиксируется 🔒 в воскресенье 23:00, чтобы не «догонял» факт. <b>Свой план</b> перебивает прогноз. <b>Выполнение</b> — фактическая реализация из Alfa.</div>
+  return `<div class="callout" style="margin-bottom:10px;font-size:12px">Недели учебного года (пн–вс). <b>Прогноз Alfa</b> — сумма списаний по запланированным занятиям (сверено с отчётом «Прогноз оплаты»: совпадает), фиксируется 🔒 в воскресенье 23:00. <b>Доход (факт)</b> — реализация за дни недели: каждый день в 22:00 cron забирает доход из Alfa и он суммируется в свою неделю.</div>
   <div class="hd-actions" style="margin-bottom:10px">
     <button class="btn sm" id="progPullBtn" onclick="progPull()">🔄 Обновить факт из Alfa</button>
     <button class="btn ghost sm" id="fcWeekBtn" onclick="progForecastWeek()" title="Посчитать прогноз текущей недели сейчас (обычно это делает cron)">🧮 Посчитать прогноз недели</button>
@@ -10402,9 +10400,9 @@ function _progHtml(){
     <span id="progPullProg" style="font-size:12px;color:var(--muted)">${haveAny?'':'Пока пусто — нажмите «Обновить факт».'}</span>
   </div>
   <div class="tscroll" style="max-width:760px"><table><thead><tr>
-    <th style="text-align:left">Месяц</th><th style="text-align:left">Неделя</th><th style="text-align:right">Прогноз Alfa</th><th style="text-align:right">Свой план</th><th style="text-align:right">Выполнение</th><th style="text-align:right">%</th>
+    <th style="text-align:left">Месяц</th><th style="text-align:left">Неделя</th><th style="text-align:right">Прогноз Alfa</th><th style="text-align:right">Доход (факт)</th><th style="text-align:right">%</th>
   </tr></thead><tbody>${rows}
-    <tr style="border-top:2px solid var(--line)"><td colspan="3"><b>Итого за год</b></td>
+    <tr style="border-top:2px solid var(--line)"><td colspan="2"><b>Итого за год</b></td>
       <td style="text-align:right"><b>${_gm(tPlan)}</b></td>
       <td style="text-align:right"><b style="color:var(--green)">${_gm(tFact)}</b></td>
       <td style="text-align:right">${tPct!=null?('<b>'+tPct.toFixed(0)+'%</b>'):'—'}</td></tr>
