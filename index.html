@@ -89,6 +89,9 @@ tbody tr:hover td{background:#EEEDEA}
 .exp-tabs{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:8px}
 .exp-tabs .chip{padding:3px 9px}
 .exp-tabs .chip.exp-on{background:var(--graphite);border-color:var(--graphite);color:#fff}
+/* «Формула 26/27»: подписи под заголовками и в строках разбора */
+.fml .hint{font-size:11px;color:var(--muted)}
+.fml h3{margin:0 0 4px}
 input.cell{width:62px;border:1px solid var(--line);border-radius:5px;padding:4px 6px;font-size:13px;
   text-align:right;background:#fff;font-family:inherit}
 input.cell:focus{outline:none;border-color:var(--terra);background:#FFFCF6}
@@ -9993,6 +9996,10 @@ function renderRuk(){
     if(!_realStore){ _realLoadStore().then(()=>{ if(_rukSec==="rating"){ const b=document.getElementById("rukBody"); if(b) b.innerHTML=_ratingHtml(); } }).catch(()=>{}); }
     if(!_pubRefs){ _pubEnsureLoaded(false).then(()=>{ if(_rukSec==="rating"){ const b=document.getElementById("rukBody"); if(b) b.innerHTML=_ratingHtml(); } }).catch(()=>{}); }
     return; }
+  if(_rukSec==="formula"){ body.innerHTML=_formulaHtml();
+    // расходы из Alfa по статьям: без них факт неполон (останется только ручной ввод)
+    if(!_paySnap){ _payLoadStore().then(_fmlRefresh).catch(()=>{}); }
+    return; }
   if(_rukSec==="sales"){ body.innerHTML=_salesHtml();
     // снимки отчётов + дневная реализация (для рейтинга педагогов) + имена педагогов
     if(!_salesStore){ _salesLoad().then(_salesRefresh).catch(e=>{ _salesErr=e; _salesRefresh(); }); }
@@ -10028,6 +10035,71 @@ function renderAdm(){
    Расходы приходят из Alfa (тип «Расход») со статьёй; их собирает cron в 22:00.
    Плюс ручные строки — для того, что мимо Alfa (наличные без проведения и т.п.). */
 const RASHOD_ITEMS_DEFAULT=["Аренда","Коммунальные платежи","Бытовые расходы","Кредит","Телефон","Интернет","Вложения в клуб","Реклама","Сервисы","Бюджет","Налог","ФСЗН","Комиссии за списание","Без статьи"];
+/* Свои статьи — то, чего нет ни в Alfa, ни в списке выше. Бухгалтер в конце месяца отдаёт
+   полный список по клубу (вместе с ЗП педагогов и налогами), и он у каждого свой. */
+function _rashodItems(){ if(!Array.isArray(S.rashodItems)) S.rashodItems=[]; return S.rashodItems; }
+function rashodAddItem(){
+  const n=(prompt("Название статьи — как в отчёте бухгалтера:")||"").trim();
+  if(!n) return;
+  const L=_rashodItems();
+  if(L.indexOf(n)<0 && RASHOD_ITEMS_DEFAULT.indexOf(n)<0) L.push(n);
+  persistLocal(); if(typeof fbSchedulePush==="function") fbSchedulePush();
+  const b=document.getElementById("admBody"); if(b) b.innerHTML=_rashodHtml();
+}
+function rashodDelItem(n){
+  const L=_rashodItems(), i=L.indexOf(n); if(i<0) return;
+  if(!confirm("Убрать статью «"+n+"» из списка? Введённые по ней суммы останутся.")) return;
+  L.splice(i,1);
+  persistLocal(); if(typeof fbSchedulePush==="function") fbSchedulePush();
+  const b=document.getElementById("admBody"); if(b) b.innerHTML=_rashodHtml();
+}
+/* Тип статьи: «растёт с загрузкой» (var) или «идёт в любом случае» (fix).
+   Нужен «Формуле 26/27»: постоянные делятся поровну на занятия, переменные считаются на занятие.
+   Умолчание — по названию; переключатель рядом со статьёй перебивает его. */
+const RASHOD_VAR_HINTS=["зп педагог","зарплата педагог","налог","усн","фсзн","белгосстрах","взнос","эквайринг","комисси"];
+function _rashodKindDefault(item){
+  const s=String(item||"").toLowerCase();
+  return RASHOD_VAR_HINTS.some(h=>s.indexOf(h)>=0)?"var":"fix";
+}
+function rashodKind(item){ return ((S.rashodKind||{})[item])||_rashodKindDefault(item); }
+function rashodKindSet(item,v){
+  if(!S.rashodKind) S.rashodKind={};
+  if(v===_rashodKindDefault(item)) delete S.rashodKind[item]; else S.rashodKind[item]=v;
+  persistLocal(); if(typeof fbSchedulePush==="function") fbSchedulePush();
+  const b=document.getElementById("admBody"); if(b) b.innerHTML=_rashodHtml();
+}
+/* Факт расходов клуба за месяц: Alfa + ручной ввод, разложенный на постоянные и переменные.
+   null — если за месяц не введено ничего (тогда «Формула» считает по модели). */
+function _rashodFact(ym){
+  const p=String(ym||"").split('-'), Y=+p[0], M=+p[1];
+  if(!Y||!M) return null;
+  const dim=new Date(Y,M,0).getDate(), pref=Y+'-'+String(M).padStart(2,'0')+'-';
+  const snap=_paySnap||{}, byItem={};
+  for(let d=1;d<=dim;d++){
+    const sn=snap[pref+String(d).padStart(2,'0')]; if(!sn) continue;
+    Object.keys(sn.byItem||{}).forEach(it=>{ byItem[it]=(byItem[it]||0)+(+sn.byItem[it]||0); });
+  }
+  const man=(_rashodManual()[ym])||{};
+  Object.keys(man).forEach(it=>{ byItem[it]=(byItem[it]||0)+(+man[it]||0); });
+  const names=Object.keys(byItem).filter(it=>+byItem[it]);
+  if(!names.length) return null;
+  let fix=0, vr=0; const items={fix:[],var:[]};
+  names.forEach(it=>{
+    const v=+byItem[it]||0;
+    if(rashodKind(it)==="var"){ vr+=v; items.var.push({n:it,v:v}); }
+    else { fix+=v; items.fix.push({n:it,v:v}); }
+  });
+  items.fix.sort((a,b)=>b.v-a.v); items.var.sort((a,b)=>b.v-a.v);
+  return {ym:ym, months:1, fix:fix, vr:vr, total:fix+vr, items:items};
+}
+/* Средний месяц по тем месяцам, где факт уже введён. */
+function _rashodFactAvg(months){
+  const got=(months||[]).map(m=>_rashodFact(m.ym)).filter(Boolean);
+  if(!got.length) return null;
+  const n=got.length, s=f=>got.reduce((a,x)=>a+f(x),0)/n;
+  return {ym:"", months:n, fix:s(x=>x.fix), vr:s(x=>x.vr), total:s(x=>x.total),
+          items:null, list:got.map(x=>x.ym)};
+}
 let _rashodMonth=(function(){ const d=new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0'); })();
 function rashodSetMonth(v){ if(v) _rashodMonth=v; const b=document.getElementById("admBody"); if(b) b.innerHTML=_rashodHtml(); }
 function _rashodManual(){ if(!S.rashodManual) S.rashodManual={}; return S.rashodManual; }
@@ -10055,14 +10127,23 @@ function _rashodHtml(){
     Object.keys(sn.byItem||{}).forEach(it=>{ byItem[it]=(byItem[it]||0)+(+sn.byItem[it]||0); });
   }
   const man=(_rashodManual()[_rashodMonth])||{};
-  const items=[...new Set([...Object.keys(byItem), ...Object.keys(man), ...RASHOD_ITEMS_DEFAULT])];
-  let tA=0, tM=0;
+  const own=_rashodItems();
+  const items=[...new Set([...Object.keys(byItem), ...Object.keys(man), ...RASHOD_ITEMS_DEFAULT, ...own])];
+  let tA=0, tM=0, tFix=0, tVar=0;
   const trs=items.map(it=>{
     const a=+(byItem[it]||0), m=+(man[it]||0);
-    if(!a && !m && RASHOD_ITEMS_DEFAULT.indexOf(it)<0) return '';
+    if(!a && !m && RASHOD_ITEMS_DEFAULT.indexOf(it)<0 && own.indexOf(it)<0) return '';
     tA+=a; tM+=m;
+    const kind=rashodKind(it);
+    if(kind==="var") tVar+=a+m; else tFix+=a+m;
+    const isOwn=own.indexOf(it)>=0;
     return `<tr>
-      <td>${esc(it)}</td>
+      <td>${esc(it)}${isOwn?` <span class="k-del" title="Убрать свою статью" onclick="rashodDelItem('${_jsStr(it)}')">×</span>`:''}</td>
+      <td style="text-align:center">
+        <select class="cell" style="width:auto;font-size:12px" title="Постоянные делятся на занятия, переменные растут вместе с загрузкой — от этого зависит «Формула 26/27»" onchange="rashodKindSet('${_jsStr(it)}',this.value)">
+          <option value="fix"${kind==="fix"?" selected":""}>идёт в любом случае</option>
+          <option value="var"${kind==="var"?" selected":""}>растёт с загрузкой</option>
+        </select></td>
       <td style="text-align:right">${a?_gm(a):'<span style="color:var(--muted)">—</span>'}</td>
       <td style="text-align:right"><input class="cell" type="number" step="0.01" style="width:104px;text-align:right" value="${m||''}" placeholder="—" onchange="rashodManSet('${_jsStr(it)}',this.value)"></td>
       <td style="text-align:right"><b>${(a+m)?_gm(a+m):''}</b></td>
@@ -10071,15 +10152,17 @@ function _rashodHtml(){
   const dayRows=Object.keys(byDay).sort().filter(k=>byDay[k]).map(k=>`<tr>
       <td>${esc(k.slice(8)+'.'+k.slice(5,7))}</td><td style="text-align:right"><b>${_gm(byDay[k])}</b></td></tr>`).join("");
   const monLabel=(_RU_MON[M-1]||'')+' '+Y;
-  return `<div class="callout" style="margin-bottom:10px;font-size:12px">Расходы из Alfa (операции с типом «Расход») по статьям — собираются автоматически в 22:00. В колонку «Вручную» впишите то, что не проходит через Alfa; она суммируется со столбцом Alfa.</div>
+  return `<div class="callout" style="margin-bottom:10px;font-size:12px">Расходы клуба за месяц по статьям. Что прошло через Alfa (операции с типом «Расход») подтягивается само в 22:00; остальное — колонка «Вручную», в конце месяца по списку от бухгалтера. Столбцы складываются.<br>Колонка <b>«Тип»</b> нужна «Дашборду руководителя → 🧮 Формула 26/27»: <b>постоянные</b> делятся поровну на занятия месяца, <b>переменные</b> растут вместе с загрузкой. Умолчание проставлено по названию статьи — проверьте.</div>
   <div class="hd-actions" style="margin-bottom:10px">
     <input type="month" class="cell" style="width:auto" value="${_rashodMonth}" onchange="rashodSetMonth(this.value)">
+    <button class="btn ghost sm" onclick="rashodAddItem()">+ статья</button>
     <span style="font-size:12px;color:var(--muted)">${daysWithData?('дней с расходами: '+daysWithData):'за месяц данных из Alfa пока нет'}</span>
   </div>
-  <div class="tscroll" style="max-width:700px"><table><thead><tr>
-    <th style="text-align:left">Статья</th><th style="text-align:right">Из Alfa</th><th style="text-align:right">Вручную</th><th style="text-align:right">Итого</th>
+  <div class="tscroll" style="max-width:860px"><table><thead><tr>
+    <th style="text-align:left">Статья</th><th>Тип</th><th style="text-align:right">Из Alfa</th><th style="text-align:right">Вручную</th><th style="text-align:right">Итого</th>
   </tr></thead><tbody>${trs}
     <tr style="border-top:2px solid var(--line)"><td><b>${esc(monLabel)}</b></td>
+      <td style="text-align:center;font-size:12px;color:var(--muted)">постоянные ${_gm(tFix)}<br>переменные ${_gm(tVar)}</td>
       <td style="text-align:right"><b>${_gm(tA)}</b></td>
       <td style="text-align:right"><b>${tM?_gm(tM):'—'}</b></td>
       <td style="text-align:right"><b style="color:var(--red)">${_gm(tA+tM)}</b></td></tr>
@@ -10873,6 +10956,230 @@ async function ratPull(){
     const b=document.getElementById("rukBody"); if(b) b.innerHTML=_ratingHtml();
   }catch(e){ const b=document.getElementById("rukBody"); if(b){ const x=document.createElement('div'); x.innerHTML=_pubErrHtml(e,"рейтинг педагогов"); b.insertBefore(x.firstChild,b.firstChild); } }
   finally{ _ratBusy=false; if(btn) btn.disabled=false; }
+}
+
+/* ---- ФОРМУЛА 26/27: юнит-экономика ----
+   «Дашборд» и «Точка безубыточности» отвечают «сколько всего», а здесь — «из чего складывается»
+   ОДНА единица: занятие, группа, ребёнок. Расходы берём из того же _expenseData, что и таблица
+   «Расходы по статьям», поэтому цифры сходятся: сумма прибыли всех занятий = прибыль периода.
+   Постоянные (аренда, админ-команда, ЗП собственника) делим поровну на занятия — они идут
+   независимо от набора, и именно эта доля решает, зарабатывает курс или нет. */
+let _fmlMonth=(function(){ try{ return localStorage.getItem("fml_month")||""; }catch(e){ return ""; } })();
+let _fmlCourse=null, _fmlN=null;
+function setFmlMonth(ym){ _fmlMonth=ym||""; try{ localStorage.setItem("fml_month",_fmlMonth); }catch(e){} _fmlRefresh(); }
+function fmlSet(k,v){
+  if(k==="course") _fmlCourse=v||null;
+  else _fmlN=Math.max(1,Math.min(30,parseInt(v,10)||0));
+  _fmlRefresh();
+}
+function _fmlRefresh(){ if(_rukSec!=="formula") return; const b=document.getElementById("rukBody"); if(b) b.innerHTML=_formulaHtml(); }
+/* Ставки, общие для всех единиц. Проценты с оборота (УСН + эквайринг + бытовые) и с ЗП (взносы). */
+function _fmlRates(){
+  const t=S.tax||{};
+  let pct=0; (S.fixedPct||[]).forEach(p=>{ pct+=+p.pct||0; });
+  return {usn:+t.usn||0, acq:+t.acquiring||0, pct:pct, con:(+t.fszn||0)+(+t.belgosstrah||0)};
+}
+/* Свод по единицам за выбранный период (месяц или средний месяц учебного года). */
+function _fmlData(ym){
+  const E=_expenseData(ym);
+  if(!E.mN) return null;
+  let groups=0, kids=0;
+  E.months.forEach(m=>{
+    const cs=m.courses||{};
+    for(const k in cs) groups+=+cs[k].groups||0;
+    kids+=+m.kidsU||0;
+  });
+  groups=groups/E.mN; kids=kids/E.mN;                       // среднее за месяц
+  const les=E.lessonsY;
+  const u=(rev,vr,fix)=>({rev:rev, vr:vr, contrib:rev-vr, fix:fix, profit:rev-vr-fix});
+  /* Постоянные берём из ФАКТА («Дашборд администратора → Расходы ежедневно»), если он введён:
+     бухгалтер отдаёт список по статьям в конце месяца, и это правда, а S.fixed — модель.
+     Переменные оставляем модельными: они нужны предельные («что изменится от +1 ребёнка»),
+     а факт по ним показываем рядом как сверку — задваивать нельзя. */
+  const F=(ym?_rashodFact(ym):_rashodFactAvg(E.months));
+  const revM=E.mo(E.revY), varM=E.mo(E.zavY), fixM=F?F.fix:E.mo(E.fixY);
+  // все три единицы делим от МЕСЯЧНЫХ сумм: только так доля постоянных берётся из факта
+  // (по периоду в целом фактических расходов может не быть — их вводят помесячно)
+  const lesM=les/E.mN;
+  const D={ E:E, mN:E.mN, F:F, fixSrc:F?"fact":"model", groups:groups, kids:kids, lessons:les, lessonsM:lesM,
+    month:u(revM,varM,fixM),
+    lesson: lesM   ? u(revM/lesM,   varM/lesM,   fixM/lesM)   : null,
+    group:  groups ? u(revM/groups, varM/groups, fixM/groups) : null,
+    kid:    kids   ? u(revM/kids,   varM/kids,   fixM/kids)   : null };
+  // порог нуля: сколько детей (и занятий) в месяц покрывают постоянные
+  D.kidsBE    = (D.kid   && D.kid.contrib>0)    ? fixM/D.kid.contrib    : null;
+  D.lessonsBE = (D.lesson&& D.lesson.contrib>0) ? fixM/D.lesson.contrib : null;
+  return D;
+}
+/* Курсы, которые реально идут по расписанию, со средней наполняемостью. */
+function _fmlCourses(E){
+  const agg={};
+  E.months.forEach(m=>{
+    const cs=m.courses||{};
+    for(const k in cs){ const c=cs[k];
+      const a=agg[k]||(agg[k]={lessons:0,rev:0,wage:0,kids:0,groups:0});
+      a.lessons+=+c.lessons||0; a.rev+=+c.rev||0; a.wage+=+c.wage||0;
+      a.kids+=+c.kids||0; a.groups+=+c.groups||0; }
+  });
+  return Object.keys(agg).map(k=>{ const a=agg[k];
+    return {name:k, lessons:a.lessons, rev:a.rev, wage:a.wage,
+            fill:a.groups?(a.kids/a.groups):0, groups:a.groups/E.mN};
+  }).sort((x,y)=>y.rev-x.rev);
+}
+/* Разбор ОДНОГО занятия курса при n детях. fixPer — доля постоянных на занятие. */
+function _fmlLesson(course,n,fixPer){
+  const R=_fmlRates(), price=_planPrice(course).p;
+  const rev=price*n;
+  const wage=(typeof wageForLesson==="function")?(wageForLesson(course,n)||0):0;
+  const usn=rev*R.usn/100, acq=rev*R.acq/100, pctE=rev*R.pct/100, con=wage*R.con/100;
+  const vr=wage+usn+acq+pctE+con;
+  return {course:course, n:n, price:price, rev:rev, wage:wage, usn:usn, acq:acq, pct:pctE, con:con,
+          vr:vr, contrib:rev-vr, fix:fixPer||0, profit:rev-vr-(fixPer||0)};
+}
+/* Минимум детей, при котором занятие выходит в ноль с учётом доли постоянных. */
+function _fmlMinFill(course,fixPer){
+  for(let n=1;n<=20;n++){ if(_fmlLesson(course,n,fixPer).profit>=0) return n; }
+  return null;
+}
+function _formulaHtml(){
+  const head=`<div class="callout" style="margin-bottom:10px;font-size:12px">Из чего складывается прибыль клуба — в разрезе <b>одного занятия</b>, <b>одной группы</b> и <b>одного ребёнка</b>. Считается по живому расписанию (только запущенные группы с подтвердившими детьми) и по тем же статьям расходов, что в «Налоги РБ и ФОТ → Расходы по статьям», поэтому цифры сходятся: прибыль всех занятий = прибыль периода. Постоянные расходы (аренда, админ-команда, ЗП собственника) делятся поровну на занятия — они идут независимо от набора.</div>`;
+  const D=_fmlData(_fmlMonth);
+  if(!D){
+    if(_fmlMonth){ _fmlMonth=""; try{ localStorage.setItem("fml_month",""); }catch(e){} return _formulaHtml(); }
+    return head+`<div class="callout">Живое расписание пока не даёт фактических цифр: нет ни одной запущенной группы с подтвердившими детьми. Заполните расписание и отметьте подтвердивших — формула посчитается сама.</div>`;
+  }
+  const E=D.E, R=_fmlRates(), one=(D.mN===1&&E.ym);
+  const chip=(v,lab,t)=>`<button class="chip${(_fmlMonth===v)?" exp-on":""}" title="${esc(t||"")}" onclick="setFmlMonth('${v}')">${esc(lab)}</button>`;
+  const tabs=`<div class="exp-tabs">${chip("","Средний месяц","Среднее по всем учебным месяцам")}${
+    E.all.map(m=>chip(m.ym,_expMonLabel(m.ym),_planLabel(m.ym))).join("")}</div>`;
+
+  /* ---- 0. Откуда взяты постоянные расходы ---- */
+  const money=n=>fmt(n)+" р";
+  const F=D.F;
+  let srcPlate;
+  if(F){
+    const dv=F.vr-D.month.vr;
+    const big=D.month.vr>0 && Math.abs(dv)>D.month.vr*0.15;
+    srcPlate=`<div class="callout" style="border-color:var(--green);font-size:12px;margin-bottom:10px">
+      Постоянные расходы — <b>ваш факт по статьям</b> из «Дашборд администратора → 💸 Расходы ежедневно»${
+        F.months>1?` (среднее по ${F.months} мес.: ${esc((F.list||[]).map(_expMonLabel).join(", "))})`:""}: <b>${money(F.fix)}</b> в месяц.
+      ${F.vr?`Переменные статьи (${money(F.vr)}) сюда не добавляются: вместо них модель считает ЗП по ставке и налоги — <b>${money(D.month.vr)}</b>, иначе одно и то же посчиталось бы дважды.
+      Расхождение: <b style="color:${big?'var(--terra-d)':'var(--muted)'}">${dv>=0?"+":"−"}${money(Math.abs(dv))}</b>${
+        big?(dv>0?" — по факту платите заметно больше, чем считает модель: проверьте ставки и типы статей.":" — по факту заметно меньше: возможно, часть статей ещё не внесена."):"."}`:
+      `Переменных статей («растёт с загрузкой») в факте нет — ЗП и налоги считает модель: <b>${money(D.month.vr)}</b>.`}
+    </div>`;
+  } else {
+    srcPlate=`<div class="callout" style="font-size:12px;margin-bottom:10px">
+      Постоянные расходы взяты <b>из модели</b> (вкладка «Постоянные расходы») — факта за ${one?"этот месяц":"учебный год"} ещё нет.
+      Впишите расходы по статьям в «Дашборд администратора → 💸 Расходы ежедневно», и формула пересчитается по ним.
+      Там же у каждой статьи стоит тип: «идёт в любом случае» или «растёт с загрузкой».
+    </div>`;
+  }
+
+  /* ---- 1. Три единицы ---- */
+  const unit=(title,u,note)=>{
+    if(!u) return "";
+    const bad=u.profit<0;
+    return `<div class="card" style="flex:1 1 240px;min-width:240px">
+      <h3 style="margin:0 0 2px">${title}</h3>
+      <div class="hint" style="margin-bottom:8px">${note}</div>
+      <table style="width:100%"><tbody>
+        <tr><td style="text-align:left">Выручка</td><td class="num"><b>${money(u.rev)}</b></td></tr>
+        <tr><td style="text-align:left;color:var(--muted)">− переменные (ЗП, налоги, %)</td><td class="num" style="color:var(--muted)">−${money(u.vr)}</td></tr>
+        <tr><td style="text-align:left">= вклад в покрытие</td><td class="num"><b style="color:var(--terra-d)">${money(u.contrib)}</b></td></tr>
+        <tr><td style="text-align:left;color:var(--muted)">− доля постоянных</td><td class="num" style="color:var(--muted)">−${money(u.fix)}</td></tr>
+        <tr style="border-top:2px solid var(--line)"><td style="text-align:left"><b>= прибыль</b></td>
+          <td class="num"><b style="color:${bad?'var(--red)':'var(--green)'}">${money(u.profit)}</b></td></tr>
+      </tbody></table></div>`;
+  };
+  const units=`<h3 style="margin:14px 0 6px">Три единицы</h3>
+    <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-start">
+      ${unit("Одно занятие",D.lesson,"среднее по клубу: занятий "+(one?E.lessonsY:Math.round(D.lessonsM))+" в месяц")}
+      ${unit("Одна группа",D.group,"в месяц · групп в расписании: "+fmt1(D.groups))}
+      ${unit("Один ребёнок",D.kid,"в месяц · детей: "+Math.round(D.kids))}
+    </div>`;
+
+  /* ---- 2. Разбор одного занятия (это и есть «формула») ---- */
+  const courses=_fmlCourses(E);
+  if(!_fmlCourse || !courses.some(c=>c.name===_fmlCourse)) _fmlCourse=(courses[0]||{}).name||"";
+  const cur=courses.find(c=>c.name===_fmlCourse)||{fill:4};
+  const nSel=_fmlN||Math.max(1,Math.round(cur.fill||4));
+  const fixPer=D.lesson?D.lesson.fix:0;
+  const L=_fmlLesson(_fmlCourse,nSel,fixPer);
+  const minF=_fmlMinFill(_fmlCourse,fixPer);
+  const step=(lab,val,sign,hint,bold)=>`<tr>
+    <td style="text-align:left">${bold?"<b>":""}${lab}${bold?"</b>":""}${hint?` <span class="hint">${hint}</span>`:""}</td>
+    <td class="num" style="white-space:nowrap">${bold?"<b>":""}${sign==="-"?"−":""}${money(Math.abs(val))}${bold?"</b>":""}</td></tr>`;
+  const razbor=`<h3 style="margin:18px 0 6px">Разбор одного занятия</h3>
+    <div class="hd-actions" style="margin-bottom:8px">
+      <select class="cell" style="width:auto" onchange="fmlSet('course',this.value)">
+        ${courses.map(c=>`<option value="${esc(c.name)}"${c.name===_fmlCourse?" selected":""}>${esc(c.name)}</option>`).join("")}
+      </select>
+      <label style="font-size:13px">детей на занятии <input class="cell" type="number" min="1" max="30" style="width:66px" value="${nSel}" onchange="fmlSet('n',this.value)"></label>
+      <span class="hint">сейчас в среднем ${fmt1(cur.fill||0)}</span>
+    </div>
+    <div class="tscroll" style="max-width:620px"><table><tbody>
+      ${step("Цена занятия × дети",L.rev,"",fmt(L.price)+" р × "+L.n,true)}
+      ${step("ЗП педагога",L.wage,"-","ставка курса при "+L.n+" детях")}
+      ${step("УСН "+fmt1(R.usn)+"%",L.usn,"-","с выручки")}
+      ${R.acq?step("Эквайринг "+fmt1(R.acq)+"%",L.acq,"-","с выручки"):""}
+      ${R.pct?step("Расходы % от оборота ("+fmt1(R.pct)+"%)",L.pct,"-","бытовые и прочие"):""}
+      ${step("Взносы "+fmt1(R.con)+"%",L.con,"-","ФСЗН и Белгосстрах с ЗП педагога")}
+      <tr style="border-top:1px solid var(--line)">${`<td style="text-align:left"><b>= вклад занятия</b> <span class="hint">идёт на покрытие постоянных</span></td><td class="num"><b style="color:var(--terra-d)">${money(L.contrib)}</b></td>`}</tr>
+      ${step("Доля постоянных",L.fix,"-","аренда, админ-команда, ЗП собственника ÷ "+(one?E.lessonsY:Math.round(D.lessonsM))+" занятий в месяц")}
+      <tr style="border-top:2px solid var(--line)"><td style="text-align:left"><b>= прибыль занятия</b></td>
+        <td class="num"><b style="color:${L.profit<0?'var(--red)':'var(--green)'}">${money(L.profit)}</b></td></tr>
+    </tbody></table></div>
+    <div class="hint" style="margin-top:6px">${minF
+      ? `Курс «${esc(_fmlCourse)}» выходит в ноль с <b>${minF}</b> ${_fmlKid(minF)} на занятии${cur.fill?` (сейчас в среднем ${fmt1(cur.fill)})`:""}.`
+      : `Курс «${esc(_fmlCourse)}» не выходит в ноль даже при 20 детях — проверьте цену и ставку.`}</div>`;
+
+  /* ---- 3. Таблица «какая наполняемость зарабатывает» ---- */
+  const NS=[4,5,6,7,8,9,10,11,12];
+  const rows=courses.map(c=>{
+    const mf=_fmlMinFill(c.name,fixPer), fillNow=Math.round(c.fill||0);
+    const cells=NS.map(n=>{
+      const p=_fmlLesson(c.name,n,fixPer).profit;
+      const isNow=(n===fillNow);
+      // −0,4 округляется в «-0» и читается как поломка: у самого нуля пишем ровный 0
+      const v=Math.round(p)===0?0:p;
+      return `<td class="num" style="${isNow?'outline:2px solid var(--graphite);outline-offset:-2px;':''}color:${p<0?'var(--red)':'var(--green)'}">${fmt(v)}</td>`;
+    }).join("");
+    return `<tr><td style="text-align:left"><b>${esc(c.name)}</b></td>
+      <td class="num">${fmt(_planPrice(c.name).p)}</td>
+      <td class="num">${fmt1(c.fill||0)}</td>
+      <td class="num">${mf?('<b style="color:'+((c.fill||0)>=mf?'var(--green)':'var(--red)')+'">'+mf+'</b>'):'<span style="color:var(--muted)">—</span>'}</td>
+      ${cells}</tr>`;
+  }).join("");
+  const table=`<h3 style="margin:18px 0 6px">Какая наполняемость зарабатывает</h3>
+    <div class="hint" style="margin-bottom:6px">Прибыль ОДНОГО занятия с учётом доли постоянных. Красное — занятие в минусе, зелёное — в плюсе. Обведена сегодняшняя средняя наполняемость курса. «Минимум» — сколько детей нужно, чтобы выйти в ноль.</div>
+    <div class="tscroll"><table><thead><tr>
+      <th style="text-align:left">Курс</th><th class="num">Цена</th><th class="num" title="Средняя наполняемость по расписанию">Сейчас</th>
+      <th class="num" title="Минимум детей до нуля">Минимум</th>
+      ${NS.map(n=>`<th class="num">${n}</th>`).join("")}
+    </tr></thead><tbody>${rows}</tbody></table></div>`;
+
+  /* ---- 4. Порог нуля ---- */
+  const be=`<h3 style="margin:18px 0 6px">Порог нуля</h3>
+    <div class="callout" style="font-size:13px;line-height:1.7">
+      Постоянные расходы: <b>${money(D.month.fix)}</b> в месяц — идут, даже если не запустится ни одна группа.<br>
+      Один ребёнок приносит <b>${money(D.kid?D.kid.contrib:0)}</b> вклада в месяц ⇒ чтобы выйти в ноль, нужно
+      <b style="color:${(D.kidsBE!=null&&D.kids>=D.kidsBE)?'var(--green)':'var(--red)'}">${D.kidsBE!=null?Math.ceil(D.kidsBE):"—"}</b>
+      ${D.kidsBE!=null?_fmlKid(Math.ceil(D.kidsBE)):""} — сейчас <b>${Math.round(D.kids)}</b>.<br>
+      Одно занятие приносит <b>${money(D.lesson?D.lesson.contrib:0)}</b> вклада ⇒ занятий в месяц нужно
+      <b>${D.lessonsBE!=null?Math.ceil(D.lessonsBE):"—"}</b> — сейчас <b>${one?E.lessonsY:Math.round(D.lessonsM)}</b>.<br>
+      <span style="color:var(--muted)">Прибыль ${one?"месяца":"среднего месяца"}: </span>
+      <b style="color:${D.month.profit<0?'var(--red)':'var(--green)'}">${money(D.month.profit)}</b>
+      <span style="color:var(--muted)"> при выручке ${money(D.month.rev)}.</span>
+    </div>`;
+
+  return `<div class="fml">`+head+tabs+srcPlate+units+razbor+table+be+`</div>`;
+}
+function _fmlKid(n){
+  n=Math.abs(+n||0); const t=n%10, h=n%100;
+  if(t===1&&h!==11) return "ребёнок";
+  if(t>=2&&t<=4&&(h<12||h>14)) return "ребёнка";
+  return "детей";
 }
 
 /* ---- ОТЧЁТ ДЛЯ ОТДЕЛА ПРОДАЖ ----
