@@ -53,11 +53,14 @@ foreach ($dates as $d) {
     $done[$d] = ['present' => $r['present'], 'all' => $r['all'], 'planned' => $r['planned'], 'lessons' => $r['lessons']];
 }
 /* Платежи (кассы) за сегодня и вчера — снимок «что админы внесли», для сверки с их листами. */
-$pays = [];
-foreach ([date('Y-m-d'), date('Y-m-d', strtotime('-1 day'))] as $d) {
+$pays = []; $today = date('Y-m-d'); $payDone = 0;
+foreach ($dates as $d) {                       // те же дни, что и реализация, но только прошедшие
+    if ($d > $today || $payDone >= 10) continue;
     $pr = alfa_payments_upsert($d, $branches);
     $pays[$d] = ['income' => $pr['income'], 'expense' => $pr['expense'], 'count' => $pr['count']];
+    $payDone++;
 }
+ksort($pays);
 header('Content-Type: application/json; charset=utf-8');
 echo json_encode(['ok' => true, 'ranAt' => date('c'), 'branches' => $branches,
                   'back' => $days, 'ahead' => $ahead, 'recalculated' => count($done), 'days' => $done, 'payments' => $pays], JSON_UNESCAPED_UNICODE);
