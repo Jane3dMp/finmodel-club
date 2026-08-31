@@ -10614,6 +10614,7 @@ function _ratingHtml(){
     <label style="font-size:13px">с <input type="date" class="cell" style="width:auto" value="${esc(from)}" onchange="ratSet('from',this.value)"></label>
     <label style="font-size:13px">по <input type="date" class="cell" style="width:auto" value="${esc(to)}" onchange="ratSet('to',this.value)"></label>
     <button class="btn sm" id="ratBtn" onclick="ratPull()">🔄 Посчитать период из Alfa</button>
+    <button class="btn ghost sm" id="ratesBtn" onclick="ratesProbe()" title="Проверить, можно ли проставлять ставки ЗП в Alfa через API">🔎 Ставки ЗП в Alfa?</button>
     <span id="ratProg" style="font-size:12px;color:var(--muted)">${days?("дней с данными: "+days):""}</span>
   </div>`;
   if(!rows.length) return head+`<div class="callout">За период нет посчитанных дней. Нажмите «Посчитать период из Alfa» — он пройдёт по дням и соберёт статистику (дальше её копит cron сам).</div>`;
@@ -10654,6 +10655,29 @@ function _ratingHtml(){
       <td style="text-align:right"><b>${(tZ&&tR)?((100*tZ/tR).toFixed(0)+'%'):'—'}</b></td></tr>
   </tbody></table></div>
   <div style="font-size:12px;color:var(--muted);margin-top:8px">«Детей» — количество посещений за период (один ребёнок на 10 занятиях = 10). Дальше данные копятся сами: cron считает каждый день в 22:00.</div>`;
+}
+/* Разведка: доступны ли ставки ЗП педагогов через API Alfa (чтобы проставлять их из финмодели) */
+async function ratesProbe(){
+  const btn=document.getElementById("ratesBtn"), prog=document.getElementById("ratProg");
+  if(btn) btn.disabled=true; if(prog) prog.textContent="Проверяю API Alfa на ставки ЗП…";
+  try{
+    const j=await _pubCall("ratesProbe",{});
+    console.log("📤 ratesProbe",j);
+    const ok=(j.tried||[]).filter(t=>!t.err);
+    const rows=(j.tried||[]).map(t=>`<tr><td style="font-family:monospace;font-size:11px">${esc(t.path)}</td>
+      <td style="text-align:center">${t.err?('<span style="color:var(--muted)">'+esc(t.err)+(t.code?(' '+t.code):'')+'</span>'):'<b style="color:var(--green)">есть!</b>'}</td></tr>`).join("");
+    const b=document.getElementById("rukBody");
+    if(b){ const d=document.createElement('div');
+      d.innerHTML=`<div class="callout" style="border-color:${ok.length?'var(--green)':'var(--terra)'};margin-bottom:10px">
+        ${ok.length?('В API нашлись ставки: <b>'+ok.map(t=>esc(t.path)).join(', ')+'</b> — можно попробовать проставлять из финмодели.')
+                   :'Ставок ЗП в API Alfa <b>нет</b> — проставить их автоматически нельзя. Ниже поля карточки педагога: если ставка есть там, скажите, посмотрим.'}
+        <details style="margin-top:6px"><summary style="cursor:pointer;font-size:12px">Что проверяли</summary>
+        <table style="margin-top:6px"><thead><tr><th>Эндпоинт</th><th>Ответ</th></tr></thead><tbody>${rows}</tbody></table>
+        <pre style="white-space:pre-wrap;font-size:11px;background:var(--paper);padding:6px;border-radius:6px;max-height:30vh;overflow:auto;margin-top:6px">${esc(JSON.stringify({teacherKeys:(j.teacher||{}).keys,teacherSample:(j.teacher||{}).sample,userKeys:(j.user||{}).keys},null,1))}</pre></details></div>`;
+      b.insertBefore(d.firstChild,b.firstChild); }
+    if(prog) prog.textContent="";
+  }catch(e){ if(prog) prog.textContent=""; toast("Не получилось: "+((e&&e.message)||e)); }
+  finally{ if(btn) btn.disabled=false; }
 }
 /* пройти период по дням и собрать статистику (дальше её копит cron) */
 async function ratPull(){

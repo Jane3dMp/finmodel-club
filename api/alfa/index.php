@@ -1361,6 +1361,34 @@ switch ($action) {
                   'sampleLesson' => $sample, 'sampleDetail' => $sampleDet]);
         break;
 
+    // --- РАЗВЕДКА: есть ли в API ставки ЗП педагогов (чтобы проставлять их из финмодели) ---
+    case 'ratesProbe':
+        @set_time_limit(120);
+        $br = alfa_realization_branches() ?: [alfa_branch()];
+        $bid = (int)$br[0];
+        $host = 'https://' . alfa_host(); $token = alfa_token();
+        $cands = ['teacher-rate/index', 'teacher-rates/index', 'rate/index', 'rates/index',
+                  'salary/index', 'salaries/index', 'teacher-salary/index', 'payroll/index',
+                  'teacher-tariff/index', 'employee-rate/index', 'wage/index'];
+        $tried = [];
+        foreach ($cands as $c) {
+            $r = alfa_http('POST', "$host/v2api/$bid/$c", ['page' => 0, 'count' => 5], $token, true, 8);
+            $row = ['path' => $c, 'err' => $r['__err'] ?? null, 'code' => $r['code'] ?? null];
+            if (!isset($r['__err'])) {
+                $row['total'] = $r['total'] ?? null;
+                $row['count'] = is_array($r['items'] ?? null) ? count($r['items']) : null;
+                $row['sample'] = is_array($r['items'] ?? null) ? ($r['items'][0] ?? null) : null;
+            }
+            $tried[] = $row;
+        }
+        // как выглядит сам педагог — вдруг ставка лежит в его карточке
+        $t = alfa_http('POST', "$host/v2api/$bid/teacher/index", ['page' => 0, 'count' => 3], $token, true, 10);
+        $u = alfa_http('POST', "$host/v2api/$bid/user/index", ['page' => 0, 'count' => 3], $token, true, 10);
+        json_out(['ok' => true, 'branch' => $bid, 'tried' => $tried,
+                  'teacher' => ['err' => $t['__err'] ?? null, 'keys' => isset($t['items'][0]) ? array_keys($t['items'][0]) : null, 'sample' => $t['items'][0] ?? null],
+                  'user' => ['err' => $u['__err'] ?? null, 'keys' => isset($u['items'][0]) ? array_keys($u['items'][0]) : null, 'sample' => $u['items'][0] ?? null]]);
+        break;
+
     // --- ПЛАТЕЖИ ЗА ДЕНЬ ПО КАССАМ (READ): для сверки с бумажными листами админов ---
     //     Отдаём и агрегаты (по кассе/типу/сотруднику), и сам список, и справочники названий.
     case 'paymentsDay':
