@@ -1172,23 +1172,58 @@ function alfa_pay_store_write(array $d): void {
     if (@file_put_contents($tmp, $json, LOCK_EX) !== false) { @chmod($tmp, 0660); @rename($tmp, $f); }
     else @file_put_contents($f, $json, LOCK_EX);
 }
-/* Сумма платежей за день по кассам — снимок в хранилище (для cron в 22:00). */
+/* Справочники касс/счетов/локаций (id => имя), кэш на сутки — чтобы снимок хранил
+   человеческие названия («ЕРИП», «Наличные», «Терминал»), а не id. */
+function alfa_pay_refs(): array {
+    static $memo = null;
+    if ($memo !== null) return $memo;
+    $f = alfa_store_dir() . '/payrefs_' . substr(hash('sha256', __DIR__ . '|payrefs'), 0, 20) . '.json';
+    if (is_file($f)) {
+        $j = json_decode((string)@file_get_contents($f), true);
+        if (is_array($j) && (int)($j['ts'] ?? 0) > time() - 86400 && is_array($j['r'] ?? null)) return $memo = $j['r'];
+    }
+    $br = alfa_realization_branches() ?: [alfa_branch()];
+    $bid = (int)$br[0];
+    $out = [];
+    foreach (['pay-account' => 'payAccounts', 'pay-item' => 'payItems', 'location' => 'locations'] as $ent => $key) {
+        $rr = alfa_http('POST', 'https://' . alfa_host() . "/v2api/$bid/$ent/index", ['page' => 0, 'count' => 100], alfa_token(), true, 8);
+        if (isset($rr['__err'])) continue;
+        $m = [];
+        foreach (($rr['items'] ?? []) as $it) { if (isset($it['id'])) $m[(int)$it['id']] = (string)($it['name'] ?? ''); }
+        if ($m) $out[$key] = $m;
+    }
+    if ($out) @file_put_contents($f, json_encode(['ts' => time(), 'r' => $out], JSON_UNESCAPED_UNICODE), LOCK_EX);
+    return $memo = $out;
+}
+/* Имя кассы для платежа: счёт → локация → тип оплаты. */
+function alfa_pay_kassa_name(array $x, array $refs): string {
+    $acc = $refs['payAccounts'][(int)($x['pay_account_id'] ?? 0)] ?? '';
+    if ($acc !== '') return $acc;
+    $loc = $refs['locations'][(int)($x['location_id'] ?? 0)] ?? '';
+    if ($loc !== '') return $loc;
+    $t = trim((string)($x['pay_type_name'] ?? ''));
+    return $t !== '' ? $t : 'Без кассы';
+}
+/* Снимок платежей за день по кассам (для cron в 22:00) — с названиями и списком операций. */
 function alfa_payments_upsert(string $date, ?array $branches = null): array {
     $r = alfa_payments_day($date, $branches);
-    $inc = 0.0; $out = 0.0; $byKey = [];
+    $refs = alfa_pay_refs();
+    $inc = 0.0; $out = 0.0; $byIn = []; $byOut = [];
     foreach ($r['rows'] as $x) {
+        $name = alfa_pay_kassa_name($x, $refs);
         $isOut = (mb_stripos((string)$x['pay_type_name'], 'расход') !== false) || ((float)$x['income'] < 0);
-        if ($isOut) { $out += abs((float)$x['income']); continue; }
-        $k = (string)($x['pay_account_id'] ?? ($x['location_id'] ?? $x['pay_type_name']));
-        $byKey[$k] = round(($byKey[$k] ?? 0) + (float)$x['income'], 2);
-        $inc += (float)$x['income'];
+        $v = abs((float)$x['income']);
+        if ($isOut) { $byOut[$name] = round(($byOut[$name] ?? 0) + $v, 2); $out += $v; }
+        else        { $byIn[$name]  = round(($byIn[$name]  ?? 0) + $v, 2); $inc += $v; }
     }
     $st = alfa_pay_store_read();
-    $st[$r['date']] = ['total' => round($inc, 2), 'expense' => round($out, 2),
-                       'count' => count($r['rows']), 'byKey' => $byKey, 'ts' => date('c')];
+    $st[$r['date']] = ['income' => round($inc, 2), 'expense' => round($out, 2),
+                       'count' => count($r['rows']), 'byIn' => $byIn, 'byOut' => $byOut, 'ts' => date('c')];
     ksort($st);
+    if (count($st) > 400) $st = array_slice($st, -400, null, true);   // храним последние ~13 месяцев
     alfa_pay_store_write($st);
-    return ['date' => $r['date'], 'total' => round($inc, 2), 'expense' => round($out, 2), 'count' => count($r['rows']), 'byKey' => $byKey];
+    return ['date' => $r['date'], 'income' => round($inc, 2), 'expense' => round($out, 2),
+            'count' => count($r['rows']), 'byIn' => $byIn, 'byOut' => $byOut];
 }
 
 /* ===== ПЛАТЕЖИ ЗА ДЕНЬ (кассы) =====

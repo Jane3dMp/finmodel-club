@@ -56,7 +56,7 @@ foreach ($dates as $d) {
 $pays = [];
 foreach ([date('Y-m-d'), date('Y-m-d', strtotime('-1 day'))] as $d) {
     $pr = alfa_payments_upsert($d, $branches);
-    $pays[$d] = ['total' => $pr['total'], 'count' => $pr['count']];
+    $pays[$d] = ['income' => $pr['income'], 'expense' => $pr['expense'], 'count' => $pr['count']];
 }
 header('Content-Type: application/json; charset=utf-8');
 echo json_encode(['ok' => true, 'ranAt' => date('c'), 'branches' => $branches,

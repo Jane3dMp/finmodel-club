@@ -9999,14 +9999,17 @@ function renderAdm(){
   nav.innerHTML=ADM_SECTIONS.map(s=>`<button class="btn ${s[0]===_admSec?'':'ghost'} sm" onclick="admGo('${s[0]}')">${esc(s[1])}</button>`).join("");
   const body=document.getElementById("admBody"); if(!body) return;
   if(_admSec==="real"){ _realRender(); return; }
-  if(_admSec==="kassa"){ body.innerHTML=_kassaHtml(); return; }
+  if(_admSec==="kassa"){ body.innerHTML=_kassaHtml();
+    if(!_paySnap){ _payLoadStore().then(()=>{ if(_admSec==="kassa"){ const b=document.getElementById("admBody"); if(b) b.innerHTML=_kassaHtml(); } }).catch(()=>{}); }
+    return; }
   const lab=(ADM_SECTIONS.find(x=>x[0]===_admSec)||[])[1]||"";
   body.innerHTML=`<div class="callout">Раздел «${esc(lab)}» — 🔧 в разработке. «Расходы» и «ЗП админы» — ручной ввод, сделаем, как определимся с логикой.</div>`;
 }
 /* ---- КАССЫ: платежи из Alfa за день против бумажного листа админа ----
    Админы сначала пишут ручкой, вечером вносят в Alfa. Здесь видно, что реально внесено,
    и можно вписать сумму «по листу», чтобы сразу увидеть расхождение. */
-let _kassaDay=null, _kassaDate=_todayIso(), _kassaBusy=false;
+let _kassaDay=null, _kassaDate=_todayIso(), _kassaBusy=false, _paySnap=null;
+async function _payLoadStore(){ const j=await _pubCall("paymentsStore",{}); _paySnap=j.store||{}; }
 function _kassaSheet(){ if(!S.kassaSheet) S.kassaSheet={}; return S.kassaSheet; }
 function kassaSetDate(v){ if(v){ _kassaDate=v; _kassaDay=null; } const b=document.getElementById("admBody"); if(b) b.innerHTML=_kassaHtml(); }
 function kassaSheetSet(key,val){
@@ -10028,13 +10031,17 @@ function _kassaName(r,refs){
 }
 function _kassaHtml(){
   const D=_kassaDay;
-  const head=`<div class="callout" style="margin-bottom:10px;font-size:12px">Платежи, внесённые в Alfa за день (кассы). Впишите сумму «по листу» — что админ записал ручкой — и увидите расхождение. Обновляется автоматически в 22:00 и по кнопке.</div>
+  const head=`<div class="callout" style="margin-bottom:10px;font-size:12px">Платежи, внесённые в Alfa за день (кассы). Впишите сумму «по листу» — что админ записал ручкой — и увидите расхождение. Cron в 22:00 сам снимает прошедший день — вкладка открывается уже с цифрами.</div>
   <div class="hd-actions" style="margin-bottom:10px">
     <input type="date" class="cell" style="width:auto" value="${esc(_kassaDate)}" onchange="kassaSetDate(this.value)">
     <button class="btn sm" id="kassaBtn" onclick="kassaLoad()">🔄 Загрузить из Alfa</button>
     <span id="kassaProg" style="font-size:12px;color:var(--muted)"></span>
   </div>`;
-  if(!D) return head+`<div class="callout">Выберите день и нажмите «Загрузить из Alfa».</div>`;
+  if(!D){
+    const sn=(_paySnap||{})[_kassaDate];
+    if(sn) return head+_kassaFromSnap(sn);
+    return head+`<div class="callout">${_paySnap?('За '+esc(_kassaDate)+' автоснимка нет (cron собирает в 22:00). Нажмите «Загрузить из Alfa», чтобы посчитать сейчас.'):'⏳ Читаю сохранённые снимки…'}</div>`;
+  }
   const refs=D.refs||{}, all=D.payments||[];
   const inc=all.filter(r=>!_kassaIsOut(r)), out=all.filter(r=>_kassaIsOut(r));
   const K=(_kassaSheet()[_kassaDate])||{};
@@ -10101,6 +10108,32 @@ function _kassaHtml(){
   ${out.length?`<details style="margin-top:10px"><summary style="cursor:pointer;font-weight:600">Расходы дня — список (${out.length})</summary>
     <div class="tscroll" style="max-width:780px;margin-top:8px"><table><thead><tr><th style="text-align:left">Кому/за что</th><th style="text-align:right">Сумма</th><th style="text-align:left">Касса</th><th style="text-align:left">Примечание</th><th>Внесён</th></tr></thead><tbody>${out.map(rowHtml).join("")}</tbody></table></div></details>`:''}`;
 }
+/* Отрисовка из автоснимка (cron 22:00): суммы по кассам, приход и расход, со сверкой. */
+function _kassaFromSnap(sn){
+  const K=(_kassaSheet()[_kassaDate])||{};
+  const tbl=(title,by,prefix,color)=>{
+    let tA=0,tS=0;
+    const trs=Object.keys(by||{}).sort().map(k=>{
+      const v=+by[k]||0, sheet=+(K[(prefix||'')+k]||0), diff=sheet?(sheet-v):null;
+      tA+=v; tS+=sheet;
+      return `<tr><td><b>${esc(k)}</b></td>
+        <td style="text-align:right"><b>${_gm(v)}</b></td>
+        <td style="text-align:right"><input class="cell" type="number" step="0.01" style="width:104px;text-align:right" value="${sheet||''}" placeholder="—" onchange="kassaSheetSet('${_jsStr((prefix||'')+k)}',this.value)"></td>
+        <td style="text-align:right">${diff==null?'<span style="color:var(--muted)">—</span>':(Math.abs(diff)<0.005?'<b style="color:var(--green)">сходится ✓</b>':('<b style="color:var(--red)">'+(diff>0?'+':'')+_gm(diff)+'</b>'))}</td></tr>`;
+    }).join("");
+    const d=tS?(tS-tA):null;
+    return `<h3 style="margin:12px 0 6px">${title}</h3>
+      <div class="tscroll" style="max-width:700px"><table><thead><tr><th style="text-align:left">Касса</th><th style="text-align:right">В Alfa</th><th style="text-align:right">По листу</th><th style="text-align:right">Разница</th></tr></thead>
+      <tbody>${trs||'<tr><td colspan="4" style="color:var(--muted);padding:10px">нет</td></tr>'}
+        <tr style="border-top:2px solid var(--line)"><td><b>Итого</b></td>
+          <td style="text-align:right"><b style="color:${color}">${_gm(tA)}</b></td>
+          <td style="text-align:right"><b>${tS?_gm(tS):'—'}</b></td>
+          <td style="text-align:right">${d==null?'—':(Math.abs(d)<0.005?'<b style="color:var(--green)">сходится ✓</b>':('<b style="color:var(--red)">'+(d>0?'+':'')+_gm(d)+'</b>'))}</td></tr>
+      </tbody></table></div>`;
+  };
+  return `<div style="font-size:12px;color:var(--muted);margin-bottom:6px">Автоснимок от ${esc(String(sn.ts||'').slice(0,16).replace('T',' '))} · операций: ${sn.count||0}. Для списка операций нажмите «Загрузить из Alfa».</div>`
+    + tbl('Приход', sn.byIn, '', 'var(--green)') + tbl('Расход', sn.byOut, 'out:', 'var(--red)');
+}
 function _kassaCustName(id){
   if(!id) return "—";
   const c=(typeof _pubCustomers!=="undefined"&&_pubCustomers)?_pubCustomers.find(x=>+x.id===+id):null;
@@ -10114,6 +10147,7 @@ async function kassaLoad(){
     const j=await _pubCall("paymentsDay",{date:_kassaDate});
     console.log("📤 paymentsDay",j);
     _kassaDay=j;
+    if(j.snapshot){ _paySnap=_paySnap||{}; _paySnap[j.date]=Object.assign({}, j.snapshot, {ts:new Date().toISOString()}); }
     // ФИО плательщиков: подтягиваем список клиентов Alfa (один раз) и перерисовываем
     if(!_pubCustomers){
       if(prog) prog.textContent="Подтягиваю ФИО клиентов…";

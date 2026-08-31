@@ -1384,10 +1384,18 @@ switch ($action) {
             $isOut = (mb_stripos($x['pay_type_name'], 'расход') !== false) || ((float)$x['income'] < 0);
             if ($isOut) $out_ += abs((float)$x['income']); else $in_ += (float)$x['income'];
         }
+        // заодно кладём снимок дня в хранилище — вкладка потом открывается мгновенно
+        $snap = null;
+        try { $snap = alfa_payments_upsert($date, $branches); } catch (\Throwable $e) { $snap = null; }
         json_out(['ok' => true, 'date' => $date, 'count' => count($rows),
                   'incomeTotal' => round($in_, 2), 'expenseTotal' => round($out_, 2),
-                  'payments' => $rows, 'refs' => $refs,
+                  'payments' => $rows, 'refs' => $refs, 'snapshot' => $snap,
                   'debug' => ['scanned' => $res['scanned'], 'pages' => $res['pages']]]);
+        break;
+
+    // --- СНИМКИ ПЛАТЕЖЕЙ ПО ДНЯМ (READ): то, что собрал cron в 22:00 ---
+    case 'paymentsStore':
+        json_out(['ok' => true, 'store' => alfa_pay_store_read()]);
         break;
 
     // --- ТОЧНЫЙ ПРОГНОЗ ЗА ДЕНЬ: по запланированным занятиям Alfa (status=1), как её отчёт ---
