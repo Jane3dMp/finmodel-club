@@ -498,7 +498,7 @@ function alfa_cron_key(): string { return (string)(cfg()['cron_key'] ?? ''); }
 /* Кэш цены занятия по ученику (файл, живёт сутки): без него каждый расчёт прогноза
    делает ~600 запросов к Alfa и шлюз рвёт связь по таймауту. */
 function alfa_price_cache_path(): string {
-    $salt = substr(hash('sha256', __DIR__ . '|lessonprice2'), 0, 24);
+    $salt = substr(hash('sha256', __DIR__ . '|lessonprice3'), 0, 24);   // v3: цена из шаблона + окно недели
     return alfa_store_dir() . '/lessonprice_' . $salt . '.json';
 }
 /* Справочник шаблонов тарифов: id => [цена, число уроков, тип]. Цена занятия ученика берётся
@@ -579,12 +579,16 @@ function alfa_price_cache_write(array $prices): void {
 }
 /* Цена занятия ученика на дату: берём его абонемент, действующий на эту дату (и, если можно,
    по нужному предмету), и цену из ШАБЛОНА тарифа. Кэш — по «ученик|предмет». */
-function alfa_lesson_price_of(int $branch, int $customerId, array &$cache, array &$dbg, int $subjectId = 0, string $onDate = ''): float {
+function alfa_lesson_price_of(int $branch, int $customerId, array &$cache, array &$dbg, int $subjectId = 0, string $from = '', string $to = ''): float {
     $ck = $customerId . '|' . $subjectId;
     if (isset($cache[$ck])) return (float)$cache[$ck];
     $r = alfa_customer_tariffs($branch, $customerId);
     $tm = &alfa_tariff_map_ref($branch);   // по ссылке: догруженные тарифы копятся на весь запрос
-    $onDate = $onDate !== '' ? alfa_iso($onDate) : date('Y-m-d');
+    /* ⚠️ Сверяем ПЕРЕСЕЧЕНИЕ периода абонемента с НЕДЕЛЕЙ, а не «действует ли в понедельник»:
+       абонементы на новый год начинаются 02.09, а неделя стартует 31.08 — при проверке по одной
+       дате отсеивались почти все ученики и прогноз выходил нулевым. */
+    $from = $from !== '' ? alfa_iso($from) : date('Y-m-d');
+    $to   = $to   !== '' ? alfa_iso($to)   : $from;
     $bySubject = null; $anyActive = null; $anyAtAll = null;
     foreach ($r['items'] as $t) {
         if (!is_array($t) || !empty($t['is_archive'])) continue;
@@ -593,13 +597,13 @@ function alfa_lesson_price_of(int $branch, int $customerId, array &$cache, array
         $per = $tm[$tid]['per'] ?? null; if ($per === null || $per <= 0) continue;
         if ($anyAtAll === null) $anyAtAll = (float)$per;
         $b = alfa_iso((string)($t['b_date'] ?? '')); $e = alfa_iso((string)($t['e_date'] ?? ''));
-        $active = ($b === '' || $b <= $onDate) && ($e === '' || $e >= $onDate);
-        if (!$active) continue;
+        $overlaps = ($b === '' || $b <= $to) && ($e === '' || $e >= $from);
+        if (!$overlaps) continue;
         if ($anyActive === null) $anyActive = (float)$per;
         $sids = array_map('intval', (array)($t['subject_ids'] ?? []));
         if ($subjectId && in_array($subjectId, $sids, true)) { $bySubject = (float)$per; break; }
     }
-    $price = $bySubject ?? $anyActive ?? 0.0;   // предмет → любой действующий → нет цены
+    $price = $bySubject ?? $anyActive ?? 0.0;   // предмет → любой действующий на неделе → нет цены
     if ($price <= 0 && count($dbg) < 3) $dbg[] = ['customer_id' => $customerId, 'subject' => $subjectId,
                                                  'tariffs' => array_slice($r['items'], 0, 2)];
     $cache[$ck] = $price;
@@ -657,7 +661,7 @@ function alfa_forecast_groups(string $mondayIso, array $groups): array {
             }
         }
         foreach (array_keys($seen) as $cid) {
-            $p = alfa_lesson_price_of($bid, (int)$cid, $priceCache, $dbg, $subj, $mon);
+            $p = alfa_lesson_price_of($bid, (int)$cid, $priceCache, $dbg, $subj, $mon, $sun);
             if ($p <= 0) { $noPrice++; if (count($noPriceIds) < 8) $noPriceIds[] = ['id' => (int)$cid, 'branch' => $bid]; }
             $sum += $p * $times; $lessons += $times; $students++;
         }
