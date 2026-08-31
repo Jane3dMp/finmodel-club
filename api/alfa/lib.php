@@ -1172,34 +1172,89 @@ function alfa_pay_store_write(array $d): void {
     if (@file_put_contents($tmp, $json, LOCK_EX) !== false) { @chmod($tmp, 0660); @rename($tmp, $f); }
     else @file_put_contents($f, $json, LOCK_EX);
 }
-/* Сумма платежей за день по кассам: [ключ кассы => сумма]. Пишем в хранилище. */
+/* Сумма платежей за день по кассам — снимок в хранилище (для cron в 22:00). */
 function alfa_payments_upsert(string $date, ?array $branches = null): array {
-    $date = alfa_iso($date);
-    $branches = $branches ?: (alfa_realization_branches() ?: [alfa_branch()]);
-    $host = 'https://' . alfa_host(); $token = alfa_token();
-    $PER = 50; $total = 0.0; $n = 0; $byKey = [];
-    foreach ($branches as $bid) {
-        $bid = (int)$bid;
-        for ($p = 0; $p < 60; $p++) {
-            $r = alfa_http('POST', "$host/v2api/$bid/pay/index",
-                ['date_from' => $date, 'date_to' => $date, 'page' => $p, 'count' => $PER], $token, true, 20);
-            $items = isset($r['__err']) ? [] : ($r['items'] ?? []);
-            foreach ($items as $x) {
-                if (!is_array($x)) continue;
-                $d = substr((string)($x['document_date'] ?? ($x['date'] ?? '')), 0, 10);
-                if ($d !== '' && $d !== $date) continue;
-                $inc = (float)($x['income'] ?? 0);
-                $k = (string)($x['cash_box_id'] ?? ($x['pay_account_id'] ?? ($x['location_id'] ?? ($x['pay_type_id'] ?? ''))));
-                $byKey[$k] = ($byKey[$k] ?? 0) + $inc;
-                $total += $inc; $n++;
-            }
-            if (count($items) < $PER) break;
-        }
+    $r = alfa_payments_day($date, $branches);
+    $inc = 0.0; $out = 0.0; $byKey = [];
+    foreach ($r['rows'] as $x) {
+        $isOut = (mb_stripos((string)$x['pay_type_name'], 'расход') !== false) || ((float)$x['income'] < 0);
+        if ($isOut) { $out += abs((float)$x['income']); continue; }
+        $k = (string)($x['pay_account_id'] ?? ($x['location_id'] ?? $x['pay_type_name']));
+        $byKey[$k] = round(($byKey[$k] ?? 0) + (float)$x['income'], 2);
+        $inc += (float)$x['income'];
     }
-    foreach ($byKey as &$v) $v = round($v, 2); unset($v);
     $st = alfa_pay_store_read();
-    $st[$date] = ['total' => round($total, 2), 'count' => $n, 'byKey' => $byKey, 'ts' => date('c')];
+    $st[$r['date']] = ['total' => round($inc, 2), 'expense' => round($out, 2),
+                       'count' => count($r['rows']), 'byKey' => $byKey, 'ts' => date('c')];
     ksort($st);
     alfa_pay_store_write($st);
-    return ['date' => $date, 'total' => round($total, 2), 'count' => $n, 'byKey' => $byKey];
+    return ['date' => $r['date'], 'total' => round($inc, 2), 'expense' => round($out, 2), 'count' => count($r['rows']), 'byKey' => $byKey];
+}
+
+/* ===== ПЛАТЕЖИ ЗА ДЕНЬ (кассы) =====
+   ⚠️ Две ловушки Alfa, обе проверены на реальных данных:
+     1) document_date приходит как «27.08.2026» (дд.мм.гггг) — сравнивать надо после alfa_iso();
+     2) фильтр дат в pay/index ИГНОРИРУЕТСЯ — отдаётся весь журнал (33k записей), отсортированный
+        по дате по убыванию. Поэтому нужную дату ищем ДВОИЧНЫМ поиском по страницам (~10 запросов
+        вместо сотен), затем листаем подряд, пока идут записи этого дня.
+   В журнале лежат и приходы, и расходы (pay_type_name = «Расход») — разделяем по знаку/типу. */
+function alfa_pay_page(int $branch, int $page, int $per = 50): array {
+    $r = alfa_http('POST', 'https://' . alfa_host() . "/v2api/$branch/pay/index",
+                   ['page' => $page, 'count' => $per], alfa_token(), true, 20);
+    if (isset($r['__err'])) return ['items' => [], 'total' => 0, 'err' => $r];
+    return ['items' => is_array($r['items'] ?? null) ? $r['items'] : [], 'total' => (int)($r['total'] ?? 0)];
+}
+function alfa_pay_row_date(array $x): string { return alfa_iso((string)($x['document_date'] ?? ($x['date'] ?? ''))); }
+function alfa_payments_day(string $date, ?array $branches = null): array {
+    $date = alfa_iso($date);
+    $branches = $branches ?: (alfa_realization_branches() ?: [alfa_branch()]);
+    $PER = 50; $rows = []; $scanned = 0; $pagesUsed = 0;
+    foreach ($branches as $bid) {
+        $bid = (int)$bid;
+        $first = alfa_pay_page($bid, 0, $PER); $pagesUsed++;
+        $total = $first['total']; $items0 = $first['items'];
+        if (!$items0) continue;
+        $pages = max(1, (int)ceil($total / $PER));
+        // двоичный поиск: первая страница, где самая свежая запись уже НЕ новее нужного дня
+        $lo = 0; $hi = $pages - 1; $start = 0;
+        if (alfa_pay_row_date($items0[0]) > $date) {
+            while ($lo <= $hi) {
+                $mid = intdiv($lo + $hi, 2);
+                $pg = alfa_pay_page($bid, $mid, $PER); $pagesUsed++;
+                $it = $pg['items'];
+                if (!$it) { $hi = $mid - 1; continue; }
+                if (alfa_pay_row_date($it[0]) > $date) { $start = $mid + 1; $lo = $mid + 1; }
+                else { $hi = $mid - 1; }
+            }
+            $start = max(0, $start - 1);   // шаг назад: день мог начаться на предыдущей странице
+        }
+        for ($p = $start; $p < $pages && $p < $start + 60; $p++) {
+            $pg = alfa_pay_page($bid, $p, $PER); $pagesUsed++;
+            $it = $pg['items']; if (!$it) break;
+            $passed = false;
+            foreach ($it as $x) {
+                if (!is_array($x)) continue;
+                $scanned++;
+                $d = alfa_pay_row_date($x);
+                if ($d === $date) {
+                    $rows[] = ['id' => $x['id'] ?? null, 'branch' => $bid,
+                               'customer_id' => (int)($x['customer_id'] ?? 0),
+                               'income' => (float)($x['income'] ?? 0),
+                               'note' => (string)($x['note'] ?? ''),
+                               'payer' => (string)($x['payer_name'] ?? ''),
+                               'date' => $d,
+                               'pay_type_id' => $x['pay_type_id'] ?? null,
+                               'pay_type_name' => (string)($x['pay_type_name'] ?? ''),
+                               'pay_account_id' => $x['pay_account_id'] ?? null,
+                               'pay_item_id' => $x['pay_item_id'] ?? null,
+                               'location_id' => $x['location_id'] ?? null,
+                               'created_at' => (string)($x['created_at'] ?? ''),
+                               'is_confirmed' => $x['is_confirmed'] ?? null];
+                } elseif ($d !== '' && $d < $date) { $passed = true; }
+            }
+            if ($passed && $rows) break;      // прошли нужный день насквозь
+            if ($passed && !$rows && $p > $start + 3) break;   // день пуст — не листаем зря
+        }
+    }
+    return ['date' => $date, 'rows' => $rows, 'scanned' => $scanned, 'pages' => $pagesUsed];
 }

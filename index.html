@@ -10018,35 +10018,34 @@ function kassaSheetSet(key,val){
   persistLocal(); if(typeof fbSchedulePush==="function") fbSchedulePush();
   const b=document.getElementById("admBody"); if(b) b.innerHTML=_kassaHtml();
 }
-/* по какому полю группируем «кассу»: берём первое, которое реально заполнено в платежах */
-function _kassaGroupKey(rows){
-  const cand=[["cash_box_id","cashBoxes"],["pay_account_id","payAccounts"],["location_id","locations"],["pay_type_id","payTypes"]];
-  for(const [f,ref] of cand){ if(rows.some(r=>r[f]!=null && r[f]!=="")) return {f, ref}; }
-  return {f:null, ref:null};
+function _kassaIsOut(r){ return /расход/i.test(r.pay_type_name||"") || (+r.income||0)<0; }
+function _kassaName(r,refs){
+  const acc=(refs.payAccounts||{})[r.pay_account_id];
+  if(acc) return acc;
+  const loc=(refs.locations||{})[r.location_id];
+  if(loc) return loc;
+  return r.pay_type_name||"Без кассы";
 }
 function _kassaHtml(){
   const D=_kassaDay;
-  const head=`<div class="callout" style="margin-bottom:10px;font-size:12px">Платежи, внесённые в Alfa за день. Впишите сумму «по листу» (что админ записал ручкой) — увидите расхождение. Данные обновляются автоматически в 22:00 и по кнопке.</div>
+  const head=`<div class="callout" style="margin-bottom:10px;font-size:12px">Платежи, внесённые в Alfa за день (кассы). Впишите сумму «по листу» — что админ записал ручкой — и увидите расхождение. Обновляется автоматически в 22:00 и по кнопке.</div>
   <div class="hd-actions" style="margin-bottom:10px">
     <input type="date" class="cell" style="width:auto" value="${esc(_kassaDate)}" onchange="kassaSetDate(this.value)">
     <button class="btn sm" id="kassaBtn" onclick="kassaLoad()">🔄 Загрузить из Alfa</button>
     <span id="kassaProg" style="font-size:12px;color:var(--muted)"></span>
   </div>`;
   if(!D) return head+`<div class="callout">Выберите день и нажмите «Загрузить из Alfa».</div>`;
-  if(D.diag) return head+`<div class="callout" style="border-color:var(--terra)">За ${esc(_kassaDate)} платежей не нашлось. Возможно, Alfa не приняла фильтр дат — ниже видно, какие поля дат есть у платежей. Покажите мне это, и я настрою.</div>
-    <pre style="white-space:pre-wrap;font-size:11px;background:var(--paper);padding:6px;border-radius:6px;max-height:44vh;overflow:auto">${esc(JSON.stringify(D.diag,null,1))}</pre>`;
-  const rows=D.payments||[], refs=D.refs||{};
-  const g=_kassaGroupKey(rows);
-  const nameOf=(f,v)=>{ if(v==null||v==="") return "Без кассы"; const m=refs[g.ref]||{}; return m[v]||("#"+v); };
-  const by={};
-  rows.forEach(r=>{ const k=g.f?String(r[g.f]??""):"all"; if(!by[k]) by[k]={sum:0,n:0}; by[k].sum+=(+r.income||0); by[k].n++; });
+  const refs=D.refs||{}, all=D.payments||[];
+  const inc=all.filter(r=>!_kassaIsOut(r)), out=all.filter(r=>_kassaIsOut(r));
   const K=(_kassaSheet()[_kassaDate])||{};
+  const by={};
+  inc.forEach(r=>{ const k=_kassaName(r,refs); if(!by[k]) by[k]={sum:0,n:0}; by[k].sum+=(+r.income||0); by[k].n++; });
   let totAlfa=0, totSheet=0;
-  const trs=Object.keys(by).map(k=>{
+  const trs=Object.keys(by).sort().map(k=>{
     const b=by[k], sheet=+(K[k]||0), diff=sheet?(sheet-b.sum):null;
     totAlfa+=b.sum; totSheet+=sheet;
     return `<tr>
-      <td>${esc(g.f?nameOf(g.f,k):"Все платежи")}</td>
+      <td><b>${esc(k)}</b></td>
       <td style="text-align:center;color:var(--muted)">${b.n}</td>
       <td style="text-align:right"><b>${_gm(b.sum)}</b></td>
       <td style="text-align:right"><input class="cell" type="number" step="0.01" style="width:104px;text-align:right" value="${sheet||''}" placeholder="—" onchange="kassaSheetSet('${_jsStr(k)}',this.value)"></td>
@@ -10054,25 +10053,26 @@ function _kassaHtml(){
     </tr>`;
   }).join("");
   const totDiff=totSheet?(totSheet-totAlfa):null;
-  const list=rows.slice().sort((a,b)=>b.income-a.income).map(r=>`<tr>
-      <td style="font-size:12px">${esc(_kassaCustName(r.customer_id))}</td>
-      <td style="text-align:right">${_gm(r.income)}</td>
+  const rowHtml=r=>`<tr>
+      <td style="font-size:12px">${esc(r.customer_id?_kassaCustName(r.customer_id):(r.payer||'—'))}</td>
+      <td style="text-align:right">${_gm(Math.abs(+r.income||0))}</td>
+      <td style="font-size:12px;color:var(--muted)">${esc(_kassaName(r,refs))}</td>
       <td style="font-size:12px;color:var(--muted)">${esc(r.note||'')}</td>
-      <td style="font-size:12px;color:var(--muted)">${esc(g.f?nameOf(g.f,r[g.f]):'')}</td>
-    </tr>`).join("");
+      <td style="font-size:11px;color:var(--muted);white-space:nowrap">${esc(String(r.created_at||'').slice(11,16))}</td>
+    </tr>`;
   return head+`
-  <div class="tscroll" style="max-width:760px;margin-bottom:14px"><table><thead><tr>
+  <div class="tscroll" style="max-width:780px;margin-bottom:14px"><table><thead><tr>
     <th style="text-align:left">Касса</th><th style="text-align:center">Платежей</th><th style="text-align:right">В Alfa</th><th style="text-align:right">По листу</th><th style="text-align:right">Разница</th>
-  </tr></thead><tbody>${trs}
-    <tr style="border-top:2px solid var(--line)"><td><b>Итого за ${esc(_kassaDate)}</b></td><td></td>
+  </tr></thead><tbody>${trs||'<tr><td colspan="5" style="color:var(--muted);padding:10px">приходов за день нет</td></tr>'}
+    <tr style="border-top:2px solid var(--line)"><td><b>Итого приход</b></td><td></td>
       <td style="text-align:right"><b style="color:var(--green)">${_gm(totAlfa)}</b></td>
       <td style="text-align:right"><b>${totSheet?_gm(totSheet):'—'}</b></td>
       <td style="text-align:right">${totDiff==null?'—':(Math.abs(totDiff)<0.005?'<b style="color:var(--green)">сходится ✓</b>':('<b style="color:var(--red)">'+(totDiff>0?'+':'')+_gm(totDiff)+'</b>'))}</td></tr>
   </tbody></table></div>
-  <details><summary style="cursor:pointer;font-weight:600">Все платежи дня (${rows.length})</summary>
-    <div class="tscroll" style="max-width:760px;margin-top:8px"><table><thead><tr><th style="text-align:left">Клиент</th><th style="text-align:right">Сумма</th><th style="text-align:left">Примечание</th><th style="text-align:left">Касса</th></tr></thead><tbody>${list||'<tr><td colspan="4" style="color:var(--muted)">платежей нет</td></tr>'}</tbody></table></div>
-    ${(!g.f)?'<div class="callout" style="margin-top:8px;font-size:12px">В платежах Alfa не нашлось поля кассы — показываю общим итогом. Если у вас в Alfa кассы разделены, скажите, добавлю разбивку.</div>':''}
-  </details>`;
+  <details open><summary style="cursor:pointer;font-weight:600">Приходы дня (${inc.length})</summary>
+    <div class="tscroll" style="max-width:780px;margin-top:8px"><table><thead><tr><th style="text-align:left">Клиент</th><th style="text-align:right">Сумма</th><th style="text-align:left">Касса</th><th style="text-align:left">Примечание</th><th>Внесён</th></tr></thead><tbody>${inc.map(rowHtml).join("")||'<tr><td colspan="5" style="color:var(--muted)">нет</td></tr>'}</tbody></table></div></details>
+  ${out.length?`<details style="margin-top:10px"><summary style="cursor:pointer;font-weight:600">Расходы дня (${out.length}) — на сумму ${_gm(D.expenseTotal||0)}</summary>
+    <div class="tscroll" style="max-width:780px;margin-top:8px"><table><thead><tr><th style="text-align:left">Кому/за что</th><th style="text-align:right">Сумма</th><th style="text-align:left">Касса</th><th style="text-align:left">Примечание</th><th>Внесён</th></tr></thead><tbody>${out.map(rowHtml).join("")}</tbody></table></div></details>`:''}`;
 }
 function _kassaCustName(id){
   if(!id) return "—";
@@ -10088,7 +10088,7 @@ async function kassaLoad(){
     console.log("📤 paymentsDay",j);
     _kassaDay=j;
     if(!_pubCustomers){ _pubEnsureCustomers(false).then(()=>{ const b=document.getElementById("admBody"); if(b&&_admSec==="kassa") b.innerHTML=_kassaHtml(); }).catch(()=>{}); }
-    if(prog) prog.textContent="Платежей: "+j.count+" · "+_gm(j.total);
+    if(prog) prog.textContent="Платежей: "+j.count+" · приход "+_gm(j.incomeTotal||0)+(j.expenseTotal?(" · расход "+_gm(j.expenseTotal)):"");
     const b=document.getElementById("admBody"); if(b) b.innerHTML=_kassaHtml();
   }catch(e){ if(prog) prog.textContent=""; const b=document.getElementById("admBody"); if(b){ const d=document.createElement('div'); d.innerHTML=_pubErrHtml(e,"платежи за день"); b.insertBefore(d.firstChild,b.firstChild); } }
   finally{ _kassaBusy=false; if(btn) btn.disabled=false; }
