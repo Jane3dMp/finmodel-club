@@ -421,6 +421,32 @@ function alfa_realization_day(string $date, ?array $branchFilter = null): array 
             if ($sampleDetail === null) $sampleDetail = $dt;
         }
     }
+    /* ⚠️ «Ожидается» отдельным запросом со status=1: lesson/index по умолчанию отдаёт ТОЛЬКО
+       проведённые (status=3), поэтому запланированные занятия выше не приходят и колонка была
+       пустой. У них Alfa сама проставляет списания в details.commission — просто складываем. */
+    if ($planned <= 0) {
+        foreach ($branches as $bid) {
+            $bid = (int)$bid;
+            for ($p = 0; $p < $MAXP; $p++) {
+                $r = alfa_http('POST', "$host/v2api/$bid/lesson/index",
+                    ['status' => 1, 'date_from' => $date, 'date_to' => $date, 'page' => $p, 'count' => $PER], $token, true, 15);
+                $items = isset($r['__err']) ? [] : ($r['items'] ?? []);
+                foreach ($items as $ls) {
+                    if (!is_array($ls)) continue;
+                    $d = substr((string)($ls['date'] ?? ''), 0, 10);
+                    if ($d !== '' && $d !== $date) continue;
+                    $plannedLessons2 = true; $plannedLessonsCnt = ($plannedLessonsCnt ?? 0) + 1;
+                    foreach ((array)($ls['details'] ?? []) as $dt) {
+                        if (!is_array($dt)) continue;
+                        $planned += (float)($dt['commission'] ?? 0); $nPlanned++;
+                        if ($samplePlanned === null) $samplePlanned = $dt;
+                    }
+                }
+                if (count($items) < $PER) break;
+            }
+        }
+        if (isset($plannedLessonsCnt)) $plannedLessons = (int)$plannedLessonsCnt;
+    }
     foreach ($byBranch as &$b) { $b['present'] = round($b['present'], 2); $b['all'] = round($b['all'], 2); } unset($b);
     return ['date' => $date, 'lessons' => $doneLessons, 'plannedLessons' => $plannedLessons,
             'perBranch' => $perBranch, 'statusHist' => $statusHist,

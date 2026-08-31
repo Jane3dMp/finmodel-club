@@ -10045,6 +10045,8 @@ function _realHtml(){
   <div class="hd-actions" style="margin-bottom:10px">
     <input type="month" class="cell" style="width:auto" value="${_realMonth}" onchange="realSetMonth(this.value)">
     <button class="btn sm" id="realPullBtn" onclick="realPullMonth()">🔄 Обновить месяц из Alfa</button>
+    <button class="btn ghost sm" id="realWeekBtn" onclick="realPullWeek()" title="Посчитать «Ожидается» и доход за конкретную неделю (пн–вс)">📅 Неделя:</button>
+    <input type="date" id="realWeekDate" class="cell" style="width:auto" value="2026-09-07">
     <span id="realPullProg" style="font-size:12px;color:var(--muted)"></span>
   </div>
   <div class="tscroll" style="max-width:720px"><table><thead><tr>
@@ -10068,6 +10070,26 @@ function _realHtml(){
       <code style="font-size:12px;word-break:break-all">wget -qO- "${esc(location.origin)}/finmodel/api/alfa/cron_realization.php?key=ВАШ_КЛЮЧ&days=7"</code><br>
       <span style="color:var(--muted)">days=7 — пересчитывает последние 7 дней (на случай правок посещаемости задним числом). Проверить вручную можно, открыв этот URL в браузере.</span>
     </div></details>`;
+}
+/* Посчитать одну неделю (пн–вс) целиком: и доход, и «Ожидается». */
+async function realPullWeek(){
+  if(_realBusy) return;
+  const v=(document.getElementById("realWeekDate")||{}).value; if(!v){ toast("Выберите дату недели"); return; }
+  const mon=(function(){ const d=new Date(v); const w=d.getDay()===0?7:d.getDay(); d.setDate(d.getDate()-(w-1)); return d; })();
+  const dates=[]; for(let i=0;i<7;i++){ const d=new Date(mon); d.setDate(d.getDate()+i); dates.push(_dIso(d)); }
+  const btn=document.getElementById("realWeekBtn"), prog=document.getElementById("realPullProg");
+  _realBusy=true; if(btn) btn.disabled=true;
+  try{
+    _realStore=_realStore||{};
+    for(let i=0;i<dates.length;i+=4){
+      if(prog) prog.textContent="Считаю неделю… "+Math.min(i+4,dates.length)+"/"+dates.length;
+      const j=await _pubCall("realizationPull",{dates:dates.slice(i,i+4)});
+      Object.assign(_realStore, j.updated||{});
+    }
+    if(prog) prog.textContent="Готово ✓";
+    const b=document.getElementById("admBody"); if(b) b.innerHTML=_realHtml();
+  }catch(e){ const b=document.getElementById("admBody"); if(b){ const d=document.createElement('div'); d.innerHTML=_pubErrHtml(e,"неделя"); b.insertBefore(d.firstChild,b.firstChild); } }
+  finally{ _realBusy=false; if(btn) btn.disabled=false; }
 }
 async function realPullMonth(){
   if(_realBusy) return;
@@ -10369,7 +10391,7 @@ function _progHtml(){
   let lastMon="";
   weeks.forEach((w,i)=>{
     const A=_progWeekAlfa(w);
-    const snap=(_weekPlans||{})[w.key];    // зафиксированный в вс 23:00 прогноз (из Alfa)
+    const snap=(_weekPlans||{})[w.key];    // зафиксированный в вс 22:00 прогноз (из Alfa)
     const snapV=snap?(+snap.plan||0):0;
     const auto=snapV||null;                // прогноз берём только из Alfa
     const src=snapV?'snap':'';
@@ -10392,11 +10414,11 @@ function _progHtml(){
   });
   const tPct=(tPlan>0&&tFact>0)?(100*tFact/tPlan):null;
   const haveAny=weeks.some(w=>_progWeekAlfa(w)!=null);
-  return `<div class="callout" style="margin-bottom:10px;font-size:12px">Недели учебного года (пн–вс). <b>Прогноз Alfa</b> — сумма списаний по запланированным занятиям (сверено с отчётом «Прогноз оплаты»: совпадает), фиксируется 🔒 в воскресенье 23:00. <b>Доход (факт)</b> — реализация за дни недели: каждый день в 22:00 cron забирает доход из Alfa и он суммируется в свою неделю.</div>
+  return `<div class="callout" style="margin-bottom:10px;font-size:12px">Недели учебного года (пн–вс). <b>Прогноз Alfa</b> — сумма списаний по запланированным занятиям (сверено с отчётом «Прогноз оплаты»: совпадает), фиксируется 🔒 в воскресенье 22:00. <b>Доход (факт)</b> — реализация за дни недели: каждый день в 22:00 cron забирает доход из Alfa и он суммируется в свою неделю.</div>
   <div class="hd-actions" style="margin-bottom:10px">
     <button class="btn sm" id="progPullBtn" onclick="progPull()">🔄 Обновить факт из Alfa</button>
     <button class="btn ghost sm" id="fcWeekBtn" onclick="progForecastWeek()" title="Посчитать прогноз текущей недели сейчас (обычно это делает cron)">🧮 Посчитать прогноз недели</button>
-    <button class="btn ghost sm" id="progSnapBtn" onclick="progSnapshot()" title="Зафиксировать прогноз на текущую неделю (обычно это делает cron в вс 23:00)">🔒 Зафиксировать неделю</button>
+    <button class="btn ghost sm" id="progSnapBtn" onclick="progSnapshot()" title="Зафиксировать прогноз на текущую неделю (обычно это делает cron в вс 22:00)">🔒 Зафиксировать неделю</button>
     <span id="progPullProg" style="font-size:12px;color:var(--muted)">${haveAny?'':'Пока пусто — нажмите «Обновить факт».'}</span>
   </div>
   <div class="tscroll" style="max-width:760px"><table><thead><tr>
