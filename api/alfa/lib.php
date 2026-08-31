@@ -1152,3 +1152,54 @@ function alfa_all_branch_ids(): array {
     foreach (($r['items'] ?? []) as $b) { if (isset($b['id'])) $ids[] = (int)$b['id']; }
     return $ids ?: [alfa_branch()];
 }
+
+/* --- ПЛАТЕЖИ ПО ДНЯМ (для сверки с листами админов) ---
+   Снимок «что внесено в Alfa на 22:00» — чтобы вечернюю сверку можно было посмотреть и потом. */
+function alfa_pay_store_path(): string {
+    $salt = substr(hash('sha256', __DIR__ . '|payday'), 0, 24);
+    return alfa_store_dir() . '/payday_' . $salt . '.json';
+}
+function alfa_pay_store_read(): array {
+    $f = alfa_pay_store_path();
+    if (!is_file($f)) return [];
+    $j = json_decode((string)@file_get_contents($f), true);
+    return is_array($j) ? $j : [];
+}
+function alfa_pay_store_write(array $d): void {
+    $f = alfa_pay_store_path();
+    $tmp = $f . '.' . getmypid() . '.tmp';
+    $json = json_encode($d, JSON_UNESCAPED_UNICODE);
+    if (@file_put_contents($tmp, $json, LOCK_EX) !== false) { @chmod($tmp, 0660); @rename($tmp, $f); }
+    else @file_put_contents($f, $json, LOCK_EX);
+}
+/* Сумма платежей за день по кассам: [ключ кассы => сумма]. Пишем в хранилище. */
+function alfa_payments_upsert(string $date, ?array $branches = null): array {
+    $date = alfa_iso($date);
+    $branches = $branches ?: (alfa_realization_branches() ?: [alfa_branch()]);
+    $host = 'https://' . alfa_host(); $token = alfa_token();
+    $PER = 50; $total = 0.0; $n = 0; $byKey = [];
+    foreach ($branches as $bid) {
+        $bid = (int)$bid;
+        for ($p = 0; $p < 60; $p++) {
+            $r = alfa_http('POST', "$host/v2api/$bid/pay/index",
+                ['date_from' => $date, 'date_to' => $date, 'page' => $p, 'count' => $PER], $token, true, 20);
+            $items = isset($r['__err']) ? [] : ($r['items'] ?? []);
+            foreach ($items as $x) {
+                if (!is_array($x)) continue;
+                $d = substr((string)($x['document_date'] ?? ($x['date'] ?? '')), 0, 10);
+                if ($d !== '' && $d !== $date) continue;
+                $inc = (float)($x['income'] ?? 0);
+                $k = (string)($x['cash_box_id'] ?? ($x['pay_account_id'] ?? ($x['location_id'] ?? ($x['pay_type_id'] ?? ''))));
+                $byKey[$k] = ($byKey[$k] ?? 0) + $inc;
+                $total += $inc; $n++;
+            }
+            if (count($items) < $PER) break;
+        }
+    }
+    foreach ($byKey as &$v) $v = round($v, 2); unset($v);
+    $st = alfa_pay_store_read();
+    $st[$date] = ['total' => round($total, 2), 'count' => $n, 'byKey' => $byKey, 'ts' => date('c')];
+    ksort($st);
+    alfa_pay_store_write($st);
+    return ['date' => $date, 'total' => round($total, 2), 'count' => $n, 'byKey' => $byKey];
+}

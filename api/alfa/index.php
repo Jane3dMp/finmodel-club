@@ -1361,6 +1361,56 @@ switch ($action) {
                   'sampleLesson' => $sample, 'sampleDetail' => $sampleDet]);
         break;
 
+    // --- ПЛАТЕЖИ ЗА ДЕНЬ ПО КАССАМ (READ): для сверки с бумажными листами админов ---
+    //     Отдаём и агрегаты (по кассе/типу/сотруднику), и сам список, и справочники названий.
+    case 'paymentsDay':
+        @set_time_limit(180);
+        $date = alfa_iso((string)($in['date'] ?? date('Y-m-d')));
+        $branches = alfa_realization_branches() ?: [alfa_branch()];
+        $host = 'https://' . alfa_host(); $token = alfa_token();
+        $PER = 50; $rows = []; $sample = null; $keys = null;
+        foreach ($branches as $bid) {
+            $bid = (int)$bid;
+            for ($p = 0; $p < 60; $p++) {
+                $r = alfa_http('POST', "$host/v2api/$bid/pay/index",
+                    ['date_from' => $date, 'date_to' => $date, 'page' => $p, 'count' => $PER], $token, true, 20);
+                $items = isset($r['__err']) ? [] : ($r['items'] ?? []);
+                foreach ($items as $x) {
+                    if (!is_array($x)) continue;
+                    $d = substr((string)($x['document_date'] ?? ($x['date'] ?? '')), 0, 10);
+                    if ($d !== '' && $d !== $date) continue;      // Alfa может игнорировать фильтр дат
+                    if ($sample === null) { $sample = $x; $keys = array_keys($x); }
+                    $rows[] = ['id' => $x['id'] ?? null, 'branch' => $bid,
+                               'customer_id' => (int)($x['customer_id'] ?? 0),
+                               'income' => (float)($x['income'] ?? 0),
+                               'expense' => (float)($x['expense'] ?? 0),
+                               'note' => (string)($x['note'] ?? ''),
+                               'date' => $d,
+                               'pay_type_id' => $x['pay_type_id'] ?? null,
+                               'location_id' => $x['location_id'] ?? null,
+                               'cash_box_id' => $x['cash_box_id'] ?? ($x['cashbox_id'] ?? null),
+                               'pay_item_id' => $x['pay_item_id'] ?? null,
+                               'user_id' => $x['user_id'] ?? ($x['created_by'] ?? null),
+                               'is_confirmed' => $x['is_confirmed'] ?? null];
+                }
+                if (count($items) < $PER) break;
+            }
+        }
+        // справочники, чтобы показывать названия касс/типов/сотрудников, а не id
+        $refs = [];
+        foreach (['pay-type' => 'payTypes', 'pay-account' => 'payAccounts', 'cash-box' => 'cashBoxes',
+                  'location' => 'locations', 'pay-item' => 'payItems', 'user' => 'users'] as $ent => $key) {
+            $rr = alfa_http('POST', "$host/v2api/" . (int)$branches[0] . "/$ent/index", ['page' => 0, 'count' => 100], $token, true, 8);
+            if (isset($rr['__err'])) continue;
+            $m = [];
+            foreach (($rr['items'] ?? []) as $it) { if (isset($it['id'])) $m[(int)$it['id']] = (string)($it['name'] ?? ''); }
+            if ($m) $refs[$key] = $m;
+        }
+        $sum = 0.0; foreach ($rows as $x) $sum += $x['income'];
+        json_out(['ok' => true, 'date' => $date, 'count' => count($rows), 'total' => round($sum, 2),
+                  'payments' => $rows, 'refs' => $refs, 'sampleKeys' => $keys, 'sample' => $sample]);
+        break;
+
     // --- ТОЧНЫЙ ПРОГНОЗ ЗА ДЕНЬ: по запланированным занятиям Alfa (status=1), как её отчёт ---
     case 'forecastDay':
         @set_time_limit(180);

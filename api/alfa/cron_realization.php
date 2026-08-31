@@ -52,6 +52,12 @@ foreach ($dates as $d) {
     $r = alfa_realization_upsert($d, $branches);
     $done[$d] = ['present' => $r['present'], 'all' => $r['all'], 'planned' => $r['planned'], 'lessons' => $r['lessons']];
 }
+/* Платежи (кассы) за сегодня и вчера — снимок «что админы внесли», для сверки с их листами. */
+$pays = [];
+foreach ([date('Y-m-d'), date('Y-m-d', strtotime('-1 day'))] as $d) {
+    $pr = alfa_payments_upsert($d, $branches);
+    $pays[$d] = ['total' => $pr['total'], 'count' => $pr['count']];
+}
 header('Content-Type: application/json; charset=utf-8');
 echo json_encode(['ok' => true, 'ranAt' => date('c'), 'branches' => $branches,
-                  'back' => $days, 'ahead' => $ahead, 'recalculated' => count($done), 'days' => $done], JSON_UNESCAPED_UNICODE);
+                  'back' => $days, 'ahead' => $ahead, 'recalculated' => count($done), 'days' => $done, 'payments' => $pays], JSON_UNESCAPED_UNICODE);
