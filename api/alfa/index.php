@@ -1369,7 +1369,12 @@ switch ($action) {
         $host = 'https://' . alfa_host(); $token = alfa_token();
         $cands = ['teacher-rate/index', 'teacher-rates/index', 'rate/index', 'rates/index',
                   'salary/index', 'salaries/index', 'teacher-salary/index', 'payroll/index',
-                  'teacher-tariff/index', 'employee-rate/index', 'wage/index'];
+                  'teacher-tariff/index', 'employee-rate/index', 'wage/index',
+                  // вторая волна догадок: другие варианты именования
+                  'teacher_rate/index', 'salary-rate/index', 'salary-scheme/index', 'rate-scheme/index',
+                  'user-rate/index', 'lesson-rate/index', 'teacher-price/index', 'price/index',
+                  'remuneration/index', 'payment-rate/index', 'teacher-payment/index', 'staff-rate/index',
+                  'salary-tariff/index', 'teacher-wage/index', 'wage-rate/index', 'employee-salary/index'];
         $tried = [];
         foreach ($cands as $c) {
             $r = alfa_http('POST', "$host/v2api/$bid/$c", ['page' => 0, 'count' => 5], $token, true, 8);
@@ -1380,6 +1385,24 @@ switch ($action) {
                 $row['sample'] = is_array($r['items'] ?? null) ? ($r['items'][0] ?? null) : null;
             }
             $tried[] = $row;
+        }
+        // глобальные (без филиала) и вложенные пути
+        foreach (['teacher-rate/index', 'rate/index', 'salary/index'] as $c) {
+            $r = alfa_http('POST', "$host/v2api/$c", ['page' => 0, 'count' => 5], $token, true, 8);
+            $tried[] = ['path' => '(без филиала) ' . $c, 'err' => $r['__err'] ?? null, 'code' => $r['code'] ?? null,
+                        'count' => is_array($r['items'] ?? null) ? count($r['items']) : null,
+                        'sample' => is_array($r['items'] ?? null) ? ($r['items'][0] ?? null) : null];
+        }
+        $tid0 = 0;
+        $tt = alfa_http('POST', "$host/v2api/$bid/teacher/index", ['page' => 0, 'count' => 1], $token, true, 8);
+        if (isset($tt['items'][0]['id'])) $tid0 = (int)$tt['items'][0]['id'];
+        if ($tid0) {
+            foreach (["teacher/$tid0/rate/index", "teacher/rate/index?teacher_id=$tid0", "rate/index?teacher_id=$tid0"] as $c) {
+                $r = alfa_http('POST', "$host/v2api/$bid/$c", ['page' => 0, 'count' => 5, 'teacher_id' => $tid0], $token, true, 8);
+                $tried[] = ['path' => $c, 'err' => $r['__err'] ?? null, 'code' => $r['code'] ?? null,
+                            'count' => is_array($r['items'] ?? null) ? count($r['items']) : null,
+                            'sample' => is_array($r['items'] ?? null) ? ($r['items'][0] ?? null) : null];
+            }
         }
         // как выглядит сам педагог — вдруг ставка лежит в его карточке
         $t = alfa_http('POST', "$host/v2api/$bid/teacher/index", ['page' => 0, 'count' => 3], $token, true, 10);
