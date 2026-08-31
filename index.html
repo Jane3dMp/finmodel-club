@@ -10053,6 +10053,31 @@ function _kassaHtml(){
     </tr>`;
   }).join("");
   const totDiff=totSheet?(totSheet-totAlfa):null;
+  // расходы — такая же сверка по видам касс (на листе они тоже разделены)
+  const byOut={};
+  out.forEach(r=>{ const k=_kassaName(r,refs); if(!byOut[k]) byOut[k]={sum:0,n:0}; byOut[k].sum+=Math.abs(+r.income||0); byOut[k].n++; });
+  let totOutAlfa=0, totOutSheet=0;
+  const outTrs=Object.keys(byOut).sort().map(k=>{
+    const b=byOut[k], sheet=+(K['out:'+k]||0), diff=sheet?(sheet-b.sum):null;
+    totOutAlfa+=b.sum; totOutSheet+=sheet;
+    return `<tr>
+      <td><b>${esc(k)}</b></td>
+      <td style="text-align:center;color:var(--muted)">${b.n}</td>
+      <td style="text-align:right"><b>${_gm(b.sum)}</b></td>
+      <td style="text-align:right"><input class="cell" type="number" step="0.01" style="width:104px;text-align:right" value="${sheet||''}" placeholder="—" onchange="kassaSheetSet('out:${_jsStr(k)}',this.value)"></td>
+      <td style="text-align:right">${diff==null?'<span style="color:var(--muted)">—</span>':(Math.abs(diff)<0.005?'<b style="color:var(--green)">сходится ✓</b>':('<b style="color:var(--red)">'+(diff>0?'+':'')+_gm(diff)+'</b>'))}</td>
+    </tr>`;
+  }).join("");
+  const totOutDiff=totOutSheet?(totOutSheet-totOutAlfa):null;
+  const outTable=`<h3 style="margin:14px 0 6px">Расход</h3>
+    <div class="tscroll" style="max-width:780px;margin-bottom:6px"><table><thead><tr>
+      <th style="text-align:left">Касса</th><th style="text-align:center">Платежей</th><th style="text-align:right">В Alfa</th><th style="text-align:right">По листу</th><th style="text-align:right">Разница</th>
+    </tr></thead><tbody>${outTrs||'<tr><td colspan="5" style="color:var(--muted);padding:10px">расходов за день нет</td></tr>'}
+      <tr style="border-top:2px solid var(--line)"><td><b>Итого расход</b></td><td></td>
+        <td style="text-align:right"><b style="color:var(--red)">${_gm(totOutAlfa)}</b></td>
+        <td style="text-align:right"><b>${totOutSheet?_gm(totOutSheet):'—'}</b></td>
+        <td style="text-align:right">${totOutDiff==null?'—':(Math.abs(totOutDiff)<0.005?'<b style="color:var(--green)">сходится ✓</b>':('<b style="color:var(--red)">'+(totOutDiff>0?'+':'')+_gm(totOutDiff)+'</b>'))}</td></tr>
+    </tbody></table></div>`;
   const rowHtml=r=>`<tr>
       <td style="font-size:12px">${esc(r.customer_id?_kassaCustName(r.customer_id):(r.payer||'—'))}</td>
       <td style="text-align:right">${_gm(Math.abs(+r.income||0))}</td>
@@ -10061,7 +10086,8 @@ function _kassaHtml(){
       <td style="font-size:11px;color:var(--muted);white-space:nowrap">${esc(String(r.created_at||'').slice(11,16))}</td>
     </tr>`;
   return head+`
-  <div class="tscroll" style="max-width:780px;margin-bottom:14px"><table><thead><tr>
+  <h3 style="margin:0 0 6px">Приход</h3>
+  <div class="tscroll" style="max-width:780px;margin-bottom:6px"><table><thead><tr>
     <th style="text-align:left">Касса</th><th style="text-align:center">Платежей</th><th style="text-align:right">В Alfa</th><th style="text-align:right">По листу</th><th style="text-align:right">Разница</th>
   </tr></thead><tbody>${trs||'<tr><td colspan="5" style="color:var(--muted);padding:10px">приходов за день нет</td></tr>'}
     <tr style="border-top:2px solid var(--line)"><td><b>Итого приход</b></td><td></td>
@@ -10071,7 +10097,8 @@ function _kassaHtml(){
   </tbody></table></div>
   <details open><summary style="cursor:pointer;font-weight:600">Приходы дня (${inc.length})</summary>
     <div class="tscroll" style="max-width:780px;margin-top:8px"><table><thead><tr><th style="text-align:left">Клиент</th><th style="text-align:right">Сумма</th><th style="text-align:left">Касса</th><th style="text-align:left">Примечание</th><th>Внесён</th></tr></thead><tbody>${inc.map(rowHtml).join("")||'<tr><td colspan="5" style="color:var(--muted)">нет</td></tr>'}</tbody></table></div></details>
-  ${out.length?`<details style="margin-top:10px"><summary style="cursor:pointer;font-weight:600">Расходы дня (${out.length}) — на сумму ${_gm(D.expenseTotal||0)}</summary>
+  ${outTable}
+  ${out.length?`<details style="margin-top:10px"><summary style="cursor:pointer;font-weight:600">Расходы дня — список (${out.length})</summary>
     <div class="tscroll" style="max-width:780px;margin-top:8px"><table><thead><tr><th style="text-align:left">Кому/за что</th><th style="text-align:right">Сумма</th><th style="text-align:left">Касса</th><th style="text-align:left">Примечание</th><th>Внесён</th></tr></thead><tbody>${out.map(rowHtml).join("")}</tbody></table></div></details>`:''}`;
 }
 function _kassaCustName(id){
@@ -10087,7 +10114,11 @@ async function kassaLoad(){
     const j=await _pubCall("paymentsDay",{date:_kassaDate});
     console.log("📤 paymentsDay",j);
     _kassaDay=j;
-    if(!_pubCustomers){ _pubEnsureCustomers(false).then(()=>{ const b=document.getElementById("admBody"); if(b&&_admSec==="kassa") b.innerHTML=_kassaHtml(); }).catch(()=>{}); }
+    // ФИО плательщиков: подтягиваем список клиентов Alfa (один раз) и перерисовываем
+    if(!_pubCustomers){
+      if(prog) prog.textContent="Подтягиваю ФИО клиентов…";
+      try{ await _pubEnsureCustomers(false); }catch(e){}
+    }
     if(prog) prog.textContent="Платежей: "+j.count+" · приход "+_gm(j.incomeTotal||0)+(j.expenseTotal?(" · расход "+_gm(j.expenseTotal)):"");
     const b=document.getElementById("admBody"); if(b) b.innerHTML=_kassaHtml();
   }catch(e){ if(prog) prog.textContent=""; const b=document.getElementById("admBody"); if(b){ const d=document.createElement('div'); d.innerHTML=_pubErrHtml(e,"платежи за день"); b.insertBefore(d.firstChild,b.firstChild); } }
