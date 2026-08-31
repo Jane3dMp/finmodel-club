@@ -10086,7 +10086,7 @@ function _kassaHtml(){
         <td style="text-align:right">${totOutDiff==null?'—':(Math.abs(totOutDiff)<0.005?'<b style="color:var(--green)">сходится ✓</b>':('<b style="color:var(--red)">'+(totOutDiff>0?'+':'')+_gm(totOutDiff)+'</b>'))}</td></tr>
     </tbody></table></div>`;
   const rowHtml=r=>`<tr>
-      <td style="font-size:12px">${esc(r.customer_id?_kassaCustName(r.customer_id):(r.payer||'—'))}</td>
+      <td style="font-size:12px">${esc(r.customer_id?_kassaCustName(r.customer_id):(r.payer||(refs.payItems||{})[r.pay_item_id]||'—'))}</td>
       <td style="text-align:right">${_gm(Math.abs(+r.income||0))}</td>
       <td style="font-size:12px;color:var(--muted)">${esc(_kassaName(r,refs))}</td>
       <td style="font-size:12px;color:var(--muted)">${esc(r.note||'')}</td>
