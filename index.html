@@ -10643,7 +10643,7 @@ function _ratingHtml(){
     <label style="font-size:13px">с <input type="date" class="cell" style="width:auto" value="${esc(from)}" onchange="ratSet('from',this.value)"></label>
     <label style="font-size:13px">по <input type="date" class="cell" style="width:auto" value="${esc(to)}" onchange="ratSet('to',this.value)"></label>
     <button class="btn sm" id="ratBtn" onclick="ratPull()">🔄 Посчитать период из Alfa</button>
-    <button class="btn ghost sm" id="ratesBtn" onclick="ratesProbe()" title="Проверить, можно ли проставлять ставки ЗП в Alfa через API">🔎 Ставки ЗП в Alfa?</button>
+    <button class="btn ghost sm" onclick="openRatesSheet()" title="Список ставок для ручного ввода в карточки педагогов Alfa">📋 Ставки для Alfa</button>
     <span id="ratProg" style="font-size:12px;color:var(--muted)">${days?("дней с данными: "+days):""}</span>
   </div>`;
   if(!rows.length) return head+`<div class="callout">За период нет посчитанных дней. Нажмите «Посчитать период из Alfa» — он пройдёт по дням и соберёт статистику (дальше её копит cron сам).</div>`;
@@ -10692,6 +10692,71 @@ function _ratingHtml(){
       <td style="text-align:right"><b>${(tZ&&tR)?((100*tZ/tR).toFixed(0)+'%'):'—'}</b></td></tr>
   </tbody></table></div>
   <div style="font-size:12px;color:var(--muted);margin-top:8px">«Детей» — количество посещений за период (один ребёнок на 10 занятиях = 10). Дальше данные копятся сами: cron считает каждый день в 22:00.</div>`;
+}
+/* ---- ЛИСТ СТАВОК ДЛЯ РУЧНОГО ВВОДА В ALFA ----
+   Ставок ЗП в API Alfa нет (проверено: 33 варианта эндпоинтов → 404, в карточке педагога
+   таких полей тоже нет). Поэтому готовим список строк ровно в формате Alfa:
+     «{длительность}: {тип} / {курсы} — {сумма} р.»
+   Курсы с одинаковой сеткой объединяются в одну строку — как это делает сама Alfa. */
+function _ratesSheetData(){
+  const byTeacher={};
+  (S.grid||[]).forEach(l=>{
+    if(!l||!l.course||!l.teacher) return;
+    const t=String(l.teacher).trim(); if(!t) return;
+    let dur=0;
+    if(l.start&&l.end&&typeof minDiff==="function"){ dur=minDiff(l.start,l.end)||0; }
+    if(!dur) dur=60;
+    dur=Math.round(dur/30)*30;                      // 60 / 90 / 120
+    if(!byTeacher[t]) byTeacher[t]={};
+    const k=dur+"|"+l.course;
+    byTeacher[t][k]=(byTeacher[t][k]||0)+1;
+  });
+  const out=[];
+  Object.keys(byTeacher).sort((a,b)=>a.localeCompare(b,"ru")).forEach(t=>{
+    // группируем курсы с ОДИНАКОВОЙ сеткой ставок и одинаковой длительностью
+    const groups={};
+    Object.keys(byTeacher[t]).forEach(k=>{
+      const p=k.split("|"), dur=+p[0], course=p.slice(1).join("|");
+      const tiers=[];
+      for(let n=4;n<=12;n++){ const w=(typeof wageForLesson==="function")?wageForLesson(course,n):0; tiers.push(w||0); }
+      if(!tiers.some(x=>x>0)) return;               // курса нет в справочнике ставок
+      const sig=dur+"::"+tiers.join(",");
+      if(!groups[sig]) groups[sig]={dur:dur, tiers:tiers, courses:[]};
+      groups[sig].courses.push(course);
+    });
+    const rows=Object.keys(groups).map(sig=>{
+      const g=groups[sig];
+      const uniq=[]; g.tiers.forEach((v,i)=>{ if(v>0 && uniq.indexOf(v)<0) uniq.push(v); });
+      return {dur:g.dur, courses:g.courses.sort((a,b)=>a.localeCompare(b,"ru")), tiers:g.tiers, sums:uniq};
+    }).sort((a,b)=>a.dur-b.dur);
+    if(rows.length) out.push({teacher:t, rows:rows});
+  });
+  return out;
+}
+function openRatesSheet(){
+  const data=_ratesSheetData();
+  const body=document.getElementById("grpChatBody"), title=document.getElementById("grpChatTitle");
+  if(!body||!title) return;
+  title.textContent="📋 Ставки ЗП для ввода в Alfa";
+  if(!data.length){ body.innerHTML=`<div class="callout">Не нашлось педагогов с курсами из справочника ставок. Проверьте расписание и вкладку «Педсостав и ФОТ».</div>`; }
+  else{
+    let total=0;
+    const html=data.map((d,i)=>{
+      const lines=d.rows.map(r=>{
+        const courses=r.courses.join(" / ");
+        return r.sums.map(v=>{ total++; return `${r.dur}: Групповой / ${courses} — ${v.toFixed(2)} р.`; }).join("\n");
+      }).join("\n");
+      const kids=d.rows[0]?d.rows[0].tiers.map((v,idx)=>v?((idx+4)+"→"+v):null).filter(Boolean).join(", "):"";
+      return `<details ${i<2?'open':''} style="margin-bottom:8px;border:1px solid var(--line);border-radius:8px;padding:8px 10px">
+        <summary style="cursor:pointer;font-weight:700">${esc(d.teacher)} <span style="font-weight:400;color:var(--muted)">— строк: ${d.rows.reduce((a,r)=>a+r.sums.length,0)}</span></summary>
+        <div style="font-size:11px;color:var(--muted);margin:6px 0">По числу детей: ${esc(kids)}</div>
+        <pre style="white-space:pre-wrap;font-size:12px;background:var(--paper);padding:8px;border-radius:6px;margin:0">${esc(lines)}</pre>
+        <button class="btn ghost sm" style="margin-top:6px" onclick="_copyText(${_jsStr(JSON.stringify(lines))}).then(ok=>toast(ok?'Скопировано':'Не удалось'))">📋 Копировать</button>
+      </details>`;
+    }).join("");
+    body.innerHTML=`<div class="callout" style="margin-bottom:10px;font-size:12px">Ставок ЗП в API Alfa нет — их заводят руками в карточке педагога («Зарплатные ставки» → «добавить»). Здесь готовые строки по вашему справочнику: длительность, тип, курсы и сумма для каждого числа детей. Курсы с одинаковой сеткой объединены в одну строку, как в Alfa.<br>Всего строк к вводу: <b>${total}</b> у ${data.length} педагогов.</div>${html}`;
+  }
+  document.getElementById("grpChatModal").classList.add("show");
 }
 /* Разведка: доступны ли ставки ЗП педагогов через API Alfa (чтобы проставлять их из финмодели) */
 async function ratesProbe(){
