@@ -383,7 +383,12 @@ function alfa_realization_day(string $date, ?array $branchFilter = null): array 
                 // 3 = проведён (факт реализации). Остальные (запланированные) считаем отдельно —
                 // это «прогноз по Alfa»: сколько ожидается списаний по расписанию.
                 if ($st !== 3 && $st !== 1 && $st !== 2) continue;   // отменённые/удалённые не берём
+                $mins = 0;
+                $tf = strtotime((string)($ls['time_from'] ?? '')); $tt = strtotime((string)($ls['time_to'] ?? ''));
+                if ($tf && $tt && $tt > $tf) $mins = (int)round(($tt - $tf) / 60);
                 $les[] = ['branch' => (int)$bid, 'id' => (int)($ls['id'] ?? 0), 'done' => ($st === 3),
+                          'teachers' => array_values(array_map('intval', (array)($ls['teacher_ids'] ?? []))),
+                          'minutes' => $mins,
                           'cids' => array_values(array_map('intval', (array)($ls['customer_ids'] ?? [])))];
             }
             if (count($items) < $PER) break;
@@ -392,7 +397,7 @@ function alfa_realization_day(string $date, ?array $branchFilter = null): array 
     }
     $present = 0.0; $all = 0.0; $nPresent = 0; $nAll = 0; $processed = 0; $noDet = 0;
     $planned = 0.0; $nPlanned = 0; $plannedLessons = 0; $doneLessons = 0;
-    $sampleDetail = null; $samplePlanned = null; $cache = []; $byBranch = [];   // разбивка по филиалам
+    $sampleDetail = null; $samplePlanned = null; $cache = []; $byBranch = []; $byTeacher = [];
     foreach ($les as $L) {
         $bid = (int)$L['branch'];
         if (!isset($byBranch[$bid])) $byBranch[$bid] = ['present' => 0.0, 'all' => 0.0, 'lessons' => 0];
@@ -418,6 +423,17 @@ function alfa_realization_day(string $date, ?array $branchFilter = null): array 
             $att = !empty($dt['is_attend']);
             $all += $c; $nAll++; $byBranch[$bid]['all'] += $c;
             if ($att) { $present += $c; $nPresent++; $byBranch[$bid]['present'] += $c; }
+            // разбивка по педагогам — для «Рейтинга педагогов» (копится тем же проходом)
+            foreach (($L['teachers'] ?? []) as $tid) {
+                if (!isset($byTeacher[$tid])) $byTeacher[$tid] = ['lessons' => 0, 'minutes' => 0, 'seats' => 0, 'revenue' => 0.0, '_les' => []];
+                $byTeacher[$tid]['revenue'] += $c;
+                if ($att) $byTeacher[$tid]['seats']++;
+                if (!isset($byTeacher[$tid]['_les'][$L['id']])) {
+                    $byTeacher[$tid]['_les'][$L['id']] = 1;
+                    $byTeacher[$tid]['lessons']++;
+                    $byTeacher[$tid]['minutes'] += (int)($L['minutes'] ?? 0);
+                }
+            }
             if ($sampleDetail === null) $sampleDetail = $dt;
         }
     }
@@ -448,7 +464,8 @@ function alfa_realization_day(string $date, ?array $branchFilter = null): array 
         if (isset($plannedLessonsCnt)) $plannedLessons = (int)$plannedLessonsCnt;
     }
     foreach ($byBranch as &$b) { $b['present'] = round($b['present'], 2); $b['all'] = round($b['all'], 2); } unset($b);
-    return ['date' => $date, 'lessons' => $doneLessons, 'plannedLessons' => $plannedLessons,
+    foreach ($byTeacher as &$t) { unset($t['_les']); $t['revenue'] = round($t['revenue'], 2); } unset($t);
+    return ['date' => $date, 'lessons' => $doneLessons, 'plannedLessons' => $plannedLessons, 'byTeacher' => $byTeacher,
             'perBranch' => $perBranch, 'statusHist' => $statusHist,
             'branchesUsed' => array_values($branches), 'branchNames' => alfa_branch_names(), 'byBranch' => $byBranch,
             'realizationPresent' => round($present, 2), 'realizationAll' => round($all, 2),
@@ -505,7 +522,7 @@ function alfa_realization_upsert(string $date, ?array $branches = null): array {
     $r = alfa_realization_day($date, $branches);
     $row = ['present' => $r['realizationPresent'], 'all' => $r['realizationAll'],
             'planned' => $r['realizationPlanned'], 'lessons' => $r['lessons'],
-            'plannedLessons' => $r['plannedLessons'], 'ts' => date('c')];
+            'plannedLessons' => $r['plannedLessons'], 'byTeacher' => $r['byTeacher'] ?? [], 'ts' => date('c')];
     $s = alfa_realization_store_read();
     $s[$r['date']] = $row;
     ksort($s);
@@ -1208,22 +1225,28 @@ function alfa_pay_kassa_name(array $x, array $refs): string {
 function alfa_payments_upsert(string $date, ?array $branches = null): array {
     $r = alfa_payments_day($date, $branches);
     $refs = alfa_pay_refs();
-    $inc = 0.0; $out = 0.0; $byIn = []; $byOut = [];
+    $inc = 0.0; $out = 0.0; $byIn = []; $byOut = []; $byItem = [];
     foreach ($r['rows'] as $x) {
         $name = alfa_pay_kassa_name($x, $refs);
         $isOut = (mb_stripos((string)$x['pay_type_name'], 'расход') !== false) || ((float)$x['income'] < 0);
         $v = abs((float)$x['income']);
-        if ($isOut) { $byOut[$name] = round(($byOut[$name] ?? 0) + $v, 2); $out += $v; }
+        if ($isOut) {
+            $byOut[$name] = round(($byOut[$name] ?? 0) + $v, 2); $out += $v;
+            // статья расхода («Аренда», «Реклама», …) — для раздела «Расходы ежедневно»
+            $item = $refs['payItems'][(int)($x['pay_item_id'] ?? 0)] ?? 'Без статьи';
+            $byItem[$item] = round(($byItem[$item] ?? 0) + $v, 2);
+        }
         else        { $byIn[$name]  = round(($byIn[$name]  ?? 0) + $v, 2); $inc += $v; }
     }
     $st = alfa_pay_store_read();
     $st[$r['date']] = ['income' => round($inc, 2), 'expense' => round($out, 2),
-                       'count' => count($r['rows']), 'byIn' => $byIn, 'byOut' => $byOut, 'ts' => date('c')];
+                       'count' => count($r['rows']), 'byIn' => $byIn, 'byOut' => $byOut,
+                       'byItem' => $byItem, 'ts' => date('c')];
     ksort($st);
     if (count($st) > 400) $st = array_slice($st, -400, null, true);   // храним последние ~13 месяцев
     alfa_pay_store_write($st);
     return ['date' => $r['date'], 'income' => round($inc, 2), 'expense' => round($out, 2),
-            'count' => count($r['rows']), 'byIn' => $byIn, 'byOut' => $byOut];
+            'count' => count($r['rows']), 'byIn' => $byIn, 'byOut' => $byOut, 'byItem' => $byItem];
 }
 
 /* ===== ПЛАТЕЖИ ЗА ДЕНЬ (кассы) =====
