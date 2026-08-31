@@ -609,6 +609,48 @@ function alfa_lesson_price_of(int $branch, int $customerId, array &$cache, array
     $cache[$ck] = $price;
     return $price;
 }
+/* ТОЧНЫЙ ПРОГНОЗ ЗА ДЕНЬ: по реально запланированным занятиям Alfa (status=1).
+   Документация: lesson/index по умолчанию отдаёт только проведённые (status=3), поэтому будущие
+   «не находились». Так считает и сам отчёт «Прогноз оплаты»: списания по запланированным урокам.
+   Участники берутся из details, а если их нет — из customer_ids занятия. */
+function alfa_forecast_lessons_day(string $date, ?array $branches = null): array {
+    $date = alfa_iso($date);
+    $branches = $branches ?: alfa_realization_branches();
+    $host = 'https://' . alfa_host(); $token = alfa_token();
+    $priceCache = alfa_price_cache_read(); $before = count($priceCache);
+    $sum = 0.0; $lessons = 0; $seats = 0; $noPrice = 0; $dbg = []; $PER = 50;
+    foreach ($branches as $bid) {
+        $bid = (int)$bid;
+        for ($p = 0; $p < 40; $p++) {
+            $r = alfa_http('POST', "$host/v2api/$bid/lesson/index",
+                ['status' => 1, 'date_from' => $date, 'date_to' => $date, 'page' => $p, 'count' => $PER], $token, true, 15);
+            $items = isset($r['__err']) ? [] : ($r['items'] ?? []);
+            foreach ($items as $ls) {
+                if (!is_array($ls)) continue;
+                $d = substr((string)($ls['date'] ?? ''), 0, 10);
+                if ($d !== '' && $d !== $date) continue;
+                $lessons++;
+                $subj = (int)($ls['subject_id'] ?? 0);
+                $ids = [];
+                foreach ((array)($ls['details'] ?? []) as $dt) {
+                    if (is_array($dt) && !empty($dt['customer_id'])) $ids[] = (int)$dt['customer_id'];
+                }
+                if (!$ids) $ids = array_map('intval', (array)($ls['customer_ids'] ?? []));
+                foreach (array_unique($ids) as $cid) {
+                    if (!$cid) continue;
+                    $pr = alfa_lesson_price_of($bid, (int)$cid, $priceCache, $dbg, $subj, $date, $date);
+                    if ($pr <= 0) $noPrice++;
+                    $sum += $pr; $seats++;
+                }
+            }
+            if (count($items) < $PER) break;
+        }
+    }
+    if (count($priceCache) !== $before) alfa_price_cache_write($priceCache);
+    return ['date' => $date, 'forecast' => round($sum, 2), 'lessons' => $lessons,
+            'seats' => $seats, 'withoutPrice' => $noPrice];
+}
+
 /* Шаг 1: какие группы и сколько раз занимаются на этой неделе (только regular-lesson — быстро). */
 function alfa_forecast_plan(string $mondayIso, ?array $branches = null): array {
     $mon = alfa_monday_of($mondayIso);

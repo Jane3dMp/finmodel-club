@@ -1361,6 +1361,14 @@ switch ($action) {
                   'sampleLesson' => $sample, 'sampleDetail' => $sampleDet]);
         break;
 
+    // --- ТОЧНЫЙ ПРОГНОЗ ЗА ДЕНЬ: по запланированным занятиям Alfa (status=1), как её отчёт ---
+    case 'forecastDay':
+        @set_time_limit(180);
+        $br = alfa_realization_branches();
+        if (!$br) json_out(['ok' => false, 'error' => 'Филиал «Пожарный» не найден в Alfa'], 400);
+        json_out(['ok' => true] + alfa_forecast_lessons_day((string)($in['date'] ?? date('Y-m-d')), $br));
+        break;
+
     // --- ПРОГНОЗ ОПЛАТЫ «как в Alfa»: шаг 1 — какие группы и сколько раз занимаются на неделе ---
     case 'forecastPlan':
         @set_time_limit(120);

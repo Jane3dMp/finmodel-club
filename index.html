@@ -10440,6 +10440,23 @@ async function progForecastWeek(week){
   if(prog) prog.textContent="Считаю по расписанию и абонементам Alfa… (до 2 минут)";
   try{
     const wk=week||_todayIso();
+    // ТОЧНЫЙ путь: по реально запланированным занятиям Alfa (status=1) — по дню за раз.
+    const mon=(function(){ const d=new Date(wk); const w=d.getDay()===0?7:d.getDay(); d.setDate(d.getDate()-(w-1)); return d; })();
+    let dSum=0,dLes=0,dSeats=0,dNo=0;
+    for(let i=0;i<7;i++){
+      const d=new Date(mon); d.setDate(d.getDate()+i);
+      if(prog) prog.textContent="Считаю по занятиям Alfa… день "+(i+1)+"/7";
+      const r=await _pubCall("forecastDay",{date:_dIso(d)});
+      dSum+=+r.forecast||0; dLes+=+r.lessons||0; dSeats+=+r.seats||0; dNo+=+r.withoutPrice||0;
+    }
+    if(dLes){
+      console.log("📤 прогноз по занятиям Alfa:",{week:wk,sum:dSum,lessons:dLes,seats:dSeats,noPrice:dNo});
+      if(prog) prog.innerHTML=`Неделя с ${esc(_dIso(mon))}: <b>${_gm(dSum)}</b> · занятий ${dLes} · посещений ${dSeats}`+
+        (dNo?` · <span style="color:var(--terra)">без цены: ${dNo}</span>`:'')+` <span style="color:var(--muted)">(по занятиям Alfa)</span>`;
+      toast("Прогноз по занятиям Alfa: "+_gm(dSum));
+      return;
+    }
+    if(prog) prog.textContent="Запланированных занятий в Alfa нет — считаю по расписанию…";
     const plan=await _pubCall("forecastPlan",{week:wk});
     const gs=plan.groups||[];
     if(!gs.length){ if(prog) prog.textContent="В Alfa нет регулярных занятий на эту неделю"; return; }
