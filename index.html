@@ -8816,8 +8816,13 @@ function _ownerReport(){
     const g=groups[key];
     kidsOf(l).forEach(k=>{
       const nn=_nameKey(k.n); if(!nn) return;   // дедуп внутри группы по ПОЛНОМУ ФИО (тёзки = разные дети)
-      const p=g.kids[nn]||{name:k.n,sent:false,reply:"",no:false,may:false};
+      const p=g.kids[nn]||{name:k.n,sent:false,reply:"",no:false,may:false,phone:"",dob:"",alfaId:null};
       p.sent=p.sent||!!k.vbSent; p.no=p.no||!!k.no; p.may=p.may||!!k.may;
+      // контакты — для печати списков по статусу; берём первое непустое из занятий группы
+      if(!p.phone && k.phone) p.phone=k.phone;
+      if(!p.dob && k.dob) p.dob=k.dob;
+      if((p.alfaId==null||p.alfaId==="") && k.alfaId!=null && k.alfaId!=="") p.alfaId=k.alfaId;
+      if(String(p.name).trim().split(/\s+/).length<String(k.n).trim().split(/\s+/).length) p.name=k.n;  // самое полное написание
       const rank=r=>r==="yes"?3:r==="no"?2:r==="maybe"?1:0;
       if(rank(k.vbReply)>rank(p.reply)) p.reply=k.vbReply;
       g.kids[nn]=p;
@@ -9369,6 +9374,134 @@ function _oldNewHTML(){
 }
 let _goalsEco="";   // фильтр «Движения по группам» по бренду
 function setGoalsEco(v){ _goalsEco=v||""; _renderGoalsAll(); }
+/* ---- ПЕЧАТЬ СПИСКА ДЕТЕЙ ПО СТАТУСУ (из «Движения по группам») ----
+   Жанна: «распечатать список детей по выбору — например молчат — с ФИО, группой, телефоном
+   и возрастом». Статус считается ТЕМИ ЖЕ правилами, что и цифры в таблице (_ownerReport):
+   отказ перевешивает всё, оплаченный майский = подтверждение. Иначе в списке «молчат»
+   оказались бы не те дети, что в колонке «Молчат».
+   Один ребёнок — одна строка: если он молчит в двух группах, звонить всё равно один раз,
+   поэтому группы собираются в одну ячейку. */
+const GOAL_ST=[["none","⚪ Молчат"],["maybe","🟡 Думают"],["no","🔴 Отказ"],["yes","🟢 Подтвердили"]];
+let _glPrint={st:{none:1}, unsent:false, mark:true};
+/* Статус записи ребёнка в группе — зеркало правил подсчёта в _ownerReport. */
+function _goalKidSt(k){
+  if(k.no||k.reply==="no") return "no";
+  if(k.may||k.reply==="yes") return "yes";
+  if(k.reply==="maybe") return "maybe";
+  return "none";
+}
+function _agePrint(dob){
+  const a=_ageYM(dob);
+  return a==null?"":(a.y+" "+_yearsWord(a.y)+(a.m?(" "+a.m+" мес"):""));
+}
+/* Дети под выбранные статусы, с телефоном и возрастом. Фильтр по бренду — тот же,
+   что стоит над таблицей (_goalsEco), чтобы список совпадал с тем, что видно на экране. */
+function _goalPrintRows(){
+  const {rows}=_ownerReport();
+  const frows=_goalsEco?rows.filter(r=>_courseEcoOf(r.course)===_goalsEco):rows;
+  const dn=["","Пн","Вт","Ср","Чт","Пт","Сб","Вс"];
+  const want=_glPrint.st||{}, byKid=new Map();
+  frows.forEach(r=>{
+    const ks=r.kids||{};
+    Object.keys(ks).forEach(nn=>{
+      const k=ks[nn], st=_goalKidSt(k);
+      if(!want[st]) return;
+      if(_glPrint.unsent && k.sent) return;              // «кому ещё не отправляли»
+      const rec=(typeof _childRec==="function")?(_childRec(k.alfaId)||{}):{};
+      const e=byKid.get(nn)||{name:k.name, phone:"", dob:"", groups:[], st:{}};
+      if(!e.phone) e.phone=k.phone||rec.phone||"";
+      if(!e.dob)   e.dob=k.dob||rec.dob||"";
+      if(String(e.name).trim().split(/\s+/).length<String(k.name).trim().split(/\s+/).length) e.name=k.name;
+      e.groups.push({name:r.name, course:r.course, when:((dn[r.day]||"")+" "+(r.time||"")).trim(), st:st});
+      e.st[st]=1;
+      byKid.set(nn,e);
+    });
+  });
+  return [...byKid.values()].sort((a,b)=>String(a.name).localeCompare(String(b.name),"ru"));
+}
+function _goalStLab(st){ const f=GOAL_ST.find(x=>x[0]===st); return f?f[1]:st; }
+function _goalPrintPicked(){ return GOAL_ST.filter(s=>_glPrint.st&&_glPrint.st[s[0]]); }
+/* Окно выбора: какие статусы печатать. Число детей пересчитывается сразу — видно,
+   на скольких человек список, ещё до печати. */
+function openGoalPrint(){
+  const body=document.getElementById("grpChatBody"), title=document.getElementById("grpChatTitle");
+  if(!body||!title) return;
+  title.textContent="🖨 Список детей по статусу";
+  body.innerHTML=_goalPrintFormHtml();
+  document.getElementById("grpChatModal").classList.add("show");
+}
+function _goalPrintFormHtml(){
+  const rows=_goalPrintRows(), picked=_goalPrintPicked();
+  const cb=(id,lab,on,fn)=>`<label style="display:flex;align-items:center;gap:7px;padding:4px 0;cursor:pointer;font-size:13px;color:var(--coal);font-weight:400;margin:0">
+    <input type="checkbox" style="width:auto;flex:none;margin:0" ${on?"checked":""} onchange="${fn}"> <span>${lab}</span></label>`;
+  const eco=_goalsEco?`<div class="hint" style="margin-top:6px">Фильтр направления над таблицей: <b>${esc(_goalsEco)}</b> — список будет только по нему.</div>`:"";
+  return `<div style="font-size:13px">
+    <div style="color:var(--muted);margin-bottom:8px">Кого включить в список:</div>
+    ${GOAL_ST.map(s=>cb(s[0],s[1],!!(_glPrint.st||{})[s[0]],`goalPrintSt('${s[0]}',this.checked)`)).join("")}
+    <div style="border-top:1px solid var(--line);margin:8px 0 4px"></div>
+    ${cb("unsent","Только те, кому ещё не отправляли приглашение",_glPrint.unsent,"goalPrintUnsent(this.checked)")}
+    ${cb("mark","Пустая графа для отметок (для звонков)",_glPrint.mark,"goalPrintMark(this.checked)")}
+    ${eco}
+    <div class="callout" style="margin:10px 0 0;font-size:12px">Попадёт детей: <b>${rows.length}</b>${
+      picked.length?"":" — не выбран ни один статус"}.
+      ${rows.length?`Один ребёнок — одна строка, даже если он в двух группах: звонить всё равно один раз.`:""}</div>
+    <div class="hd-actions" style="margin-top:10px">
+      <button class="btn sm" ${rows.length?"":"disabled"} onclick="goalPrintList()">🖨 Печать (${rows.length})</button>
+      <button class="btn ghost sm" ${rows.length?"":"disabled"} onclick="goalPrintCopy()" title="Скопировать телефоны через запятую — для рассылки">📋 Телефоны</button>
+    </div></div>`;
+}
+function _goalPrintRefresh(){ const b=document.getElementById("grpChatBody"); if(b) b.innerHTML=_goalPrintFormHtml(); }
+function goalPrintSt(st,on){ if(!_glPrint.st) _glPrint.st={}; if(on) _glPrint.st[st]=1; else delete _glPrint.st[st]; _goalPrintRefresh(); }
+function goalPrintUnsent(on){ _glPrint.unsent=!!on; _goalPrintRefresh(); }
+function goalPrintMark(on){ _glPrint.mark=!!on; _goalPrintRefresh(); }
+function goalPrintCopy(){
+  const ph=_goalPrintRows().map(r=>r.phone).filter(Boolean);
+  if(!ph.length){ toast("Ни у кого из списка нет телефона"); return; }
+  _copyText(ph.join(", ")).then(ok=>toast(ok?("Скопировано телефонов: "+ph.length):"Не удалось скопировать"));
+}
+function goalPrintList(){
+  const rows=_goalPrintRows();
+  if(!rows.length){ toast("Под выбранные статусы никто не попал"); return; }
+  const picked=_goalPrintPicked(), many=picked.length>1;
+  const now=new Date(), z=n=>String(n).padStart(2,"0");
+  const dd=z(now.getDate())+"."+z(now.getMonth()+1)+"."+now.getFullYear();
+  const mark=_glPrint.mark;
+  const head=`<tr><th style="width:28px">№</th><th class="l">ФИО ребёнка</th><th style="width:92px">Возраст</th>
+    <th class="l" style="width:118px">Телефон</th><th class="l">Группа</th>${many?'<th style="width:74px">Статус</th>':''}${mark?'<th class="l" style="width:150px">Отметки</th>':''}</tr>`;
+  const body=rows.map((r,i)=>{
+    const grp=r.groups.map(g=>esc(g.name)+((g.course&&String(g.name).indexOf(g.course)<0)?(' <span class="dim">'+esc(g.course)+'</span>'):'')
+      +(g.when?(' <span class="dim">· '+esc(g.when)+'</span>'):'')).join("<br>");
+    const st=Object.keys(r.st).map(s=>esc(_goalStLab(s))).join("<br>");
+    return `<tr><td class="c">${i+1}</td><td>${esc(r.name)}</td><td class="c">${esc(_agePrint(r.dob))}</td>
+      <td class="l">${esc(r.phone||"")}</td><td class="l">${grp}</td>${many?`<td class="c">${st}</td>`:''}${mark?'<td></td>':''}</tr>`;
+  }).join("");
+  const noPh=rows.filter(r=>!r.phone).length, noAge=rows.filter(r=>!r.dob).length;
+  const sub=[picked.map(s=>s[1]).join(", ")||"—",
+             _goalsEco?("направление: "+_goalsEco):"",
+             _glPrint.unsent?"только кому не отправляли":"",
+             "детей: "+rows.length, "на "+dd].filter(Boolean).join(" · ");
+  const warn=(noPh||noAge)?`<div class="warn">Без телефона: ${noPh} · без возраста: ${noAge} — подтянутся из Альфы кнопкой «Контакты из Альфы».</div>`:"";
+  const css=`@page{size:portrait;margin:12mm}
+    *{box-sizing:border-box;font-family:Arial,Helvetica,sans-serif}
+    body{margin:0;color:#1c1410}
+    h1{font-size:15px;margin:0 0 2px;border-bottom:2px solid #b5532a;padding-bottom:3px}
+    .sub{font-size:10px;color:#666;margin:0 0 6px}
+    .warn{font-size:10px;color:#8a5a2b;margin:0 0 6px}
+    table{border-collapse:collapse;width:100%}
+    th,td{border:1px solid #ccc;font-size:11px;padding:4px 7px;text-align:center;vertical-align:top}
+    th{background:#2a211b;color:#fff}
+    th.l,td.l{text-align:left} td:nth-child(2){text-align:left}
+    .dim{color:#777}
+    thead{display:table-header-group} tr{page-break-inside:avoid}
+    tbody tr:nth-child(even) td{background:#faf7f3}`;
+  const w=window.open("","_printGoalList"); if(!w){ toast("Разрешите всплывающие окна для печати"); return; }
+  w.document.open();
+  w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Список детей — ${esc(picked.map(s=>s[1]).join(", "))}</title><style>${css}</style></head>
+    <body><h1>Список детей</h1><div class="sub">${esc(sub)}</div>${warn}
+    <table><thead>${head}</thead><tbody>${body}</tbody></table></body></html>`);
+  w.document.close();
+  setTimeout(()=>{ try{ w.focus(); w.print(); }catch(e){} },300);
+}
 let _goalsSort={col:"",dir:1};   // сортировка таблицы «Движение по группам»
 function goalsSort(col){ if(_goalsSort.col===col) _goalsSort.dir*=-1; else _goalsSort={col,dir:1}; _renderGoalsAll(); }
 function _goalTh(col,lab,align){ const a=_goalsSort.col===col?(_goalsSort.dir>0?" ▲":" ▼"):""; return `<th style="background:var(--graphite);color:#fff;padding:6px 8px;text-align:${align};position:sticky;top:0;cursor:pointer;user-select:none;white-space:nowrap" onclick="goalsSort('${col}')" title="Сортировать">${lab}${a}</th>`; }
@@ -9462,6 +9595,7 @@ function _goalsDashHTML(opts){
   h+=`<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:6px 0 10px">
       <h3 style="font-size:15px;margin:0;display:flex;align-items:center;gap:8px"><span data-ic="report"></span>Движение по группам</h3>
       <div class="ecofilt" style="margin-left:auto" title="Показать группы только выбранного направления">${eb('','Все')}${eb('Прознание','Прознание')}${eb('CODDY','CODDY')}${eb('Детали','Детали')}</div>
+      <button class="btn ghost sm" onclick="openGoalPrint()" title="Распечатать список детей по статусу — ФИО, группа, телефон, возраст">🖨 Список по статусу</button>
     </div>
     <div class="tscroll"><table style="width:100%;border-collapse:collapse;font-size:12px">
     <thead><tr>${_goalTh('name','Группа','left')}${_goalTh('course','Курс','left')}${_goalTh('teacher','Педагог','left')}${_goalTh('daytime','День·время','left')}${_goalTh('total','Записано','center')}${_goalTh('yes','🟢','center')}${_goalTh('no','🔴','center')}${_goalTh('maybe','🟡','center')}${_goalTh('none','Молчат','center')}${_goalTh('fill','Заполн.','center')}</tr></thead><tbody>`;
@@ -10349,36 +10483,56 @@ function _realHtml(){
   const [Y,M]=_realMonth.split('-').map(Number);
   const dim=new Date(Y,M,0).getDate();
   const todayIso=_todayIso();
-  let cum=0, tp=0, ta=0, tl=0, tpl=0, days=0;
+  let cum=0, tp=0, ta=0, tl=0, tpl=0, days=0, tex=0, texDone=0, texFact=0;
   let rows="";
   for(let d=1;d<=dim;d++){
     const key=Y+'-'+String(M).padStart(2,'0')+'-'+String(d).padStart(2,'0');
     const r=(_realStore||{})[key];
     const future = key>todayIso;
-    if(r){ cum+=(+r.present||0); tp+=(+r.present||0); ta+=(+r.all||0); tl+=(+r.lessons||0); tpl+=(+r.planned||0); if(r.lessons) days++; }
+    /* «Накопительно» копит СРЕДНЕЕ между «без пропусков» и «с пропусками» — тот же факт, что
+       во «Все показатели», «Прогноз по всем» и отчёте продаж. Раньше копились только пришедшие,
+       и накопительное расходилось с выручкой месяца во всех остальных разделах. */
+    if(r){ cum+=((+r.present||0)+(+r.all||0))/2; tp+=(+r.present||0); ta+=(+r.all||0); tl+=(+r.lessons||0); tpl+=(+r.planned||0); if(r.lessons) days++; }
+    /* «Ожидается» — ЗАМОРОЖЕННОЕ значение (expect): его пишут раз в неделю в вс 22:00 и больше
+       не трогают. Живое planned показываем только пока неделя не зафиксирована — иначе цифра
+       таяла бы по мере проведения занятий и сравнивать факт было бы не с чем. */
+    const frozen=(r&&r.expect!=null);
+    const exp=frozen?(+r.expect||0):(r?(+r.planned||0):0);
+    const fact=r?((+r.present||0)+(+r.all||0))/2:0;
+    // в % берём только ПРОШЕДШИЕ дни: иначе факт первой недели делился бы на ожидание всего
+    // месяца вперёд и выполнение выглядело бы вдвое хуже, чем есть
+    if(frozen){ tex+=exp; if(!future && r && r.lessons){ texDone+=exp; texFact+=fact; } }
+    const pct=(frozen&&exp>0&&!future&&r&&r.lessons)?(100*fact/exp):null;
     rows+=`<tr${future?' style="opacity:.6"':''}>
       <td style="text-align:center">${d}</td>
       <td style="text-align:right">${(r&&r.lessons)?('<b>'+_gm(r.present)+'</b>'):'<span style="color:var(--muted)">—</span>'}</td>
       <td style="text-align:right">${(r&&r.lessons)?_gm(r.all):''}</td>
-      <td style="text-align:right;color:var(--terra-d)">${(r&&+r.planned)?_gm(r.planned):''}</td>
+      <td style="text-align:right;color:var(--terra-d)">${exp?(frozen
+          ?('<span title="Зафиксировано '+esc(String(r.expectTs||'').slice(0,16).replace("T"," "))+' — больше не меняется">'+_gm(exp)+' 🔒</span>')
+          :('<span style="opacity:.65" title="Неделя ещё не зафиксирована: цифра живая и будет меняться">'+_gm(exp)+'</span>')):''}</td>
+      <td style="text-align:right">${pct!=null?('<b style="color:'+(pct>=100?'var(--green)':(pct>=85?'#C9922E':'var(--red)'))+'">'+pct.toFixed(0)+'%</b>'):''}</td>
       <td style="text-align:right;color:var(--muted)">${(r&&r.lessons)?_gm(cum):''}</td>
       <td style="text-align:center;color:var(--muted)">${r?((r.lessons||0)+((+r.plannedLessons)?('+'+r.plannedLessons):'')):''}</td></tr>`;
   }
+  const texPct=(texFact>0&&texDone>0)?(100*texFact/texDone):null;
   const monLabel=(_RU_MON[M-1]||'')+' '+Y;
-  return `<div class="callout" style="margin-bottom:10px;font-size:13px">Считается из Alfa: сумма списаний (<b>commission</b>) по проведённым занятиям филиала <b>${_realBranchLabel()}</b>. «Без пропусков» — только пришедшие, «с пропусками» — все.</div>
+  const mon=(function(){ const d=new Date(); const w=d.getDay()===0?7:d.getDay(); d.setDate(d.getDate()-(w-1)+7); return _dIso(d); })();
+  return `<div class="callout" style="margin-bottom:10px;font-size:13px">Считается из Alfa: сумма списаний (<b>commission</b>) по проведённым занятиям филиала <b>${_realBranchLabel()}</b>. «Без пропусков» — только пришедшие, «с пропусками» — все.<br>
+    <b>Ожидается 🔒</b> — сколько ожидали ДО начала недели. Фиксируется один раз в воскресенье в 22:00 и больше не меняется, поэтому реализацию есть с чем сравнить: <b>%</b> = (без пропусков + с пропусками) ÷ 2 от ожидания.</div>
   <div class="hd-actions" style="margin-bottom:10px">
     <input type="month" class="cell" style="width:auto" value="${_realMonth}" onchange="realSetMonth(this.value)">
     <button class="btn sm" id="realPullBtn" onclick="realPullMonth()">🔄 Обновить месяц из Alfa</button>
     <button class="btn ghost sm" id="realWeekBtn" onclick="realPullWeek()" title="Посчитать «Ожидается» и доход за конкретную неделю (пн–вс)">📅 Неделя:</button>
-    <input type="date" id="realWeekDate" class="cell" style="width:auto" value="2026-09-07">
+    <input type="date" id="realWeekDate" class="cell" style="width:auto" value="${esc(mon)}">
+    <button class="btn ghost sm" id="realExpBtn" onclick="realFreezeExpect()" title="Зафиксировать «ожидается» на неделю из поля слева (обычно это делает cron в вс 22:00)">🔒 Зафиксировать ожидание</button>
     <span id="realPullProg" style="font-size:12px;color:var(--muted)"></span>
   </div>
-  <div class="tscroll" style="max-width:720px"><table><thead><tr>
-    <th>Дн</th><th style="text-align:right">Без пропусков</th><th style="text-align:right">С пропусками</th><th style="text-align:right" title="Ожидаемые списания по ещё не проведённым занятиям">Ожидается</th><th style="text-align:right">Накопительно</th><th style="text-align:center">Занятий</th>
+  <div class="tscroll" style="max-width:820px"><table><thead><tr>
+    <th>Дн</th><th style="text-align:right">Без пропусков</th><th style="text-align:right">С пропусками</th><th style="text-align:right" title="Сколько ожидали ДО начала недели — зафиксировано в вс 22:00 и не меняется">Ожидается</th><th style="text-align:right" title="Реализация от ожидания: (без пропусков + с пропусками) ÷ 2 ÷ ожидание">%</th><th style="text-align:right" title="Нарастающим итогом: среднее «без пропусков» и «с пропусками» — тот же доход, что во «Все показатели» и «Прогноз по всем»">Накопительно</th><th style="text-align:center">Занятий</th>
   </tr></thead><tbody>${rows}
-    <tr style="border-top:2px solid var(--line)"><td><b>${esc(monLabel)}</b></td><td style="text-align:right"><b style="color:var(--green)">${_gm(tp)}</b></td><td style="text-align:right"><b>${_gm(ta)}</b></td><td style="text-align:right"><b style="color:var(--terra-d)">${_gm(tpl)}</b></td><td style="text-align:right"></td><td style="text-align:center"><b>${tl}</b></td></tr>
+    <tr style="border-top:2px solid var(--line)"><td><b>${esc(monLabel)}</b></td><td style="text-align:right"><b style="color:var(--green)">${_gm(tp)}</b></td><td style="text-align:right"><b>${_gm(ta)}</b></td><td style="text-align:right"><b style="color:var(--terra-d)">${tex?_gm(tex):_gm(tpl)}</b></td><td style="text-align:right">${texPct!=null?('<b title="По прошедшим дням: факт '+_gm(texFact)+' из ожидавшихся '+_gm(texDone)+'">'+texPct.toFixed(0)+'%</b>'):''}</td><td style="text-align:right"><b title="Доход месяца: среднее «без пропусков» и «с пропусками»">${_gm((tp+ta)/2)}</b></td><td style="text-align:center"><b>${tl}</b></td></tr>
   </tbody></table></div>
-  <div style="font-size:12px;color:var(--muted);margin-top:6px">Дней с проведёнными занятиями: ${days}. «Обновить месяц» пересчитывает <b>весь</b> месяц (включая будущие дни — по ним считается «Ожидается», это и есть прогноз). Автоматически — cron в 22:00.</div>
+  <div style="font-size:12px;color:var(--muted);margin-top:6px">Дней с проведёнными занятиями: ${days}. «Обновить месяц» пересчитывает <b>весь</b> месяц; зафиксированное «ожидается 🔒» он не трогает. Цифра без замка — неделю ещё не фиксировали, она живая и будет меняться.${tex?'':' <b>За этот месяц ожидание не зафиксировано</b> — сравнивать не с чем: нажмите «🔒 Зафиксировать ожидание» на предстоящую неделю или дождитесь cron в воскресенье.'}</div>
   <details style="margin-top:14px"><summary style="cursor:pointer;font-weight:600">🔍 Проверить один день (разведка по филиалам)</summary>
     <div style="padding:8px 0">
       <div class="hd-actions"><input type="date" id="realProbeDate" class="cell" style="width:auto" value="${todayIso}">
@@ -10394,6 +10548,28 @@ function _realHtml(){
       <code style="font-size:12px;word-break:break-all">wget -qO- "${esc(location.origin)}/finmodel/api/alfa/cron_realization.php?key=ВАШ_КЛЮЧ&days=7"</code><br>
       <span style="color:var(--muted)">days=7 — пересчитывает последние 7 дней (на случай правок посещаемости задним числом). Проверить вручную можно, открыв этот URL в браузере.</span>
     </div></details>`;
+}
+/* Зафиксировать «ожидается» на неделю из поля даты. Обычно это делает cron в вс 22:00;
+   кнопка — на случай «расписание доделали в понедельник утром». Уже замороженное не трогаем,
+   пока не подтвердят перезапись: в этом весь смысл — цифра должна стоять на месте. */
+async function realFreezeExpect(){
+  if(_realBusy) return;
+  const v=(document.getElementById("realWeekDate")||{}).value; if(!v){ toast("Выберите дату недели"); return; }
+  const btn=document.getElementById("realExpBtn"), prog=document.getElementById("realPullProg");
+  _realBusy=true; if(btn) btn.disabled=true;
+  try{
+    if(prog) prog.textContent="Считаю неделю из Alfa и фиксирую…";
+    let j=await _pubCall("expectFreeze",{week:v, pull:true});
+    if(!j.frozen && j.kept){
+      if(confirm("На эту неделю ожидание уже зафиксировано ("+_gm(j.total)+").\nПерезаписать по текущему расписанию?")){
+        j=await _pubCall("expectFreeze",{week:v, pull:true, force:true});
+      }
+    }
+    _realStore=j.store||_realStore;
+    if(prog) prog.innerHTML=`Неделя с ${esc(j.week)}: ожидание <b>${_gm(j.total)}</b> · зафиксировано дней ${j.frozen}${j.kept?(" · уже стояло "+j.kept):""}`;
+    const b=document.getElementById("admBody"); if(b) b.innerHTML=_realHtml();
+  }catch(e){ if(prog) prog.textContent=""; const b=document.getElementById("admBody"); if(b){ const d=document.createElement('div'); d.innerHTML=_pubErrHtml(e,"фиксация ожидания"); b.insertBefore(d.firstChild,b.firstChild); } }
+  finally{ _realBusy=false; if(btn) btn.disabled=false; }
 }
 /* Посчитать одну неделю (пн–вс) целиком: и доход, и «Ожидается». */
 async function realPullWeek(){

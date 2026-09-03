@@ -1509,6 +1509,23 @@ switch ($action) {
         json_out(['ok' => true] + $snap + ['weekPlans' => alfa_weekplan_read(), 'store' => alfa_realization_store_read()]);
         break;
 
+    // --- ЗАМОРОЗИТЬ «ОЖИДАЛОСЬ» НА НЕДЕЛЮ (обычно делает cron в вс 22:00) ---
+    //     Раз записанное значение не трогается: с ним потом сравнивается реализация.
+    //     force:true — перезаписать (например, расписание переделали до начала недели).
+    case 'expectFreeze':
+        @set_time_limit(180);
+        $branches = alfa_realization_branches();
+        if (!$branches) json_out(['ok' => false, 'error' => 'Филиал «Пожарный» не найден в Alfa'], 400);
+        $wk = (string)($in['week'] ?? date('Y-m-d'));
+        // сначала обновим дни недели из Alfa — замораживать надо свежее расписание
+        if (!empty($in['pull'])) {
+            $mon = alfa_monday_of(alfa_iso($wk));
+            for ($i = 0; $i < 7; $i++) alfa_realization_upsert(date('Y-m-d', strtotime("+$i day", strtotime($mon))), $branches);
+        }
+        $r = alfa_expect_freeze(alfa_iso($wk), $branches, !empty($in['force']));
+        json_out(['ok' => true] + $r + ['store' => alfa_realization_store_read()]);
+        break;
+
     // --- ПЕРЕСЧИТАТЬ РЕАЛИЗАЦИЮ за день/несколько дней и записать в хранилище (клуб = Пожарный) ---
     //     Тяжёлые месяцы клиент тянет по одному дню (чанками) — тут максимум 7 дат за вызов.
     case 'realizationPull':

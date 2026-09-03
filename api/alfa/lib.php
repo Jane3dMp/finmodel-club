@@ -535,10 +535,39 @@ function alfa_realization_upsert(string $date, ?array $branches = null): array {
             'planned' => $r['realizationPlanned'], 'lessons' => $r['lessons'],
             'plannedLessons' => $r['plannedLessons'], 'byTeacher' => $r['byTeacher'] ?? [], 'ts' => date('c')];
     $s = alfa_realization_store_read();
+    /* ⚠️ ЗАМОРОЖЕННОЕ «ожидалось» (expect) переносим из старой строки. Иначе его затирал бы
+       этот же ежедневный пересчёт: по мере проведения занятий planned падает в ноль, и к концу
+       недели сравнивать факт становится не с чем. Заполняется один раз (alfa_expect_freeze). */
+    $old = $s[$r['date']] ?? null;
+    if (is_array($old) && isset($old['expect'])) {
+        $row['expect'] = $old['expect'];
+        if (isset($old['expectTs'])) $row['expectTs'] = $old['expectTs'];
+    }
     $s[$r['date']] = $row;
     ksort($s);
     alfa_realization_store_write($s);
     return ['date' => $r['date']] + $row;
+}
+/* Заморозить «ожидалось» на неделю (пн–вс): по каждому дню записать текущее planned в expect
+   и больше никогда его не трогать. Делается раз в неделю (вс 22:00, вместе со снимком прогноза):
+   потом реализация сравнивается с тем, что ожидали ДО начала недели, а не с остатком расписания.
+   $force — перезаписать уже замороженное (только по явной просьбе с экрана). */
+function alfa_expect_freeze(string $mondayIso, ?array $branches = null, bool $force = false): array {
+    $mon = alfa_monday_of($mondayIso);
+    $s = alfa_realization_store_read();
+    $set = 0; $kept = 0; $days = [];
+    for ($i = 0; $i < 7; $i++) {
+        $d = date('Y-m-d', strtotime("+$i day", strtotime($mon)));
+        $row = $s[$d] ?? null;
+        if (!is_array($row)) { $days[$d] = null; continue; }
+        if (isset($row['expect']) && !$force) { $kept++; $days[$d] = (float)$row['expect']; continue; }
+        $row['expect'] = round((float)($row['planned'] ?? 0), 2);
+        $row['expectTs'] = date('c');
+        $s[$d] = $row; $set++; $days[$d] = (float)$row['expect'];
+    }
+    if ($set) { ksort($s); alfa_realization_store_write($s); }
+    return ['week' => $mon, 'frozen' => $set, 'kept' => $kept, 'days' => $days,
+            'total' => round(array_sum(array_map('floatval', array_filter($days, 'is_numeric'))), 2)];
 }
 function alfa_cron_key(): string { return (string)(cfg()['cron_key'] ?? ''); }
 
@@ -844,13 +873,18 @@ function alfa_weekplan_snapshot(string $mondayIso, ?array $branches = null): arr
         $donePart += ((float)$r['present'] + (float)$r['all']) / 2;
         $days[$d] = ['present' => $r['present'], 'all' => $r['all'], 'planned' => $r['planned']];
     }
+    /* Заодно замораживаем подневное «ожидалось» — тем же снимком, что и недельный прогноз.
+       Строго после upsert-ов выше: они только что положили в planned свежее расписание. */
+    $exp = alfa_expect_freeze($mon, $branches);
     $store = alfa_weekplan_read();
     $store[$mon] = ['plan' => $fc['forecast'], 'lessons' => $fc['lessons'], 'groups' => ($fc['groups'] ?? 0),
-                    'alreadyDone' => round($donePart, 2), 'src' => 'alfa', 'ts' => date('c')];
+                    'alreadyDone' => round($donePart, 2), 'src' => 'alfa', 'ts' => date('c'),
+                    'expect' => $exp['total'], 'expectFrozen' => $exp['frozen']];
     ksort($store);
     alfa_weekplan_write($store);
     return ['week' => $mon, 'plan' => $fc['forecast'], 'lessons' => $fc['lessons'],
-            'groups' => ($fc['groups'] ?? 0), 'alreadyDone' => round($donePart, 2), 'days' => $days];
+            'groups' => ($fc['groups'] ?? 0), 'alreadyDone' => round($donePart, 2), 'days' => $days,
+            'expect' => $exp];
 }
 
 /* Форма полей периода по РЕАЛЬНОЙ записи: у части сущностей Alfa строковая дата лежит в
