@@ -6051,7 +6051,11 @@ function _lesRosterCompare(members,kids){
 }
 function _lesRosterHtml(R,g,meta){
   const dmy=s=>(typeof _pubDMY==="function")?_pubDMY(s):String(s||"");
-  const nm=m=>m.name||('<span style="color:var(--muted)" title="Клиента нет в справочнике: удалён в Alfa или создан только что — 🔄 перечитает справочник">Клиент id '+esc(String(m.customer_id))+' — нет в справочнике</span>');
+  const noDir=!!(meta&&meta.noDir);
+  // имени нет: либо справочник не прочитался (тогда молчим — предупреждение уже в шапке),
+  // либо прочитался, а клиента в нём нет (удалён в Alfa или создан только что)
+  const nm=m=>m.name?esc(m.name):(noDir?('<span style="color:var(--muted)">Клиент id '+esc(String(m.customer_id))+'</span>')
+      :('<span style="color:var(--muted)" title="Клиента нет в справочнике: удалён в Alfa или создан только что — 🔄 перечитает">Клиент id '+esc(String(m.customer_id))+' — нет в справочнике</span>'));
   const row=(name,phone,b,note,withB)=>`<tr><td>${name}</td><td style="font-size:12px;color:var(--muted)">${esc(phone||"")}</td>${withB?`<td style="font-size:12px;color:var(--muted);white-space:nowrap">${b?esc(dmy(b)):"—"}</td>`:""}<td style="font-size:12px">${note||""}</td></tr>`;
   const head=withB=>`<thead><tr><th style="text-align:left">Ребёнок</th><th style="text-align:left">Телефон</th>${withB?'<th>Зачислен с</th>':''}<th style="text-align:left"></th></tr></thead>`;
   const sec=(title,color,trs,empty,withB)=>`<div style="margin-top:8px"><div style="font-weight:600;color:${color};margin-bottom:3px">${title}</div>
@@ -6066,7 +6070,8 @@ function _lesRosterHtml(R,g,meta){
         ? '<span style="color:var(--terra-d)" title="Совпало по имени, но связь в карточке ведёт на другого клиента Alfa — возможно, две карточки одного ребёнка">связь указывает на другого клиента Alfa (id '+esc(String(x.k.alfaId))+')</span>'
         : '<span style="color:var(--muted)" title="Сопоставлен по имени: у записи в карточке нет связи с Альфой (⟳ в строке ребёнка)">по имени</span>');
     }
-    return row(nm(x.m)||esc(x.k.n), x.m.phone, x.m.b_date, notes.join(" · "), true);
+    // связь по id есть — имя и телефон знаем из карточки, даже если Alfa не отдала клиента
+    return row(x.m.name?esc(x.m.name):esc(x.k.n), x.m.phone||x.k.phone||"", x.m.b_date, notes.join(" · "), true);
   }).join("");
   const alfa=R.onlyAlfa.map(m=>row(nm(m), m.phone, m.b_date, '<span style="color:var(--terra-d)">в карточке нет</span>', true)).join("");
   const ours=R.onlyOurs.map(o=>{ const k=o.k;
@@ -6076,7 +6081,7 @@ function _lesRosterHtml(R,g,meta){
     return row(esc(k.n), k.phone, "", note, false); }).join("");
   const ts=meta&&meta.ts?String(meta.ts).slice(11,16):"";
   const gone=(meta&&meta.gone)?meta.gone:0;
-  const warn=(meta&&meta.noDir)?`<div style="color:var(--terra-d);font-size:12px;margin-top:4px">⚠️ Справочник клиентов Alfa не загрузился — имена, телефоны и сопоставление по имени недоступны, показаны только связи по alfaId. Нажмите 🔄.</div>`:"";
+  const warn=noDir?`<div style="color:var(--terra-d);font-size:12px;margin-top:4px">⚠️ Alfa не отдала карточки детей — имена и телефоны взяты из карточки занятия, сопоставление по имени недоступно (только связи по alfaId). Нажмите 🔄.</div>`:"";
   return `<div class="callout" style="margin-top:8px;font-size:12px;padding:8px 10px">
     <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
       <b>👥 Состав в Alfa: «${esc(g.name||("группа id "+g.id))}»</b>
@@ -6110,13 +6115,23 @@ async function lesAlfaRoster(force){
     const jb=await _pubCall("membersByGroups",{groups:[{id:g.id, branch:0}], e_date:c.eDate||""});
     if(!same()) return;
     if((jb.errors||[]).some(x=>String(x)===String(g.id))) throw new Error("Alfa не отдала состав этой группы (cgi). Попробуйте ещё раз; если повторится — покажите мне консоль (F12).");
-    const j={members:(jb.byGroup||{})[String(g.id)]||[], branch:null};
-    // ФИО и телефоны — из справочника клиентов (один раз на сессию; 🔄 перечитывает)
-    let noDir=false;
-    if(box()) box().innerHTML=`<div class="callout" style="margin-top:8px;font-size:12px">⏳ Загружаю справочник клиентов Alfa${_pubCustomers?"":" (первый раз — до минуты)"}…</div>`;
-    try{ await _pubEnsureCustomers(!!force); }catch(e){ noDir=true; console.warn("справочник клиентов не загрузился",e); }
-    if(!same()) return;
-    const byId=new Map(); (_pubCustomers||[]).forEach(x=>byId.set(String(x.id),x));
+    const j={members:(jb.byGroup||{})[String(g.id)]||[], branch:((jb.branchByGroup||{})[String(g.id)]||0)};
+    /* ФИО и телефоны. Полный справочник клиентов (обход всех филиалов постранично) — самый
+       тяжёлый запрос прокси, и шлюз его рвал. Для карточки он не нужен: читаем только детей
+       этой группы по их id (customersByIds — один короткий запрос на ребёнка внутри прокси).
+       Если справочник уже загружен в сессии — берём из него, бесплатно. */
+    let noDir=false; const byId=new Map();
+    if(_pubCustomers && !force){ _pubCustomers.forEach(x=>byId.set(String(x.id),x)); }
+    const need=j.members.map(m=>+m.customer_id).filter(id=>id && !byId.has(String(id)));
+    if(need.length){
+      if(box()) box().innerHTML=`<div class="callout" style="margin-top:8px;font-size:12px">⏳ Читаю ${need.length} ${_kassaDayWord(need.length)==="день"?"ребёнка":"детей"} из Alfa…</div>`;
+      try{
+        const jc=await _pubCall("customersByIds",{ids:need, branch:j.branch});
+        Object.keys(jc.customers||{}).forEach(id=>{ const c=jc.customers[id]; if(c) byId.set(String(id),c); });
+        if((jc.missing||[]).length) console.warn("👥 клиентов не нашлось в Alfa по id:",jc.missing);
+      }catch(e){ noDir=true; console.warn("клиенты по id не прочитались",e); }
+      if(!same()) return;
+    }
     const today=_todayIso();
     const all=(j.members||[]).map(m=>{ const cst=byId.get(String(m.customer_id));
       return {customer_id:m.customer_id, b_date:m.b_date, e_date:m.e_date,

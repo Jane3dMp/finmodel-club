@@ -143,8 +143,22 @@ check('баланс <table>', (h.match(/<table/g) || []).length === (h.match(/<\
 const stale = API._lesRosterCompare([{ customer_id: 13, name: 'Сидорова Вера' }], [{ n: 'Петрова Маша', alfaId: 13 }]);
 check('при разных именах показано «в карточке: …»', API._lesRosterHtml(stale, { id: 1 }, null).indexOf('в карточке: Петрова Маша') > 0);
 
-// справочник не загрузился — предупреждение, а не уверенная пустота
-check('без справочника — предупреждение', API._lesRosterHtml(API._lesRosterCompare([], []), { id: 5 }, { noDir: true }).indexOf('Справочник клиентов Alfa не загрузился') > 0);
+/* --- Alfa не отдала карточки детей: имена и телефоны берём из карточки занятия ---
+   Так было у Жанны на «Нейромалыш №1»: четыре «Клиент id 5171 — нет в справочнике» при том,
+   что все четверо сопоставлены по alfaId и их имена в карточке есть. */
+const noDirR = API._lesRosterCompare(
+  [{ customer_id: 5171, name: '', phone: '', b_date: '2026-09-02' }, { customer_id: 9, name: '', phone: '' }],
+  [{ n: 'Таборко Варвара', alfaId: 5171, phone: '+375(29)111-11-11' }]);
+const hnd = API._lesRosterHtml(noDirR, { id: 5 }, { noDir: true });
+check('без справочника — предупреждение в шапке', hnd.indexOf('Alfa не отдала карточки детей') > 0);
+check('сопоставленный по id показан именем из карточки', hnd.indexOf('Таборко Варвара') > 0);
+check('и телефоном из карточки', hnd.indexOf('+375(29)111-11-11') > 0);
+check('«нет в справочнике» не пишется, когда справочника не было', hnd.indexOf('нет в справочнике') < 0);
+check('несопоставленный без имени — просто «Клиент id»', hnd.indexOf('Клиент id 9') > 0);
+// а если справочник прочитался и клиента в нём нет — это уже сигнал
+const hdir = API._lesRosterHtml(noDirR, { id: 5 }, { noDir: false });
+check('со справочником пустое имя = «нет в справочнике»', hdir.indexOf('Клиент id 9 — нет в справочнике') > 0);
+check('но сопоставленный по id всё равно назван по карточке', hdir.indexOf('Таборко Варвара') > 0);
 const h0 = API._lesRosterHtml(API._lesRosterCompare([], []), { id: 5 }, null);
 check('без названия группы — «группа id»', h0.indexOf('группа id 5') > 0);
 check('пустые секции — понятные подписи', h0.indexOf('никого') > 0);
@@ -159,6 +173,9 @@ const fn = html.slice(html.indexOf('async function lesAlfaRoster('), html.indexO
 check('карточка зовёт membersByGroups, а не groupMembers', fn.indexOf('_pubCall("membersByGroups"') > 0 && fn.indexOf('_pubCall("groupMembers"') < 0);
 check('ошибка чтения группы не проглатывается', fn.indexOf('jb.errors') > 0);
 check('«Failed to fetch» объясняется по-человечески', html.indexOf('соединение оборвалось, ответа не было') > 0);
+// полный справочник клиентов — самый тяжёлый запрос прокси; карточке нужны только дети группы
+check('карточка читает детей по id, а не весь справочник', fn.indexOf('_pubCall("customersByIds"') > 0 && fn.indexOf('_pubEnsureCustomers(') < 0);
+check('уже загруженный справочник используется бесплатно', fn.indexOf('if(_pubCustomers && !force)') > 0);
 
 console.log(bad ? '\n❌ провалено проверок: ' + bad : '\n✅ всё сошлось');
 process.exit(bad ? 1 : 0);

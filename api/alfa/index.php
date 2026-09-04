@@ -899,10 +899,38 @@ switch ($action) {
             }
             if (!$gotOk) $errors[] = $gid;
             $byGroup[(string)$gid] = $mem;
+            $branchByGroup[(string)$gid] = $bid;      // клиенту: где искать карточки этих детей
         }
         // ни одна группа в пачке не прочиталась → это системный отказ cgi, отдаём сырой ответ Alfa
         if (!$okAny) json_out(['ok' => false, 'error' => 'AlfaCRM не отдаёт состав групп (cgi). Диагностика приложена.', 'diag' => $diag], 502);
-        json_out(['ok' => true, 'byGroup' => $byGroup, 'errors' => $errors, 'diag' => $diag]);
+        json_out(['ok' => true, 'byGroup' => $byGroup, 'branchByGroup' => $branchByGroup ?? [], 'errors' => $errors, 'diag' => $diag]);
+        break;
+
+    // --- КЛИЕНТЫ ПО СПИСКУ id (READ): ФИО и телефоны для состава одной группы ---
+    //     Полный customers обходит все филиалы постранично и шлюз его рвёт; здесь — один
+    //     короткий запрос на ребёнка в филиале группы, с запасным поиском по остальным.
+    case 'customersByIds':
+        @set_time_limit(90);
+        $ids = is_array($in['ids'] ?? null) ? $in['ids'] : [];
+        $ids = array_values(array_unique(array_filter(array_map('intval', $ids))));
+        if (!$ids) json_out(['ok' => false, 'error' => 'Не переданы id клиентов']);
+        $ids = array_slice($ids, 0, 60);
+        $bid0 = (int)($in['branch'] ?? 0) ?: alfa_branch();
+        $host = 'https://' . alfa_host(); $token = alfa_token();
+        $out = []; $missing = [];
+        foreach ($ids as $cid) {
+            $c = null;
+            $r = alfa_http('POST', "$host/v2api/$bid0/customer/index", ['id' => $cid, 'page' => 0, 'count' => 1], $token, true, 8);
+            foreach ((is_array($r['items'] ?? null) ? $r['items'] : []) as $it) { if ((int)($it['id'] ?? 0) === $cid) { $c = $it; break; } }
+            if ($c === null) { $br = null; $c = alfa_customer_get($cid, $br); }   // не в филиале группы — ищем по остальным
+            if ($c === null) { $missing[] = $cid; continue; }
+            $phones = $c['phone'] ?? [];
+            if (is_string($phones)) $phones = $phones === '' ? [] : [$phones];
+            $out[(string)$cid] = ['id' => $cid, 'name' => trim((string)($c['name'] ?? '')),
+                                  'phones' => array_values(array_filter(array_map('strval', (array)$phones))),
+                                  'dob' => $c['dob'] ?? null, 'is_study' => (int)($c['is_study'] ?? 0)];
+        }
+        json_out(['ok' => true, 'customers' => $out, 'missing' => $missing, 'branch' => $bid0]);
         break;
 
     // --- ДОБАВИТЬ ДЕТЕЙ В ГРУППУ (WRITE, dryRun по умолчанию). Сущность cgi = членство:
