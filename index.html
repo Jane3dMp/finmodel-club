@@ -5721,8 +5721,10 @@ function editLes(idx,focusKi){
       <button type="button" class="btn ghost sm" onclick="kidPasteList()">📋 Вставить список</button>
       <button type="button" class="btn ghost sm" id="kidsPullAgesBtn" onclick="kidsPullAges()" title="Подтянуть из Альфы возраст, телефон и связь сразу ВСЕМ детям этого занятия (один заход)" style="display:none">🎂 Возраст всем</button>
       <button type="button" class="btn ghost sm" onclick="editViberTpl()" title="Текст сообщения, который копируется в Viber"><i data-ic="pen"></i>Шаблон Viber</button>
+      <button type="button" class="btn ghost sm" id="lesAlfaRosterBtn" onclick="lesAlfaRoster()" title="${esc((function(){ const gm=(S.groupMeta||{})[_grpKeyOf(l)]||{}; return (+gm.alfaId)?("Показать, кто зачислен в группу AlfaCRM «"+(gm.alfaName||("id "+gm.alfaId))+"», и сверить с этим списком"):"Группа ещё не связана с AlfaCRM: вкладка «Группы» → столбец «Alfa»"; })())}" ${(+(((S.groupMeta||{})[_grpKeyOf(l)]||{}).alfaId))?"":"disabled"}>👥 Состав из Альфы</button>
       <span style="font-size:11px;color:var(--muted);align-self:center">Комментарии в основную сетку не выводятся</span>
     </div>
+    <div id="lesAlfaRoster"></div>
 
     <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-top:10px">
       <input type="checkbox" id="mNewIntake" ${l.newIntake?"checked":""} style="width:auto">
@@ -5998,6 +6000,132 @@ function kidFlagChanged(){ _kidsFromDOM(); renderKidsEditor(); }
    (подтвердивших, оплативших), а не весь список. Отметка живёт на ребёнке (k.alfaGrp),
    поэтому одинаково видна и в карточке занятия, и в «Группах». */
 function _grpKeyOf(l){ return l.course+"||"+(l.group||("__"+l.day+"_"+l.start+"_"+l.room)); }
+/* ---- СОСТАВ ГРУППЫ ИЗ ALFA — прямо в карточке занятия ----
+   Жанна: «хочу видеть состав из Альфы прямо в финмодели, кнопка внутри карточки группы».
+   Читаем членства группы (groupMembers — только чтение) и кладём рядом с нашим списком:
+   кто есть и там, и там; кто зачислен в Alfa, но в карточке отсутствует; кто у нас есть,
+   а в Alfa не внесён (его можно внести кнопкой 👥 в строке ребёнка). Ничего не меняем. */
+let _lesRosterBusy=false, _lesRoster=null;   // последний ответ: {groupId, branch, members, ts}
+/* Ключ имени — ТОТ ЖЕ нормализатор, что у справочника клиентов и кнопки ⟳ (_normName):
+   срезает «(резерв)», «#34,00», цифры, латиницу-двойника, ё→е, берёт фамилию+имя без учёта
+   порядка. Свой нормализатор здесь был и расходился с приложением — тест это стережёт. */
+function _rosterNameKey(s){ return _normName(s); }
+/* Членство ещё действует? Правило то же, что у истории ребёнка (index.php, history):
+   без даты окончания, или окончание не раньше сегодня, или начало в будущем. */
+function _rosterActive(m,today){
+  const e=String(m.e_date||"").slice(0,10), b=String(m.b_date||"").slice(0,10);
+  return !e || e>=today || (b && b>=today);
+}
+/* Сравнение состава Alfa с детьми в карточке. members: [{customer_id,name,phone,b_date}],
+   kids: записи карточки (n, alfaId, no).
+   Два прохода: сначала ВСЕ связи по alfaId (они точные), потом — по имени среди оставшихся.
+   Иначе член Alfa, идущий первым, «по имени» забирал ребёнка, чей alfaId указывает на
+   следующего (две карточки одного ребёнка в Alfa). Тёзки различаются через _sameKid:
+   «Иванова Анна Сергеевна» ≠ «Иванова Анна Петровна». */
+function _lesRosterCompare(members,kids){
+  const K=(kids||[]).filter(k=>k&&String(k.n||"").trim());
+  const M=members||[];
+  const matchedK=new Set(), matchedM=new Set(), both=[];
+  // 1) по alfaId — глобально
+  const byId=new Map();
+  K.forEach(k=>{ if(k.alfaId!=null&&k.alfaId!==""){ const id=String(k.alfaId); if(!byId.has(id)) byId.set(id,k); } });
+  M.forEach((m,i)=>{
+    const k=byId.get(String(m.customer_id));
+    if(k&&!matchedK.has(k)){ matchedK.add(k); matchedM.add(i); both.push({m:m,k:k,how:"id"}); }
+  });
+  // 2) по имени — только среди ещё не сопоставленных; при нескольких кандидатах — _sameKid
+  M.forEach((m,i)=>{
+    if(matchedM.has(i)) return;
+    const nk=_rosterNameKey(m.name); if(!nk) return;
+    const cands=K.filter(k=>!matchedK.has(k)&&_rosterNameKey(k.n)===nk);
+    if(!cands.length) return;
+    let k=null;
+    if(cands.length===1) k=(typeof _sameKid==="function")?(_sameKid(m.name,cands[0].n)?cands[0]:null):cands[0];
+    else k=cands.find(c=>_nameWords(c.n).join(" ")===_nameWords(m.name).join(" "))||cands.find(c=>_sameKid(m.name,c.n))||null;
+    if(k){ matchedK.add(k); matchedM.add(i); both.push({m:m,k:k,how:"name"}); }
+  });
+  const onlyAlfa=M.filter((m,i)=>!matchedM.has(i));
+  const matchedIds=new Set(both.map(x=>String(x.m.customer_id)));
+  const onlyOurs=K.filter(k=>!matchedK.has(k)).map(k=>({k:k, dup:(k.alfaId!=null&&k.alfaId!==""&&matchedIds.has(String(k.alfaId)))}));
+  return {both:both, onlyAlfa:onlyAlfa, onlyOurs:onlyOurs};
+}
+function _lesRosterHtml(R,g,meta){
+  const dmy=s=>(typeof _pubDMY==="function")?_pubDMY(s):String(s||"");
+  const nm=m=>m.name||('<span style="color:var(--muted)" title="Клиента нет в справочнике: удалён в Alfa или создан только что — 🔄 перечитает справочник">Клиент id '+esc(String(m.customer_id))+' — нет в справочнике</span>');
+  const row=(name,phone,b,note,withB)=>`<tr><td>${name}</td><td style="font-size:12px;color:var(--muted)">${esc(phone||"")}</td>${withB?`<td style="font-size:12px;color:var(--muted);white-space:nowrap">${b?esc(dmy(b)):"—"}</td>`:""}<td style="font-size:12px">${note||""}</td></tr>`;
+  const head=withB=>`<thead><tr><th style="text-align:left">Ребёнок</th><th style="text-align:left">Телефон</th>${withB?'<th>Зачислен с</th>':''}<th style="text-align:left"></th></tr></thead>`;
+  const sec=(title,color,trs,empty,withB)=>`<div style="margin-top:8px"><div style="font-weight:600;color:${color};margin-bottom:3px">${title}</div>
+    <div class="tscroll"><table style="font-size:13px">${head(withB)}<tbody>${trs||`<tr><td colspan="${withB?4:3}" style="color:var(--muted);padding:6px">${empty}</td></tr>`}</tbody></table></div></div>`;
+  const both=R.both.map(x=>{
+    const notes=[];
+    if(x.k.no) notes.push('<span style="color:var(--terra-d)">❌ в карточке «не придёт», а в Alfa зачислен</span>');
+    if(x.m.name && _rosterNameKey(x.m.name)!==_rosterNameKey(x.k.n)) notes.push('<span style="color:var(--terra-d)" title="Связь по alfaId есть, а имена разные — проверьте, тот ли это ребёнок">в карточке: '+esc(x.k.n)+'</span>');
+    if(x.how==="name"){
+      const other=(x.k.alfaId!=null&&x.k.alfaId!==""&&String(x.k.alfaId)!==String(x.m.customer_id));
+      notes.push(other
+        ? '<span style="color:var(--terra-d)" title="Совпало по имени, но связь в карточке ведёт на другого клиента Alfa — возможно, две карточки одного ребёнка">связь указывает на другого клиента Alfa (id '+esc(String(x.k.alfaId))+')</span>'
+        : '<span style="color:var(--muted)" title="Сопоставлен по имени: у записи в карточке нет связи с Альфой (⟳ в строке ребёнка)">по имени</span>');
+    }
+    return row(nm(x.m)||esc(x.k.n), x.m.phone, x.m.b_date, notes.join(" · "), true);
+  }).join("");
+  const alfa=R.onlyAlfa.map(m=>row(nm(m), m.phone, m.b_date, '<span style="color:var(--terra-d)">в карточке нет</span>', true)).join("");
+  const ours=R.onlyOurs.map(o=>{ const k=o.k;
+    const note=o.dup?'<span style="color:var(--muted)" title="Ещё одна строка с тем же alfaId уже сопоставлена с членом Alfa">дубль строки: тот же ребёнок уже сопоставлен</span>'
+      :(k.no?'<span style="color:var(--muted)">❌ не придёт</span>'
+      :(k.alfaId?'<span style="color:var(--terra-d)">не внесён в группу Alfa — 👥 в строке</span>':'<span style="color:var(--muted)">нет связи с Альфой — ⟳ в строке</span>'));
+    return row(esc(k.n), k.phone, "", note, false); }).join("");
+  const ts=meta&&meta.ts?String(meta.ts).slice(11,16):"";
+  const gone=(meta&&meta.gone)?meta.gone:0;
+  const warn=(meta&&meta.noDir)?`<div style="color:var(--terra-d);font-size:12px;margin-top:4px">⚠️ Справочник клиентов Alfa не загрузился — имена, телефоны и сопоставление по имени недоступны, показаны только связи по alfaId. Нажмите 🔄.</div>`:"";
+  return `<div class="callout" style="margin-top:8px;font-size:12px;padding:8px 10px">
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+      <b>👥 Состав в Alfa: «${esc(g.name||("группа id "+g.id))}»</b>
+      <span style="color:var(--muted)">зачислено ${R.both.length+R.onlyAlfa.length}${gone?(" · выбыли: "+gone):""}${ts?(" · прочитано в "+ts):""}</span>
+      <button type="button" class="btn ghost sm" style="margin-left:auto;padding:1px 6px" onclick="lesAlfaRoster(true)" title="Перечитать из Alfa (и справочник клиентов заново)">🔄</button>
+      <button type="button" class="btn ghost sm" style="padding:1px 6px" onclick="lesAlfaRosterClose()" title="Скрыть">×</button>
+    </div>${warn}
+    ${sec("И в Alfa, и в карточке — "+R.both.length,"var(--green)",both,"никого",true)}
+    ${sec("Только в Alfa — "+R.onlyAlfa.length,"var(--terra-d)",alfa,"все зачисленные есть в карточке",true)}
+    ${sec("Только в карточке — "+R.onlyOurs.length,"var(--muted)",ours,"все дети карточки зачислены в Alfa",false)}
+    <div style="font-size:11px;color:var(--muted);margin-top:6px">Только чтение: здесь ничего не меняется ни в Alfa, ни в карточке. Внести ребёнка в группу Alfa — кнопка 👥 в его строке.${gone?" «Выбыли» — членства с уже прошедшей датой окончания, в состав не входят.":""}</div>
+  </div>`;
+}
+function lesAlfaRosterClose(){ const b=document.getElementById("lesAlfaRoster"); if(b) b.innerHTML=""; }
+async function lesAlfaRoster(force){
+  if(_lesRosterBusy) return;
+  const g=_modalAlfaGroup();
+  if(!g||!g.id){ toast("Группа ещё не связана с AlfaCRM: вкладка «Группы» → столбец «Alfa»"); return; }
+  // карточку могут закрыть и открыть другую, пока Alfa отвечает — тогда результат не наш
+  const lesIdx=_modalLesIdx();
+  const same=()=>_modalLesIdx()===lesIdx && (_modalAlfaGroup()||{}).id===g.id;
+  const box=()=>document.getElementById("lesAlfaRoster");
+  const btn=document.getElementById("lesAlfaRosterBtn");
+  _lesRosterBusy=true; if(btn) btn.disabled=true;
+  if(box()) box().innerHTML=`<div class="callout" style="margin-top:8px;font-size:12px">⏳ Читаю состав группы из Alfa…</div>`;
+  try{
+    const c=(typeof _pubCfg==="function")?_pubCfg():{};
+    const j=await _pubCall("groupMembers",{groupId:g.id, e_date:c.eDate||""});
+    if(!same()) return;
+    // ФИО и телефоны — из справочника клиентов (один раз на сессию; 🔄 перечитывает)
+    let noDir=false;
+    if(box()) box().innerHTML=`<div class="callout" style="margin-top:8px;font-size:12px">⏳ Загружаю справочник клиентов Alfa${_pubCustomers?"":" (первый раз — до минуты)"}…</div>`;
+    try{ await _pubEnsureCustomers(!!force); }catch(e){ noDir=true; console.warn("справочник клиентов не загрузился",e); }
+    if(!same()) return;
+    const byId=new Map(); (_pubCustomers||[]).forEach(x=>byId.set(String(x.id),x));
+    const today=_todayIso();
+    const all=(j.members||[]).map(m=>{ const cst=byId.get(String(m.customer_id));
+      return {customer_id:m.customer_id, b_date:m.b_date, e_date:m.e_date,
+              name:cst?cst.name:"", phone:(cst&&Array.isArray(cst.phones))?cst.phones.filter(Boolean).join(", "):""}; });
+    // выбывшие (дата окончания прошла) в состав не входят — иначе ушедший ребёнок выглядел бы зачисленным
+    const members=all.filter(m=>_rosterActive(m,today)).sort((a,b)=>String(a.name).localeCompare(String(b.name),"ru"));
+    _lesRoster={groupId:g.id, branch:j.branch, members:members, gone:all.length-members.length, noDir:noDir, ts:new Date().toISOString()};
+    _kidsFromDOM();                                  // сравниваем с тем, что сейчас в карточке, включая несохранённые правки
+    const R=_lesRosterCompare(members,_editKids);
+    if(box()) box().innerHTML=_lesRosterHtml(R,g,_lesRoster);
+  }catch(e){
+    if(same() && box()) box().innerHTML=_pubErrHtml(e,"состав группы из Alfa");
+  }finally{ _lesRosterBusy=false; const b=document.getElementById("lesAlfaRosterBtn"); if(b) b.disabled=false; }
+}
 function _modalAlfaGroup(){
   const idx=_modalLesIdx(); const l=(idx>=0)?S.grid[idx]:null;
   if(!l||!l.course) return null;
