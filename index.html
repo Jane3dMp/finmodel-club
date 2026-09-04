@@ -10160,7 +10160,8 @@ function renderAdm(){
     if(!_paySnap){ _payLoadStore().then(()=>{ if(_admSec==="rashod"){ const b=document.getElementById("admBody"); if(b) b.innerHTML=_rashodHtml(); } }).catch(()=>{}); }
     return; }
   if(_admSec==="kassa"){ body.innerHTML=_kassaHtml();
-    if(!_paySnap){ _payLoadStore().then(()=>{ if(_admSec==="kassa"){ const b=document.getElementById("admBody"); if(b) b.innerHTML=_kassaHtml(); } }).catch(()=>{}); }
+    if(!_paySnap){ _payLoadStore().then(()=>{ if(_admSec==="kassa"){ const b=document.getElementById("admBody"); if(b) b.innerHTML=_kassaHtml(); } kassaToday(); }).catch(()=>{}); }
+    else kassaToday();
     return; }
   const lab=(ADM_SECTIONS.find(x=>x[0]===_admSec)||[])[1]||"";
   body.innerHTML=`<div class="callout">Раздел «${esc(lab)}» — 🔧 в разработке. «Расходы» и «ЗП админы» — ручной ввод, сделаем, как определимся с логикой.</div>`;
@@ -10330,9 +10331,127 @@ function _kassaName(r,refs){
   if(loc) return loc;
   return r.pay_type_name||"Без кассы";
 }
+/* ---- КАССА СЕГОДНЯ И ИТОГ ЗА МЕСЯЦ ----
+   Жанна: «хочу видеть актуальную кассу на сегодня и общий приход по ЕРИП / наличным /
+   терминалу за месяц, чтобы не щёлкать по всем дням».
+   Месяц складываем из ДНЕВНЫХ СНИМКОВ, которые копит cron в 22:00 — по каждому дню лезть
+   в Alfa нельзя: журнал платежей она отдаёт без фильтра по дате, и день ищется двоичным
+   поиском по страницам (~10 запросов). Если снимка за какой-то прошедший день нет, месяц
+   будет неполным — так и пишем, плюс кнопка «дособрать». */
+function _kassaMonth(ym){
+  const p=String(ym||"").split('-'), Y=+p[0], M=+p[1];
+  if(!Y||!M) return null;
+  const dim=new Date(Y,M,0).getDate(), pref=Y+'-'+String(M).padStart(2,'0')+'-';
+  const snap=_paySnap||{}, today=_todayIso();
+  const byIn={}, byOut={}; let inc=0, out=0, have=0, cnt=0; const missing=[];
+  for(let d=1;d<=dim;d++){
+    const key=pref+String(d).padStart(2,'0');
+    const sn=snap[key];
+    if(!sn){ if(key<=today) missing.push(key); continue; }
+    have++; cnt+=+sn.count||0; inc+=+sn.income||0; out+=+sn.expense||0;
+    Object.keys(sn.byIn||{}).forEach(k=>{ byIn[k]=(byIn[k]||0)+(+sn.byIn[k]||0); });
+    Object.keys(sn.byOut||{}).forEach(k=>{ byOut[k]=(byOut[k]||0)+(+sn.byOut[k]||0); });
+  }
+  return {ym:ym, byIn:byIn, byOut:byOut, income:inc, expense:out, days:have, count:cnt, missing:missing};
+}
+function _kassaDMY(iso){ const p=String(iso||"").split('-'); return p.length===3?(p[2]+'.'+p[1]):iso; }
+/* Две карточки над сверкой: касса сегодня и итог за месяц выбранной даты. */
+function _kassaTopHtml(){
+  const today=_todayIso(), sn=(_paySnap||{})[today];
+  const rowsOf=by=>Object.keys(by||{}).sort().map(k=>
+    `<tr><td style="text-align:left">${esc(k)}</td><td class="num"><b>${_gm(by[k])}</b></td></tr>`).join("");
+
+  // --- сегодня ---
+  let todayCard;
+  if(sn){
+    const ts=String(sn.ts||"").slice(11,16);
+    todayCard=`<table style="width:100%"><tbody>${rowsOf(sn.byIn)||'<tr><td colspan="2" style="color:var(--muted)">приходов пока нет</td></tr>'}
+      <tr style="border-top:2px solid var(--line)"><td style="text-align:left"><b>Итого приход</b></td>
+        <td class="num"><b style="color:var(--green)">${_gm(sn.income)}</b></td></tr>
+      ${(+sn.expense)?`<tr><td style="text-align:left;color:var(--muted)">расход</td><td class="num" style="color:var(--red)">${_gm(sn.expense)}</td></tr>`:''}
+    </tbody></table>
+    <div class="hint" style="margin-top:6px">операций: ${sn.count||0}${ts?(" · обновлено "+ts):""}</div>`;
+  } else {
+    todayCard=`<div style="color:var(--muted);font-size:13px;padding:6px 0">${_paySnap
+      ? 'Считаю из Alfa…' : '⏳ Читаю сохранённые снимки…'}</div>`;
+  }
+
+  // --- месяц выбранной даты ---
+  const ym=String(_kassaDate||today).slice(0,7), M=_kassaMonth(ym);
+  const mLab=(_RU_MON[(+ym.slice(5,7))-1]||'')+' '+ym.slice(0,4);
+  let monCard;
+  if(M && M.days){
+    monCard=`<table style="width:100%"><tbody>${rowsOf(M.byIn)}
+      <tr style="border-top:2px solid var(--line)"><td style="text-align:left"><b>Итого приход</b></td>
+        <td class="num"><b style="color:var(--green)">${_gm(M.income)}</b></td></tr>
+      ${M.expense?`<tr><td style="text-align:left;color:var(--muted)">расход</td><td class="num" style="color:var(--red)">${_gm(M.expense)}</td></tr>`:''}
+    </tbody></table>
+    <div class="hint" style="margin-top:6px">дней с данными: ${M.days} · операций: ${M.count}</div>
+    ${M.missing.length?`<div class="hint" style="color:var(--terra-d);margin-top:4px">
+      Нет снимка за ${M.missing.length} ${_kassaDayWord(M.missing.length)}: ${esc(M.missing.slice(0,6).map(_kassaDMY).join(', '))}${M.missing.length>6?'…':''} — ${M.missing.length===1?'он в сумму не вошёл':'они в сумму не вошли'}.
+      <button class="btn ghost sm" style="margin-top:5px" id="kassaFillBtn" onclick="kassaFillMonth()">Дособрать из Alfa</button></div>`:''}`;
+  } else {
+    monCard=`<div style="color:var(--muted);font-size:13px;padding:6px 0">За ${esc(mLab)} снимков пока нет.</div>`;
+  }
+
+  return `<div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-start;margin-bottom:12px">
+    <div class="card" style="flex:1 1 260px;min-width:260px">
+      <h3 style="margin:0 0 2px">Касса сегодня</h3>
+      <div class="hint" style="margin-bottom:6px">${esc(_kassaDMY(today))} · по данным Alfa на сейчас</div>
+      ${todayCard}
+      <button class="btn ghost sm" style="margin-top:8px" onclick="kassaToday(true)" title="Пересчитать сегодняшний день из Alfa">🔄 Обновить</button>
+    </div>
+    <div class="card" style="flex:1 1 260px;min-width:260px">
+      <h3 style="margin:0 0 2px">Приход за ${esc(mLab)}</h3>
+      <div class="hint" style="margin-bottom:6px">сумма дневных снимков — без хождения по дням</div>
+      ${monCard}
+    </div>
+  </div>`;
+}
+function _kassaDayWord(n){
+  n=Math.abs(+n||0); const t=n%10, h=n%100;
+  if(t===1&&h!==11) return "день";
+  if(t>=2&&t<=4&&(h<12||h>14)) return "дня";
+  return "дней";
+}
+/* Дособрать дни месяца, которых нет в хранилище. Каждый день — отдельный проход по журналу
+   Alfa, поэтому идём по одному и показываем прогресс. */
+async function kassaFillMonth(){
+  if(_kassaBusy) return;
+  const M=_kassaMonth(String(_kassaDate||_todayIso()).slice(0,7));
+  if(!M||!M.missing.length){ toast("Все дни месяца уже собраны"); return; }
+  if(!confirm("Дней без снимка: "+M.missing.length+".\nAlfa отдаёт журнал платежей без фильтра по дате, поэтому каждый день считается отдельно — это займёт до "+Math.ceil(M.missing.length*8/60)+" мин. Продолжить?")) return;
+  const btn=document.getElementById("kassaFillBtn"), prog=document.getElementById("kassaProg");
+  _kassaBusy=true; if(btn) btn.disabled=true;
+  try{
+    for(let i=0;i<M.missing.length;i++){
+      if(prog) prog.textContent="Собираю дни… "+(i+1)+"/"+M.missing.length+" ("+_kassaDMY(M.missing[i])+")";
+      const j=await _pubCall("paymentsDay",{date:M.missing[i]});
+      if(j.snapshot){ _paySnap=_paySnap||{}; _paySnap[j.date]=Object.assign({},j.snapshot,{ts:new Date().toISOString()}); }
+    }
+    if(prog) prog.textContent="Готово ✓";
+    const b=document.getElementById("admBody"); if(b) b.innerHTML=_kassaHtml();
+  }catch(e){ if(prog) prog.textContent=""; const b=document.getElementById("admBody"); if(b){ const d=document.createElement('div'); d.innerHTML=_pubErrHtml(e,"сбор дней месяца"); b.insertBefore(d.firstChild,b.firstChild); } }
+  finally{ _kassaBusy=false; if(btn) btn.disabled=false; }
+}
+/* Подтянуть сегодняшний день из Alfa, не сбивая выбранную дату сверки.
+   Нужно потому, что снимок за сегодня cron положит только в 22:00, а касса нужна сейчас. */
+let _kassaAutoDone=false;
+async function kassaToday(force){
+  const today=_todayIso();
+  if(!force && ((_paySnap||{})[today] || _kassaAutoDone || _kassaBusy)) return;
+  _kassaAutoDone=true;
+  try{
+    const j=await _pubCall("paymentsDay",{date:today});
+    if(j.snapshot){ _paySnap=_paySnap||{}; _paySnap[today]=Object.assign({},j.snapshot,{ts:new Date().toISOString()}); }
+    if(_admSec==="kassa"){ const b=document.getElementById("admBody"); if(b) b.innerHTML=_kassaHtml(); }
+  }catch(e){ console.warn("касса за сегодня не посчиталась",e); }
+}
 function _kassaHtml(){
   const D=_kassaDay;
-  const head=`<div class="callout" style="margin-bottom:10px;font-size:12px">Платежи, внесённые в Alfa за день (кассы). Впишите сумму «по листу» — что админ записал ручкой — и увидите расхождение. Cron в 22:00 сам снимает прошедший день — вкладка открывается уже с цифрами.</div>
+  const head=_kassaTopHtml()
+  +`<h3 style="margin:6px 0">Сверка по дню</h3>
+  <div class="callout" style="margin-bottom:10px;font-size:12px">Платежи, внесённые в Alfa за день (кассы). Впишите сумму «по листу» — что админ записал ручкой — и увидите расхождение. Cron в 22:00 сам снимает прошедший день — вкладка открывается уже с цифрами.</div>
   <div class="hd-actions" style="margin-bottom:10px">
     <input type="date" class="cell" style="width:auto" value="${esc(_kassaDate)}" onchange="kassaSetDate(this.value)">
     <button class="btn sm" id="kassaBtn" onclick="kassaLoad()">🔄 Загрузить из Alfa</button>
