@@ -153,6 +153,12 @@ check('пустые секции — понятные подписи', h0.indexO
 check('кнопка «Состав из Альфы» есть в карточке занятия', html.indexOf('id="lesAlfaRosterBtn"') > 0 && html.indexOf('onclick="lesAlfaRoster()"') > 0);
 check('контейнер для результата есть', html.indexOf('id="lesAlfaRoster"') > 0);
 check('title кнопки экранирован', html.indexOf('title="${esc((function(){ const gm=(S.groupMeta||{})[_grpKeyOf(l)]') > 0);
+// состав читается тем же путём, что и печать составов: groupMembers слал group_id в теле и
+// листал до 20 страниц — шлюз хостинга рвал соединение («Failed to fetch»)
+const fn = html.slice(html.indexOf('async function lesAlfaRoster('), html.indexOf('async function lesAlfaRoster(') + 4000);
+check('карточка зовёт membersByGroups, а не groupMembers', fn.indexOf('_pubCall("membersByGroups"') > 0 && fn.indexOf('_pubCall("groupMembers"') < 0);
+check('ошибка чтения группы не проглатывается', fn.indexOf('jb.errors') > 0);
+check('«Failed to fetch» объясняется по-человечески', html.indexOf('соединение оборвалось, ответа не было') > 0);
 
 console.log(bad ? '\n❌ провалено проверок: ' + bad : '\n✅ всё сошлось');
 process.exit(bad ? 1 : 0);

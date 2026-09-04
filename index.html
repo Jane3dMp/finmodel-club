@@ -6104,8 +6104,13 @@ async function lesAlfaRoster(force){
   if(box()) box().innerHTML=`<div class="callout" style="margin-top:8px;font-size:12px">⏳ Читаю состав группы из Alfa…</div>`;
   try{
     const c=(typeof _pubCfg==="function")?_pubCfg():{};
-    const j=await _pubCall("groupMembers",{groupId:g.id, e_date:c.eDate||""});
+    // ⚠️ Тот же путь, что у печати составов (membersByGroups): group_id в адресе, одна страница
+    //    на 200, 15 с. У groupMembers group_id шёл в теле и листалось до 20 страниц — Alfa тянула,
+    //    шлюз хостинга рвал соединение, в карточке было «Failed to fetch».
+    const jb=await _pubCall("membersByGroups",{groups:[{id:g.id, branch:0}], e_date:c.eDate||""});
     if(!same()) return;
+    if((jb.errors||[]).some(x=>String(x)===String(g.id))) throw new Error("Alfa не отдала состав этой группы (cgi). Попробуйте ещё раз; если повторится — покажите мне консоль (F12).");
+    const j={members:(jb.byGroup||{})[String(g.id)]||[], branch:null};
     // ФИО и телефоны — из справочника клиентов (один раз на сессию; 🔄 перечитывает)
     let noDir=false;
     if(box()) box().innerHTML=`<div class="callout" style="margin-top:8px;font-size:12px">⏳ Загружаю справочник клиентов Alfa${_pubCustomers?"":" (первый раз — до минуты)"}…</div>`;
@@ -12501,7 +12506,13 @@ async function _pubCall(action,payload){
 function _pubErrHtml(e,where){
   const d=(e&&e.data)||null;
   console.warn("📤 Alfa "+(where||"")+" — ошибка:",(e&&e.message)||e,d||e);
-  let h=`<div class="callout" style="border-color:var(--red)">Не получилось: ${esc((e&&e.message)||e)}</div>`;
+  const msg=String((e&&e.message)||e);
+  // «Failed to fetch» — браузер не получил ответа вовсе: обычно Alfa отвечала дольше, чем ждёт
+  // шлюз хостинга, и он оборвал соединение. Голая надпись читается как поломка модели.
+  const human=/failed to fetch|networkerror|load failed/i.test(msg)
+    ? "соединение оборвалось, ответа не было (обычно Alfa отвечала дольше, чем позволяет хостинг). Попробуйте ещё раз."
+    : msg;
+  let h=`<div class="callout" style="border-color:var(--red)">Не получилось: ${esc(human)}</div>`;
   if(d&&(d.alfa||d.sent)) h+=`<details style="margin-top:6px"><summary style="cursor:pointer;font-size:12px;color:var(--muted)">Что мы отправили и что ответила Alfa</summary>
     <pre style="white-space:pre-wrap;font-size:11px;background:var(--paper);padding:6px;border-radius:6px;max-height:30vh;overflow:auto">${
       esc(JSON.stringify({отправили:d.sent,ответ:d.alfa,филиал:d.branch},null,1))}</pre></details>`;

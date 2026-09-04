@@ -834,11 +834,17 @@ switch ($action) {
         $winTo = alfa_iso((string)($in['e_date'] ?? '')) ?: '2027-08-31';
         if ($winTo < $today) $winTo = '2027-08-31';
         $seen = []; $members = []; $readOk = false;
+        // ⚠️ cgi/index требует group_id именно В АДРЕСЕ (в теле Alfa его игнорит) — как в
+        //    membersByGroups. Раньше тут был alfa_index_all с фильтром в теле: до 20 страниц по 50
+        //    двумя заходами, Alfa тянула, шлюз хостинга рвал соединение («Failed to fetch»).
+        $host = 'https://' . alfa_host(); $token = alfa_token();
         foreach ([
-            ['group_id' => $gid],
-            ['group_id' => $gid, 'date_from' => $today, 'date_to' => $winTo, 'b_date' => $today, 'e_date' => $winTo],
-        ] as $q) {
-            $r = alfa_index_all($bid, 'cgi', $q, 20, 12);
+            ['?group_id=' . $gid, ['group_id' => $gid]],
+            ['?group_id=' . $gid . '&date_from=' . $today . '&date_to=' . $winTo,
+             ['group_id' => $gid, 'date_from' => $today, 'date_to' => $winTo, 'b_date' => $today, 'e_date' => $winTo]],
+        ] as $v) {
+            $rr = alfa_http('POST', "$host/v2api/$bid/cgi/index" . $v[0], array_merge($v[1], ['page' => 0, 'count' => 200]), $token, true, 15);
+            $r = isset($rr['__err']) ? ['ok' => false, 'items' => []] : ['ok' => true, 'items' => (is_array($rr['items'] ?? null) ? $rr['items'] : [])];
             if ($r['ok']) $readOk = true;                                // хотя бы один заход удался
             foreach ($r['items'] as $it) {
                 if ((int)($it['group_id'] ?? 0) !== $gid) continue;      // Alfa может проигнорировать фильтр
