@@ -1425,6 +1425,32 @@ switch ($action) {
                   'debug' => ['scanned' => $res['scanned'], 'pages' => $res['pages']]]);
         break;
 
+    // --- РАЗВЕДКА: отдаёт ли Alfa остаток по кассам? Сырые записи pay-account + соседние пути ---
+    //     Справочник касс мы читаем только как id → name; есть ли там баланс — неизвестно.
+    //     Если есть — «Наличные в клубе» можно брать прямо из Alfa, без ручного пересчёта.
+    case 'payAccountsRaw':
+        @set_time_limit(120);
+        $br = alfa_realization_branches() ?: [alfa_branch()];
+        $host = 'https://' . alfa_host(); $token = alfa_token();
+        $accounts = [];
+        foreach ($br as $bid) {
+            $bid = (int)$bid;
+            $r = alfa_http('POST', "$host/v2api/$bid/pay-account/index", ['page' => 0, 'count' => 100], $token, true, 12);
+            $items = isset($r['__err']) ? [] : (is_array($r['items'] ?? null) ? $r['items'] : []);
+            $accounts[$bid] = ['err' => $r['__err'] ?? null, 'code' => $r['code'] ?? null, 'msg' => $r['msg'] ?? null, 'count' => count($items),
+                               'keys' => ($items && is_array($items[0])) ? array_keys($items[0]) : [],
+                               'items' => array_slice($items, 0, 20)];
+        }
+        // соседние пути, где остаток мог бы лежать (все, скорее всего, 404 — но проверить дёшево)
+        $tried = []; $bid0 = (int)$br[0];
+        foreach (['pay-account/balance', 'pay-account/rest', 'report/pay-account/index', 'report/cash/index', 'cash/index', 'balance/index'] as $p) {
+            $r = alfa_http('POST', "$host/v2api/$bid0/$p", ['page' => 0, 'count' => 10], $token, true, 8);
+            $tried[] = ['path' => $p, 'err' => $r['__err'] ?? null, 'code' => $r['code'] ?? null, 'msg' => $r['msg'] ?? null,
+                        'keys' => (!isset($r['__err']) && is_array($r)) ? array_slice(array_keys($r), 0, 12) : []];
+        }
+        json_out(['ok' => true, 'branches' => $br, 'accounts' => $accounts, 'tried' => $tried]);
+        break;
+
     // --- СНИМКИ ПЛАТЕЖЕЙ ПО ДНЯМ (READ): то, что собрал cron в 22:00 ---
     case 'paymentsStore':
         json_out(['ok' => true, 'store' => alfa_pay_store_read()]);

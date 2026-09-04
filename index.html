@@ -15,6 +15,7 @@ html.authgate #fbLogin{display:flex !important}
   /* спокойная нейтральная палитра: белый/серый/чёрный + приглушённая охра (акцент) + голубой CODDY.
      Для дневной работы по 8 часов — мягкий контраст, без тёплой «детской» терракоты. */
   --terra:#6B7078; --terra-d:#565B62; --coal:#20201D; --sand:#EAE9E5;
+  --paper:#F5F4F1;   /* фон <pre> с сырыми ответами Alfa; раньше не был объявлен — фон молча пропадал */
   --graphite:#2C2F35;   /* тёмно-графитовый — тёмные подложки/фоны (шапка, заголовки, кнопки, таблетки); текст остаётся --coal */
   --sand-l:#F4F3F0; --cream:#FBFAF8; --green:#3B7A57; --red:#B0493D;
   --blue:#1F5BC0; --line:#E4E2DD; --muted:#847F76;   /* --blue = фирменный CODDY-синий (кобальт #0052CC), чуть приглушён для 8-часового комфорта */
@@ -2072,7 +2073,7 @@ function fbPush(){
 }
 /* ===== ЖУРНАЛ ДЕЙСТВИЙ (кто что менял) — отдельный узел logs/ в Firebase ===== */
 let _fbSeeding=false;   // true во время стартовой заливки пустого облака — такие правки не логируем
-const _LOG_SECTIONS={
+const _LOG_SECTIONS={kassaOpen:"пересчёт наличных в кассе",kassaSheet:"сверка касс по листу",
   courses:"курсы", planner:"планировщик", staff:"педсостав", wageTable:"справочник ставок ЗП",
   fixed:"постоянные расходы", fixedGroup:"группировка расходов", fixedPct:"процентные расходы",
   tax:"налоги", assume:"параметры расчёта", mayList:"список майских", groupsDone:"готовность групп", groupMeta:"возраст/класс групп",
@@ -10338,6 +10339,163 @@ function _kassaName(r,refs){
    в Alfa нельзя: журнал платежей она отдаёт без фильтра по дате, и день ищется двоичным
    поиском по страницам (~10 запросов). Если снимка за какой-то прошедший день нет, месяц
    будет неполным — так и пишем, плюс кнопка «дособрать». */
+/* ---- ПРИХОД / РАСХОД / ОСТАТОК ПО КАССАМ ----
+   Жанна: «расход тоже по кассам, как и доход — чтобы понимать, сколько наличных в клубе».
+   Касса у прихода и расхода берётся из одного справочника Alfa (pay_account_id), поэтому
+   «Наличные» там и там — одна касса, и остаток = приход − расход по имени.
+   ⚠️ Идём по ОБЪЕДИНЕНИЮ ключей: у расхода бывают кассы без прихода («Оплата картой»,
+   или «Расход» — когда у операции не указан счёт). Иначе такой расход молча выпадет. */
+function _kassaMerge(byIn,byOut){
+  const keys=[...new Set([...Object.keys(byIn||{}),...Object.keys(byOut||{})])].sort((a,b)=>a.localeCompare(b,"ru"));
+  return keys.map(k=>{ const i=+(byIn||{})[k]||0, o=+(byOut||{})[k]||0; return {k:k, in:i, out:o, net:i-o}; });
+}
+/* Таблица «Касса | Приход | Расход | Остаток» с итогом. compact — для карточек. */
+function _kassaNetTable(byIn,byOut,opts){
+  opts=opts||{};
+  const rows=_kassaMerge(byIn,byOut);
+  if(!rows.length) return `<div style="color:var(--muted);font-size:13px;padding:6px 0">${esc(opts.empty||"операций нет")}</div>`;
+  let tI=0,tO=0;
+  const trs=rows.map(r=>{ tI+=r.in; tO+=r.out;
+    return `<tr><td style="text-align:left">${esc(r.k)}</td>
+      <td class="num">${r.in?_gm(r.in):'<span style="color:var(--muted)">—</span>'}</td>
+      <td class="num" style="color:var(--red)">${r.out?('−'+_gm(r.out)):'<span style="color:var(--muted)">—</span>'}</td>
+      <td class="num"><b style="color:${r.net<0?'var(--red)':'var(--coal)'}">${_gm(r.net)}</b></td></tr>`; }).join("");
+  return `<div class="tscroll"><table style="width:100%${opts.compact?';font-size:12px':''}"><thead><tr>
+      <th style="text-align:left">Касса</th><th class="num">Приход</th><th class="num">Расход</th><th class="num" title="За выбранный период; остаток на счёте это не показывает">Приход − расход</th>
+    </tr></thead><tbody>${trs}
+      <tr style="border-top:2px solid var(--line)"><td style="text-align:left"><b>Итого</b></td>
+        <td class="num"><b style="color:var(--green)">${_gm(tI)}</b></td>
+        <td class="num"><b style="color:var(--red)">${tO?('−'+_gm(tO)):'—'}</b></td>
+        <td class="num"><b>${_gm(tI-tO)}</b></td></tr>
+    </tbody></table></div>`;
+}
+
+/* ---- НАЛИЧНЫЕ В КЛУБЕ ----
+   Сколько наличных физически в кассе: остаток на конец дня X (пересчитали — вписали) плюс
+   приход наличными ПОСЛЕ X минус расход наличными после X, по дневным снимкам.
+   Считать с нуля нельзя: снимки копятся только с конца августа, а деньги в кассе были и до
+   того. Поэтому якорь — ручной пересчёт; сделали новый — впишите, счёт пойдёт от него.
+   Дни без снимка после якоря делают остаток неточным — перечисляем их. */
+function _kassaOpen(){ if(!S.kassaOpen||typeof S.kassaOpen!=="object") S.kassaOpen={}; return S.kassaOpen; }
+function _kassaAccNames(){
+  const set=new Set();
+  Object.keys(_paySnap||{}).forEach(d=>{ const sn=_paySnap[d]; Object.keys(sn.byIn||{}).forEach(k=>set.add(k)); Object.keys(sn.byOut||{}).forEach(k=>set.add(k)); });
+  return [...set].sort((a,b)=>a.localeCompare(b,"ru"));
+}
+function _kassaCashAcc(){
+  const O=_kassaOpen(); if(O.acc) return O.acc;
+  const names=_kassaAccNames();
+  // ⚠️ /нал/ ловил бы «Безналичные» — а по алфавиту они идут раньше «Наличных». Первую попавшуюся
+  // кассу тоже не подставляем: лучше попросить выбрать, чем молча считать наличными ЕРИП.
+  return names.find(n=>n.toLowerCase()==="наличные")
+      || names.find(n=>/налич/i.test(n)&&!/безнал/i.test(n))
+      || "";
+}
+function _kassaCash(){
+  const O=_kassaOpen(), acc=_kassaCashAcc(), from=String(O.date||"");
+  const hasSum=(typeof O.sum==="number"&&!isNaN(O.sum)), open=hasSum?O.sum:0;
+  const today=_todayIso(), snap=_paySnap||{};
+  const set=/^\d{4}-\d{2}-\d{2}$/.test(from)&&hasSum&&!!acc;
+  const future=set&&from>today;
+  let inc=0,out=0,days=0; const missing=[], other={};
+  if(set&&!future){
+    // дни строго ПОСЛЕ даты пересчёта: остаток вписан на конец того дня.
+    // Дату собираем по частям — new Date("2026-09-02") даёт полночь UTC и в западных поясах
+    // уезжает на день назад.
+    const p=from.split('-').map(Number); const d=new Date(p[0],p[1]-1,p[2]); d.setDate(d.getDate()+1);
+    for(; _dIso(d)<=today; d.setDate(d.getDate()+1)){
+      const k=_dIso(d), sn=snap[k];
+      if(!sn){ if(!(k===today&&_kassaTodayBusy)) missing.push(k); continue; }   // сегодня ещё считается — не «пропуск»
+      days++; inc+=+(sn.byIn||{})[acc]||0; out+=+(sn.byOut||{})[acc]||0;
+      // расходы по ДРУГИМ кассам за те же дни: картой — не наличные, а «Расход»/«Без кассы» —
+      // операция без счёта в Alfa, которая могла быть и наличными. Из остатка их не вычитаем,
+      // но показываем: иначе касса молча завышается.
+      Object.keys(sn.byOut||{}).forEach(k2=>{ if(k2!==acc){ other[k2]=(other[k2]||0)+(+sn.byOut[k2]||0); } });
+    }
+  }
+  return {acc:acc, from:from, open:open, inc:inc, out:out, now:open+inc-out, days:days, missing:missing,
+          other:other, set:set, future:future, today:(from===today)};
+}
+function kassaOpenSet(field,val){
+  const O=_kassaOpen();
+  if(field==="acc") O.acc=String(val||"");
+  else if(field==="date") O.date=String(val||"");
+  else { const n=parseFloat(String(val).replace(',','.')); if(isNaN(n)) delete O.sum; else O.sum=n; }
+  persistLocal(); if(typeof fbSchedulePush==="function") fbSchedulePush();
+  const b=document.getElementById("admBody"); if(b) b.innerHTML=_kassaHtml();
+}
+function _kassaCashCard(){
+  if(!_paySnap) return `<div class="card" style="flex:1 1 260px;min-width:260px"><h3 style="margin:0 0 2px">Наличные в клубе</h3>
+    <div style="color:var(--muted);font-size:13px;padding:6px 0">⏳ Читаю сохранённые снимки…</div></div>`;
+  const C=_kassaCash();
+  // сохранённая касса всегда в списке — иначе селект показал бы первую попавшуюся, а считалась бы другая
+  const names=[...new Set([C.acc,..._kassaAccNames()].filter(Boolean))];
+  const accSel=`<select class="cell" style="width:auto;font-size:12px" onchange="kassaOpenSet('acc',this.value)" title="Какая касса считается наличными">
+    ${C.acc?"":'<option value="" selected>— выберите кассу —</option>'}${names.map(n=>`<option value="${esc(n)}"${n===C.acc?" selected":""}>${esc(n)}</option>`).join("")}</select>`;
+  const anchor=`<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;font-size:12px;margin-bottom:8px">
+      ${accSel}<span>на конец дня</span>
+      <input type="date" class="cell" style="width:auto;font-size:12px" value="${esc(C.from)}" onchange="kassaOpenSet('date',this.value)">
+      <span>было</span>
+      <input class="cell" type="number" step="0.01" style="width:96px;text-align:right;font-size:12px" value="${(typeof _kassaOpen().sum==="number")?_kassaOpen().sum:''}" placeholder="сумма" onchange="kassaOpenSet('sum',this.value)">
+    </div>`;
+  let body;
+  if(!C.set){
+    body=`<div style="font-size:13px;color:var(--muted)">${C.acc?'':'Сначала выберите, какая касса — наличные. '}Пересчитайте наличные в кассе и впишите остаток <b>на конец дня</b> с датой — дальше считается само: плюс приход наличными, минус расход, по дневным снимкам.</div>`;
+  } else if(C.future){
+    body=`<div style="font-size:13px;color:var(--terra-d)">Дата пересчёта ${esc(_kassaDMY(C.from))} ещё не наступила — проверьте дату.</div>`;
+  } else {
+    const otherKeys=Object.keys(C.other).filter(k=>C.other[k]>0).sort((a,b)=>a.localeCompare(b,"ru"));
+    const otherRow=otherKeys.length?`<tr><td style="text-align:left;color:var(--muted)" title="Расходы по другим кассам за те же дни. «Расход» или «Без кассы» — в Alfa у операции не указан счёт: это могли быть и наличные, проверьте">не вычтено, другие кассы: ${esc(otherKeys.map(k=>k+" −"+_gm(C.other[k])).join(", "))}</td><td></td></tr>`:'';
+    body=`<table style="width:100%"><tbody>
+      <tr><td style="text-align:left;color:var(--muted)">остаток на конец ${esc(_kassaDMY(C.from))}</td><td class="num">${_gm(C.open)}</td></tr>
+      <tr><td style="text-align:left">+ приход «${esc(C.acc)}» с тех пор</td><td class="num" style="color:var(--green)">+${_gm(C.inc)}</td></tr>
+      <tr><td style="text-align:left">− расход «${esc(C.acc)}»</td><td class="num" style="color:var(--red)">−${_gm(C.out)}</td></tr>
+      <tr style="border-top:2px solid var(--line)"><td style="text-align:left"><b>= сейчас в кассе</b></td>
+        <td class="num"><b style="font-size:16px;color:${C.now<0?'var(--red)':'var(--coal)'}">${_gm(C.now)}</b></td></tr>
+      ${otherRow}
+    </tbody></table>
+    <div class="hint" style="margin-top:6px">дней посчитано: ${C.days}</div>
+    ${C.today?`<div class="hint" style="color:var(--terra-d);margin-top:4px">Дата пересчёта — сегодня: считается остаток на <b>конец</b> дня. Вписывайте вечером, после последнего платежа, либо укажите вчерашнюю дату — иначе сегодняшний приход после пересчёта не попадёт в кассу.</div>`:''}
+    ${C.missing.length?`<div class="hint" style="color:var(--terra-d);margin-top:4px">Нет снимка за ${C.missing.length} ${_kassaDayWord(C.missing.length)}: ${esc(C.missing.slice(0,6).map(_kassaDMY).join(', '))}${C.missing.length>6?'…':''} — остаток неточный, дособерите их в карточке месяца (кнопка «Дособрать из Alfa»).</div>`:''}`;
+  }
+  return `<div class="card" style="flex:1 1 260px;min-width:260px">
+    <h3 style="margin:0 0 2px">Наличные в клубе</h3>
+    <div class="hint" style="margin-bottom:6px">пересчёт кассы + приход − расход наличными</div>
+    ${anchor}${body}</div>`;
+}
+
+/* ---- РАЗВЕДКА: отдаёт ли Alfa остаток по кассам сама? ----
+   Если у pay-account есть поле с балансом — «Наличные в клубе» можно брать прямо из Alfa,
+   без ручного пересчёта. По коду это неизвестно: справочник читается только как id → name. */
+let _kassaProbeLast="";   // результат зонда: раздел перерисовывается целиком (сегодня досчиталось, вписали сумму) — иначе ответ пропадал бы
+async function kassaProbe(){
+  const btn0=document.getElementById("kassaProbeBtn"); if(btn0) btn0.disabled=true;
+  _kassaProbeLast="⏳ Спрашиваю Alfa про кассы…";
+  const paint=()=>{ const o=document.getElementById("kassaProbeOut"); if(o) o.innerHTML=_kassaProbeLast; };
+  paint();
+  try{
+    const j=await _pubCall("payAccountsRaw",{});
+    console.log("📤 payAccountsRaw",j);
+    // только «остаточные» слова целиком: sum/total/amount ловили бы summary, total_count и т.п.
+    const balRe=/(^|_)(balance|rest|remain\w*|saldo|ostat\w*)($|_)/i;
+    const accs=j.accounts||{};
+    const blocks=Object.keys(accs).map(bid=>{ const a=accs[bid];
+      const hot=(a.keys||[]).filter(k=>balRe.test(k));
+      return `<div style="margin-bottom:6px"><b>Филиал #${esc(bid)}</b>: касс ${a.count||0}${a.err?(' · <span style="color:var(--red)">ошибка '+esc(a.err)+(a.code?(' '+a.code):'')+(a.msg?(': '+esc(a.msg)):'')+'</span>'):''}<br>
+        поля: <code style="font-size:11px">${esc((a.keys||[]).join(', ')||'—')}</code>${hot.length?`<br><b style="color:var(--green)">похоже на остаток: ${esc(hot.join(', '))}</b>`:''}</div>`; }).join("");
+    const anyHot=Object.values(accs).some(a=>(a.keys||[]).some(k=>balRe.test(k)));
+    const tried=(j.tried||[]).map(t=>`<tr><td style="font-family:monospace;font-size:11px">${esc(t.path)}</td><td style="text-align:center">${t.err?('<span style="color:var(--muted)">'+esc(t.err)+(t.code?(' '+t.code):'')+'</span>'):'<b style="color:var(--green)">ответил</b>'}</td><td style="font-size:11px">${esc((t.keys||[]).join(', '))}</td></tr>`).join("");
+    _kassaProbeLast=`<div class="callout" style="border-color:${anyHot?'var(--green)':'var(--terra)'};font-size:12px">
+      ${anyHot?'У касс <b>есть поля, которые стоит проверить</b> (похожи на остаток) — покажите мне, подключу вместо ручного пересчёта.'
+              :'Поля с остатком у касс Alfa <b>не нашлось</b> — считаем от ручного пересчёта, как сейчас.'}
+      <div style="margin-top:6px">${blocks}</div>
+      <details style="margin-top:6px"><summary style="cursor:pointer">Соседние пути и сырые записи</summary>
+        <table style="margin-top:6px"><thead><tr><th>Путь</th><th>Ответ</th><th>Ключи</th></tr></thead><tbody>${tried}</tbody></table>
+        <pre style="white-space:pre-wrap;font-size:11px;background:var(--paper);padding:6px;border-radius:6px;max-height:40vh;overflow:auto;margin-top:6px">${esc(JSON.stringify(accs,null,1))}</pre></details></div>`;
+    paint();
+  }catch(e){ _kassaProbeLast=_pubErrHtml(e,"разведка касс"); paint(); }
+  finally{ const b=document.getElementById("kassaProbeBtn"); if(b) b.disabled=false; }
+}
 function _kassaMonth(ym){
   const p=String(ym||"").split('-'), Y=+p[0], M=+p[1];
   if(!Y||!M) return null;
@@ -10347,7 +10505,7 @@ function _kassaMonth(ym){
   for(let d=1;d<=dim;d++){
     const key=pref+String(d).padStart(2,'0');
     const sn=snap[key];
-    if(!sn){ if(key<=today) missing.push(key); continue; }
+    if(!sn){ if(key<=today && !(key===today&&_kassaTodayBusy)) missing.push(key); continue; }
     have++; cnt+=+sn.count||0; inc+=+sn.income||0; out+=+sn.expense||0;
     Object.keys(sn.byIn||{}).forEach(k=>{ byIn[k]=(byIn[k]||0)+(+sn.byIn[k]||0); });
     Object.keys(sn.byOut||{}).forEach(k=>{ byOut[k]=(byOut[k]||0)+(+sn.byOut[k]||0); });
@@ -10358,19 +10516,12 @@ function _kassaDMY(iso){ const p=String(iso||"").split('-'); return p.length===3
 /* Две карточки над сверкой: касса сегодня и итог за месяц выбранной даты. */
 function _kassaTopHtml(){
   const today=_todayIso(), sn=(_paySnap||{})[today];
-  const rowsOf=by=>Object.keys(by||{}).sort().map(k=>
-    `<tr><td style="text-align:left">${esc(k)}</td><td class="num"><b>${_gm(by[k])}</b></td></tr>`).join("");
-
   // --- сегодня ---
   let todayCard;
   if(sn){
     const ts=String(sn.ts||"").slice(11,16);
-    todayCard=`<table style="width:100%"><tbody>${rowsOf(sn.byIn)||'<tr><td colspan="2" style="color:var(--muted)">приходов пока нет</td></tr>'}
-      <tr style="border-top:2px solid var(--line)"><td style="text-align:left"><b>Итого приход</b></td>
-        <td class="num"><b style="color:var(--green)">${_gm(sn.income)}</b></td></tr>
-      ${(+sn.expense)?`<tr><td style="text-align:left;color:var(--muted)">расход</td><td class="num" style="color:var(--red)">${_gm(sn.expense)}</td></tr>`:''}
-    </tbody></table>
-    <div class="hint" style="margin-top:6px">операций: ${sn.count||0}${ts?(" · обновлено "+ts):""}</div>`;
+    todayCard=_kassaNetTable(sn.byIn,sn.byOut,{compact:true,empty:"операций пока нет"})
+      +`<div class="hint" style="margin-top:6px">операций: ${sn.count||0}${ts?(" · обновлено "+ts):""}</div>`;
   } else {
     todayCard=`<div style="color:var(--muted);font-size:13px;padding:6px 0">${_paySnap
       ? 'Считаю из Alfa…' : '⏳ Читаю сохранённые снимки…'}</div>`;
@@ -10381,12 +10532,8 @@ function _kassaTopHtml(){
   const mLab=(_RU_MON[(+ym.slice(5,7))-1]||'')+' '+ym.slice(0,4);
   let monCard;
   if(M && M.days){
-    monCard=`<table style="width:100%"><tbody>${rowsOf(M.byIn)}
-      <tr style="border-top:2px solid var(--line)"><td style="text-align:left"><b>Итого приход</b></td>
-        <td class="num"><b style="color:var(--green)">${_gm(M.income)}</b></td></tr>
-      ${M.expense?`<tr><td style="text-align:left;color:var(--muted)">расход</td><td class="num" style="color:var(--red)">${_gm(M.expense)}</td></tr>`:''}
-    </tbody></table>
-    <div class="hint" style="margin-top:6px">дней с данными: ${M.days} · операций: ${M.count}</div>
+    monCard=_kassaNetTable(M.byIn,M.byOut,{compact:true})
+    +`<div class="hint" style="margin-top:6px">дней с данными: ${M.days} · операций: ${M.count}</div>
     ${M.missing.length?`<div class="hint" style="color:var(--terra-d);margin-top:4px">
       Нет снимка за ${M.missing.length} ${_kassaDayWord(M.missing.length)}: ${esc(M.missing.slice(0,6).map(_kassaDMY).join(', '))}${M.missing.length>6?'…':''} — ${M.missing.length===1?'он в сумму не вошёл':'они в сумму не вошли'}.
       <button class="btn ghost sm" style="margin-top:5px" id="kassaFillBtn" onclick="kassaFillMonth()">Дособрать из Alfa</button></div>`:''}`;
@@ -10402,10 +10549,11 @@ function _kassaTopHtml(){
       <button class="btn ghost sm" style="margin-top:8px" onclick="kassaToday(true)" title="Пересчитать сегодняшний день из Alfa">🔄 Обновить</button>
     </div>
     <div class="card" style="flex:1 1 260px;min-width:260px">
-      <h3 style="margin:0 0 2px">Приход за ${esc(mLab)}</h3>
-      <div class="hint" style="margin-bottom:6px">сумма дневных снимков — без хождения по дням</div>
+      <h3 style="margin:0 0 2px">Касса за ${esc(mLab)}</h3>
+      <div class="hint" style="margin-bottom:6px">приход и расход по кассам — сумма дневных снимков</div>
       ${monCard}
     </div>
+    ${_kassaCashCard()}
   </div>`;
 }
 function _kassaDayWord(n){
@@ -10436,16 +10584,17 @@ async function kassaFillMonth(){
 }
 /* Подтянуть сегодняшний день из Alfa, не сбивая выбранную дату сверки.
    Нужно потому, что снимок за сегодня cron положит только в 22:00, а касса нужна сейчас. */
-let _kassaAutoDone=false;
+let _kassaAutoDone=false, _kassaTodayBusy=false;
 async function kassaToday(force){
   const today=_todayIso();
   if(!force && ((_paySnap||{})[today] || _kassaAutoDone || _kassaBusy)) return;
-  _kassaAutoDone=true;
+  _kassaAutoDone=true; _kassaTodayBusy=true;
   try{
     const j=await _pubCall("paymentsDay",{date:today});
     if(j.snapshot){ _paySnap=_paySnap||{}; _paySnap[today]=Object.assign({},j.snapshot,{ts:new Date().toISOString()}); }
     if(_admSec==="kassa"){ const b=document.getElementById("admBody"); if(b) b.innerHTML=_kassaHtml(); }
   }catch(e){ console.warn("касса за сегодня не посчиталась",e); }
+  finally{ _kassaTodayBusy=false; if(_admSec==="kassa"){ const b=document.getElementById("admBody"); if(b) b.innerHTML=_kassaHtml(); } }
 }
 function _kassaHtml(){
   const D=_kassaDay;
@@ -10459,8 +10608,8 @@ function _kassaHtml(){
   </div>`;
   if(!D){
     const sn=(_paySnap||{})[_kassaDate];
-    if(sn) return head+_kassaFromSnap(sn);
-    return head+`<div class="callout">${_paySnap?('За '+esc(_kassaDate)+' автоснимка нет (cron собирает в 22:00). Нажмите «Загрузить из Alfa», чтобы посчитать сейчас.'):'⏳ Читаю сохранённые снимки…'}</div>`;
+    if(sn) return head+_kassaFromSnap(sn)+_kassaProbeHtml();
+    return head+`<div class="callout">${_paySnap?('За '+esc(_kassaDate)+' автоснимка нет (cron собирает в 22:00). Нажмите «Загрузить из Alfa», чтобы посчитать сейчас.'):'⏳ Читаю сохранённые снимки…'}</div>`+_kassaProbeHtml();
   }
   const refs=D.refs||{}, all=D.payments||[];
   const inc=all.filter(r=>!_kassaIsOut(r)), out=all.filter(r=>_kassaIsOut(r));
@@ -10525,8 +10674,17 @@ function _kassaHtml(){
   <details open><summary style="cursor:pointer;font-weight:600">Приходы дня (${inc.length})</summary>
     <div class="tscroll" style="max-width:780px;margin-top:8px"><table><thead><tr><th style="text-align:left">Клиент</th><th style="text-align:right">Сумма</th><th style="text-align:left">Касса</th><th style="text-align:left">Примечание</th><th>Внесён</th></tr></thead><tbody>${inc.map(rowHtml).join("")||'<tr><td colspan="5" style="color:var(--muted)">нет</td></tr>'}</tbody></table></div></details>
   ${outTable}
+  <h3 style="margin:12px 0 6px">Приход − расход по кассам за день</h3>
+  <div style="max-width:700px">${_kassaNetTable(Object.fromEntries(Object.keys(by).map(x=>[x,by[x].sum])), Object.fromEntries(Object.keys(byOut).map(x=>[x,byOut[x].sum])))}</div>
   ${out.length?`<details style="margin-top:10px"><summary style="cursor:pointer;font-weight:600">Расходы дня — список (${out.length})</summary>
-    <div class="tscroll" style="max-width:780px;margin-top:8px"><table><thead><tr><th style="text-align:left">Кому/за что</th><th style="text-align:right">Сумма</th><th style="text-align:left">Касса</th><th style="text-align:left">Примечание</th><th>Внесён</th></tr></thead><tbody>${out.map(rowHtml).join("")}</tbody></table></div></details>`:''}`;
+    <div class="tscroll" style="max-width:780px;margin-top:8px"><table><thead><tr><th style="text-align:left">Кому/за что</th><th style="text-align:right">Сумма</th><th style="text-align:left">Касса</th><th style="text-align:left">Примечание</th><th>Внесён</th></tr></thead><tbody>${out.map(rowHtml).join("")}</tbody></table></div></details>`:''}`
+  +_kassaProbeHtml();
+}
+function _kassaProbeHtml(){
+  return `<details style="margin-top:14px"${_kassaProbeLast?" open":""}><summary style="cursor:pointer;font-weight:600">🔍 Есть ли у Alfa остаток кассы?</summary>
+    <div style="padding:8px 0;font-size:12px;color:var(--muted)">Если Alfa хранит остаток по кассам, «Наличные в клубе» можно брать из неё напрямую, без ручного пересчёта. Кнопка покажет, какие поля есть у касс.</div>
+    <button class="btn ghost sm" id="kassaProbeBtn" onclick="kassaProbe()">🔎 Спросить Alfa</button>
+    <div id="kassaProbeOut" style="margin-top:6px">${_kassaProbeLast}</div></details>`;
 }
 /* Отрисовка из автоснимка (cron 22:00): суммы по кассам, приход и расход, со сверкой. */
 function _kassaFromSnap(sn){
@@ -10552,7 +10710,8 @@ function _kassaFromSnap(sn){
       </tbody></table></div>`;
   };
   return `<div style="font-size:12px;color:var(--muted);margin-bottom:6px">Автоснимок от ${esc(String(sn.ts||'').slice(0,16).replace('T',' '))} · операций: ${sn.count||0}. Для списка операций нажмите «Загрузить из Alfa».</div>`
-    + tbl('Приход', sn.byIn, '', 'var(--green)') + tbl('Расход', sn.byOut, 'out:', 'var(--red)');
+    + tbl('Приход', sn.byIn, '', 'var(--green)') + tbl('Расход', sn.byOut, 'out:', 'var(--red)')
+    + `<h3 style="margin:12px 0 6px">Приход − расход по кассам за день</h3><div style="max-width:700px">${_kassaNetTable(sn.byIn,sn.byOut)}</div>`;
 }
 function _kassaCustName(id){
   if(!id) return "—";
