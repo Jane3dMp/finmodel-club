@@ -122,6 +122,11 @@ const h = API._lesRosterHtml(R, { id: 555, name: 'Roblox №1' }, { ts: '2026-09
 check('заголовок с названием группы', h.indexOf('«Roblox №1»') > 0);
 check('число зачисленных = both + onlyAlfa', h.indexOf('зачислено 6') > 0);
 check('выбывшие показаны отдельно и объяснены', h.indexOf('выбыли: 2') > 0 && h.indexOf('«Выбыли» — членства с уже прошедшей датой окончания') > 0);
+// архивных детей в составе не показываем, но говорим, что они ещё числятся в группе
+const harch = API._lesRosterHtml(R, { id: 555, name: 'Roblox №1' }, { gone: 0, arch: 3 });
+check('архивные — отдельным счётчиком в шапке', harch.indexOf('в архиве: 3') > 0);
+check('и объяснены внизу', harch.indexOf('архивные дети Alfa: в состав тоже не входят') > 0);
+check('без архивных счётчика нет', h.indexOf('в архиве:') < 0);
 check('время чтения', h.indexOf('прочитано в 16:41') > 0);
 check('три секции со счётчиками', h.indexOf('И в Alfa, и в карточке — 4') > 0 && h.indexOf('Только в Alfa — 2') > 0 && h.indexOf('Только в карточке — 4') > 0);
 check('пометка «по имени» у сопоставленного без связи (Борис)', (h.match(/>по имени</g) || []).length === 1);
@@ -176,6 +181,17 @@ check('«Failed to fetch» объясняется по-человечески', 
 // полный справочник клиентов — самый тяжёлый запрос прокси; карточке нужны только дети группы
 check('карточка читает детей по id, а не весь справочник', fn.indexOf('_pubCall("customersByIds"') > 0 && fn.indexOf('_pubEnsureCustomers(') < 0);
 check('уже загруженный справочник используется бесплатно', fn.indexOf('if(_pubCustomers && !force)') > 0);
+// «мне только 1 филиал»: филиал не навязываем — прокси берёт клубный из config
+check('филиал в запросе не навязывается', fn.indexOf('{ids:need}') > 0);
+check('архивные отсеиваются до состава', fn.indexOf('const live=all.filter(m=>!m.removed)') > 0);
+
+// сервер: один филиал, без обхода остальных, архив читается вторым заходом
+const php = fs.readFileSync(path.join(__dirname, '..', 'api', 'alfa', 'index.php'), 'utf8');
+const cse = php.slice(php.indexOf("case 'customersByIds':"), php.indexOf("case 'customersByIds':") + 2600);
+check('филиал по умолчанию — клубный из config', cse.indexOf('alfa_realization_branches()[0]') > 0);
+check('по остальным филиалам не ходим', cse.indexOf('alfa_customer_get') < 0);
+check('архивных всё же находим (removed=1 вторым заходом)', cse.indexOf("'removed' => 1") > 0);
+check('признак архива уходит клиенту', cse.indexOf("'removed' => (int)($c['removed'] ?? 0)") > 0);
 
 console.log(bad ? '\n❌ провалено проверок: ' + bad : '\n✅ всё сошлось');
 process.exit(bad ? 1 : 0);

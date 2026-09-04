@@ -6080,19 +6080,19 @@ function _lesRosterHtml(R,g,meta){
       :(k.alfaId?'<span style="color:var(--terra-d)">не внесён в группу Alfa — 👥 в строке</span>':'<span style="color:var(--muted)">нет связи с Альфой — ⟳ в строке</span>'));
     return row(esc(k.n), k.phone, "", note, false); }).join("");
   const ts=meta&&meta.ts?String(meta.ts).slice(11,16):"";
-  const gone=(meta&&meta.gone)?meta.gone:0;
+  const gone=(meta&&meta.gone)?meta.gone:0, arch=(meta&&meta.arch)?meta.arch:0;
   const warn=noDir?`<div style="color:var(--terra-d);font-size:12px;margin-top:4px">⚠️ Alfa не отдала карточки детей — имена и телефоны взяты из карточки занятия, сопоставление по имени недоступно (только связи по alfaId). Нажмите 🔄.</div>`:"";
   return `<div class="callout" style="margin-top:8px;font-size:12px;padding:8px 10px">
     <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
       <b>👥 Состав в Alfa: «${esc(g.name||("группа id "+g.id))}»</b>
-      <span style="color:var(--muted)">зачислено ${R.both.length+R.onlyAlfa.length}${gone?(" · выбыли: "+gone):""}${ts?(" · прочитано в "+ts):""}</span>
+      <span style="color:var(--muted)">зачислено ${R.both.length+R.onlyAlfa.length}${gone?(" · выбыли: "+gone):""}${arch?(' · <span style="color:var(--terra-d)" title="Ребёнок в архиве Alfa, но всё ещё числится в этой группе — уберите его из группы в Alfa">в архиве: '+arch+"</span>"):""}${ts?(" · прочитано в "+ts):""}</span>
       <button type="button" class="btn ghost sm" style="margin-left:auto;padding:1px 6px" onclick="lesAlfaRoster(true)" title="Перечитать из Alfa (и справочник клиентов заново)">🔄</button>
       <button type="button" class="btn ghost sm" style="padding:1px 6px" onclick="lesAlfaRosterClose()" title="Скрыть">×</button>
     </div>${warn}
     ${sec("И в Alfa, и в карточке — "+R.both.length,"var(--green)",both,"никого",true)}
     ${sec("Только в Alfa — "+R.onlyAlfa.length,"var(--terra-d)",alfa,"все зачисленные есть в карточке",true)}
     ${sec("Только в карточке — "+R.onlyOurs.length,"var(--muted)",ours,"все дети карточки зачислены в Alfa",false)}
-    <div style="font-size:11px;color:var(--muted);margin-top:6px">Только чтение: здесь ничего не меняется ни в Alfa, ни в карточке. Внести ребёнка в группу Alfa — кнопка 👥 в его строке.${gone?" «Выбыли» — членства с уже прошедшей датой окончания, в состав не входят.":""}</div>
+    <div style="font-size:11px;color:var(--muted);margin-top:6px">Только чтение: здесь ничего не меняется ни в Alfa, ни в карточке. Внести ребёнка в группу Alfa — кнопка 👥 в его строке.${gone?" «Выбыли» — членства с уже прошедшей датой окончания, в состав не входят.":""}${arch?" «В архиве» — архивные дети Alfa: в состав тоже не входят, но из группы их стоит убрать.":""}</div>
   </div>`;
 }
 function lesAlfaRosterClose(){ const b=document.getElementById("lesAlfaRoster"); if(b) b.innerHTML=""; }
@@ -6126,7 +6126,7 @@ async function lesAlfaRoster(force){
     if(need.length){
       if(box()) box().innerHTML=`<div class="callout" style="margin-top:8px;font-size:12px">⏳ Читаю ${need.length} ${_kassaDayWord(need.length)==="день"?"ребёнка":"детей"} из Alfa…</div>`;
       try{
-        const jc=await _pubCall("customersByIds",{ids:need, branch:j.branch});
+        const jc=await _pubCall("customersByIds",{ids:need});   // филиал прокси берёт клубный (config)
         Object.keys(jc.customers||{}).forEach(id=>{ const c=jc.customers[id]; if(c) byId.set(String(id),c); });
         if((jc.missing||[]).length) console.warn("👥 клиентов не нашлось в Alfa по id:",jc.missing);
       }catch(e){ noDir=true; console.warn("клиенты по id не прочитались",e); }
@@ -6135,10 +6135,15 @@ async function lesAlfaRoster(force){
     const today=_todayIso();
     const all=(j.members||[]).map(m=>{ const cst=byId.get(String(m.customer_id));
       return {customer_id:m.customer_id, b_date:m.b_date, e_date:m.e_date,
-              name:cst?cst.name:"", phone:(cst&&Array.isArray(cst.phones))?cst.phones.filter(Boolean).join(", "):""}; });
+              removed:!!(cst&&+cst.removed), name:cst?cst.name:"",
+              phone:(cst&&Array.isArray(cst.phones))?cst.phones.filter(Boolean).join(", "):""}; });
     // выбывшие (дата окончания прошла) в состав не входят — иначе ушедший ребёнок выглядел бы зачисленным
-    const members=all.filter(m=>_rosterActive(m,today)).sort((a,b)=>String(a.name).localeCompare(String(b.name),"ru"));
-    _lesRoster={groupId:g.id, branch:j.branch, members:members, gone:all.length-members.length, noDir:noDir, ts:new Date().toISOString()};
+    // архивных (removed=1) в составе не показываем — Жанна: «не бери архивных детей».
+    // Считаем отдельно: ребёнок в архиве, но всё ещё числится в группе — это повод убрать его в Alfa.
+    const live=all.filter(m=>!m.removed);
+    const members=live.filter(m=>_rosterActive(m,today)).sort((a,b)=>String(a.name).localeCompare(String(b.name),"ru"));
+    _lesRoster={groupId:g.id, branch:jb.branchByGroup?j.branch:null, members:members,
+                gone:live.length-members.length, arch:all.length-live.length, noDir:noDir, ts:new Date().toISOString()};
     _kidsFromDOM();                                  // сравниваем с тем, что сейчас в карточке, включая несохранённые правки
     const R=_lesRosterCompare(members,_editKids);
     if(box()) box().innerHTML=_lesRosterHtml(R,g,_lesRoster);
