@@ -1916,7 +1916,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-09-05-03";
+const APP_VER="2026-09-05-04";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -11121,8 +11121,14 @@ async function realRebuildExpect(apply){
       const d=document.createElement('div'); d.innerHTML=_realRebHtml(j);
       if(d.firstElementChild) b.insertBefore(d.firstElementChild,b.firstChild); }
     if(prog) prog.textContent="";
-  }catch(e){ if(prog) prog.textContent=""; const b=document.getElementById("admBody");
-    if(b){ const d=document.createElement('div'); d.innerHTML=_pubErrHtml(e,"восстановление ожидания"); if(d.firstElementChild) b.insertBefore(d.firstElementChild,b.firstChild); } }
+  }catch(e){ if(prog) prog.textContent="";
+    const b=document.getElementById("admBody"); if(!b) return;
+    /* Осознанный отказ («нумерацию не подобрал») прилетает сюда же, как ошибка, — но это не сбой,
+       и показывать его надо своим экраном с причиной, а не общей плашкой про Alfa. */
+    const own=e&&e.data&&e.data.why;
+    const d=document.createElement('div');
+    d.innerHTML=own?_realRebHtml(e.data):_pubErrHtml(e,"восстановление ожидания");
+    if(d.firstElementChild) b.insertBefore(d.firstElementChild,b.firstChild); }
   finally{ _realBusy=false; if(btn) btn.disabled=false; }
 }
 function _realRebHtml(j){
@@ -11132,7 +11138,15 @@ function _realRebHtml(j){
   if(!j||!j.ok) return `<div class="callout" style="border-color:var(--red);margin-bottom:12px">
     <b>Не восстановил — и не стал угадывать.</b><br>${esc((j&&j.why)||"неизвестная причина")}
     ${j&&j.calibWeek?`<br><span style="font-size:12px;color:var(--muted)">Сверялся по неделе с ${esc(j.calibWeek)}.</span>`:""}
-    <br><span style="font-size:12px;color:var(--muted)">Нумерация дня недели в Alfa не документирована. Пока она не подтвердилась расписанием, ожидание по дням разъедется — лучше пусто, чем неверно.</span></div>`;
+    <br><span style="font-size:12px;color:var(--muted)">Нумерация дня недели в Alfa не документирована. Пока она не подтвердилась расписанием, ожидание по дням разъедется — лучше пусто, чем неверно.</span>
+    ${j&&j.score?`<div class="tscroll" style="max-width:520px;margin-top:8px"><table><thead><tr>
+      <th>Нумерация</th><th style="text-align:right">Совпало дней</th><th style="text-align:right">Невязка занятий</th></tr></thead><tbody>${
+      j.score.map(x=>`<tr><td>${esc(MODES[x.mode]||x.mode)}</td>
+        <td style="text-align:right">${x.exact} из ${x.compared}</td>
+        <td style="text-align:right;color:${x.diff?'var(--red)':'var(--green)'}">${x.diff}</td></tr>`).join("")}
+    </tbody></table></div>
+    ${j.refLessons?`<div style="font-size:12px;color:var(--muted);margin-top:6px">Занятий по дням эталонной недели, как их видит Alfa: ${
+      Object.keys(j.refLessons).map(d=>day(d)+" — "+j.refLessons[d]).join(", ")}</div>`:""}`:""}</div>`;
   if(j.applied) return `<div class="callout" style="border-color:var(--green);margin-bottom:12px">
     <b>Ожидание восстановлено.</b> Записано дней: <b>${j.written}</b>${j.kept?(", уже стояло: "+j.kept):""}${j.noRow?(", нет данных за день: "+j.noRow):""}.
     Итого за неделю с ${esc(j.week)}: <b>${_gm(j.total)}</b>.

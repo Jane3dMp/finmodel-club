@@ -1607,6 +1607,10 @@ switch ($action) {
         $wk = (string)($in['week'] ?? date('Y-m-d'));
         $r = alfa_expect_rebuild_week(alfa_iso($wk), $branches, !empty($in['apply']),
                                       isset($in['calibWeek']) ? (string)$in['calibWeek'] : null);
+        /* Отказ — это не сбой связи, а осознанный ответ «не смог и не стал угадывать». Но клиент
+           разбирает ошибки по полю error, и без него сообщение вырождалось в «ошибка 200»
+           (HTTP-код успешного ответа). Дублируем причину туда, оставляя why для разбора. */
+        if (empty($r['ok']) && !isset($r['error'])) $r['error'] = (string)($r['why'] ?? 'не удалось восстановить ожидание');
         json_out($r + ['store' => alfa_realization_store_read()]);
         break;
 
