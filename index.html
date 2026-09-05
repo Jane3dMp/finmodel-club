@@ -1916,7 +1916,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-09-05-01";
+const APP_VER="2026-09-05-02";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -11016,7 +11016,16 @@ function _realHtml(){
   }
   const texPct=(texFact>0&&texDone>0)?(100*texFact/texDone):null;
   const monLabel=(_RU_MON[M-1]||'')+' '+Y;
-  const mon=(function(){ const d=new Date(); const w=d.getDay()===0?7:d.getDay(); d.setDate(d.getDate()-(w-1)+7); return _dIso(d); })();
+  /* Какую неделю подставить в поле «Неделя». Раньше здесь ВСЕГДА стоял следующий понедельник —
+     и текущую неделю не морозил никто: ни эта кнопка, ни cron_weekplan.php, ни автоснимок в
+     прогнозе (все берут следующий пн). Дни текущей недели доживали до конца незамороженными,
+     planned у них стекал в ноль, и «ожидается» пропадало. Теперь пока текущая неделя не
+     зафиксирована — предлагаем её, чтобы можно было спасти оставшиеся дни. */
+  const curMon=(function(){ const d=new Date(); const w=d.getDay()===0?7:d.getDay(); d.setDate(d.getDate()-(w-1)); return _dIso(d); })();
+  const nextMon=(function(){ const d=new Date(curMon); d.setDate(d.getDate()+7); return _dIso(d); })();
+  const curFrozen=(function(){ for(let i=0;i<7;i++){ const d=new Date(curMon); d.setDate(d.getDate()+i);
+      const r=(_realStore||{})[_dIso(d)]; if(r&&r.expect!=null) return true; } return false; })();
+  const mon=curFrozen?nextMon:curMon;
   return `<div class="callout" style="margin-bottom:10px;font-size:13px">Считается из Alfa: сумма списаний (<b>commission</b>) по проведённым занятиям филиала <b>${_realBranchLabel()}</b>. «Без пропусков» — только пришедшие, «с пропусками» — все.<br>
     <b>Ожидается 🔒</b> — сколько ожидали ДО начала недели. Фиксируется один раз в воскресенье в 22:00 и больше не меняется, поэтому реализацию есть с чем сравнить: <b>%</b> = (без пропусков + с пропусками) ÷ 2 от ожидания.</div>
   <div class="hd-actions" style="margin-bottom:10px">
@@ -11027,6 +11036,11 @@ function _realHtml(){
     <button class="btn ghost sm" id="realExpBtn" onclick="realFreezeExpect()" title="Зафиксировать «ожидается» на неделю из поля слева (обычно это делает cron в вс 22:00)">🔒 Зафиксировать ожидание</button>
     <span id="realPullProg" style="font-size:12px;color:var(--muted)"></span>
   </div>
+  <div style="font-size:12px;color:var(--muted);margin:-4px 0 10px">🔒 морозит <b>всю неделю (пн–вс)</b>, в которую попадает дата слева${
+    curFrozen
+      ? ' — сейчас это <b>следующая</b> неделя с '+esc(nextMon)+', текущая уже зафиксирована.'
+      : ' — сейчас это <b>текущая</b> неделя с '+esc(curMon)+': её ещё не фиксировали, и её будущие дни пропадут, если не заморозить до того, как занятия пройдут.'
+    } Дни, где занятия уже проведены, кнопка не трогает — им ожидание восстанавливают отдельно.</div>
   <div class="tscroll" style="max-width:820px"><table><thead><tr>
     <th>Дн</th><th style="text-align:right">Без пропусков</th><th style="text-align:right">С пропусками</th><th style="text-align:right" title="Сколько ожидали ДО начала недели — зафиксировано в вс 22:00 и не меняется">Ожидается</th><th style="text-align:right" title="Реализация от ожидания: (без пропусков + с пропусками) ÷ 2 ÷ ожидание">%</th><th style="text-align:right" title="Нарастающим итогом: среднее «без пропусков» и «с пропусками» — тот же доход, что во «Все показатели» и «Прогноз по всем»">Накопительно</th><th style="text-align:center">Занятий</th>
   </tr></thead><tbody>${rows}
@@ -11066,7 +11080,12 @@ async function realFreezeExpect(){
       }
     }
     _realStore=j.store||_realStore;
-    if(prog) prog.innerHTML=`Неделя с ${esc(j.week)}: ожидание <b>${_gm(j.total)}</b> · зафиксировано дней ${j.frozen}${j.kept?(" · уже стояло "+j.kept):""}`;
+    /* late — дни, где занятия уже прошли: там planned давно ноль, и морозить его значило бы
+       навсегда записать «ожидали ноль». Говорим об этом прямо, иначе «зафиксировано 0» выглядит
+       поломкой, хотя кнопка отработала правильно. */
+    if(prog) prog.innerHTML=(j.frozen||j.kept)
+      ? `Неделя с ${esc(j.week)}: ожидание <b>${_gm(j.total)}</b> · зафиксировано дней ${j.frozen}${j.kept?(" · уже стояло "+j.kept):""}${j.late?(" · пропущено прошедших "+j.late):""}`
+      : `Неделя с ${esc(j.week)}: замораживать нечего — все ${j.late||0} дн. уже прошли, ожидание по ним не восстановить этой кнопкой.`;
     const b=document.getElementById("admBody"); if(b) b.innerHTML=_realHtml();
   }catch(e){ if(prog) prog.textContent=""; const b=document.getElementById("admBody"); if(b){ const d=document.createElement('div'); d.innerHTML=_pubErrHtml(e,"фиксация ожидания"); b.insertBefore(d.firstChild,b.firstChild); } }
   finally{ _realBusy=false; if(btn) btn.disabled=false; }

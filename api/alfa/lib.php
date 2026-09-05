@@ -555,18 +555,27 @@ function alfa_realization_upsert(string $date, ?array $branches = null): array {
 function alfa_expect_freeze(string $mondayIso, ?array $branches = null, bool $force = false): array {
     $mon = alfa_monday_of($mondayIso);
     $s = alfa_realization_store_read();
-    $set = 0; $kept = 0; $days = [];
+    $set = 0; $kept = 0; $late = 0; $days = [];
     for ($i = 0; $i < 7; $i++) {
         $d = date('Y-m-d', strtotime("+$i day", strtotime($mon)));
         $row = $s[$d] ?? null;
         if (!is_array($row)) { $days[$d] = null; continue; }
         if (isset($row['expect']) && !$force) { $kept++; $days[$d] = (float)$row['expect']; continue; }
+        /* ⚠️ День, который УЖЕ ПРОШЁЛ, замораживать нечем: занятия проведены, planned стёк в ноль.
+           Записать сюда 0 — значит навсегда зафиксировать «ожидали ноль» и испортить и день, и месячный
+           %, причём снять это можно будет только через force. Отличаем «день прошёл»
+           (planned=0, но занятия были) от «в этот день и не планировали» (planned=0, занятий 0):
+           второе — честный ноль, его морозим. Прошедшие дни восстанавливаются отдельно,
+           по регулярному расписанию (alfa_expect_rebuild_week). */
+        if ((float)($row['planned'] ?? 0) <= 0 && (int)($row['lessons'] ?? 0) > 0) {
+            $late++; $days[$d] = null; continue;
+        }
         $row['expect'] = round((float)($row['planned'] ?? 0), 2);
         $row['expectTs'] = date('c');
         $s[$d] = $row; $set++; $days[$d] = (float)$row['expect'];
     }
     if ($set) { ksort($s); alfa_realization_store_write($s); }
-    return ['week' => $mon, 'frozen' => $set, 'kept' => $kept, 'days' => $days,
+    return ['week' => $mon, 'frozen' => $set, 'kept' => $kept, 'late' => $late, 'days' => $days,
             'total' => round(array_sum(array_map('floatval', array_filter($days, 'is_numeric'))), 2)];
 }
 function alfa_cron_key(): string { return (string)(cfg()['cron_key'] ?? ''); }
