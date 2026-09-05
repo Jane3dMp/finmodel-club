@@ -784,7 +784,7 @@ function alfa_forecast_groups(string $mondayIso, array $groups, ?string $from = 
     $sun = $to !== null ? alfa_iso($to) : date('Y-m-d', strtotime('+6 day', strtotime(alfa_monday_of($mondayIso))));
     $host = 'https://' . alfa_host(); $token = alfa_token();
     $priceCache = alfa_price_cache_read(); $before = count($priceCache);
-    $sum = 0.0; $lessons = 0; $students = 0; $noPrice = 0; $dbg = []; $noPriceIds = [];
+    $sum = 0.0; $lessons = 0; $students = 0; $noPrice = 0; $dbg = []; $noPriceIds = []; $perGroup = []; $perGroupStudents = []; $perGroupNoPrice = [];
     foreach ($groups as $g) {
         $gid = (int)($g['id'] ?? 0); $bid = (int)($g['branch'] ?? 0); $times = (int)($g['times'] ?? 1);
         $subj = (int)($g['subject'] ?? 0);
@@ -804,16 +804,25 @@ function alfa_forecast_groups(string $mondayIso, array $groups, ?string $from = 
                 $seen[$cid] = 1;
             }
         }
+        $gSum = 0.0; $gNo = 0;
         foreach (array_keys($seen) as $cid) {
             $p = alfa_lesson_price_of($bid, (int)$cid, $priceCache, $dbg, $subj, $mon, $sun);
-            if ($p <= 0) { $noPrice++; if (count($noPriceIds) < 8) $noPriceIds[] = ['id' => (int)$cid, 'branch' => $bid]; }
-            $sum += $p * $times; $lessons += $times; $students++;
+            if ($p <= 0) { $noPrice++; $gNo++; if (count($noPriceIds) < 8) $noPriceIds[] = ['id' => (int)$cid, 'branch' => $bid]; }
+            $gSum += $p; $lessons += $times; $students++;
         }
+        $perGroupStudents[$gid] = count($seen);
+        $perGroupNoPrice[$gid] = $gNo;
+        $sum += $gSum * $times;
+        /* Выручка ОДНОГО занятия этой группы. Нужна восстановлению ожидания: там одна и та же
+           группа встречается в нескольких днях недели, и без этого пришлось бы опрашивать её
+           состав заново на каждый день — сотни запросов к Alfa и таймаут шлюза. */
+        $perGroup[$gid] = round($gSum, 2);
     }
     if (count($priceCache) !== $before) alfa_price_cache_write($priceCache);
     $tmRef = &alfa_tariff_map_ref();
     return ['week' => $mon, 'forecast' => round($sum, 2), 'lessons' => $lessons,
             'students' => $students, 'withoutPrice' => $noPrice, 'noPriceIds' => $noPriceIds,
+            'perGroup' => $perGroup, 'perGroupStudents' => $perGroupStudents, 'perGroupNoPrice' => $perGroupNoPrice,
             'tariffMapSize' => count($tmRef), 'sampleTariffs' => $dbg];
 }
 /* Прогноз на неделю целиком (для cron: там ограничения по времени мягче). */
@@ -1000,42 +1009,77 @@ function alfa_expect_rebuild_week(string $mondayIso, ?array $branches = null, bo
     }
     $mode = $verdict['mode'];
 
-    /* Деньги считаем по дням: окно cgi — ровно этот день, иначе в него попали бы дети,
-       зачисленные позже в ту же неделю, и ожидание задним числом выросло бы. */
-    $calc = function (string $weekMon) use ($items, $mode, $branches) {
+    /* ⚠️ Считаем КАЖДУЮ группу ОДИН раз за неделю и потом раскладываем по её дням. Раньше состав
+       группы запрашивался заново на каждый день, и на живых данных это дало сотни запросов к Alfa
+       и таймаут шлюза (500 Request Timeout). Окно состава — неделя целиком, а не один день: за
+       неделю состав меняется редко, зато запросов в разы меньше. */
+    $calc = function (string $weekMon, ?array $onlyDays = null) use ($items, $mode) {
+        $sun = date('Y-m-d', strtotime('+6 day', strtotime($weekMon)));
         $days = alfa_regular_days_of_week(alfa_regular_by_iso_dow($items, $mode), $weekMon);
+        $need = [];
+        foreach ($days as $d => $list) {
+            if ($onlyDays !== null && !in_array($d, $onlyDays, true)) continue;
+            foreach ($list as $g) $need[$g['id']] = ['id' => $g['id'], 'branch' => $g['branch'],
+                                                     'times' => 1, 'subject' => $g['subject']];
+        }
+        $per = []; $stu = []; $noPr = []; $asked = 0;
+        foreach (array_chunk(array_values($need), 12) as $chunk) {
+            $r = alfa_forecast_groups($weekMon, $chunk, $weekMon, $sun);
+            foreach (($r['perGroup'] ?? []) as $gid => $v) $per[(int)$gid] = (float)$v;
+            foreach (($r['perGroupStudents'] ?? []) as $gid => $v) $stu[(int)$gid] = (int)$v;
+            foreach (($r['perGroupNoPrice'] ?? []) as $gid => $v) $noPr[(int)$gid] = (int)$v;
+            $asked += count($chunk);
+        }
         $out = [];
         foreach ($days as $d => $list) {
-            if (!$list) { $out[$d] = ['expect' => 0.0, 'groups' => 0, 'students' => 0, 'withoutPrice' => 0]; continue; }
+            if ($onlyDays !== null && !in_array($d, $onlyDays, true)) continue;
             $sum = 0.0; $st = 0; $np = 0;
-            foreach (array_chunk($list, 12) as $chunk) {
-                $gs = [];
-                foreach ($chunk as $g) $gs[] = ['id' => $g['id'], 'branch' => $g['branch'], 'times' => 1, 'subject' => $g['subject']];
-                $r = alfa_forecast_groups($weekMon, $gs, $d, $d);
-                $sum += (float)$r['forecast']; $st += (int)$r['students']; $np += (int)$r['withoutPrice'];
+            foreach ($list as $g) {
+                $sum += $per[$g['id']] ?? 0.0;
+                $st  += $stu[$g['id']] ?? 0;
+                $np  += $noPr[$g['id']] ?? 0;
             }
             $out[$d] = ['expect' => round($sum, 2), 'groups' => count($list), 'students' => $st, 'withoutPrice' => $np];
         }
-        return $out;
+        return ['days' => $out, 'groupsAsked' => $asked];
     };
 
-    $out = $calc($mon);
+    /* Целевую неделю считаем только по дням, где ожидания ещё нет: остальные мы всё равно не
+       перезаписываем, а каждый лишний день — это запросы к Alfa и риск словить таймаут шлюза. */
+    $wantDays = [];
+    for ($i = 0; $i < 7; $i++) {
+        $d = date('Y-m-d', strtotime("+$i day", strtotime($mon)));
+        $row = $store[$d] ?? null;
+        if (is_array($row) && isset($row['expect'])) continue;
+        $wantDays[] = $d;
+    }
+    if (!$wantDays) {
+        return ['ok' => false, 'week' => $mon, 'calibWeek' => $ref,
+                'why' => 'у всех дней этой недели ожидание уже стоит — восстанавливать нечего'];
+    }
+    $r0 = $calc($mon, $wantDays);
+    $out = $r0['days'];
     $total = 0.0;
     foreach ($out as $v) $total += (float)$v['expect'];
 
     /* Сверка на эталонной неделе: там подневное «ожидается» известно по-настоящему (planned),
-       и видно, насколько реконструкция вообще похожа на правду. Считаем только в режиме
-       предпросмотра — при записи это лишние запросы к Alfa. */
+       и видно, насколько реконструкция похожа на правду. Берём ТРИ самых загруженных дня, а не
+       всю неделю: систематический промах виден и по ним, а запросов втрое меньше. Считаем только
+       в предпросмотре — при записи это лишняя работа. */
     $check = null;
     if (!$apply) {
-        $rc = $calc($ref); $rows = []; $sc = 0.0; $sp = 0.0;
-        foreach ($rc as $d => $v) {
+        $byLoad = array_filter($refLessons, function ($n) { return (int)$n > 0; });
+        arsort($byLoad);
+        $refDays = array_slice(array_keys($byLoad), 0, 3);
+        $rc = $calc($ref, $refDays); $rows = []; $sc = 0.0; $sp = 0.0;
+        foreach ($rc['days'] as $d => $v) {
             $planned = round((float)($store[$d]['planned'] ?? 0), 2);
             $rows[$d] = ['rebuilt' => $v['expect'], 'planned' => $planned,
                          'diff' => round($v['expect'] - $planned, 2)];
             $sc += $v['expect']; $sp += $planned;
         }
         $check = ['week' => $ref, 'days' => $rows, 'rebuiltTotal' => round($sc, 2), 'plannedTotal' => round($sp, 2),
+                  'partial' => count($refDays) < 7,
                   'offPct' => $sp > 0 ? round(100 * ($sc - $sp) / $sp, 1) : null];
     }
 
@@ -1056,7 +1100,7 @@ function alfa_expect_rebuild_week(string $mondayIso, ?array $branches = null, bo
             'total' => round($total, 2), 'applied' => $apply, 'written' => $written,
             'kept' => $kept, 'noRow' => $noRow, 'check' => $check, 'score' => $verdict['score'],
             'residual' => $verdict['residual'] ?? 0, 'totalLessons' => $verdict['totalLessons'] ?? 0,
-            'refLessons' => $refLessons];
+            'refLessons' => $refLessons, 'groupsAsked' => $r0['groupsAsked'] ?? 0];
 }
 
 /* --- НЕДЕЛЬНЫЙ ПРОГНОЗ (снимок) ---

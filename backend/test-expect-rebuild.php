@@ -145,5 +145,29 @@ $rlGone[0]['e_date_v'] = '2026-09-06';                 // слот законч�
 $days2 = alfa_regular_days_of_week(alfa_regular_by_iso_dow($rlGone, 'iso'), $MON);
 ok('завершённый слот не считается', count($days2['2026-09-07']), 0);
 
+/* --- 7. основа оптимизации: группа, идущая несколько раз в неделю, опрашивается ОДИН раз.
+   Раньше состав запрашивался заново на каждый день, и на живых данных это дало таймаут шлюза. --- */
+$rlMulti = [];
+foreach ([101, 102, 103] as $g) { $rlMulti[] = $mk(1, $g); $rlMulti[] = $mk(3, $g); }  // пн и ср
+$rlMulti[] = $mk(5, 104);                                                              // только пт
+$dm = alfa_regular_days_of_week(alfa_regular_by_iso_dow($rlMulti, 'iso'), $MON);
+ok('в понедельник три группы', count($dm['2026-09-07']), 3);
+ok('в среду те же три', count($dm['2026-09-09']), 3);
+ok('в пятницу одна', count($dm['2026-09-11']), 1);
+$slots = 0; $uniq = [];
+foreach ($dm as $list) foreach ($list as $g) { $slots++; $uniq[$g['id']] = 1; }
+ok('занятий за неделю', $slots, 7);
+yes('уникальных групп меньше, чем занятий — на этом и экономим запросы',
+    count($uniq) < $slots, count($uniq) . ' против ' . $slots);
+
+/* считаем только дни без ожидания: пн и пт → в опрос попадают все 4 группы, среда не добавляет ничего */
+$want = ['2026-09-07', '2026-09-11'];
+$only = [];
+foreach ($dm as $d => $list) if (in_array($d, $want, true)) foreach ($list as $g) $only[$g['id']] = 1;
+ok('для двух нужных дней опрашиваем 4 группы', count($only), 4);
+$skip = [];
+foreach ($dm as $d => $list) if (in_array($d, ['2026-09-11'], true)) foreach ($list as $g) $skip[$g['id']] = 1;
+ok('а для одной пятницы — всего одну', count($skip), 1);
+
 echo $bad ? "\n❌ провалено проверок: $bad\n" : "\n✅ всё сошлось\n";
 exit($bad ? 1 : 0);
