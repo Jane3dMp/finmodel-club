@@ -1916,7 +1916,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-09-05-10";
+const APP_VER="2026-09-06-01";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -7575,18 +7575,54 @@ async function _apiJson(r){
 }
 /* Запрос к прокси с повтором на страницу проверки: она сама обещает перезагрузку через 5 сек,
    значит через несколько секунд защита обычно пропускает. Ждём чуть дольше и пробуем ещё раз. */
+/* Общий «шлагбаум» на все запросы к прокси. Пока хостинг показывает страницу проверки, ходить
+   к нему бесполезно, а параллельные разделы устраивали шторм: открытие одного раздела шлёт до
+   четырёх запросов сразу, каждый повторялся трижды — двенадцать обращений подряд, и это само
+   выглядит как поведение бота. Теперь первый пойманный challenge закрывает шлагбаум для всех,
+   и остальные ждут, а не долбят. */
+let _proxyGateUntil=0;
+function _proxyGateOpen(){ _proxyGateUntil=0; }
+async function _proxyGateWait(){
+  const left=_proxyGateUntil-Date.now();
+  if(left>0) await new Promise(z=>setTimeout(z, left+Math.floor(Math.random()*700)));
+}
+/* Повтор с растущей паузой. Раньше было три попытки по 6 секунд — окно всего 12 секунд, короче
+   реальной блокировки, и повтор не срабатывал вовсе на обрыве связи и на 5xx, хотя это самые
+   частые отказы у этого хостинга. */
 async function _apiPost(url, action, payload, tries){
-  tries=tries||3;
+  tries=tries||4;
   let last=null;
   for(let i=0;i<tries;i++){
-    const token=await _alfaIdToken();
-    const r=await fetch(url+"?action="+action,{method:"POST",
-      headers:{"Content-Type":"application/json","Authorization":"Bearer "+token},body:JSON.stringify(payload||{})});
-    const j=await _apiJson(r);
-    if(!j.challenge) return {r,j};
-    last={r,j};
-    if(i<tries-1){ toast("Хостинг проверяет запрос, повторяю…"); await new Promise(z=>setTimeout(z,6000)); }
+    await _proxyGateWait();          // ждём общий шлагбаум, если его закрыл кто-то другой
+    let r=null, j=null, netErr=null;
+    try{
+      const token=await _alfaIdToken();
+      r=await fetch(url+"?action="+action,{method:"POST",
+        headers:{"Content-Type":"application/json","Authorization":"Bearer "+token},body:JSON.stringify(payload||{})});
+      j=await _apiJson(r);
+    }catch(e){
+      // «Нужно войти в модель» — не сетевой сбой, повторять бессмысленно
+      if(String((e&&e.message)||e).indexOf("Firebase")>=0) throw e;
+      netErr=e;
+    }
+    if(!netErr && j && !j.challenge && !(r && (r.status>=500 || r.status===429))){
+      _proxyGateOpen(); return {r,j};
+    }
+    if(!netErr) last={r,j};
+    if(i===tries-1) break;
+    if(!netErr && j && j.challenge){
+      /* Проверка хостинга: закрываем шлагбаум для ВСЕХ и ждём его же. Отдельной паузы здесь
+         быть не должно — иначе этот запрос отсидел бы и шлагбаум, и свою паузу, то есть вдвое
+         дольше нужного. */
+      _proxyGateUntil=Math.max(_proxyGateUntil, Date.now()+Math.min(45000, 5000*Math.pow(2,i)));
+      toast("Хостинг проверяет запрос, повторяю…");
+      continue;
+    }
+    /* Обрыв связи или 5xx — причина другая, общий шлагбаум тут ни при чём: ждём коротко и сами. */
+    toast(netErr?"Связь оборвалась, повторяю…":"Сервер ответил ошибкой, повторяю…");
+    await new Promise(z=>setTimeout(z, Math.min(12000, 1500*Math.pow(2,i))+Math.floor(Math.random()*700)));
   }
+  if(!last) throw new Error("Не удалось достучаться до прокси: связь обрывалась "+tries+" раз подряд.");
   return last;
 }
 async function _alfaIdToken(){
@@ -10967,7 +11003,22 @@ const _RU_MON=["январь","февраль","март","апрель","май
 let _realStore=null, _realBranches=null, _realBranchNames=null, _realBusy=false;
 let _realMonth=(function(){ const d=new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0'); })();
 let _weekPlans=null;
-async function _realLoadStore(){ const j=await _pubCall("realizationStore",{}); _realStore=j.store||{}; _weekPlans=j.weekPlans||{}; _realBranches=j.branches||[]; _realBranchNames=j.branchNames||{}; }
+/* Один и тот же запрос не должен уходить дважды. Разделы «Реализация», «Прогноз по всем»,
+   «Рейтинг» и «Отчёт для отдела продаж» каждый зовут это при открытии, и переключение вкладок
+   отправляло по копии запроса на каждый клик — при закрытом шлагбауме это лишний шум ровно
+   там, где его и так слишком много. Пока запрос в полёте, все ждут его же. */
+let _realLoading=null;
+async function _realLoadStore(force){
+  if(!force && _realStore) return true;
+  if(_realLoading) return _realLoading;
+  _realLoading=(async()=>{
+    const j=await _pubCall("realizationStore",{});
+    _realStore=j.store||{}; _weekPlans=j.weekPlans||{};
+    _realBranches=j.branches||[]; _realBranchNames=j.branchNames||{};
+    return true;
+  })();
+  try{ return await _realLoading; } finally{ _realLoading=null; }
+}
 function _realBranchLabel(){
   if(!_realBranches||!_realBranches.length) return '<span style="color:var(--terra)">филиал «Пожарный» в Alfa не найден — проверьте название</span>';
   return _realBranches.map(id=>esc((_realBranchNames||{})[id]||('#'+id))).join(', ');
@@ -12274,26 +12325,47 @@ function _trialsHtml(){
   const [Y,M]=_trialMonth.split('-').map(Number);
   const dim=new Date(Y,M,0).getDate();
   const today=_todayIso();
-  let done=0, missed=0, counted=0, noCid=0, rows="", missIds={};
+  /* ⚠️ Считаем ДЕТЕЙ, а не занятия. Пробный абонемент действует не один день, а период, и раньше
+     пробным засчитывалось КАЖДОЕ занятие ребёнка внутри этого периода: ребёнок, пришедший на
+     пробное и оставшийся в группе, давал восемь «пробных» вместо одного. Поэтому день считаем по
+     спискам id, а за месяц берём множества. «Дошёл» перевешивает «не дошёл»: если ребёнок один
+     раз пропустил, а на пробное всё-таки пришёл — он дошёл. */
+  let counted=0, noCid=0, rows="", slots=0;
+  const monDone=new Set(), monMiss=new Set();
+  let sumDone=0, sumMiss=0, extraDone=0, extraMiss=0;
   for(let d=1;d<=dim;d++){
     const key=Y+'-'+String(M).padStart(2,'0')+'-'+String(d).padStart(2,'0');
     const r=(_realStore||{})[key];
     if(!r||!(r.lessons>0)) continue;
-    const has=(r.trialDone!=null||r.trialMissed!=null);
-    if(!has) continue;
+    if(r.trialDone==null&&r.trialMissed==null) continue;   // день считали до появления статистики
     counted++;
-    const dn=(+r.trialDone||0), mi=(+r.trialMissed||0);
     noCid+=(+r.trialNoCid||0);
-    (r.trialMissedIds||[]).forEach(x=>{ missIds[x]=(missIds[x]||0)+1; });
+    slots+=(+r.trialDone||0)+(+r.trialMissed||0);
+    /* Запасной вариант нужен ОТДЕЛЬНО по каждой стороне: списки id пишутся только когда они
+       непустые, и день может прийти со счётчиком без списка. Общий флаг «есть списки» тогда
+       молча обнулял бы вторую сторону. */
+    const dHas=Array.isArray(r.trialDoneIds), mHas=Array.isArray(r.trialMissedIds);
+    const dIds=new Set((r.trialDoneIds||[]).map(String));
+    const mIds=(r.trialMissedIds||[]).map(String).filter(x=>!dIds.has(x));
+    dIds.forEach(x=>monDone.add(x)); mIds.forEach(x=>monMiss.add(x));
+    const dn=dHas?dIds.size:(+r.trialDone||0);
+    const mi=mHas?new Set(mIds).size:(+r.trialMissed||0);
+    if(!dHas) extraDone+=(+r.trialDone||0);   // детей этого дня по именам не знаем — считаем числом
+    if(!mHas) extraMiss+=(+r.trialMissed||0);
+    sumDone+=dn; sumMiss+=mi;
     if(!dn&&!mi) continue;
-    done+=dn; missed+=mi;
-    const tot=dn+mi, pct=tot?Math.round(100*dn/tot):null;
+    const t=dn+mi, p=t?Math.round(100*dn/t):null;
     rows+=`<tr><td style="text-align:center">${d}</td>
-      <td style="text-align:right"><b>${tot}</b></td>
+      <td style="text-align:right"><b>${t}</b></td>
       <td style="text-align:right;color:var(--green)">${dn||''}</td>
       <td style="text-align:right;color:${mi?'var(--red)':'var(--muted)'}">${mi||''}</td>
-      <td style="text-align:right">${pct!=null?('<b style="color:'+(pct>=70?'var(--green)':(pct>=50?'#C9922E':'var(--red)'))+'">'+pct+'%</b>'):''}</td></tr>`;
+      <td style="text-align:right">${p!=null?('<b style="color:'+(p>=70?'var(--green)':(p>=50?'#C9922E':'var(--red)'))+'">'+p+'%</b>'):''}</td></tr>`;
   }
+  /* Итог за месяц — по уникальным детям: тот, кто дошёл хоть раз, в «не дошли» не попадает.
+     Поэтому сумма по дням может быть больше итога, и это не ошибка. */
+  const missList=[...monMiss].filter(x=>!monDone.has(x));
+  const done=monDone.size+extraDone;
+  const missed=missList.length+extraMiss;
   const tot=done+missed, pct=tot?Math.round(100*done/tot):null;
   const sel=`<div class="hd-actions" style="margin:8px 0">
     <input type="month" class="cell" style="width:auto" value="${_trialMonth}" onchange="trialSetMonth(this.value)">
@@ -12306,7 +12378,7 @@ function _trialsHtml(){
     body=`<div class="callout" style="font-size:13px">Пробных за этот месяц не нашлось. Проверено дней с занятиями: ${counted}.
       <br><span style="font-size:12px;color:var(--muted)">Пробным считается ребёнок с абонементом, в названии которого есть «пробн». Если у вас он называется иначе — скажите, добавлю это название.</span></div>`;
   } else {
-    const names=Object.keys(missIds).map(id=>esc(_trialKidName(id))+(missIds[id]>1?(' ×'+missIds[id]):'')).sort();
+    const names=missList.map(id=>esc(_trialKidName(id))).sort();
     body=`<div class="tscroll" style="max-width:560px"><table><thead><tr>
         <th>Дн</th><th style="text-align:right" title="Пробных занятий, которые должны были состояться">Должно было</th>
         <th style="text-align:right">Дошли</th><th style="text-align:right">Не дошли</th><th style="text-align:right">Дошли, %</th>
@@ -12324,7 +12396,7 @@ function _trialsHtml(){
     ⚠️ У ${noCid} участников занятий не удалось определить ребёнка — Alfa вернула строку без привычного поля с id.
     Эти строки в статистику не попали, то есть цифра занижена. Покажите это сообщение мне, поправлю разбор.</div>`:'';
   return `<h3 style="margin:22px 0 4px">🎯 Пробные занятия</h3>
-    <div style="font-size:12px;color:var(--muted);margin-bottom:2px">Списали деньги за пробное — ребёнок дошёл. Закрыли занятие нулём при действующем пробном абонементе — не дошёл.</div>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:2px">Списали деньги за пробное — ребёнок дошёл. Закрыли занятие нулём при действующем пробном абонементе — не дошёл.<br>Считаются <b>дети</b>, а не занятия: пробный абонемент действует период, и ребёнок внутри него ходит не один раз. Кто дошёл хоть раз — дошёл. Поэтому сумма по дням может быть больше итога.</div>
     ${sel}${body}${warn}`;
 }
 function _salesCronHtml(){

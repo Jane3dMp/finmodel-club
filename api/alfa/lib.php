@@ -401,7 +401,11 @@ function alfa_realization_day(string $date, ?array $branchFilter = null): array 
     /* Пробные считаем ЗДЕСЬ ЖЕ: участники занятий уже прочитаны, отдельный обход Alfa ради
        той же информации был бы чистой тратой. Список пробных детей берётся из кэша. */
     $trials = alfa_trial_customers_cached($branchFilter);
-    $trialSet = $trials['customers'] ?? [];
+    /* Если список не собрался (сбой сети или Alfa проигнорировала фильтр) — пробные за этот день
+       НЕ считаем и НЕ пишем нули: пустая статистика честнее выдуманной. Наружу уходит trialOk,
+       по нему alfa_realization_upsert решает, есть ли что сохранять. */
+    $trialOk = !empty($trials['ok']) && ($trials['filterHonored'] !== false);
+    $trialSet = $trialOk ? ($trials['customers'] ?? []) : [];
     $trialDone = 0; $trialMissed = 0; $trialMissedIds = []; $trialDoneIds = []; $trialNoCid = 0;
     foreach ($les as $L) {
         $bid = (int)$L['branch'];
@@ -498,7 +502,7 @@ function alfa_realization_day(string $date, ?array $branchFilter = null): array 
             'trialDone' => $trialDone, 'trialMissed' => $trialMissed,
             'trialMissedIds' => array_map('intval', array_keys($trialMissedIds)),
             'trialDoneIds' => array_map('intval', array_keys($trialDoneIds)),
-            'trialNoCid' => $trialNoCid, 'trialKnown' => count($trialSet),
+            'trialNoCid' => $trialNoCid, 'trialKnown' => count($trialSet), 'trialOk' => $trialOk,
             'trialFilterHonored' => $trials['filterHonored'] ?? null];
 }
 
@@ -553,8 +557,10 @@ function alfa_realization_upsert(string $date, ?array $branches = null): array {
     /* Пробные за день: сколько состоялось (списали) и сколько не дошло (закрыли нулём при
        действующем пробном абонементе). Кладём в ту же дневную строку — тогда месячная сводка
        собирается из хранилища, без единого обращения к Alfa. */
-    foreach (['trialDone', 'trialMissed', 'trialNoCid'] as $k) if (isset($r[$k])) $row[$k] = (int)$r[$k];
-    foreach (['trialMissedIds', 'trialDoneIds'] as $k) if (!empty($r[$k])) $row[$k] = $r[$k];
+    if (!empty($r['trialOk'])) {
+        foreach (['trialDone', 'trialMissed', 'trialNoCid'] as $k) if (isset($r[$k])) $row[$k] = (int)$r[$k];
+    }
+    if (!empty($r['trialOk'])) foreach (['trialMissedIds', 'trialDoneIds'] as $k) if (!empty($r[$k])) $row[$k] = $r[$k];
     $s = alfa_realization_store_read();
     /* ⚠️ ЗАМОРОЖЕННОЕ «ожидалось» (expect) переносим из старой строки. Иначе его затирал бы
        этот же ежедневный пересчёт: по мере проведения занятий planned падает в ноль, и к концу
@@ -647,9 +653,14 @@ function alfa_trial_customers(?array $branches = null): array {
                 $cid = (int)($it['customer_id'] ?? 0); if (!$cid) continue;
                 $b = alfa_iso((string)($it['b_date'] ?? '')); $e = alfa_iso((string)($it['e_date'] ?? ''));
                 $prev = $out[$cid] ?? null;
-                // у ребёнка может быть несколько пробных за год — держим самый широкий период
-                $out[$cid] = ['from' => ($prev && $prev['from'] !== '' && ($b === '' || $prev['from'] < $b)) ? $prev['from'] : $b,
-                              'to'   => ($prev && ($prev['to'] === '' || ($e !== '' && $prev['to'] > $e))) ? $prev['to'] : $e,
+                /* У ребёнка может быть несколько пробных за год — держим самый широкий период.
+                   ⚠️ Пустая дата означает «без границы», то есть САМОЕ ШИРОКОЕ значение, и должна
+                   побеждать конкретную. Раньше условие проверяло $prev['from'] !== '' и пустая
+                   граница проигрывала — окно сужалось, и пробное переставало засчитываться. */
+                $wideFrom = function ($a, $b) { if ($a === '' || $b === '') return ''; return $a < $b ? $a : $b; };
+                $wideTo   = function ($a, $b) { if ($a === '' || $b === '') return ''; return $a > $b ? $a : $b; };
+                $out[$cid] = ['from' => $prev ? $wideFrom($prev['from'], $b) : $b,
+                              'to'   => $prev ? $wideTo($prev['to'], $e)     : $e,
                               'tariff' => $tid];
             }
         }
@@ -671,7 +682,10 @@ function alfa_trial_customers_cached(?array $branches = null): array {
         if (is_array($j) && (int)($j['ts'] ?? 0) > time() - 7200 && isset($j['data'])) return $memo = $j['data'];
     }
     $d = alfa_trial_customers($branches);
-    @file_put_contents($f, json_encode(['ts' => time(), 'data' => $d], JSON_UNESCAPED_UNICODE), LOCK_EX);
+    /* ⚠️ Неудачную сборку НЕ кэшируем. Иначе один сетевой сбой на два часа превращал бы «список
+       не собрался» в «пробных нет», и это уезжало бы в дневные строки как честный ноль — то есть
+       в отчёт попадали бы выдуманные цифры, которые потом не отличить от настоящих. */
+    if (!empty($d['ok'])) @file_put_contents($f, json_encode(['ts' => time(), 'data' => $d], JSON_UNESCAPED_UNICODE), LOCK_EX);
     return $memo = $d;
 }
 /* Достать id ребёнка из строки участника занятия. Имя поля в Alfa не документировано, а от него

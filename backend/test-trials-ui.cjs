@@ -52,13 +52,34 @@ const h4=run(Object.fromEntries([day(2,{lessons:12,trialDone:1,trialMissed:0,tri
 t('предупреждение показано', h4.includes('не удалось определить ребёнка'));
 t('сказано, что цифра занижена', h4.includes('цифра занижена'));
 
-console.log('--- 5. повторное пробное у одного ребёнка ---');
+console.log('--- 5. считаем ДЕТЕЙ, а не занятия ---');
+// пробный абонемент действует период, и ребёнок внутри него ходит не один раз.
+// Раньше каждое такое занятие засчитывалось как отдельное пробное — цифра раздувалась.
 const h5=run(Object.fromEntries([
   day(2,{lessons:12,trialDone:0,trialMissed:1,trialMissedIds:[501]}),
   day(9,{lessons:12,trialDone:0,trialMissed:1,trialMissedIds:[501]}),
 ]),{children:{'501':{name:'Аня Петрова'}},grid:[]});
-t('показано, что не дошёл дважды', h5.includes('Аня Петрова ×2'));
+t('один ребёнок за месяц посчитан один раз', h5.includes('Кто не дошёл (1)'));
+t('и в списке он один раз, без «×2»', !h5.includes('×2'));
 
+console.log('--- 6. пришёл хотя бы раз — значит дошёл ---');
+// ребёнок пропустил занятие 2-го, но на пробное 9-го пришёл: в «не дошли» он попасть не должен
+const h6=run(Object.fromEntries([
+  day(2,{lessons:12,trialDone:0,trialMissed:1,trialMissedIds:[501]}),
+  day(9,{lessons:12,trialDone:1,trialMissed:0,trialDoneIds:[501]}),
+]),{children:{'501':{name:'Аня Петрова'}},grid:[]});
+t('в «не дошли» не попал', !h6.includes('Кто не дошёл'));
+t('засчитан дошедшим', h6.includes('100%'));
+
+console.log('--- 7. день со счётчиком, но без списка имён ---');
+// списки id пишутся только когда непустые: сторона без списка должна считаться по счётчику,
+// иначе она молча обнулялась бы
+const h7=run(Object.fromEntries([
+  day(2,{lessons:12,trialDone:3,trialMissed:1,trialMissedIds:[501]}),
+]),{children:{},grid:[]});
+t('дошедшие взяты из счётчика', h7.includes('>3</b>'));
+t('недошедшие взяты из списка', h7.includes('Кто не дошёл (1)'));
+t('итого 4', h7.includes('>4</b>'));
 
 if (bad) { console.log(String.fromCharCode(10) + "провалено проверок: " + bad); process.exit(1); }
 console.log(String.fromCharCode(10) + "всё сошлось");
