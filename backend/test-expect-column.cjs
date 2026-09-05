@@ -15,6 +15,12 @@ function eq(name, got, want) { check(name, got === want, JSON.stringify(got) + '
 
 const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
 const m = html.match(/\nfunction _realHtml\([^)]*\)\s*\{[\s\S]*?\n\}/m);
+// _realHtml подписывает, когда снимался недельный снимок. Берём НАСТОЯЩУЮ _realSnapNote,
+// а не заглушку: подпись под кнопками — то, по чему видно, отработал ли воскресный cron.
+const iSnap = html.indexOf('function _realSnapNote(');
+const eSnap = html.indexOf(String.fromCharCode(10) + '}', iSnap);
+if (iSnap < 0 || eSnap < 0) { console.log('не найдено в index.html: _realSnapNote'); process.exit(1); }
+const snapSrc = html.slice(iSnap, eSnap + 2);
 if (!m) { console.log('не найдено в index.html: _realHtml'); process.exit(1); }
 
 /* --- сентябрь 2026, сегодня 10-е ---
@@ -22,6 +28,11 @@ if (!m) { console.log('не найдено в index.html: _realHtml'); process.e
    7–10  прошли, ожидание заморожено в вс 06.09 → есть %
    11–13 впереди, заморожено                    → % ещё нет
    14–16 впереди, НЕ заморожено                 → живая цифра без замка */
+/* Подпись про снимок берёт неделю от реальных часов (nextMon), поэтому ключ считаем так же,
+   иначе тест начнёт падать в другой день. */
+const _d = new Date(); const _w = _d.getDay() === 0 ? 7 : _d.getDay();
+_d.setDate(_d.getDate() - (_w - 1) + 7);
+const NEXT_MON = _d.getFullYear() + '-' + String(_d.getMonth() + 1).padStart(2, '0') + '-' + String(_d.getDate()).padStart(2, '0');
 const store = {};
 const put = (d, o) => { store['2026-09-' + String(d).padStart(2, '0')] = Object.assign(
   { present: 0, all: 0, planned: 0, lessons: 0, plannedLessons: 0 }, o); };
@@ -45,8 +56,9 @@ const ctx = {
   esc: s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'),
   _realBranchLabel: () => 'Пожарный, 19',
   location: { origin: 'https://app.proznanie.club' },
+  _weekPlans: { [NEXT_MON]: { ts, expectFrozen: 7 } },
 };
-const API = new Function('ctx', 'with (ctx) { ' + m[0] + ' return {_realHtml}; }')(ctx);
+const API = new Function('ctx', 'with (ctx) { ' + m[0] + ';' + snapSrc + ' return {_realHtml, _realSnapNote}; }')(ctx);
 const h = API._realHtml();
 
 /* --- разбор строк таблицы без DOM: колонки по порядку --- */
@@ -117,6 +129,15 @@ ctx._realStore = { '2026-09-02': { present: 1783, all: 1805, planned: 0, lessons
 const h0 = API._realHtml();
 check('без заморозок — понятное объяснение, а не пустая колонка',
       h0.indexOf('ожидание не зафиксировано') > 0);
+
+
+/* Подпись про недельный снимок: по ней видно, отработал ли воскресный cron_weekplan.php.
+   Расписание задач живёт в панели хостинга, из приложения его не проверить. */
+check('снимок недели показан в подписи', h.includes('Снимок недели с ' + NEXT_MON), h.slice(h.indexOf('Снимок'), h.indexOf('Снимок') + 90));
+check('видно, сколько дней зафиксировано', h.includes('дней зафиксировано: 7'));
+check('свежий снимок не помечается тревогой', !API._realSnapNote(NEXT_MON).includes('не отрабатывает'));
+check('снимка нет — сказано прямо и с подсказкой',
+    API._realSnapNote('2099-01-04').includes('ещё не было') && API._realSnapNote('2099-01-04').includes('не заведена'));
 
 console.log(bad ? '\n❌ провалено проверок: ' + bad : '\n✅ всё сошлось');
 process.exit(bad ? 1 : 0);
