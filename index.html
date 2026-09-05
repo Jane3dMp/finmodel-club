@@ -1916,7 +1916,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-09-05-04";
+const APP_VER="2026-09-05-05";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -11172,7 +11172,10 @@ function _realRebHtml(j){
   const trust=!!(c&&c.offPct!=null&&Math.abs(c.offPct)<=5);
   return `<div class="callout" style="border-color:${trust?'var(--green)':'var(--terra)'};margin-bottom:12px">
     <b>Расчёт готов — пока НИЧЕГО не записано.</b><br>
-    Нумерация дней в Alfa подобрана по расписанию: <b>${esc(MODES[j.mode]||j.mode)}</b> (сверено по неделе с ${esc(j.calibWeek)}, сошлось точно).<br>
+    Нумерация дней в Alfa подобрана по расписанию: <b>${esc(MODES[j.mode]||j.mode)}</b> — сверено по неделе с ${esc(j.calibWeek)}${
+      j.residual
+        ? `, разошлось на ${j.residual} зан. из ${j.totalLessons} (разовые занятия в регулярном расписании не лежат — это норма)`
+        : `, сошлось день в день`}.<br>
     Неделя с ${esc(j.week)}, восстановленное ожидание — <b>${_gm(j.total)}</b>:
     <div class="tscroll" style="max-width:560px;margin-top:6px"><table><thead><tr><th>День</th>
       <th style="text-align:right">Ожидалось</th><th style="text-align:right">Групп</th><th style="text-align:right">Детей</th><th style="text-align:right" title="Детей, у которых не нашлась цена занятия">Без цены</th></tr></thead><tbody>${rows}</tbody></table></div>

@@ -73,7 +73,7 @@ $rl0 = [];
 foreach ([101, 102] as $g) $rl0[] = $mk(0, $g);
 foreach ([201, 202, 203] as $g) $rl0[] = $mk(2, $g);
 $rl0[] = $mk(4, 301);
-$v0 = alfa_day_mode_verdict(alfa_day_mode_pick($rl0, $MON, $ref));
+$v0 = alfa_day_mode_verdict(alfa_day_mode_pick($rl0, $MON, $ref), $ref);
 yes('нумерация 0=пн тоже распознаётся', $v0['ok'], $v0['why'] ?? '');
 ok('и это zero', $v0['mode'] ?? null, 'zero');
 
@@ -82,7 +82,7 @@ $rls = [];
 foreach ([101, 102] as $g) $rls[] = $mk(2, $g);   // пн
 foreach ([201, 202, 203] as $g) $rls[] = $mk(4, $g);   // ср
 $rls[] = $mk(6, 301);                                   // пт
-$vs = alfa_day_mode_verdict(alfa_day_mode_pick($rls, $MON, $ref));
+$vs = alfa_day_mode_verdict(alfa_day_mode_pick($rls, $MON, $ref), $ref);
 yes('нумерация 1=вс тоже распознаётся', $vs['ok'], $vs['why'] ?? '');
 ok('и это sun1', $vs['mode'] ?? null, 'sun1');
 
@@ -92,11 +92,43 @@ $vEmpty = alfa_day_mode_verdict(alfa_day_mode_pick([], $MON, ['2026-09-07' => 0,
 yes('пустая неделя не различает режимы — отказ', !$vEmpty['ok']);
 ok('и причина названа', $vEmpty['why'], 'эталонная неделя не различает режимы нумерации');
 
-$vBad = alfa_day_mode_verdict(alfa_day_mode_pick($rl, $MON,
-    ['2026-09-07' => 9, '2026-09-08' => 9, '2026-09-09' => 9, '2026-09-10' => 9,
-     '2026-09-11' => 9, '2026-09-12' => 9, '2026-09-13' => 9]));
-yes('расписание не бьётся с фактом — отказ', !$vBad['ok']);
-ok('и причина названа', $vBad['why'], 'ни один режим не сошёлся с расписанием');
+$flat = ['2026-09-07' => 9, '2026-09-08' => 9, '2026-09-09' => 9, '2026-09-10' => 9,
+         '2026-09-11' => 9, '2026-09-12' => 9, '2026-09-13' => 9];
+$vBad = alfa_day_mode_verdict(alfa_day_mode_pick($rl, $MON, $flat), $flat);
+yes('ровная неделя не даёт различить режимы — отказ', !$vBad['ok']);
+ok('и причина названа', $vBad['why'], 'эталонная неделя не различает режимы нумерации');
+
+/* режим определяется однозначно, но расписание всё равно далеко от факта:
+   в четверг Alfa показывает 40 занятий, которых в регулярном расписании нет вовсе */
+$offRef = ['2026-09-07' => 2, '2026-09-08' => 0, '2026-09-09' => 3, '2026-09-10' => 40,
+           '2026-09-11' => 1, '2026-09-12' => 0, '2026-09-13' => 0];
+$vOff = alfa_day_mode_verdict(alfa_day_mode_pick($rl, $MON, $offRef), $offRef);
+yes('расписание не сходится с фактом — отказ', !$vOff['ok']);
+yes('и причина про расхождение', strpos((string)$vOff['why'], 'не сходится') !== false, (string)$vOff['why']);
+
+/* --- 5б. РЕАЛЬНЫЙ случай из клуба (05.09.2026): iso промахнулся на одно разовое занятие
+   из 138, остальные режимы — на 50 и 61. Нумерация очевидна, и требовать идеала здесь нельзя. --- */
+$realRef = ['2026-09-07' => 19, '2026-09-08' => 14, '2026-09-09' => 15, '2026-09-10' => 13,
+            '2026-09-11' => 11, '2026-09-12' => 36, '2026-09-13' => 30];
+$realScore = [
+    ['mode' => 'iso',  'diff' => 1,  'compared' => 7, 'exact' => 6, 'calc' => []],
+    ['mode' => 'sun1', 'diff' => 50, 'compared' => 7, 'exact' => 0, 'calc' => []],
+    ['mode' => 'zero', 'diff' => 61, 'compared' => 7, 'exact' => 0, 'calc' => []],
+];
+$vReal = alfa_day_mode_verdict($realScore, $realRef);
+yes('одно разовое занятие не мешает определить нумерацию', $vReal['ok'], (string)($vReal['why'] ?? ''));
+ok('выбран iso', $vReal['mode'] ?? null, 'iso');
+ok('остаток показан честно', $vReal['residual'], 1);
+ok('и масштаб недели тоже', $vReal['totalLessons'], 138);
+
+/* но если бы отрыв от второго режима был мал — отказ, даже при крошечном остатке */
+$vClose = alfa_day_mode_verdict([
+    ['mode' => 'iso',  'diff' => 1, 'compared' => 7, 'exact' => 6, 'calc' => []],
+    ['mode' => 'zero', 'diff' => 3, 'compared' => 7, 'exact' => 5, 'calc' => []],
+    ['mode' => 'sun1', 'diff' => 60, 'compared' => 7, 'exact' => 0, 'calc' => []],
+], $realRef);
+yes('близкие режимы — отказ', !$vClose['ok']);
+yes('и причина про близость', strpos((string)$vClose['why'], 'слишком близки') !== false, (string)$vClose['why']);
 
 $vFew = alfa_day_mode_verdict(alfa_day_mode_pick($rl, $MON, ['2026-09-07' => 2, '2026-09-09' => 3]));
 yes('слишком мало дней для сверки — отказ', !$vFew['ok']);

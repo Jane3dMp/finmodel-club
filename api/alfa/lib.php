@@ -904,14 +904,35 @@ function alfa_day_mode_pick(array $items, string $refMon, array $refLessonsPerDa
 /* Режим засчитан только если он сошёлся ТОЧНО по всем сверенным дням и при этом
    единственный такой: два одинаково хороших режима означают, что неделя их не различает
    (например, занятия стоят симметрично) — тогда выбирать наугад нельзя. */
-function alfa_day_mode_verdict(array $score): array {
+function alfa_day_mode_verdict(array $score, array $refLessons = []): array {
     $best = $score[0] ?? null;
     if (!$best || $best['compared'] < 3) return ['ok' => false, 'why' => 'мало дней для сверки', 'score' => $score];
-    if ($best['diff'] !== 0) return ['ok' => false, 'why' => 'ни один режим не сошёлся с расписанием', 'score' => $score];
+    $total = 0;
+    foreach ($refLessons as $n) $total += (int)$n;
+
+    /* Ничья отвергается всегда: если два режима описывают неделю одинаково хорошо, она их просто
+       не различает (например, занятий нет вовсе), и выбирать не из чего. */
     $ties = 0;
-    foreach ($score as $s) if ($s['diff'] === 0) $ties++;
+    foreach ($score as $s) if ($s['diff'] === $best['diff']) $ties++;
     if ($ties > 1) return ['ok' => false, 'why' => 'эталонная неделя не различает режимы нумерации', 'score' => $score];
-    return ['ok' => true, 'mode' => $best['mode'], 'score' => $score];
+
+    /* Идеального совпадения не требуем. Разовые занятия (отработки, переносы) в регулярном
+       расписании не лежат, поэтому пара занятий расхождения — норма, а не признак неверной
+       нумерации. Важно другое: остаток должен быть мал НА ФОНЕ недели, а победитель —
+       отрываться от следующего с большим запасом. Неверная нумерация промахивается не на
+       проценты, а в разы: она раскладывает те же занятия по другим дням. */
+    $slack = $total > 0 ? max(2, (int)round($total * 0.05)) : 0;
+    if ($total > 0 && $best['diff'] > $slack) {
+        return ['ok' => false, 'why' => 'расписание не сходится с тем, что показывает Alfa (расхождение '
+               . $best['diff'] . ' занятий из ' . $total . ')', 'score' => $score];
+    }
+    $second = $score[1]['diff'] ?? PHP_INT_MAX;
+    if ($second < $best['diff'] * 5 + 3) {
+        return ['ok' => false, 'why' => 'режимы нумерации слишком близки, чтобы выбрать уверенно ('
+               . $best['diff'] . ' против ' . $second . ')', 'score' => $score];
+    }
+    return ['ok' => true, 'mode' => $best['mode'], 'residual' => $best['diff'],
+            'totalLessons' => $total, 'score' => $score];
 }
 
 /* Регулярное расписание клубных филиалов целиком (с пометкой филиала — она нужна для цен). */
@@ -972,7 +993,7 @@ function alfa_expect_rebuild_week(string $mondayIso, ?array $branches = null, bo
         $d = date('Y-m-d', strtotime("+$i day", strtotime($ref)));
         $refLessons[$d] = (int)($store[$d]['plannedLessons'] ?? 0);
     }
-    $verdict = alfa_day_mode_verdict(alfa_day_mode_pick($items, $ref, $refLessons));
+    $verdict = alfa_day_mode_verdict(alfa_day_mode_pick($items, $ref, $refLessons), $refLessons);
     if (empty($verdict['ok'])) {
         return ['ok' => false, 'week' => $mon, 'calibWeek' => $ref, 'why' => $verdict['why'],
                 'refLessons' => $refLessons, 'score' => $verdict['score']];
@@ -1033,7 +1054,9 @@ function alfa_expect_rebuild_week(string $mondayIso, ?array $branches = null, bo
     }
     return ['ok' => true, 'week' => $mon, 'mode' => $mode, 'calibWeek' => $ref, 'days' => $out,
             'total' => round($total, 2), 'applied' => $apply, 'written' => $written,
-            'kept' => $kept, 'noRow' => $noRow, 'check' => $check, 'score' => $verdict['score']];
+            'kept' => $kept, 'noRow' => $noRow, 'check' => $check, 'score' => $verdict['score'],
+            'residual' => $verdict['residual'] ?? 0, 'totalLessons' => $verdict['totalLessons'] ?? 0,
+            'refLessons' => $refLessons];
 }
 
 /* --- НЕДЕЛЬНЫЙ ПРОГНОЗ (снимок) ---
