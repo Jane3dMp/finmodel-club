@@ -1916,7 +1916,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-09-05-06";
+const APP_VER="2026-09-05-07";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -12755,7 +12755,13 @@ function _pubErrHtml(e,where){
   const human=/failed to fetch|networkerror|load failed/i.test(msg)
     ? "соединение оборвалось, ответа не было (обычно Alfa отвечала дольше, чем позволяет хостинг). Попробуйте ещё раз."
     : msg;
-  let h=`<div class="callout" style="border-color:var(--red)">Не получилось: ${esc(human)}</div>`;
+  /* Страница проверки хостинга — не поломка модели, а препятствие с известным обходом.
+     Готовый блок с кнопкой «Открыть проверку» и советом снять защиту с /finmodel/api/ уже был,
+     но висел только на диагностике amo — здесь его не хватало, и адрес приходилось копировать
+     руками из текста ошибки. */
+  const isChal=/Секундочку|не пропустил запрос|страница проверки/i.test(msg);
+  let h=`<div class="callout" style="border-color:var(--red)">Не получилось: ${esc(human)}${
+    isChal?_challengeFixHTML():""}</div>`;
   if(d&&(d.alfa||d.sent)) h+=`<details style="margin-top:6px"><summary style="cursor:pointer;font-size:12px;color:var(--muted)">Что мы отправили и что ответила Alfa</summary>
     <pre style="white-space:pre-wrap;font-size:11px;background:var(--paper);padding:6px;border-radius:6px;max-height:30vh;overflow:auto">${
       esc(JSON.stringify({отправили:d.sent,ответ:d.alfa,филиал:d.branch},null,1))}</pre></details>`;
@@ -14808,8 +14814,10 @@ function _challengeFixHTML(){
       <button class="btn ghost sm" onclick="window.open(ALFA_PROXY+'?action=ping','_blank')">Открыть проверку · Альфа</button>
       <button class="btn ghost sm" onclick="window.open(AMO_PROXY+'?action=ping','_blank')">Открыть проверку · amo</button>
     </div>
-    <div style="margin-top:6px;color:var(--muted)">Не помогло — защиту снимает хостинг: попросите
-    исключить путь <code>/finmodel/api/</code> из проверки, это внутренний API самого сайта.</div></div>`;
+    <div style="margin-top:6px;color:var(--muted)"><b>Если проверка возвращается снова и снова</b> — обходить её по кругу бесполезно,
+    защиту должен снять хостинг: попросите исключить путь <code>/finmodel/api/</code> из проверки. Это внутренний API самого
+    сайта, а не трафик извне, и проверять его незачем. Тяжёлые запросы (восстановление ожидания, обновление месяца) идут
+    дольше и чаще попадают под подозрение — их без этого исключения нормально не сделать.</div></div>`;
 }
 async function amoDiag(){
   const body=document.getElementById("amoNewBody");
