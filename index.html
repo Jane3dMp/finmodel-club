@@ -1916,7 +1916,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-09-05-08";
+const APP_VER="2026-09-05-09";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -10979,6 +10979,19 @@ async function _realRender(){
   body.innerHTML=_realHtml();
 }
 function realSetMonth(v){ if(v){ _realMonth=v; } const b=document.getElementById("admBody"); if(b) b.innerHTML=_realHtml(); }
+/* Когда последний раз снимался недельный снимок. Нужно, чтобы было ВИДНО, отработал ли
+   воскресный cron: расписание задач живёт в панели хостинга, из приложения его не проверить,
+   и без этой строки «сделал ли крон своё дело» выясняется гаданием. */
+function _realSnapNote(mon){
+  const w=(_weekPlans||{})[mon];
+  if(!w||!w.ts) return `Снимка на неделю с ${esc(mon)} ещё не было. Если он не появится после воскресенья 22:00 — задача cron_weekplan.php в панели хостинга не заведена.`;
+  const d=new Date(w.ts); const dn=["вс","пн","вт","ср","чт","пт","сб"];
+  const t=String(w.ts).replace("T"," ").slice(0,16);
+  const stale=isNaN(d.getTime())||(Date.now()-d.getTime())>8*24*3600*1000;
+  return `Снимок недели с ${esc(mon)} сделан ${esc(t)}${isNaN(d.getTime())?"":" ("+dn[d.getDay()]+")"}${
+    w.expectFrozen!=null?(", дней зафиксировано: "+w.expectFrozen):""}.${
+    stale?" ⚠️ Снимку больше недели — похоже, воскресный cron не отрабатывает.":""}`;
+}
 function _realHtml(){
   const [Y,M]=_realMonth.split('-').map(Number);
   const dim=new Date(Y,M,0).getDate();
@@ -11054,6 +11067,7 @@ function _realHtml(){
       ? ' — сейчас это <b>следующая</b> неделя с '+esc(nextMon)+', текущая уже зафиксирована.'
       : ' — сейчас это <b>текущая</b> неделя с '+esc(curMon)+': её ещё не фиксировали, и её будущие дни пропадут, если не заморозить до того, как занятия пройдут.'
     } Дни, где занятия уже проведены, кнопка не трогает — им ожидание восстанавливают отдельно.</div>
+  <div style="font-size:12px;color:var(--muted);margin:-4px 0 10px">${_realSnapNote(nextMon)}</div>
   <div class="tscroll" style="max-width:820px"><table><thead><tr>
     <th>Дн</th><th style="text-align:right">Без пропусков</th><th style="text-align:right">С пропусками</th><th style="text-align:right" title="Сколько ожидали ДО начала недели — зафиксировано в вс 22:00 и не меняется">Ожидается</th><th style="text-align:right" title="Реализация от ожидания: (без пропусков + с пропусками) ÷ 2 ÷ ожидание">%</th><th style="text-align:right" title="Нарастающим итогом: среднее «без пропусков» и «с пропусками» — тот же доход, что во «Все показатели» и «Прогноз по всем»">Накопительно</th><th style="text-align:center">Занятий</th>
   </tr></thead><tbody>${rows}
