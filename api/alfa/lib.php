@@ -1569,12 +1569,31 @@ function alfa_ref_branch(int $branch, string $entity, int $timeout = 12): ?array
 }
 
 // Имена филиалов: id => name.
+/* Справочник филиалов меняется раз в год, а спрашивается на КАЖДОМ действии прокси — и по два
+   раза за одно: alfa_realization_branches() внутри зовёт его же. Из-за этого даже чтение
+   локального хранилища («открыть Реализацию») требовало двух живых ответов Alfa, и стоило ей
+   задуматься — раздел падал с «соединение оборвалось», хотя все данные лежат в файле рядом.
+   Кэшируем дважды: в памяти на время запроса и в файле на 12 часов. */
 function alfa_branch_names(): array {
+    static $memo = null;
+    if ($memo !== null) return $memo;
+    $f = cache_dir() . '/alfa_branches.json';
+    if (is_file($f)) {
+        $c = json_decode((string)@file_get_contents($f), true);
+        if (is_array($c) && (int)($c['ts'] ?? 0) > time() - 43200 && !empty($c['names']) && is_array($c['names'])) {
+            $out = [];
+            foreach ($c['names'] as $k => $v) $out[(int)$k] = (string)$v;   // json вернул ключи строками
+            return $memo = $out;
+        }
+    }
     $r = alfa_http('POST', 'https://' . alfa_host() . '/v2api/branch/index',
         ['is_active' => 1, 'page' => 0], alfa_token(), true, 8);
     $out = [];
     foreach (($r['items'] ?? []) as $b) { if (isset($b['id'])) $out[(int)$b['id']] = (string)($b['name'] ?? ''); }
-    return $out;
+    /* Пустой ответ НЕ кэшируем: один сетевой сбой иначе залип бы на 12 часов, и «филиал
+       «Пожарный» не найден» держалось бы полдня на ровном месте. */
+    if ($out) @cache_write($f, json_encode(['ts' => time(), 'names' => $out], JSON_UNESCAPED_UNICODE));
+    return $memo = $out;
 }
 
 // Прочитать справочник целиком (index, до 500 записей) → массив items с нужными полями.
