@@ -141,5 +141,41 @@ $STORE = $STORE2;
 $w = alfa_expect_freeze('2026-09-11');           // пятница
 ok('пятница указывает на свой понедельник', $w['week'], $MON);
 
+/* --- 8. воскресный снимок обновляет ЕЩЁ НЕ НАЧАВШУЮСЯ неделю, но не трогает начавшуюся.
+   Иначе достаточно кому-то в среду открыть прогноз — автоснимок заморозит следующую неделю по
+   среде, и воскресный cron уже ничего не обновит: раз записанное expect он не трогает. --- */
+$FUT = date('Y-m-d', strtotime('monday next week'));   // неделя, которая ещё не началась
+$DAY = []; $STORE = [];
+for ($i = 0; $i < 7; $i++) {
+    $d = date('Y-m-d', strtotime("+$i day", strtotime($FUT)));
+    $DAY[$d] = ['present' => 0, 'all' => 0, 'planned' => 1000.0, 'lessons' => 0, 'plannedLessons' => 5];
+    alfa_realization_upsert($d);
+}
+$first = alfa_expect_freeze($FUT);                       // «кто-то открыл прогноз в среду»
+ok('первый снимок заморозил неделю', $first['frozen'], 7);
+ok('в понедельник записана тысяча', (float)$STORE[$FUT]['expect'], 1000.0);
+
+// расписание уточнили: детей дописали, суммы выросли
+foreach ($DAY as $d => $v) { $DAY[$d]['planned'] = 1400.0; alfa_realization_upsert($d); }
+$noForce = alfa_expect_freeze($FUT);
+ok('без force воскресный cron ничего бы не обновил', $noForce['frozen'], 0);
+ok('и понедельник остался бы со старой тысячей', (float)$STORE[$FUT]['expect'], 1000.0);
+
+$forced = alfa_expect_freeze($FUT, null, true);          // так теперь зовёт alfa_weekplan_snapshot
+ok('force пересобрал будущую неделю', $forced['frozen'], 7);
+ok('понедельник взял свежую сумму', (float)$STORE[$FUT]['expect'], 1400.0);
+
+/* а начавшуюся неделю трогать нельзя: проведённые дни защищены даже под force */
+$PAST = date('Y-m-d', strtotime('monday last week'));
+$STORE = []; $DAY = [];
+$d1 = $PAST; $d2 = date('Y-m-d', strtotime('+1 day', strtotime($PAST)));
+$DAY[$d1] = ['present' => 900.0, 'all' => 950.0, 'planned' => 0.0, 'lessons' => 8, 'plannedLessons' => 0];
+$DAY[$d2] = ['present' => 0, 'all' => 0, 'planned' => 700.0, 'lessons' => 0, 'plannedLessons' => 4];
+alfa_realization_upsert($d1); alfa_realization_upsert($d2);
+$STORE[$d1]['expect'] = 1200.0;                          // ожидание было снято вовремя
+$mix = alfa_expect_freeze($PAST, null, true);
+ok('проведённый день не тронут даже под force', (float)$STORE[$d1]['expect'], 1200.0);
+ok('а непроведённый пересобран', (float)$STORE[$d2]['expect'], 700.0);
+
 echo $bad ? "\n❌ провалено проверок: $bad\n" : "\n✅ всё сошлось\n";
 exit($bad ? 1 : 0);

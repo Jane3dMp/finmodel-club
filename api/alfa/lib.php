@@ -1155,8 +1155,17 @@ function alfa_weekplan_snapshot(string $mondayIso, ?array $branches = null): arr
         $days[$d] = ['present' => $r['present'], 'all' => $r['all'], 'planned' => $r['planned']];
     }
     /* Заодно замораживаем подневное «ожидалось» — тем же снимком, что и недельный прогноз.
-       Строго после upsert-ов выше: они только что положили в planned свежее расписание. */
-    $exp = alfa_expect_freeze($mon, $branches);
+       Строго после upsert-ов выше: они только что положили в planned свежее расписание.
+
+       ⚠️ Если неделя ЕЩЁ НЕ НАЧАЛАСЬ — пересобираем ожидание принудительно, по самому свежему
+       расписанию. Смысл воскресного снимка в том, чтобы поймать расписание как можно ближе к
+       старту недели. Без этого достаточно было кому-то в среду открыть «Прогноз по всем» —
+       автоснимок морозил следующую неделю по среде, и воскресный cron уже ничего не обновлял
+       (раз записанное expect он не трогает). Неприкосновенным ожидание становится с началом
+       недели: начавшуюся неделю force здесь не тронет, а прошедшие дни защищены и внутри
+       alfa_expect_freeze. */
+    $fresh = $mon > date('Y-m-d');
+    $exp = alfa_expect_freeze($mon, $branches, $fresh);
     $store = alfa_weekplan_read();
     $store[$mon] = ['plan' => $fc['forecast'], 'lessons' => $fc['lessons'], 'groups' => ($fc['groups'] ?? 0),
                     'alreadyDone' => round($donePart, 2), 'src' => 'alfa', 'ts' => date('c'),
