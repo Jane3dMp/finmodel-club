@@ -17,7 +17,8 @@ const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
 const NAMES = ['_salesNum', '_salesCfg', '_ratAgg', '_ratSubjToCourse', '_ratModelTeacher',
                'fixRateByName', '_ratWage', '_ratTeacherName',
                '_salesTops', '_salesWeekText', '_salesMonthText',
-               '_salesReports', '_salesCur', '_salesDate', '_salesMonName', '_salesHtml', '_salesCronHtml'];
+               '_salesReports', '_salesCur', '_salesDate', '_salesMonName', '_salesHtml', '_salesCronHtml',
+               '_trialKidName', '_trialsHtml'];
 const ONE_LINERS = ['_salesMonthEnd', '_salesMonday'];   // тело в одну строку — своя регулярка
 let src = '';
 function grab(name, re) {
@@ -64,10 +65,11 @@ const ctx = {
   _pubErrHtml: e => '<div class="callout">Не получилось: ' + ((e && e.message) || e) + '</div>',
   _salesStore: null, _salesWeek: null, _salesErr: null,
   _todayIso: () => '2025-11-05',
+  _trialMonth: '2025-10', _salesRefresh: () => {},
   location: { origin: 'https://app.proznanie.club' },
 };
 const API = new Function('ctx', 'with (ctx) { ' + src +
-  ' return {_salesNum,_salesTops,_salesWeekText,_salesMonthText,_salesMonthEnd,_salesCfg,_salesHtml}; }')(ctx);
+  ' return {_salesNum,_salesTops,_salesWeekText,_salesMonthText,_salesMonthEnd,_salesCfg,_salesHtml,_trialsHtml}; }')(ctx);
 
 /* ================= формат чисел (как в чате: 22.578) ================= */
 eq('число с разделителем тысяч', API._salesNum(22578), '22.578');

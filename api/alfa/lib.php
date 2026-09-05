@@ -398,6 +398,11 @@ function alfa_realization_day(string $date, ?array $branchFilter = null): array 
     $present = 0.0; $all = 0.0; $nPresent = 0; $nAll = 0; $processed = 0; $noDet = 0;
     $planned = 0.0; $nPlanned = 0; $plannedLessons = 0; $doneLessons = 0;
     $sampleDetail = null; $samplePlanned = null; $cache = []; $byBranch = []; $byTeacher = []; $wageRows = [];
+    /* Пробные считаем ЗДЕСЬ ЖЕ: участники занятий уже прочитаны, отдельный обход Alfa ради
+       той же информации был бы чистой тратой. Список пробных детей берётся из кэша. */
+    $trials = alfa_trial_customers_cached($branchFilter);
+    $trialSet = $trials['customers'] ?? [];
+    $trialDone = 0; $trialMissed = 0; $trialMissedIds = []; $trialDoneIds = []; $trialNoCid = 0;
     foreach ($les as $L) {
         $bid = (int)$L['branch'];
         if (!isset($byBranch[$bid])) $byBranch[$bid] = ['present' => 0.0, 'all' => 0.0, 'lessons' => 0];
@@ -416,6 +421,12 @@ function alfa_realization_day(string $date, ?array $branchFilter = null): array 
         if ($L['done']) {
             $att = 0;
             foreach ((array)($found['details'] ?? []) as $d2) { if (is_array($d2) && !empty($d2['is_attend'])) $att++; }
+            if ($trialSet) {
+                $tc = alfa_trial_count_details((array)($found['details'] ?? []), $trialSet, $date);
+                $trialDone += $tc['done']; $trialMissed += $tc['missed']; $trialNoCid += $tc['noCid'];
+                foreach ($tc['missedIds'] as $x) $trialMissedIds[$x] = 1;
+                foreach ($tc['doneIds'] as $x) $trialDoneIds[$x] = 1;
+            }
             foreach (($L['teachers'] ?? []) as $tid0) {
                 if (!isset($wageRows[$tid0])) $wageRows[$tid0] = [];
                 $k2 = ((int)$L['subject']) . '|' . $att . '|' . ((int)$L['minutes']);
@@ -483,7 +494,12 @@ function alfa_realization_day(string $date, ?array $branchFilter = null): array 
             'realizationPlanned' => round($planned, 2), 'plannedCount' => $nPlanned,
             'attendedCount' => $nPresent, 'chargedCount' => $nAll,
             'lessonsProcessed' => $processed, 'lessonsNoDetails' => $noDet,
-            'sampleDetail' => $sampleDetail, 'samplePlanned' => $samplePlanned];
+            'sampleDetail' => $sampleDetail, 'samplePlanned' => $samplePlanned,
+            'trialDone' => $trialDone, 'trialMissed' => $trialMissed,
+            'trialMissedIds' => array_map('intval', array_keys($trialMissedIds)),
+            'trialDoneIds' => array_map('intval', array_keys($trialDoneIds)),
+            'trialNoCid' => $trialNoCid, 'trialKnown' => count($trialSet),
+            'trialFilterHonored' => $trials['filterHonored'] ?? null];
 }
 
 /* --- Хранилище посчитанной реализации по дням ---
@@ -534,6 +550,11 @@ function alfa_realization_upsert(string $date, ?array $branches = null): array {
     $row = ['present' => $r['realizationPresent'], 'all' => $r['realizationAll'],
             'planned' => $r['realizationPlanned'], 'lessons' => $r['lessons'],
             'plannedLessons' => $r['plannedLessons'], 'byTeacher' => $r['byTeacher'] ?? [], 'ts' => date('c')];
+    /* Пробные за день: сколько состоялось (списали) и сколько не дошло (закрыли нулём при
+       действующем пробном абонементе). Кладём в ту же дневную строку — тогда месячная сводка
+       собирается из хранилища, без единого обращения к Alfa. */
+    foreach (['trialDone', 'trialMissed', 'trialNoCid'] as $k) if (isset($r[$k])) $row[$k] = (int)$r[$k];
+    foreach (['trialMissedIds', 'trialDoneIds'] as $k) if (!empty($r[$k])) $row[$k] = $r[$k];
     $s = alfa_realization_store_read();
     /* ⚠️ ЗАМОРОЖЕННОЕ «ожидалось» (expect) переносим из старой строки. Иначе его затирал бы
        этот же ежедневный пересчёт: по мере проведения занятий planned падает в ноль, и к концу
@@ -579,6 +600,108 @@ function alfa_expect_freeze(string $mondayIso, ?array $branches = null, bool $fo
             'total' => round(array_sum(array_map('floatval', array_filter($days, 'is_numeric'))), 2)];
 }
 function alfa_cron_key(): string { return (string)(cfg()['cron_key'] ?? ''); }
+
+/* ===================== ПРОБНЫЕ ЗАНЯТИЯ =====================
+   Правило Жанны: у пробного ребёнка абонемент «пробное». Списали деньги — ребёнок дошёл;
+   закрыли занятие нулём при действующем пробном абонементе — не дошёл.
+   Считаем по СПИСАНИЮ, а не по отметке присутствия: is_attend в Alfa проставляют не всегда
+   (HANDOFF прямо помечает это поле как непроверенное), а списания сверены с её же отчётом
+   «Реализация» до копейки — на них и стоит вся эта вкладка. */
+
+/* Пробный абонемент узнаём по НАЗВАНИЮ тарифа, а не по цене: цена пробного меняется от года
+   к году, и привязка к числу однажды молча обнулила бы статистику. Тот же признак уже
+   используется при подборе цены занятия (там пробные, наоборот, отсеиваются). */
+function alfa_is_trial_name(string $name): bool {
+    return (bool)preg_match('/пробн/iu', $name);
+}
+/* id пробных тарифов филиала (по справочнику, который и так кэшируется на сутки). */
+function alfa_trial_tariff_ids(int $branch): array {
+    $out = [];
+    foreach (alfa_tariff_map($branch) as $tid => $t) {
+        if (alfa_is_trial_name((string)($t['name'] ?? ''))) $out[] = (int)$tid;
+    }
+    return $out;
+}
+/* Кто из детей сидит на пробном абонементе и в какой период он действует.
+   Возвращаем customer_id => ['from','to','tariff'] — дальше это просто поиск по массиву,
+   без единого запроса на ребёнка. */
+function alfa_trial_customers(?array $branches = null): array {
+    $branches = $branches ?: alfa_realization_branches();
+    $out = []; $asked = 0; $ok = true; $filterHonored = null;
+    foreach ($branches as $bid) {
+        $bid = (int)$bid;
+        $ids = alfa_trial_tariff_ids($bid);
+        foreach ($ids as $tid) {
+            $asked++;
+            $r = alfa_index_all($bid, 'customer-tariff', ['tariff_id' => $tid], 20, 15);
+            if (!$r['ok']) { $ok = false; continue; }
+            foreach ($r['items'] as $it) {
+                if (!is_array($it)) continue;
+                $got = (int)($it['tariff_id'] ?? 0);
+                /* Проверяем, что Alfa ВООБЩЕ учла фильтр: если она его игнорирует, в ответе
+                   приедут чужие абонементы, и «пробными» окажутся все подряд. Молча такое
+                   пропускать нельзя — это прямо портит цифру. */
+                if ($got && $got !== $tid) { $filterHonored = false; continue; }
+                if ($filterHonored === null) $filterHonored = true;
+                if (!empty($it['is_archive'])) continue;
+                $cid = (int)($it['customer_id'] ?? 0); if (!$cid) continue;
+                $b = alfa_iso((string)($it['b_date'] ?? '')); $e = alfa_iso((string)($it['e_date'] ?? ''));
+                $prev = $out[$cid] ?? null;
+                // у ребёнка может быть несколько пробных за год — держим самый широкий период
+                $out[$cid] = ['from' => ($prev && $prev['from'] !== '' && ($b === '' || $prev['from'] < $b)) ? $prev['from'] : $b,
+                              'to'   => ($prev && ($prev['to'] === '' || ($e !== '' && $prev['to'] > $e))) ? $prev['to'] : $e,
+                              'tariff' => $tid];
+            }
+        }
+    }
+    return ['customers' => $out, 'tariffsAsked' => $asked, 'ok' => $ok, 'filterHonored' => $filterHonored];
+}
+/* Список пробных детей меняется медленно, а нужен на каждый пересчитываемый день. Держим его
+   в файловом кэше на 2 часа: без этого обход месяца (клиент шлёт его чанками по 4 дня) строил бы
+   один и тот же список восемь раз подряд. */
+function alfa_trial_cache_path(): string {
+    return alfa_store_dir() . '/trials_' . substr(hash('sha256', __DIR__ . '|trials1'), 0, 20) . '.json';
+}
+function alfa_trial_customers_cached(?array $branches = null): array {
+    static $memo = null;
+    if ($memo !== null) return $memo;
+    $f = alfa_trial_cache_path();
+    if (is_file($f)) {
+        $j = json_decode((string)@file_get_contents($f), true);
+        if (is_array($j) && (int)($j['ts'] ?? 0) > time() - 7200 && isset($j['data'])) return $memo = $j['data'];
+    }
+    $d = alfa_trial_customers($branches);
+    @file_put_contents($f, json_encode(['ts' => time(), 'data' => $d], JSON_UNESCAPED_UNICODE), LOCK_EX);
+    return $memo = $d;
+}
+/* Достать id ребёнка из строки участника занятия. Имя поля в Alfa не документировано, а от него
+   зависит вся статистика, поэтому перебираем известные варианты и честно сообщаем, если ни один
+   не подошёл, — вместо того чтобы отдать нули и выдать их за «пробных не было». */
+function alfa_detail_customer_id(array $dt): int {
+    foreach (['customer_id', 'client_id', 'customer', 'cid', 'id_customer'] as $k) {
+        if (isset($dt[$k]) && (int)$dt[$k] > 0) return (int)$dt[$k];
+    }
+    return 0;
+}
+/* Посчитать пробные по участникам ОДНОГО проведённого занятия. Чистая функция — покрыта тестом. */
+function alfa_trial_count_details(array $details, array $trialByCustomer, string $date): array {
+    $done = 0; $missed = 0; $missedIds = []; $doneIds = []; $noCid = 0; $seen = 0;
+    foreach ($details as $dt) {
+        if (!is_array($dt)) continue;
+        $seen++;
+        $cid = alfa_detail_customer_id($dt);
+        if (!$cid) { $noCid++; continue; }
+        $t = $trialByCustomer[$cid] ?? null;
+        if (!$t) continue;
+        // абонемент должен действовать на дату занятия, иначе прошлогоднее пробное считалось бы снова
+        if ($t['from'] !== '' && $t['from'] > $date) continue;
+        if ($t['to'] !== '' && $t['to'] < $date) continue;
+        if ((float)($dt['commission'] ?? 0) > 0) { $done++; $doneIds[] = $cid; }
+        else { $missed++; $missedIds[] = $cid; }
+    }
+    return ['done' => $done, 'missed' => $missed, 'doneIds' => $doneIds,
+            'missedIds' => $missedIds, 'noCid' => $noCid, 'seen' => $seen];
+}
 
 /* ===== ПРОГНОЗ ОПЛАТЫ «как в Alfa» =====
    В Alfa есть отчёт «Прогноз оплаты» (Расход за период), но наружу v2api его не отдаёт (404).
