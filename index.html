@@ -1916,7 +1916,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-09-05-02";
+const APP_VER="2026-09-05-03";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -11008,7 +11008,11 @@ function _realHtml(){
       <td style="text-align:right">${(r&&r.lessons)?('<b>'+_gm(r.present)+'</b>'):'<span style="color:var(--muted)">—</span>'}</td>
       <td style="text-align:right">${(r&&r.lessons)?_gm(r.all):''}</td>
       <td style="text-align:right;color:var(--terra-d)">${exp?(frozen
-          ?('<span title="Зафиксировано '+esc(String(r.expectTs||'').slice(0,16).replace("T"," "))+' — больше не меняется">'+_gm(exp)+' 🔒</span>')
+          ?((r.expectSrc==='schedule')
+              /* восстановлено задним числом по расписанию — это НЕ снимок, снятый вовремя,
+                 и выглядеть одинаково они не должны: точность у них разная */
+              ?('<span style="border-bottom:1px dotted var(--terra)" title="Восстановлено по регулярному расписанию '+esc(String(r.expectTs||'').slice(0,16).replace("T"," "))+' — неделю не успели зафиксировать вовремя, это реконструкция">'+_gm(exp)+' 🧩</span>')
+              :('<span title="Зафиксировано '+esc(String(r.expectTs||'').slice(0,16).replace("T"," "))+' — больше не меняется">'+_gm(exp)+' 🔒</span>'))
           :('<span style="opacity:.65" title="Неделя ещё не зафиксирована: цифра живая и будет меняться">'+_gm(exp)+'</span>')):''}</td>
       <td style="text-align:right">${pct!=null?('<b style="color:'+(pct>=100?'var(--green)':(pct>=85?'#C9922E':'var(--red)'))+'">'+pct.toFixed(0)+'%</b>'):''}</td>
       <td style="text-align:right;color:var(--muted)">${(r&&r.lessons)?_gm(cum):''}</td>
@@ -11023,8 +11027,16 @@ function _realHtml(){
      зафиксирована — предлагаем её, чтобы можно было спасти оставшиеся дни. */
   const curMon=(function(){ const d=new Date(); const w=d.getDay()===0?7:d.getDay(); d.setDate(d.getDate()-(w-1)); return _dIso(d); })();
   const nextMon=(function(){ const d=new Date(curMon); d.setDate(d.getDate()+7); return _dIso(d); })();
+  /* «Неделя закрыта» = не осталось дня, который ЕЩЁ МОЖНО заморозить. Просто «есть хоть одно
+     expect» тут не годится: после восстановления прошедших дней неделя выглядела бы закрытой,
+     а её будущие дни так и остались бы незамороженными и пропали. Прошедшие дни (занятия
+     проведены, planned=0) в расчёт не берём — их заморозка всё равно пропустит. */
   const curFrozen=(function(){ for(let i=0;i<7;i++){ const d=new Date(curMon); d.setDate(d.getDate()+i);
-      const r=(_realStore||{})[_dIso(d)]; if(r&&r.expect!=null) return true; } return false; })();
+      const r=(_realStore||{})[_dIso(d)]; if(!r) continue;
+      if(r.expect!=null) continue;                                   // уже зафиксирован
+      if(!(+r.planned>0) && (+r.lessons>0)) continue;                // день прошёл — морозить нечем
+      return false;                                                  // нашёлся день, который можно спасти
+    } return true; })();
   const mon=curFrozen?nextMon:curMon;
   return `<div class="callout" style="margin-bottom:10px;font-size:13px">Считается из Alfa: сумма списаний (<b>commission</b>) по проведённым занятиям филиала <b>${_realBranchLabel()}</b>. «Без пропусков» — только пришедшие, «с пропусками» — все.<br>
     <b>Ожидается 🔒</b> — сколько ожидали ДО начала недели. Фиксируется один раз в воскресенье в 22:00 и больше не меняется, поэтому реализацию есть с чем сравнить: <b>%</b> = (без пропусков + с пропусками) ÷ 2 от ожидания.</div>
@@ -11034,6 +11046,7 @@ function _realHtml(){
     <button class="btn ghost sm" id="realWeekBtn" onclick="realPullWeek()" title="Посчитать «Ожидается» и доход за конкретную неделю (пн–вс)">📅 Неделя:</button>
     <input type="date" id="realWeekDate" class="cell" style="width:auto" value="${esc(mon)}">
     <button class="btn ghost sm" id="realExpBtn" onclick="realFreezeExpect()" title="Зафиксировать «ожидается» на неделю из поля слева (обычно это делает cron в вс 22:00)">🔒 Зафиксировать ожидание</button>
+    <button class="btn ghost sm" id="realRebBtn" onclick="realRebuildExpect(false)" title="Для недели, которую не успели заморозить: восстановить «ожидается» по регулярному расписанию. Сначала показывает расчёт и сверку, ничего не записывая">🧩 Восстановить ожидание</button>
     <span id="realPullProg" style="font-size:12px;color:var(--muted)"></span>
   </div>
   <div style="font-size:12px;color:var(--muted);margin:-4px 0 10px">🔒 морозит <b>всю неделю (пн–вс)</b>, в которую попадает дата слева${
@@ -11046,7 +11059,7 @@ function _realHtml(){
   </tr></thead><tbody>${rows}
     <tr style="border-top:2px solid var(--line)"><td><b>${esc(monLabel)}</b></td><td style="text-align:right"><b style="color:var(--green)">${_gm(tp)}</b></td><td style="text-align:right"><b>${_gm(ta)}</b></td><td style="text-align:right"><b style="color:var(--terra-d)">${tex?_gm(tex):_gm(tpl)}</b></td><td style="text-align:right">${texPct!=null?('<b title="По прошедшим дням: факт '+_gm(texFact)+' из ожидавшихся '+_gm(texDone)+'">'+texPct.toFixed(0)+'%</b>'):''}</td><td style="text-align:right"><b title="Доход месяца: среднее «без пропусков» и «с пропусками»">${_gm((tp+ta)/2)}</b></td><td style="text-align:center"><b>${tl}</b></td></tr>
   </tbody></table></div>
-  <div style="font-size:12px;color:var(--muted);margin-top:6px">Дней с проведёнными занятиями: ${days}. «Обновить месяц» пересчитывает <b>весь</b> месяц; зафиксированное «ожидается 🔒» он не трогает. Цифра без замка — неделю ещё не фиксировали, она живая и будет меняться.${tex?'':' <b>За этот месяц ожидание не зафиксировано</b> — сравнивать не с чем: нажмите «🔒 Зафиксировать ожидание» на предстоящую неделю или дождитесь cron в воскресенье.'}</div>
+  <div style="font-size:12px;color:var(--muted);margin-top:6px">Дней с проведёнными занятиями: ${days}. «Обновить месяц» пересчитывает <b>весь</b> месяц; зафиксированное «ожидается 🔒» он не трогает. Цифра без замка — неделю ещё не фиксировали, она живая и будет меняться; 🧩 — ожидание восстановлено по расписанию задним числом, потому что неделю не успели зафиксировать вовремя.${tex?'':' <b>За этот месяц ожидание не зафиксировано</b> — сравнивать не с чем: нажмите «🔒 Зафиксировать ожидание» на предстоящую неделю или дождитесь cron в воскресенье.'}</div>
   <details style="margin-top:14px"><summary style="cursor:pointer;font-weight:600">🔍 Проверить один день (разведка по филиалам)</summary>
     <div style="padding:8px 0">
       <div class="hd-actions"><input type="date" id="realProbeDate" class="cell" style="width:auto" value="${todayIso}">
@@ -11089,6 +11102,72 @@ async function realFreezeExpect(){
     const b=document.getElementById("admBody"); if(b) b.innerHTML=_realHtml();
   }catch(e){ if(prog) prog.textContent=""; const b=document.getElementById("admBody"); if(b){ const d=document.createElement('div'); d.innerHTML=_pubErrHtml(e,"фиксация ожидания"); b.insertBefore(d.firstChild,b.firstChild); } }
   finally{ _realBusy=false; if(btn) btn.disabled=false; }
+}
+/* Восстановление «ожидания» за неделю, которую не успели заморозить вовремя. Записываем только
+   после показа расчёта: это реконструкция по расписанию, а не снимок, снятый в срок, — доверять
+   ей вслепую нельзя. Сверка на будущей неделе (где настоящее «ожидается» известно) показывает,
+   насколько метод вообще попадает. */
+async function realRebuildExpect(apply){
+  if(_realBusy) return;
+  const v=(document.getElementById("realWeekDate")||{}).value; if(!v){ toast("Выберите дату недели"); return; }
+  const btn=document.getElementById("realRebBtn"), prog=document.getElementById("realPullProg");
+  _realBusy=true; if(btn) btn.disabled=true;
+  try{
+    if(prog) prog.textContent=apply?"Записываю восстановленное ожидание…":"Читаю расписание, подбираю нумерацию дней и сверяю…";
+    const j=await _pubCall("expectRebuild",{week:v, apply:!!apply});
+    if(j.store) _realStore=j.store;
+    const b=document.getElementById("admBody");
+    if(b){ b.innerHTML=_realHtml();
+      const d=document.createElement('div'); d.innerHTML=_realRebHtml(j);
+      if(d.firstElementChild) b.insertBefore(d.firstElementChild,b.firstChild); }
+    if(prog) prog.textContent="";
+  }catch(e){ if(prog) prog.textContent=""; const b=document.getElementById("admBody");
+    if(b){ const d=document.createElement('div'); d.innerHTML=_pubErrHtml(e,"восстановление ожидания"); if(d.firstElementChild) b.insertBefore(d.firstElementChild,b.firstChild); } }
+  finally{ _realBusy=false; if(btn) btn.disabled=false; }
+}
+function _realRebHtml(j){
+  const MODES={iso:"1=пн … 7=вс",zero:"0=пн … 6=вс",sun1:"1=вс, 2=пн …"};
+  const dn=["вс","пн","вт","ср","чт","пт","сб"];
+  const day=d=>{ const x=new Date(d); return esc(d.slice(8)+"."+d.slice(5,7))+" "+dn[x.getDay()]; };
+  if(!j||!j.ok) return `<div class="callout" style="border-color:var(--red);margin-bottom:12px">
+    <b>Не восстановил — и не стал угадывать.</b><br>${esc((j&&j.why)||"неизвестная причина")}
+    ${j&&j.calibWeek?`<br><span style="font-size:12px;color:var(--muted)">Сверялся по неделе с ${esc(j.calibWeek)}.</span>`:""}
+    <br><span style="font-size:12px;color:var(--muted)">Нумерация дня недели в Alfa не документирована. Пока она не подтвердилась расписанием, ожидание по дням разъедется — лучше пусто, чем неверно.</span></div>`;
+  if(j.applied) return `<div class="callout" style="border-color:var(--green);margin-bottom:12px">
+    <b>Ожидание восстановлено.</b> Записано дней: <b>${j.written}</b>${j.kept?(", уже стояло: "+j.kept):""}${j.noRow?(", нет данных за день: "+j.noRow):""}.
+    Итого за неделю с ${esc(j.week)}: <b>${_gm(j.total)}</b>.
+    <br><span style="font-size:12px;color:var(--muted)">Эти дни помечены как восстановленные по расписанию, а не снятые вовремя.</span></div>`;
+  const rows=Object.keys(j.days||{}).map(d=>`<tr><td>${day(d)}</td>
+    <td style="text-align:right"><b>${_gm(j.days[d].expect)}</b></td>
+    <td style="text-align:right;color:var(--muted)">${j.days[d].groups}</td>
+    <td style="text-align:right;color:var(--muted)">${j.days[d].students}</td>
+    <td style="text-align:right;color:${j.days[d].withoutPrice?'var(--red)':'var(--muted)'}">${j.days[d].withoutPrice||""}</td></tr>`).join("");
+  const c=j.check;
+  const chk=c?`<div style="margin-top:10px"><b style="font-size:13px">Сверка на неделе с ${esc(c.week)}</b>
+    <span style="font-size:12px;color:var(--muted)"> — там настоящее «ожидается» известно, и видно, насколько метод попадает</span>
+    <div class="tscroll" style="max-width:560px;margin-top:6px"><table><thead><tr><th>День</th>
+      <th style="text-align:right">Восстановлено</th><th style="text-align:right">На самом деле</th><th style="text-align:right">Разница</th></tr></thead><tbody>${
+      Object.keys(c.days).map(d=>{ const r=c.days[d]; const bad=r.planned>0?(Math.abs(r.diff)/r.planned>0.05):(r.rebuilt>0);
+        return `<tr><td>${day(d)}</td><td style="text-align:right">${_gm(r.rebuilt)}</td>
+        <td style="text-align:right">${_gm(r.planned)}</td>
+        <td style="text-align:right;color:${bad?'var(--red)':'var(--green)'}">${r.diff>0?"+":""}${_gm(r.diff)}</td></tr>`;}).join("")}
+      <tr style="border-top:2px solid var(--line)"><td><b>Итого</b></td><td style="text-align:right"><b>${_gm(c.rebuiltTotal)}</b></td>
+      <td style="text-align:right"><b>${_gm(c.plannedTotal)}</b></td>
+      <td style="text-align:right"><b style="color:${(c.offPct!=null&&Math.abs(c.offPct)<=5)?'var(--green)':'var(--red)'}">${c.offPct!=null?((c.offPct>0?"+":"")+c.offPct+"%"):"—"}</b></td></tr>
+    </tbody></table></div></div>`:"";
+  const trust=!!(c&&c.offPct!=null&&Math.abs(c.offPct)<=5);
+  return `<div class="callout" style="border-color:${trust?'var(--green)':'var(--terra)'};margin-bottom:12px">
+    <b>Расчёт готов — пока НИЧЕГО не записано.</b><br>
+    Нумерация дней в Alfa подобрана по расписанию: <b>${esc(MODES[j.mode]||j.mode)}</b> (сверено по неделе с ${esc(j.calibWeek)}, сошлось точно).<br>
+    Неделя с ${esc(j.week)}, восстановленное ожидание — <b>${_gm(j.total)}</b>:
+    <div class="tscroll" style="max-width:560px;margin-top:6px"><table><thead><tr><th>День</th>
+      <th style="text-align:right">Ожидалось</th><th style="text-align:right">Групп</th><th style="text-align:right">Детей</th><th style="text-align:right" title="Детей, у которых не нашлась цена занятия">Без цены</th></tr></thead><tbody>${rows}</tbody></table></div>
+    ${chk}
+    <div style="margin-top:10px">${trust
+      ? '<span style="font-size:12px;color:var(--green)">На проверочной неделе метод разошёлся меньше чем на 5% — можно записывать.</span>'
+      : '<span style="font-size:12px;color:var(--red)">⚠️ На проверочной неделе расхождение больше 5%. Записывать не советую: посмотрите колонку «Без цены» — скорее всего, у части детей не нашёлся абонемент.</span>'}
+      <br><button class="btn sm" style="margin-top:8px" onclick="realRebuildExpect(true)">Записать это ожидание</button>
+      <span style="font-size:12px;color:var(--muted);margin-left:8px">Дни, где ожидание уже стоит, не тронутся.</span></div></div>`;
 }
 /* Посчитать одну неделю (пн–вс) целиком: и доход, и «Ожидается». */
 async function realPullWeek(){

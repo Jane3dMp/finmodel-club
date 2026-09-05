@@ -776,9 +776,12 @@ function alfa_forecast_plan(string $mondayIso, ?array $branches = null): array {
     return ['week' => $mon, 'to' => $sun, 'groups' => $out];
 }
 /* Шаг 2: прогноз по ПАЧКЕ групп (клиент шлёт чанками — иначе шлюз рвёт связь по таймауту). */
-function alfa_forecast_groups(string $mondayIso, array $groups): array {
-    $mon = alfa_monday_of($mondayIso);
-    $sun = date('Y-m-d', strtotime('+6 day', strtotime($mon)));
+/* $from/$to — окно, в котором проверяется зачисление ученика (cgi) и действует цена.
+   По умолчанию это вся неделя; восстановление ожидания за прошедший день передаёт один день,
+   иначе в него попали бы дети, зачисленные позже в ту же неделю. */
+function alfa_forecast_groups(string $mondayIso, array $groups, ?string $from = null, ?string $to = null): array {
+    $mon = $from !== null ? alfa_iso($from) : alfa_monday_of($mondayIso);
+    $sun = $to !== null ? alfa_iso($to) : date('Y-m-d', strtotime('+6 day', strtotime(alfa_monday_of($mondayIso))));
     $host = 'https://' . alfa_host(); $token = alfa_token();
     $priceCache = alfa_price_cache_read(); $before = count($priceCache);
     $sum = 0.0; $lessons = 0; $students = 0; $noPrice = 0; $dbg = []; $noPriceIds = [];
@@ -829,6 +832,208 @@ function alfa_forecast_week(string $mondayIso, ?array $branches = null): array {
     $groupsUsed = count($plan['groups']);
     return ['week' => $mon, 'to' => $sun, 'forecast' => round($sum, 2), 'lessons' => $lessonsCount,
             'groups' => $groupsUsed, 'withoutPrice' => $noPrice, 'sampleTariffs' => $dbg];
+}
+
+/* ===== ВОССТАНОВЛЕНИЕ «ОЖИДАЛОСЬ» ЗА ПРОШЕДШУЮ НЕДЕЛЮ =====
+   Если неделю не заморозили вовремя, ожидание уже не достать из lesson/index: проведённые
+   занятия перестали быть запланированными и planned = 0. Единственный уцелевший след того,
+   что ДОЛЖНО было пройти, — регулярное расписание (regular-lesson) плюс состав групп на ту дату.
+   ⚠️ Нумерация поля day в Alfa не документирована (PUBLISH_GROUPS.md: «сверить нумерацию»),
+   поэтому её здесь не угадывают, а ПОДБИРАЮТ: эталонную неделю, где подневное число
+   запланированных занятий уже известно из хранилища, считают всеми режимами и берут тот,
+   что сошёлся точно. Не сошёлся ни один — не пишем ничего и говорим об этом прямо.
+   Деньги — слишком дорогая цена за красивое предположение. */
+const ALFA_DAY_MODES = ['iso', 'zero', 'sun1'];
+
+/* day из Alfa → день недели ISO (1=пн … 7=вс). Чистая функция, покрыта тестом. */
+function alfa_day_to_iso(int $day, string $mode): ?int {
+    if ($mode === 'zero') { $d = $day + 1; return ($d >= 1 && $d <= 7) ? $d : null; }   // 0=пн … 6=вс
+    if ($mode === 'sun1') { $d = $day - 1; return $d === 0 ? 7 : (($d >= 1 && $d <= 6) ? $d : null); }  // 1=вс, 2=пн …
+    return ($day >= 1 && $day <= 7) ? $day : null;                                      // iso: 1=пн … 7=вс
+}
+/* Разложить регулярные занятия по дням недели ISO, сохранив период действия слота. */
+function alfa_regular_by_iso_dow(array $items, string $mode): array {
+    $out = [];
+    foreach ($items as $rl) {
+        if (!is_array($rl)) continue;
+        $gid = (int)($rl['related_id'] ?? 0); if (!$gid) continue;
+        $dow = alfa_day_to_iso((int)($rl['day'] ?? -1), $mode);
+        if ($dow === null) continue;
+        $out[$dow][] = ['id' => $gid, 'branch' => (int)($rl['__branch'] ?? 0),
+                        'subject' => (int)($rl['subject_id'] ?? 0),
+                        'from' => alfa_iso((string)($rl['b_date_v'] ?? ($rl['b_date'] ?? ''))),
+                        'to'   => alfa_iso((string)($rl['e_date_v'] ?? ($rl['e_date'] ?? '')))];
+    }
+    return $out;
+}
+/* Какие группы шли в каждый день недели (с учётом периода действия слота). */
+function alfa_regular_days_of_week(array $byDow, string $mon): array {
+    $out = [];
+    for ($i = 0; $i < 7; $i++) {
+        $d = date('Y-m-d', strtotime("+$i day", strtotime($mon)));
+        $dow = (int)date('N', strtotime($d));
+        $list = [];
+        foreach ($byDow[$dow] ?? [] as $g) {
+            if ($g['from'] !== '' && $g['from'] > $d) continue;
+            if ($g['to'] !== '' && $g['to'] < $d) continue;
+            $list[] = $g;
+        }
+        $out[$d] = $list;
+    }
+    return $out;
+}
+/* Подбор режима нумерации: сверяем расчётное число занятий по дням эталонной недели
+   с фактическим plannedLessons из хранилища. Целые числа — сигнал надёжнее денег. */
+function alfa_day_mode_pick(array $items, string $refMon, array $refLessonsPerDate): array {
+    $score = [];
+    foreach (ALFA_DAY_MODES as $mode) {
+        $days = alfa_regular_days_of_week(alfa_regular_by_iso_dow($items, $mode), $refMon);
+        $diff = 0; $cmp = 0; $exact = 0; $calc = [];
+        foreach ($days as $d => $list) {
+            $calc[$d] = count($list);
+            if (!array_key_exists($d, $refLessonsPerDate)) continue;
+            $cmp++; $n = (int)$refLessonsPerDate[$d];
+            $diff += abs($calc[$d] - $n);
+            if ($calc[$d] === $n) $exact++;
+        }
+        $score[] = ['mode' => $mode, 'diff' => $diff, 'compared' => $cmp, 'exact' => $exact, 'calc' => $calc];
+    }
+    usort($score, function ($a, $b) { return [$a['diff'], -$a['exact']] <=> [$b['diff'], -$b['exact']]; });
+    return $score;
+}
+/* Режим засчитан только если он сошёлся ТОЧНО по всем сверенным дням и при этом
+   единственный такой: два одинаково хороших режима означают, что неделя их не различает
+   (например, занятия стоят симметрично) — тогда выбирать наугад нельзя. */
+function alfa_day_mode_verdict(array $score): array {
+    $best = $score[0] ?? null;
+    if (!$best || $best['compared'] < 3) return ['ok' => false, 'why' => 'мало дней для сверки', 'score' => $score];
+    if ($best['diff'] !== 0) return ['ok' => false, 'why' => 'ни один режим не сошёлся с расписанием', 'score' => $score];
+    $ties = 0;
+    foreach ($score as $s) if ($s['diff'] === 0) $ties++;
+    if ($ties > 1) return ['ok' => false, 'why' => 'эталонная неделя не различает режимы нумерации', 'score' => $score];
+    return ['ok' => true, 'mode' => $best['mode'], 'score' => $score];
+}
+
+/* Регулярное расписание клубных филиалов целиком (с пометкой филиала — она нужна для цен). */
+function alfa_regular_all(?array $branches = null): array {
+    $branches = $branches ?: alfa_realization_branches();
+    $items = [];
+    foreach ($branches as $bid) {
+        $bid = (int)$bid;
+        $rr = alfa_index_all($bid, 'regular-lesson', [], 40, 15);
+        foreach (($rr['items'] ?? []) as $rl) {
+            if (!is_array($rl)) continue;
+            $rl['__branch'] = $bid;
+            $items[] = $rl;
+        }
+    }
+    return $items;
+}
+/* Эталон для калибровки — неделя ЦЕЛИКОМ БУДУЩАЯ, у которой в хранилище уже есть подневное
+   число запланированных занятий. Только на такой неделе Alfa показывает расписание как план,
+   и его можно сверить с regular-lesson. Прошедшая неделя для сверки не годится: там занятия
+   уже проведены и plannedLessons давно ноль. */
+function alfa_expect_calib_week(array $store, ?string $prefer = null): ?string {
+    $today = date('Y-m-d');
+    $cands = [];
+    if ($prefer) $cands[] = alfa_monday_of(alfa_iso($prefer));
+    $start = alfa_monday_of(date('Y-m-d', strtotime('+7 day')));
+    for ($w = 0; $w < 6; $w++) $cands[] = date('Y-m-d', strtotime('+' . ($w * 7) . ' day', strtotime($start)));
+    foreach ($cands as $m) {
+        $full = true; $lessons = 0;
+        for ($i = 0; $i < 7; $i++) {
+            $d = date('Y-m-d', strtotime("+$i day", strtotime($m)));
+            $r = $store[$d] ?? null;
+            if ($d <= $today || !is_array($r)) { $full = false; break; }
+            $lessons += (int)($r['plannedLessons'] ?? 0);
+        }
+        if ($full && $lessons > 0) return $m;
+    }
+    return null;
+}
+/* Восстановить «ожидалось» по дням недели из регулярного расписания.
+   $apply=false (по умолчанию) — только показать расчёт и сверку, ничего не записывая.
+   Уже зафиксированное expect не трогаем никогда: снимок, снятый вовремя, точнее реконструкции. */
+function alfa_expect_rebuild_week(string $mondayIso, ?array $branches = null, bool $apply = false, ?string $calibWeek = null): array {
+    $mon = alfa_monday_of(alfa_iso($mondayIso));
+    $branches = $branches ?: alfa_realization_branches();
+    $store = alfa_realization_store_read();
+
+    $ref = alfa_expect_calib_week($store, $calibWeek);
+    if ($ref === null) {
+        return ['ok' => false, 'week' => $mon,
+                'why' => 'не на чем откалибровать нумерацию дней: нужна целиком будущая неделя с расписанием в хранилище — сначала нажмите «Обновить месяц из Alfa»'];
+    }
+    $items = alfa_regular_all($branches);
+    if (!$items) return ['ok' => false, 'week' => $mon, 'calibWeek' => $ref, 'why' => 'Alfa не отдала регулярное расписание'];
+
+    $refLessons = [];
+    for ($i = 0; $i < 7; $i++) {
+        $d = date('Y-m-d', strtotime("+$i day", strtotime($ref)));
+        $refLessons[$d] = (int)($store[$d]['plannedLessons'] ?? 0);
+    }
+    $verdict = alfa_day_mode_verdict(alfa_day_mode_pick($items, $ref, $refLessons));
+    if (empty($verdict['ok'])) {
+        return ['ok' => false, 'week' => $mon, 'calibWeek' => $ref, 'why' => $verdict['why'],
+                'refLessons' => $refLessons, 'score' => $verdict['score']];
+    }
+    $mode = $verdict['mode'];
+
+    /* Деньги считаем по дням: окно cgi — ровно этот день, иначе в него попали бы дети,
+       зачисленные позже в ту же неделю, и ожидание задним числом выросло бы. */
+    $calc = function (string $weekMon) use ($items, $mode, $branches) {
+        $days = alfa_regular_days_of_week(alfa_regular_by_iso_dow($items, $mode), $weekMon);
+        $out = [];
+        foreach ($days as $d => $list) {
+            if (!$list) { $out[$d] = ['expect' => 0.0, 'groups' => 0, 'students' => 0, 'withoutPrice' => 0]; continue; }
+            $sum = 0.0; $st = 0; $np = 0;
+            foreach (array_chunk($list, 12) as $chunk) {
+                $gs = [];
+                foreach ($chunk as $g) $gs[] = ['id' => $g['id'], 'branch' => $g['branch'], 'times' => 1, 'subject' => $g['subject']];
+                $r = alfa_forecast_groups($weekMon, $gs, $d, $d);
+                $sum += (float)$r['forecast']; $st += (int)$r['students']; $np += (int)$r['withoutPrice'];
+            }
+            $out[$d] = ['expect' => round($sum, 2), 'groups' => count($list), 'students' => $st, 'withoutPrice' => $np];
+        }
+        return $out;
+    };
+
+    $out = $calc($mon);
+    $total = 0.0;
+    foreach ($out as $v) $total += (float)$v['expect'];
+
+    /* Сверка на эталонной неделе: там подневное «ожидается» известно по-настоящему (planned),
+       и видно, насколько реконструкция вообще похожа на правду. Считаем только в режиме
+       предпросмотра — при записи это лишние запросы к Alfa. */
+    $check = null;
+    if (!$apply) {
+        $rc = $calc($ref); $rows = []; $sc = 0.0; $sp = 0.0;
+        foreach ($rc as $d => $v) {
+            $planned = round((float)($store[$d]['planned'] ?? 0), 2);
+            $rows[$d] = ['rebuilt' => $v['expect'], 'planned' => $planned,
+                         'diff' => round($v['expect'] - $planned, 2)];
+            $sc += $v['expect']; $sp += $planned;
+        }
+        $check = ['week' => $ref, 'days' => $rows, 'rebuiltTotal' => round($sc, 2), 'plannedTotal' => round($sp, 2),
+                  'offPct' => $sp > 0 ? round(100 * ($sc - $sp) / $sp, 1) : null];
+    }
+
+    $written = 0; $kept = 0; $noRow = 0;
+    if ($apply) {
+        foreach ($out as $d => $v) {
+            $row = $store[$d] ?? null;
+            if (!is_array($row)) { $noRow++; continue; }
+            if (isset($row['expect'])) { $kept++; continue; }   // снимок вовремя точнее реконструкции
+            $row['expect'] = $v['expect'];
+            $row['expectTs'] = date('c');
+            $row['expectSrc'] = 'schedule';   // честно помечаем: это восстановлено, а не снято вовремя
+            $store[$d] = $row; $written++;
+        }
+        if ($written) { ksort($store); alfa_realization_store_write($store); }
+    }
+    return ['ok' => true, 'week' => $mon, 'mode' => $mode, 'calibWeek' => $ref, 'days' => $out,
+            'total' => round($total, 2), 'applied' => $apply, 'written' => $written,
+            'kept' => $kept, 'noRow' => $noRow, 'check' => $check, 'score' => $verdict['score']];
 }
 
 /* --- НЕДЕЛЬНЫЙ ПРОГНОЗ (снимок) ---

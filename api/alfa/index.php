@@ -1596,6 +1596,20 @@ switch ($action) {
         json_out(['ok' => true] + $r + ['store' => alfa_realization_store_read()]);
         break;
 
+    // --- ВОССТАНОВИТЬ «ОЖИДАЛОСЬ» ЗА ПРОШЕДШУЮ НЕДЕЛЮ по регулярному расписанию ---
+    //     Для недели, которую не успели заморозить вовремя: planned там уже ноль, и снимка нет.
+    //     apply:false (умолчание) — только показать расчёт и сверку на эталонной неделе.
+    //     Нумерацию дня недели в Alfa не угадываем — подбираем; не подобралась, значит отказ.
+    case 'expectRebuild':
+        @set_time_limit(300);
+        $branches = alfa_realization_branches();
+        if (!$branches) json_out(['ok' => false, 'error' => 'Филиал «Пожарный» не найден в Alfa'], 400);
+        $wk = (string)($in['week'] ?? date('Y-m-d'));
+        $r = alfa_expect_rebuild_week(alfa_iso($wk), $branches, !empty($in['apply']),
+                                      isset($in['calibWeek']) ? (string)$in['calibWeek'] : null);
+        json_out($r + ['store' => alfa_realization_store_read()]);
+        break;
+
     // --- ПЕРЕСЧИТАТЬ РЕАЛИЗАЦИЮ за день/несколько дней и записать в хранилище (клуб = Пожарный) ---
     //     Тяжёлые месяцы клиент тянет по одному дню (чанками) — тут максимум 7 дат за вызов.
     case 'realizationPull':
