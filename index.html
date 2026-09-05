@@ -345,6 +345,72 @@ details.cwarn .cwarn-body{padding:0 14px 12px}
 .dragh{cursor:grab;color:var(--muted);font-size:16px;text-align:center;user-select:none}
 .dragh:active{cursor:grabbing}
 #courseTable tr[draggable="true"]:hover .dragh{color:var(--terra)}
+
+/* ==== Важные ссылки (дашборд руководителя) ====
+   Таблица держится узкой и по центру: растянутая на весь монитор, она разрывала пару
+   «название → ссылка» — глаз не дотягивался от одного края экрана до другого.
+   Текст в полях выравниваем влево: общий input.cell прижимает его вправо, и в широкой
+   ячейке название уезжало от своей ссылки на полэкрана. Селекторы с id — чтобы перебить
+   и зебру tr:nth-child(even), и .touchui input.cell{width:auto}, без !important. */
+/* Обе содержательные колонки фиксированы, и ширина обёртки равна их сумме: если оставить
+   одну «резиновой», на широком мониторе она раздувается и пара снова разъезжается.
+   Ссылке хватает 420px, чтобы показать домен и начало id — читают её редко, чаще жмут ↗. */
+.bizwrap{max-width:1002px;margin:0 auto}
+#bizTable{table-layout:fixed}
+#bizTable .col-h{width:56px}
+#bizTable .col-n{width:340px}
+#bizTable .col-u{width:420px}
+#bizTable .col-a{width:186px}
+.touchui #bizTable .col-a{width:230px}   /* кнопки на сенсоре крупнее — иначе не влезают */
+#bizTable td input.cell{width:100%;box-sizing:border-box;text-align:left}
+#bizTable td.bl-h{cursor:grab;color:var(--muted);text-align:center;user-select:none;white-space:nowrap;font-size:13px}
+#bizTable td.bl-h:active{cursor:grabbing}
+#bizTable tr[draggable="true"]:hover td.bl-h{color:var(--terra)}
+/* во время поиска перетаскивание выключено — не обещаем курсором того, чего нет */
+#bizTable tr:not([draggable="true"]) td.bl-h{cursor:default;opacity:.5}
+#bizTable td.bl-a{white-space:nowrap;text-align:center}
+/* Линия места вставки. Сторона важна: rowDrop сначала вырезает строку, а потом вставляет
+   по индексу i — вниз строка встаёт ПОСЛЕ цели, вверх ПЕРЕД. Рисуем с той же стороны,
+   иначе индикатор обманывает в половине случаев. box-shadow, а не border — без сдвига вёрстки. */
+#bizTable tr.bl-over-a td{box-shadow:inset 0 2px 0 0 var(--terra)}
+#bizTable tr.bl-over-b td{box-shadow:inset 0 -2px 0 0 var(--terra)}
+/* на узком экране фиксированные ширины не помещаются — отдаём раскладку браузеру */
+@media(max-width:760px){#bizTable{table-layout:auto}
+  #bizTable .col-h,#bizTable .col-n,#bizTable .col-u,#bizTable .col-a,.touchui #bizTable .col-a{width:auto}}
+/* цветные метки строк: тона мягкие (светлее 90%), чёрный текст на них читается с запасом.
+   Ховер прописан явно, а не через filter: filter на <td> создал бы containing block
+   и сломал позиционирование палитры внутри ячейки. */
+#bizTable tr.bl-y td{background:#FBF3D6}
+#bizTable tbody tr.bl-y:hover td{background:#F6EAC0}
+#bizTable tr.bl-g td{background:#E7EFE8}
+#bizTable tbody tr.bl-g:hover td{background:#DBE7DC}
+#bizTable tr.bl-b td{background:#E6EDFB}
+#bizTable tbody tr.bl-b:hover td{background:#D8E3F7}
+#bizTable tr.bl-r td{background:#F7E7E4}
+#bizTable tbody tr.bl-r:hover td{background:#F1D9D5}
+#bizTable tr.bl-p td{background:#EFE9F5}
+#bizTable tbody tr.bl-p:hover td{background:#E5DCEE}
+#bizTable tr.bl-s td{background:#EAE8E3}
+#bizTable tbody tr.bl-s:hover td{background:#DFDCD5}
+/* палитра открывается ВЛЕВО и внутри высоты своей строки: у .tscroll задан overflow-x:auto,
+   а тогда по спецификации и вертикальная ось перестаёт быть visible — всё, что вылезет
+   выше или ниже строки, будет обрезано. */
+#bizTable .bl-cw{position:relative;display:inline-block;vertical-align:middle}
+#bizTable .bl-sw{width:20px;height:20px;border-radius:50%;border:1px solid #CFCBC2;cursor:pointer;
+  padding:0;vertical-align:middle;background:#fff}
+#bizTable .bl-sw:hover{border-color:var(--graphite)}
+#bizTable .bl-pal{display:none;position:absolute;right:100%;top:50%;transform:translateY(-50%);
+  margin-right:6px;background:#fff;border:1px solid var(--line);border-radius:14px;padding:4px;
+  box-shadow:0 6px 24px rgba(28,20,16,.15);z-index:60;white-space:nowrap}
+#bizTable .bl-cw.on .bl-pal{display:block}
+#bizTable .bl-po{display:inline-block;width:16px;height:16px;border-radius:50%;margin:0 2px;
+  border:1px solid #CFCBC2;cursor:pointer;vertical-align:middle}
+#bizTable .bl-po:hover{border-color:var(--graphite)}
+/* на сенсоре кружки крупнее: 16px пальцем не попасть. Палитра при этом ~36px и всё ещё
+   помещается в строку .touchui (~64px), то есть не обрезается .tscroll */
+.touchui #bizTable .bl-sw{width:34px;height:34px}
+.touchui #bizTable .bl-po{width:26px;height:26px;margin:0 3px}
+
 /* ширины колонок таблицы курсов */
 #courseTable .col-name{min-width:230px}
 #courseTable .col-name input{width:100%;min-width:220px}
@@ -1850,7 +1916,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-08-20-14";
+const APP_VER="2026-09-05-01";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -2795,7 +2861,10 @@ function _applyStartTab(){
   activateTab(_fbIsAdmin ? START_TAB_ADMIN : "goals");   // админ → «Отчёт»; менеджер → «Набор» (стартовая)
 }
 /* ---- выпадающие меню «⋯ Ещё» / «☰ Меню» ---- */
-function closeAllMore(){ document.querySelectorAll(".more-menu.show").forEach(function(m){ m.classList.remove("show"); }); }
+function closeAllMore(){ document.querySelectorAll(".more-menu.show").forEach(function(m){ m.classList.remove("show"); });
+  /* сюда же — палитра цвета строки в «Важных ссылках»: так она бесплатно закрывается
+     и по клику мимо, и по Escape (оба слушателя ниже зовут closeAllMore) */
+  document.querySelectorAll(".bl-cw.on").forEach(function(w){ w.classList.remove("on"); }); }
 function toggleMore(btn){
   const menu=btn.parentElement.querySelector(".more-menu");
   const wasOpen=menu&&menu.classList.contains("show");
@@ -11092,33 +11161,72 @@ async function realProbe(){
 /* ---- Важные ссылки: редактируемый список (S.bizLinks = [{n,u}]) ---- */
 const BIZ_LINKS_SEED=[{"n":"Дашборд админа 25/26","u":"https://docs.google.com/spreadsheets/d/1-g6xql3to-UAlOL4J6TSjlavAZhrQRhEnzFGj09rfQU/edit?gid=946546833#gid=946546833"},{"n":"Лагеря 2019-2026","u":"https://docs.google.com/spreadsheets/d/1qmuCyhtsO2KtmTa2GDABYgb3_iJA4ZlT9sB-Qd476UI/edit"},{"n":"ЗП по альфа","u":"https://docs.google.com/spreadsheets/d/1ksKSXfXf4kkBSSpamx0x3XMLvPKhUJG1iC3wmSl-nDA/edit#gid=1145723565"},{"n":"Запуск 25/26","u":"https://docs.google.com/spreadsheets/d/1DG81xg6cjBk9gMqHpZOcQXfs2fSMxmEIfGSSuvbIZ_s/edit?gid=33813177#gid=33813177"},{"n":"Лиды 25/26","u":"https://docs.google.com/spreadsheets/d/1s7cpEMD9gRjxEBP6z_96328eCexlEdhftroqTDcgMn0/edit?gid=464548212#gid=464548212"},{"n":"КП Прознание","u":"https://docs.google.com/spreadsheets/d/1RkP2eNAAcXUnnCj0XMKkU9hhEdHHvzApoOueA_miPr4/edit?gid=0#gid=0"},{"n":"КП CODDY","u":"https://docs.google.com/spreadsheets/d/12x3e6BtewJAHN5rpexjcQph8i4DAYEa9aey_Z5W8SRE/edit?gid=1346607578#gid=1346607578"},{"n":"КП Уикенд","u":"https://docs.google.com/spreadsheets/d/1lbfGKggjqii3BFVT1NFi0vVP5Jt3pcmQ-DS-JGA4Frc/edit?gid=0#gid=0"},{"n":"Работа по Ганту","u":"https://docs.google.com/spreadsheets/d/1MY54YaqVVdAJCdOSIspRszOYxbm_qOMvHP_SjQDHZMY/edit"},{"n":"Фин модель лагеря 2024","u":"https://docs.google.com/spreadsheets/d/1muk1xorBW0rKoI87xYF94YGPeZXXOMcm24jxxgyk-uY/edit?usp=sharing"},{"n":"Лиды/продажи","u":"https://docs.google.com/spreadsheets/d/1ksYhNmNNb-frcB9qVAzCoQ2rXK2OTqnlD4ncNcp-gEY/edit"},{"n":"Таня и Оля","u":"https://docs.google.com/spreadsheets/d/1pW7kPQ2pOmYCy1ibgVaehraIdEvRdoeAOr6bagzFQvU/edit#gid=687995415"},{"n":"Работа в директ","u":"https://docs.google.com/spreadsheets/d/15WOaJa3yklgoOo9065ZhOGsRXAwk8nkqtENBjc26pSA/edit#gid=1506261730"},{"n":"Контент планы","u":"https://docs.google.com/spreadsheets/d/1lKuXqQDz2-hvRF5v35MWHLljPItPlhIB/edit#gid=412364114"},{"n":"Подготовка к запуску онлайн","u":"https://docs.google.com/spreadsheets/d/1SAH2qEytyHP7Na33gtxajWnxTyCusx3hEwzAVCQBHh0/edit#gid=2026816275"},{"n":"ФА лагерь 22/23","u":"https://docs.google.com/spreadsheets/d/1cgys77Y2wB_ukn4GmMpVq7X3Dv1Oo3srYhNp7gVpmfU/edit#gid=0"},{"n":"Запись за бонусы","u":"https://docs.google.com/spreadsheets/d/1UwEYzY6AkXmvXI32uql30vOmftwTqqanBtwPv2Q5Fms/edit#gid=0"},{"n":"Рекламная активность запуска 2021","u":"https://docs.google.com/spreadsheets/d/1CfjA__6p4Cw2fngGEgQoVRMqjprO5wzMVI3TNW2FT4I/edit#gid=386244767"},{"n":"Бюджетные ЗП","u":"https://docs.google.com/spreadsheets/u/1/d/1AgxO-u-ulcleqpgh2_zvAC27jlXNnAGGadjkEJku2mw/edit?ouid=104124518695863465229&usp=sheets_home&ths=true"},{"n":"Запуск 2024","u":"https://docs.google.com/spreadsheets/d/1j7xAtaalUZWY7xNGpnj2DuoR46QkZmYFoYwSRbPr-Bo/edit?usp=sharing"},{"n":"Запуск 2023","u":"https://docs.google.com/spreadsheets/u/2/d/1pW7kPQ2pOmYCy1ibgVaehraIdEvRdoeAOr6bagzFQvU/edit?fromCopy=true"},{"n":"Прайс 24-25","u":"https://docs.google.com/spreadsheets/d/1twrFK9KltFNHZHzH4OPbZ3_umPqc2Tti/edit#gid=1617174292"},{"n":"Дашборд админа 23/24","u":"https://docs.google.com/spreadsheets/d/1dDap8uKnPGLSfjp9V2VDPw0joJqLQtWgpfhopTZoAmg/edit#gid=0"},{"n":"Дашборд админа","u":"https://docs.google.com/spreadsheets/d/1_JSUhx6-tN8im5EBuN52ioZcZqmMA2Uat4pIew9uwv0/edit#gid=0"},{"n":"Расчет оплат","u":"https://docs.google.com/spreadsheets/d/1XBgAHkG87i3FE8UJg6IrmNv8Spfl3ItN8SjwIpuwQ-I/edit?pli=1#gid=44727830"},{"n":"Программы","u":"https://docs.google.com/spreadsheets/d/1DMQpBoTTzAOhO8NDaooIKG8FJof3jHEGEB82oCbVwIc/edit#gid=0"},{"n":"Нейронки/Ценность для сторис","u":"https://docs.google.com/spreadsheets/d/1e4ALaI4nBDYnLchXzLvkufsvfN5S51iDHwmlkCEvuwM/edit#gid=1031448484"},{"n":"3+","u":"https://docs.google.com/spreadsheets/d/1rT1Q3XZlfFr0rMw3pedmIbiBYGbCm9Ba-kHUsjvxhGw/edit#gid=1609810387"},{"n":"Прайс от 1.02.2024","u":"https://docs.google.com/spreadsheets/d/1twrFK9KltFNHZHzH4OPbZ3_umPqc2Tti/edit#gid=1734350713"},{"n":"Страт 2024","u":"https://docs.google.com/spreadsheets/d/15czSEYCfcpzmKJf38JWoU242vRmpIkyzTvAX_vROhQw/edit#gid=0"},{"n":"Онлайн проекты","u":"https://docs.google.com/spreadsheets/d/1SZEvYoySuLot3QhhtYqVOfr6DajOKf3Ix3nzHk28QXg/edit?usp=sharing"},{"n":"Контент-план онлайн-курсов Прознания","u":"https://docs.google.com/spreadsheets/d/1ZQw3b604tSQSIVUuxVyWP8KT98xH8zXeKeqfzTGmpLM/edit?gid=0#gid=0"},{"n":"Админы 24/25","u":"https://docs.google.com/spreadsheets/d/1Es8SIoc0nQXB20OCNFcJ2bRqozhT2OGX-hzJtulU7uQ/edit"},{"n":"CODDY СММ","u":"https://docs.google.com/spreadsheets/d/1s7h_qkwEVPEF7uHnIDmChyLGbig7jzsnTQF0on4Cg8k/edit?gid=1655405128#gid=1655405128"},{"n":"Мамин ресурс (Мой)","u":"https://docs.google.com/spreadsheets/d/1cr2h6CpJmWnZy7T5HXlcM2S-hIzz84jmjV0u-RFeHtE/edit?gid=412777986#gid=412777986"},{"n":"Мотивашки онлайн","u":"https://docs.google.com/document/d/1aAyPNrnJ3erHWpHAzfZq6UW1-unOnPlAKUOQGb6oTUQ/edit"},{"n":"Скрипты в вибер","u":"https://docs.google.com/document/d/1L8e4MFdZDuGzW_BGdayAlzuKuyKFotxGUm2OtlAYFsI/edit"},{"n":"Письма марафона","u":"https://docs.google.com/document/d/15_2g8tgRQ3AWGYD-5iIWpeBNJJtrra3oyuTYjWwP8sU/edit"},{"n":"Содержание книги админа","u":"https://docs.google.com/document/d/115dWUfuN-9ByYMMlF18ia0Xu4moTJdCzzjMY7uQ4EmM/edit"},{"n":"Письма рассылки детя клуба","u":"https://docs.google.com/document/d/1V7gu5zKU5J68MQ3sUnoKI2SgO8nzCqwycrqQ3CKmG6Q/edit"},{"n":"Договор ООО","u":"https://docs.google.com/document/d/1IymmHzJydeJ7tgq598xAE_QL3y_AqDIS/edit?usp=drive_web&ouid=104155574451411693488&rtpof=true"},{"n":"Заявление на прием на курс","u":"https://docs.google.com/document/d/13bkRQA9gazYpocJh29gwFs43nEMEMWG8/edit?usp=drive_web&ouid=104155574451411693488&rtpof=true"},{"n":"Посты","u":"https://docs.google.com/document/d/1gu42U0WYBH0kBUFsJuvJM2kMIjCe7P5zWDwra3oMU3Y/edit"},{"n":"Нейро сети для пед состава \"Прознание\"","u":"https://docs.google.com/document/d/1iNMiPZWkbGu6D7E5JbjWDzU7-AojkW0BnsKztPQRgks/edit"},{"n":"Таплинк","u":"https://taplink.ru/profile/1336331/pages/"},{"n":"БЕЛИНВЕСТ","u":"https://biz.belinvestbank.by/"},{"n":"Маркетинг с GPT","u":"https://docs.google.com/spreadsheets/d/1s57-yKyQcb-DxvtIPBhMd0zaW20UbHQYmh_fgBEo2Xs/edit#gid=0"},{"n":"ИИ для админа","u":"https://docs.google.com/spreadsheets/d/1X4QPEUARHFpAi8bVQdBdTjOeAe0quBOZ02tAsaXIuik/edit#gid=0"},{"n":"Buyer Persona для покупателя","u":"https://docs.google.com/spreadsheets/d/1Y4YA-PPC1tX_g0Ke-kSK2lpfKACMjDESPGlF9t3jLVc/edit?usp=drive_web&ouid=104155574451411693488"},{"n":"Minecraft","u":"https://signup.microsoft.com/get-started/signup?products=ed55d69e-0d7b-41e4-9e25-d0891565cd56&brandingId=28b276fb-d2a0-4379-a7c0-57dce33da0f9&ali=1"},{"n":"СМС Белтелеком","u":"https://sms.beltelecom.by/content/sms-btcby?destination=node/17"},{"n":"Рекламный кабинет","u":"https://adsmanager.facebook.com/adsmanager/manage/adsets/edit?act=188611296094607"},{"n":"Могилевский государственный областной институт развития образования","u":"https://www.mogileviro.by/"}];
 function _bizLinks(){ if(!Array.isArray(S.bizLinks)) S.bizLinks=BIZ_LINKS_SEED.map(x=>({n:x.n,u:x.u})); return S.bizLinks; }
+/* Цветные метки строк. Ключ хранится в r.c; строки без ключа рисуются как раньше.
+   Первый элемент — «без цвета»: он же снимает метку. */
+const BIZ_COLORS=[["","без цвета","#fff"],["y","жёлтый","#E8C55C"],["g","зелёный","#4F7A55"],
+  ["b","синий","#1F5BC0"],["r","красный","#B0493D"],["p","фиолетовый","#8E5AA8"],["s","серый","#847F76"]];
+function _bizDot(k){ const c=BIZ_COLORS.find(x=>x[0]===(k||"")); return (c||BIZ_COLORS[0])[2]; }
 function _bizLinksHtml(){
   const rows=_bizLinks();
-  const list=rows.map((r,i)=>`<tr data-bl="${i}" data-s="${esc((r.n||'').toLowerCase())}">
-    <td style="text-align:center;color:var(--muted)">${i+1}</td>
-    <td><input class="cell" style="width:100%;box-sizing:border-box" value="${esc(r.n||'')}" placeholder="название" onchange="bizUpd(${i},'n',this.value)"></td>
-    <td><input class="cell" style="width:100%;box-sizing:border-box;font-size:12px" value="${esc(r.u||'')}" placeholder="https://…" onchange="bizUpd(${i},'u',this.value)"></td>
-    <td style="white-space:nowrap;text-align:center">
+  const list=rows.map((r,i)=>`<tr data-bl="${i}" data-s="${esc((r.n||'').toLowerCase())}" class="${r.c?'bl-'+esc(r.c):''}" draggable="true" ondragstart="bizDragStart(event,${i})" ondragend="bizDragEnd(event)" ondragover="bizDragOver(event,this)" ondrop="bizDrop(event,${i})">
+    <td class="bl-h" title="Перетащите строку на новое место">⠿ ${i+1}</td>
+    <td><input class="cell" value="${esc(r.n||'')}" placeholder="название" onchange="bizUpd(${i},'n',this.value)"></td>
+    <td><input class="cell" style="font-size:12px" value="${esc(r.u||'')}" placeholder="https://…" onchange="bizUpd(${i},'u',this.value)"></td>
+    <td class="bl-a">
       <button class="btn sm" title="Открыть в новой вкладке" onclick="bizOpen(${i})">↗</button>
       <button class="btn ghost sm" title="Выше" onclick="bizMove(${i},-1)">↑</button>
       <button class="btn ghost sm" title="Ниже" onclick="bizMove(${i},1)">↓</button>
+      <span class="bl-cw"><button class="bl-sw" title="Цвет строки" style="background:${_bizDot(r.c)}" onclick="bizColorToggle(event,this)"></button><span class="bl-pal">${
+        BIZ_COLORS.map(c=>`<i class="bl-po" title="${c[1]}" style="background:${c[2]}" onclick="bizSetColor(${i},'${c[0]}')"></i>`).join("")}</span></span>
       <span class="k-del" title="Удалить" onclick="bizDel(${i})">×</span>
     </td></tr>`).join("");
-  return `<div class="hd-actions" style="margin-bottom:8px">
-      <input type="search" class="cell" style="width:260px" placeholder="🔍 Поиск по названию" oninput="_bizFilter(this.value)">
+  return `<div class="bizwrap"><div class="hd-actions" style="margin-bottom:8px">
+      <input type="search" class="cell" style="width:260px;text-align:left" placeholder="🔍 Поиск по названию" oninput="_bizFilter(this.value)">
       <button class="btn sm" onclick="bizAdd()">+ ссылка</button>
       <span style="margin-left:auto;font-size:12px;color:var(--muted)">Всего: ${rows.length}. Изменения сохраняются автоматически.</span>
     </div>
-    <div class="callout" style="margin-bottom:10px;font-size:12px">Логины и пароли из старой таблицы сюда НЕ переносил — модель синхронизируется в облако, хранить их здесь небезопасно.</div>
-    <div class="tscroll"><table id="bizTable"><thead><tr><th style="width:34px">#</th><th style="text-align:left">Название</th><th style="text-align:left">Ссылка</th><th style="width:160px"></th></tr></thead><tbody>${list||'<tr><td colspan="4" style="padding:12px;color:var(--muted)">Пусто. Нажмите «+ ссылка».</td></tr>'}</tbody></table></div>`;
+    <div class="callout" style="margin-bottom:10px;font-size:12px">Порядок строк меняйте перетаскиванием за ⠿ (на телефоне — стрелками ↑↓), цвет строки — кружком в конце строки.<br>Логины и пароли из старой таблицы сюда НЕ переносил — модель синхронизируется в облако, хранить их здесь небезопасно.</div>
+    <div class="tscroll"><table id="bizTable"><thead><tr><th class="col-h">#</th><th class="col-n">Название</th><th class="col-u">Ссылка</th><th class="col-a"></th></tr></thead><tbody>${list||'<tr><td colspan="4" style="padding:12px;color:var(--muted)">Пусто. Нажмите «+ ссылка».</td></tr>'}</tbody></table></div></div>`;
 }
-function _bizFilter(v){ v=(v||'').toLowerCase().trim(); document.querySelectorAll('#bizTable tbody tr[data-bl]').forEach(tr=>{ tr.style.display=(!v||(tr.getAttribute('data-s')||'').includes(v))?'':'none'; }); }
+/* Поиск прячет строки, но индексы остаются от массива — бросок при активном фильтре
+   переставил бы правильные элементы, а выглядело бы это непредсказуемо. Поэтому на время
+   поиска перетаскивание выключаем, стрелки ↑↓ продолжают работать. */
+function _bizFilter(v){ v=(v||'').toLowerCase().trim(); document.querySelectorAll('#bizTable tbody tr[data-bl]').forEach(tr=>{ tr.style.display=(!v||(tr.getAttribute('data-s')||'').includes(v))?'':'none'; tr.draggable=!v; }); }
 function _bizSave(){ persistLocal(); if(typeof fbSchedulePush==="function") fbSchedulePush(); }
 function bizUpd(i,f,val){ const r=_bizLinks(); if(!r[i]) return; r[i][f]=String(val||'').trim(); if(f==='n'){ const tr=document.querySelector('#bizTable tbody tr[data-bl="'+i+'"]'); if(tr) tr.setAttribute('data-s',(r[i].n||'').toLowerCase()); } _bizSave(); }
 function bizAdd(){ _bizLinks().push({n:'',u:''}); _bizSave(); renderRuk();
   const inps=document.querySelectorAll('#bizTable tbody tr td:nth-child(2) input'); if(inps.length) inps[inps.length-1].focus(); }
 function bizDel(i){ const r=_bizLinks(); if(r[i]===undefined) return; if(!confirm('Удалить ссылку «'+(r[i].n||'')+'»?')) return; r.splice(i,1); _bizSave(); renderRuk(); }
 function bizMove(i,d){ const r=_bizLinks(); const j=i+d; if(j<0||j>=r.length) return; const t=r[i]; r[i]=r[j]; r[j]=t; _bizSave(); renderRuk(); }
+/* Перетаскивание строк мышью. Ядро — общие rowDragStart/rowDragOver/rowDrop (там же splice,
+   persistLocal и выгрузка в Firebase), здесь только индикатор места вставки. */
+function _bizClearOver(){ document.querySelectorAll('#bizTable tr.bl-over-a,#bizTable tr.bl-over-b').forEach(t=>t.classList.remove('bl-over-a','bl-over-b')); }
+/* Firefox не начинает перетаскивание, если в dragstart ничего не положили в dataTransfer.
+   Общий rowDragStart этого не делает — оборачиваем его, а не правим (на нём висят курсы и планировщик). */
+function bizDragStart(e,i){ try{ e.dataTransfer.setData('text/plain',(_bizLinks()[i]||{}).n||''); }catch(_){}
+  rowDragStart(e,'bizLinks',i); }
+/* Линию рисуем с той стороны, с которой строка реально встанет (см. комментарий у .bl-over-*).
+   Отдельного dragleave нет намеренно: он всплывает с каждой <td>, и при движении внутри одной
+   строки линия мигала бы. Предыдущую строку гасит сам dragover, последнюю — dragend. */
+function bizDragOver(e,tr){ rowDragOver(e);
+  if(!tr||_rowDrag.arr!=='bizLinks'||_rowDrag.idx==null) return;
+  const i=+tr.getAttribute('data-bl');
+  const c=(i===_rowDrag.idx)?'':(i>_rowDrag.idx?'bl-over-b':'bl-over-a');
+  if(c&&tr.classList.contains(c)) return;
+  _bizClearOver(); if(c) tr.classList.add(c); }
+function bizDragEnd(e){ rowDragEnd(e); _bizClearOver(); }
+function bizDrop(e,i){ _bizClearOver(); rowDrop(e,'bizLinks',i,renderRuk); }
+/* Палитра цвета. stopPropagation обязателен: глобальный слушатель клика зовёт closeAllMore
+   на любой клик мимо «⋯ Ещё», иначе палитра закрылась бы в тот же миг, как открылась. */
+function bizColorToggle(e,btn){ e.stopPropagation(); const w=btn.parentElement; const was=w.classList.contains('on'); closeAllMore(); if(!was) w.classList.add('on'); }
+/* Красим строку точечно, без renderRuk(): полная перерисовка стёрла бы поле поиска
+   вместе с активным фильтром и вернула бы всем строкам draggable. */
+function bizSetColor(i,k){ const r=_bizLinks(); if(!r[i]) return;
+  if(k) r[i].c=k; else delete r[i].c;
+  const tr=document.querySelector('#bizTable tbody tr[data-bl="'+i+'"]');
+  if(tr){ BIZ_COLORS.forEach(c=>{ if(c[0]) tr.classList.remove('bl-'+c[0]); }); if(k) tr.classList.add('bl-'+k);
+    const sw=tr.querySelector('.bl-sw'); if(sw) sw.style.background=_bizDot(k); }
+  closeAllMore(); _bizSave(); }
 function bizOpen(i){ const r=_bizLinks(); let u=((r[i]&&r[i].u)||'').trim(); if(!u){ toast('Пустая ссылка'); return; } if(!/^https?:\/\//i.test(u)) u='https://'+u; window.open(u,'_blank','noopener'); }
 
 /* ---- Годовые итоги: оборот по годам + сценарии роста + помесячный прогноз ---- */
