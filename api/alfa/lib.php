@@ -908,12 +908,14 @@ function alfa_trials_day(string $date, ?array $branches = null): array {
    и прошедшие, и будущие. Обход по дням стоил бы сотни запросов (в дне под тридцать занятий,
    у проведённых участники добираются отдельно), а по детям это ~150 запросов на весь набор,
    и клиент шлёт их пачками. Прошедшие занятия не меняются, поэтому кэш живёт долго. */
+/* v2 в соли: записи прежней версии содержали только проведённые занятия. Без смены соли они
+   пролежали бы час и показывали старую картину уже после исправления. */
 function alfa_kidles_cache_path(): string {
-    return alfa_store_dir() . '/kidles_' . substr(hash('sha256', __DIR__ . '|kidles1'), 0, 20) . '.json';
+    return alfa_store_dir() . '/kidles_' . substr(hash('sha256', __DIR__ . '|kidles2'), 0, 20) . '.json';
 }
 /* Для каждого ребёнка: занятия периода с датой, предметом, суммой и отметкой присутствия.
    Возвращаем только то, что нужно экрану, — иначе кэш распухнет. */
-function alfa_kids_lessons(array $ids, string $from, string $to, ?array $branches = null): array {
+function alfa_kids_lessons(array $ids, string $from, string $to, ?array $branches = null, bool $force = false): array {
     $ids = array_values(array_unique(array_map('intval', array_filter($ids))));
     if (!$ids) return ['kids' => [], 'asked' => 0];
     $branches = $branches ?: alfa_realization_branches();
@@ -929,7 +931,7 @@ function alfa_kids_lessons(array $ids, string $from, string $to, ?array $branche
         $c = $cache[$k] ?? null;
         /* Кэш годен, если окно совпадает и он свежий. Держим час: будущие занятия переносят и
            отменяют, а прошедшие всё равно уже не изменятся. */
-        if (is_array($c) && ($c['from'] ?? '') === $from && ($c['to'] ?? '') === $to
+        if (!$force && is_array($c) && ($c['from'] ?? '') === $from && ($c['to'] ?? '') === $to
             && (int)($c['ts'] ?? 0) > time() - 3600) {
             $out[$id] = (array)($c['lessons'] ?? []);
             continue;
@@ -987,8 +989,9 @@ function alfa_kids_lessons(array $ids, string $from, string $to, ?array $branche
    анализировать прошлый период. Один снимок сделан — в память. Мы же не можем изменить прошлое».
    Так и делаем: ПРОШЕДШИЙ день отдаём из хранилища не трогая Alfa, а сегодняшний и будущие
    всегда считаем заново — они ещё меняются в течение дня (утром «ждём», вечером «пришёл»). */
+/* v2 в соли: снимки дней, снятые прежней версией, не содержали запланированных занятий. */
 function alfa_trials_store_path(): string {
-    return alfa_store_dir() . '/trialsdays_' . substr(hash('sha256', __DIR__ . '|trialsdays1'), 0, 20) . '.json';
+    return alfa_store_dir() . '/trialsdays_' . substr(hash('sha256', __DIR__ . '|trialsdays2'), 0, 20) . '.json';
 }
 function alfa_trials_store_read(): array {
     $f = alfa_trials_store_path();
