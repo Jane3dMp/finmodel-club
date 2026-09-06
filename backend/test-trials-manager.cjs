@@ -147,7 +147,7 @@ delete ctx.S.children['201'];
   {
     const html2 = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
     let s2 = '';
-    for (const n of ['_trPayDays', '_trPaySum', '_trPayHtml', '_trMgrStats', '_trMgrTableHtml']) {
+    for (const n of ['_trPayDays', '_trPaySum', '_trPayHtml', '_trMgrUnknownHtml', '_trMgrStats', '_trMgrTableHtml']) {
       const m = html2.match(new RegExp('\\nfunction ' + n + '\\([^)]*\\)\\s*\\{[\\s\\S]*?\\n\\}', 'm'));
       if (!m) { console.log('не найдено в index.html: ' + n); process.exit(1); }
       s2 += m[0] + '\n';
@@ -182,13 +182,17 @@ delete ctx.S.children['201'];
     },
       _trFunnel: () => FN,
       _trMgrOf: id => mgrOf[String(id)] || '',
+    _trKidName: id => 'Ребёнок ' + id,
+    _trKidLink: id => '<a>Ребёнок ' + id + '</a>',
+    _trPhone: id => ({ '208': '+375291110000' })[String(id)] || '',
+    _phoneKey: p => { const d = String(p || '').replace(/[^0-9]/g, ''); return d.length >= 9 ? d.slice(-9) : ''; },
       _trHasPaid: id => !!paid[String(id)],
       _trArchived: id => !!arch[String(id)],
       _gm: n => Math.round(+n || 0).toLocaleString('ru-RU'),
       esc: x => String(x),
     };
     const A2 = new Function('ctx', 'with (ctx) { ' + s2 +
-    ' return {_trMgrStats,_trMgrTableHtml,_trPaySum,_trPayDays,_trPayHtml}; }')(ctx2);
+    ' return {_trMgrStats,_trMgrTableHtml,_trMgrUnknownHtml,_trPaySum,_trPayDays,_trPayHtml}; }')(ctx2);
 
     const st = A2._trMgrStats();
     eq('менеджеров в рейтинге', st.length, 3);            // Ольга, Мария и «не определён»
@@ -249,6 +253,31 @@ delete ctx.S.children['201'];
     const h3 = A2._trMgrTableHtml();
     check('колонка «Оплачено» есть', h3.indexOf('>Оплачено<') > 0);
     check('сказано, что снимки неполные', h3.indexOf('из 3') > 0, h3.slice(h3.indexOf('Оплачено') - 200, h3.indexOf('Оплачено') + 60));
+
+
+  /* --- конверсия не может быть больше 100% ---
+     Числитель и знаменатель должны быть из одной корзины. Абонемент ждущего или возвращенца
+     попадал в числитель, но не в знаменатель — так и выходили 105% и 183%. */
+  const oo = st2.find(x => x.name === 'Ольга');
+  eq('купили всего (включая не дошедших)', oo.paid, 1);
+  eq('купили ИЗ дошедших', oo.paidCame, 1);
+  check('конверсия не выше 100%', st2.every(x => x.conv == null || x.conv <= 100),
+        JSON.stringify(st2.map(x => [x.name, x.conv])));
+
+  /* --- кого не удалось связать: имя, телефон и ПРИЧИНА --- */
+  const hu = A2._trMgrUnknownHtml();
+  check('список несвязанных есть', hu.indexOf('Кого не удалось связать') > 0, hu.slice(0, 120));
+  check('и в нём один ребёнок', hu.indexOf('(1)') > 0, hu.slice(0, 160));
+  check('назван телефон из Alfa', hu.indexOf('+375291110000') > 0, hu);
+  check('и причина: номера нет в воронке', hu.indexOf('номера нет ни в одной сделке') > 0, hu);
+  check('сказано, что делать', hu.indexOf('вписать') > 0, hu);
+
+  /* --- в «Работе» рейтинга быть не должно: там нужен ответ «чей пробник», а не сравнение --- */
+  const funnelSrc = html2.match(/\nfunction _trFunnelHtml\(\)[\s\S]*?\n\}/m);
+  check('в воронке «Пробных» таблица рейтинга не собирается',
+        funnelSrc && funnelSrc[0].indexOf('_trMgrTableHtml()') < 0, 'рейтинг остался в «Работе»');
+  check('но «чей пробник» в строках остался', html2.indexOf('_trMgrHtml(r.id)') > 0);
+  check('раздел заведён в дашборде руководителя', html2.indexOf('["mgr","🏅 Рейтинг менеджеров"]') > 0);
 
 
     // менеджеры не подтянуты — рейтинга нет вовсе
