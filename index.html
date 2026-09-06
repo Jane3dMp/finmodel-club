@@ -79,6 +79,15 @@ th{background:var(--graphite);color:var(--sand);padding:9px 10px;text-align:left
 td{padding:6px 9px;border-bottom:1px solid var(--line)}
 tr:nth-child(even) td{background:var(--sand-l)}
 tbody tr:hover td{background:#EEEDEA}
+/* «Реализация»: выходные — заливкой. В колонке «Дн» стоят только числа месяца, день недели по
+   ним не читается, а суббота с воскресеньем у клуба живут иначе: занятий больше, ожидание другое.
+   Правило перебивает зебру tr:nth-child(even) td, поэтому идёт через #realTable; вторая строка
+   возвращает ховер — без неё он проигрывал бы по весу и выходные перестали бы подсвечиваться.
+   Заливка — палитровый --sand: он заметно темнее и зебры (--sand-l), и светлой строки, поэтому
+   суббота читается так же ясно, как воскресенье. Взять оттенок ближе к зебре нельзя: чётные дни
+   и так залиты ею, и разница пропадала бы через строку. */
+#realTable tbody tr.wknd td{background:var(--sand)}
+#realTable tbody tr.wknd:hover td{background:#E1E0DB}
 .tscroll{overflow-x:auto;border-radius:9px;border:1px solid var(--line)}
 /* Таблица расходов: на широком экране она расползалась во всю панель, и глаз не связывал
    статью с её цифрой. Держим её узкой и по центру, числовые колонки — фиксированной ширины. */
@@ -1923,7 +1932,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-09-06-29";
+const APP_VER="2026-09-06-30";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -11754,8 +11763,11 @@ function _realHtml(){
     // месяца вперёд и выполнение выглядело бы вдвое хуже, чем есть
     if(frozen){ tex+=exp; if(!future && r && r.lessons){ texDone+=exp; texFact+=fact; } }
     const pct=(frozen&&exp>0&&!future&&r&&r.lessons)?(100*fact/exp):null;
-    rows+=`<tr${future?' style="opacity:.6"':''}>
-      <td style="text-align:center">${d}</td>
+    // выходные заливаем отдельно: по числу месяца день недели не виден, а суббота с воскресеньем
+    // у клуба и по занятиям, и по ожиданию совсем другие
+    const wd=new Date(Y,M-1,d).getDay(), wknd=(wd===0||wd===6);
+    rows+=`<tr${wknd?' class="wknd"':''}${future?' style="opacity:.6"':''}>
+      <td style="text-align:center"${wknd?' title="'+(wd===6?'суббота':'воскресенье')+'"':''}>${d}</td>
       <td style="text-align:right">${(r&&r.lessons)?('<b>'+_gm(r.present)+'</b>'):'<span style="color:var(--muted)">—</span>'}</td>
       <td style="text-align:right">${(r&&r.lessons)?_gm(r.all):''}</td>
       <td style="text-align:right;color:var(--terra-d)">${exp?(frozen
@@ -11806,7 +11818,7 @@ function _realHtml(){
       : ' — сейчас это <b>текущая</b> неделя с '+esc(curMon)+': её ещё не фиксировали, и её будущие дни пропадут, если не заморозить до того, как занятия пройдут.'
     } Дни, где занятия уже проведены, кнопка не трогает — им ожидание восстанавливают отдельно.</div>
   <div style="font-size:12px;color:var(--muted);margin:-4px 0 10px">${_realSnapNote(nextMon)}</div>
-  <div class="tscroll" style="max-width:820px"><table><thead><tr>
+  <div class="tscroll" style="max-width:820px"><table id="realTable"><thead><tr>
     <th>Дн</th><th style="text-align:right">Без пропусков</th><th style="text-align:right">С пропусками</th><th style="text-align:right" title="Сколько ожидали ДО начала недели — зафиксировано в вс 22:00 и не меняется">Ожидается</th><th style="text-align:right" title="Реализация от ожидания: (без пропусков + с пропусками) ÷ 2 ÷ ожидание">%</th><th style="text-align:right" title="Нарастающим итогом: среднее «без пропусков» и «с пропусками» — тот же доход, что во «Все показатели» и «Прогноз по всем»">Накопительно</th><th style="text-align:center">Занятий</th>
   </tr></thead><tbody>${rows}
     <tr style="border-top:2px solid var(--line)"><td><b>${esc(monLabel)}</b></td><td style="text-align:right"><b style="color:var(--green)">${_gm(tp)}</b></td><td style="text-align:right"><b>${_gm(ta)}</b></td><td style="text-align:right"><b style="color:var(--terra-d)">${tex?_gm(tex):_gm(tpl)}</b></td><td style="text-align:right">${texPct!=null?('<b title="По прошедшим дням: факт '+_gm(texFact)+' из ожидавшихся '+_gm(texDone)+'">'+texPct.toFixed(0)+'%</b>'):''}</td><td style="text-align:right"><b title="Доход месяца: среднее «без пропусков» и «с пропусками»">${_gm((tp+ta)/2)}</b></td><td style="text-align:center"><b>${tl}</b></td></tr>
