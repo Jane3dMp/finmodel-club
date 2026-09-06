@@ -18,6 +18,7 @@ const NAMES = ['_salesNum', '_salesCfg', '_ratAgg', '_ratSubjToCourse', '_ratMod
                'fixRateByName', '_ratWage', '_ratTeacherName',
                '_salesTops', '_salesWeekText', '_salesMonthText',
                '_salesLastYearDates', '_salesLastYearLabel', '_salesLastYearFact',
+               '_salesActiveNote',
                '_salesReports', '_salesCur', '_salesDate', '_salesMonName', '_salesHtml', '_salesCronHtml'];
 const ONE_LINERS = ['_salesMonthEnd', '_salesMonday'];   // тело в одну строку — своя регулярка
 let src = '';
@@ -69,7 +70,7 @@ const ctx = {
 };
 const API = new Function('ctx', 'with (ctx) { ' + src +
   ' return {_salesNum,_salesTops,_salesWeekText,_salesMonthText,_salesMonthEnd,_salesCfg,_salesHtml,' +
-  '_salesLastYearDates,_salesLastYearLabel,_salesLastYearFact}; }')(ctx);
+  '_salesLastYearDates,_salesLastYearLabel,_salesLastYearFact,_salesActiveNote}; }')(ctx);
 
 /* ================= формат чисел (как в чате: 22.578) ================= */
 eq('число с разделителем тысяч', API._salesNum(22578), '22.578');
@@ -248,6 +249,35 @@ const hWeekOnly = render({ _salesStore: { reports: { '2025-10-06': rep, '2025-10
                                           settings: { lastRun: '2025-11-02T22:00:11+03:00' } }, _salesWeek: '2025-10-06' });
 check('обычная неделя — без месячного блока', hWeekOnly.indexOf('Сообщение по итогам месяца') < 0);
 check('обычная неделя — недельный текст на месте', hWeekOnly.indexOf('Оборот недели: 22.578.') > 0);
+
+/* ================= подпись под «активными клиентами» =================
+   С 06.09.2026 активные — это те, кто РЕАЛЬНО пришёл за неделю. Прежний счёт по базе Alfa
+   остался запасным, и способ надо называть вслух: цифры у них расходятся в полтора-два раза,
+   и молча подменить одну другой значит соврать отделу продаж. */
+{
+  const note = r => API._salesActiveNote(r);
+  const att = note({ active: 412, activePrev: 398, activeSrc: 'attend', activeDays: 7 });
+  check('посещаемость: сказано, что это пришедшие', att.indexOf('кто пришёл хотя бы на одно занятие') === 0, att);
+  check('и видно прошлую неделю', att.indexOf('неделю назад: 398') > 0, att);
+  check('при полных данных лишнего предупреждения нет', att.indexOf('из 7 дней') < 0, att);
+
+  const part = note({ active: 300, activePrev: 0, activeSrc: 'attend', activeDays: 4 });
+  check('неполная неделя помечена', part.indexOf('только за 4 из 7 дней') > 0, part);
+  check('и подсвечена', part.indexOf('terra') > 0, part);
+
+  const base = note({ active: 793, activePrev: 0, activeSrc: 'total' });
+  check('запасной счёт назван своим именем', base.indexOf('учащиеся Alfa') === 0, base);
+  check('и объяснено, почему он', base.indexOf('посещаемости за ту неделю не осталось') > 0, base);
+
+  const none = note({ active: 0, activeSrc: 'skip: сеть' });
+  check('не посчиталось — так и написано', none.indexOf('не посчитались') === 0, none);
+  check('с причиной', none.indexOf('сеть') > 0, none);
+
+  // первая неделя нового способа: прошлого значения нет — сравнивать не с чем, и это не ошибка
+  const first = note({ active: 412, activePrev: 0, activeSrc: 'attend', activeDays: 7 });
+  check('без прошлой недели сравнения нет', first.indexOf('неделю назад') < 0, first);
+}
+
 
 console.log(bad ? '\n❌ провалено проверок: ' + bad : '\n✅ всё сошлось');
 process.exit(bad ? 1 : 0);

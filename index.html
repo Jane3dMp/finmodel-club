@@ -1932,7 +1932,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-09-06-32";
+const APP_VER="2026-09-06-33";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -11037,7 +11037,7 @@ function renderRuk(){
   const lab=(RUK_SECTIONS.find(x=>x[0]===_rukSec)||[])[1]||"";
   body.innerHTML=`<div class="callout">Раздел «${esc(lab)}» — 🔧 в разработке, построим следующим.</div>`;
 }
-const ADM_SECTIONS=[["real","📈 Реализация"],["kassa","💵 Кассы (сверка)"],["rashod","💸 Расходы ежедневно"],["zp","🧹 ЗП админы и уборка"]];
+const ADM_SECTIONS=[["real","📈 Реализация"],["obzvon","📞 Списки на обзвон"],["kassa","💵 Кассы (сверка)"],["rashod","💸 Расходы ежедневно"],["zp","🧹 ЗП админы и уборка"]];
 let _admSec=(function(){ try{ return localStorage.getItem("admSec")||"real"; }catch(e){ return "real"; } })();
 function admGo(s){ _admSec=s; try{ localStorage.setItem("admSec",s); }catch(e){} renderAdm(); }
 function renderAdm(){
@@ -11046,6 +11046,7 @@ function renderAdm(){
   nav.innerHTML=ADM_SECTIONS.map(s=>`<button class="btn ${s[0]===_admSec?'':'ghost'} sm" onclick="admGo('${s[0]}')">${esc(s[1])}</button>`).join("");
   const body=document.getElementById("admBody"); if(!body) return;
   if(_admSec==="real"){ _realRender(); return; }
+  if(_admSec==="obzvon"){ body.innerHTML=_obzvonHtml(); obzLoad(false); return; }
   if(_admSec==="rashod"){ body.innerHTML=_rashodHtml();
     if(!_paySnap){ _payLoadStore().then(()=>{ if(_admSec==="rashod"){ const b=document.getElementById("admBody"); if(b) b.innerHTML=_rashodHtml(); } }).catch(()=>{}); }
     return; }
@@ -11055,6 +11056,332 @@ function renderAdm(){
     return; }
   const lab=(ADM_SECTIONS.find(x=>x[0]===_admSec)||[])[1]||"";
   body.innerHTML=`<div class="callout">Раздел «${esc(lab)}» — 🔧 в разработке. «Расходы» и «ЗП админы» — ручной ввод, сделаем, как определимся с логикой.</div>`;
+}
+
+/* ===== СПИСКИ НА ОБЗВОН =====
+   Жанна: «нужен ещё раздел. Кто не дошёл из новых — с балансами и контактами, чтобы распечатать
+   и работать с этим менеджеру. И второй список — кто не пришёл на какой курс из прошлогодних,
+   т.е. все остальные; этих обзванивают админы. Поставь на автоматический прогон в вс в 21:00,
+   чтобы финмодель только формировала, а я распечатывала».
+
+   Как устроено. Ходить в Alfa за занятиями трёх сотен детей — минуты, в один заход это не
+   проходит ни здесь, ни на хостинге. Поэтому в воскресенье в 21:00 cron_obzvon.php собирает
+   СЫРОЙ снимок (занятия, абонементы, карточки) и кладёт его на сервер. Здесь мы этот снимок
+   только читаем и разбираем на корзины — тем же правилом _trLesState, что рисует воронку по
+   набору. Правило одно на всю модель: если писать разбор ещё и в PHP, «пришёл / не пришёл»
+   будет жить в двух местах и разъедется, а цена расхождения прямая — человеку зря позвонят.
+
+   Роспись (кто новый, кто прошлогодний, чей телефон) знает только модель — она из таблицы.
+   Кладём её на сервер при открытии раздела, воскресный прогон берёт последнюю. */
+let _obz=null;                 // снимок с сервера
+let _obzMeta=null;             // лёгкая шапка: когда собран, кем, сколько детей
+let _obzBusy=false, _obzProg="", _obzErr="";
+let _obzRosterSent="";         // отпечаток отправленной росписи — одно и то же не шлём дважды
+let _obzLoaded=false;          // снимок уже пробовали прочитать (пусто — тоже ответ)
+
+/* Роспись из модели: новые и прошлогодние с телефонами. Без alfaId ребёнка не спросишь —
+   у Alfa занятия ищутся только по её собственному id, поэтому такие в роспись не идут. */
+function _obzRoster(){
+  if(typeof _goalsKidLists!=="function") return null;
+  let L=null; try{ L=_goalsKidLists(); }catch(e){ return null; }
+  if(!L) return null;
+  const ok=o=>o&&o.alfaId!=null&&o.alfaId!==""&&Number(o.alfaId)>0;
+  const row=o=>({id:Number(o.alfaId), name:String(o.name||""), phone:String(_trPhone(o.alfaId)||"")});
+  return {new:(L.newKids||[]).filter(ok).map(row), old:(L.oldKids||[]).filter(ok).map(row)};
+}
+function _obzRosterFp(r){
+  const f=a=>a.map(x=>x.id+"|"+x.phone).join(",");
+  return f(r.new)+"//"+f(r.old);
+}
+async function obzPushRoster(force){
+  const r=_obzRoster();
+  if(!r||(!r.new.length&&!r.old.length)) return null;
+  const fp=_obzRosterFp(r);
+  if(!force && fp===_obzRosterSent) return null;
+  const j=await _pubCall("obzvonRoster",{new:r.new, old:r.old});
+  _obzRosterSent=fp;
+  return j;
+}
+async function obzLoad(force){
+  if(_obzBusy) return;
+  if(!force && _obzLoaded) return;
+  _obzBusy=true; _obzErr=""; _obzPaint();
+  try{
+    /* Роспись отправляем при каждом открытии раздела: состав набора в таблице меняется, а
+       воскресный прогон работает по тому, что мы положили в последний раз. Ошибку отправки
+       глушим — снимок читается и без неё, а раздел без снимка бесполезен. */
+    try{ await obzPushRoster(false); }catch(e){}
+    const j=await _pubCall("obzvonStore",{});
+    _obz=(j&&j.snap&&j.snap.kids)?j.snap:null;
+    _obzMeta=j||null;
+    _obzLoaded=true;
+  }catch(e){ _obzErr=(e&&e.message)||String(e); }
+  finally{ _obzBusy=false; _obzPaint(); }
+}
+/* Пересобрать вручную — тот же серверный сборщик, что крутит воскресный cron, только цикл
+   крутит браузер: кусками, иначе шлюз хостинга оборвёт запрос на середине. */
+async function obzBuildNow(){
+  if(_obzBusy) return;
+  _obzBusy=true; _obzErr=""; _obzProg="0/?"; _obzPaint();
+  try{
+    await obzPushRoster(true);
+    let off=0;
+    for(let i=0;i<400;i++){
+      const j=await _pubCall("obzvonBuild",{offset:off, limit:15, force:true});
+      _obzProg=(j.done||0)+"/"+(j.total||0); _obzPaint();
+      if(j.complete) break;
+      off=j.nextOffset||0;
+    }
+    const j=await _pubCall("obzvonStore",{});
+    _obz=(j&&j.snap&&j.snap.kids)?j.snap:null; _obzMeta=j||null; _obzLoaded=true;
+    toast("Списки на обзвон собраны");
+  }catch(e){ _obzErr=(e&&e.message)||String(e); }
+  finally{ _obzBusy=false; _obzProg=""; _obzPaint(); }
+}
+function _obzPaint(){ if(_admSec==="obzvon"){ const b=document.getElementById("admBody"); if(b) b.innerHTML=_obzvonHtml(); } }
+
+function _obzCard(id){ return (_obz&&_obz.cards&&(_obz.cards[String(id)]||_obz.cards[Number(id)]))||null; }
+function _obzArch(id){ const c=_obzCard(id); return !!(c&&c.archived); }
+function _obzEv(id){ const c=_obzCard(id); return (c&&c.evzz)?String(c.evzz).trim():""; }
+function _obzName(id, fallback){ const c=_obzCard(id); return (c&&c.name)||fallback||("id "+id); }
+function _obzSubj(sid){ return (_obz&&_obz.subjects&&_obz.subjects[String(sid)])||("предмет "+sid); }
+/* Телефон: сначала тот, что уехал в снимок вместе с росписью (он и печатается в воскресном
+   списке), потом живой из модели — вдруг с воскресенья успели вписать. */
+function _obzPhone(id, rosterPhone){ return String(rosterPhone||"")||String(_trPhone(id)||""); }
+/* Абонемент и баланс — то, ради чего Жанна просила «и балансы»: без денег разговор менеджера
+   слепой. Показываем действующие платные, остаток числом. */
+function _obzTar(id){ return (_obz&&_obz.tar&&(_obz.tar[String(id)]||_obz.tar[Number(id)]))||null; }
+function _obzTarText(id){
+  const t=_obzTar(id);
+  if(!t) return "";
+  if(!t.tariffs||!t.tariffs.length) return "без абонемента";
+  const paid=t.tariffs.filter(x=>!x.trial);
+  if(!paid.length) return "только пробный";
+  return paid.map(x=>x.name+((x.balance!=null)?(" · остаток "+x.balance):"")).join(", ");
+}
+function _obzBalance(id){
+  const t=_obzTar(id);
+  if(!t||!t.tariffs||!t.tariffs.length) return null;
+  let s=null;
+  t.tariffs.forEach(x=>{ if(x&&x.balance!=null){ s=(s==null?0:s)+(+x.balance||0); } });
+  return s;
+}
+function _obzDay(d){
+  const dn=["вс","пн","вт","ср","чт","пт","сб"];
+  const x=new Date(d+"T12:00:00");
+  return String(d).slice(8)+"."+String(d).slice(5,7)+" "+(dn[x.getDay()]||"");
+}
+
+/* СПИСОК 1 — не дошли из НОВЫХ: занятия у ребёнка уже прошли, а он не был ни на одном.
+   Тот же разбор, что в воронке по набору («не дошли»), только собранный из воскресного снимка.
+   Возвращенцев отсюда убираем — у них своя корзина и свой список ниже: по занятиям ДО
+   1 сентября видно, что клиент не новый, сколько бы ни говорила классификация в таблице.
+   Архивных не берём: карточку убрали в Alfa — вопрос закрыт, звонок будет впустую. */
+function _obzNewMissed(){
+  if(!_obz||!_obz.roster) return null;
+  const today=_obz.today||_trToday();
+  const rows=[];
+  (_obz.roster.new||[]).forEach(r=>{
+    const id=String(r.id);
+    const pv=(_obz.before||{})[id];
+    if(pv&&pv.n>0) return;                       // на деле прошлогодний — он во втором списке
+    if(_obzArch(id)) return;
+    const L=(_obz.kids||{})[id]||[];
+    let came=false; const miss=[], ahead=[];
+    L.forEach(x=>{
+      const st=_trLesState(x,today);
+      if(st==="came"||st==="came_free") came=true;
+      else if(st==="missed") miss.push(x);
+      else if(st==="ahead") ahead.push(x);
+    });
+    if(came||!miss.length) return;
+    rows.push({id:id, name:_obzName(id,r.name), phone:_obzPhone(id,r.phone), miss:miss, ahead:ahead});
+  });
+  rows.sort((a,b)=>a.name.localeCompare(b.name,"ru"));
+  return rows;
+}
+/* СПИСОК 2 — прошлогодние: на КАКОЙ курс не пришли. Считаем по курсам, а не «ходил ли вообще»:
+   ребёнок может второй год ходить на Roblox и ни разу не появиться на Scratch — звонить нужно
+   именно про Scratch, и админ должен видеть, что человек в клубе, просто курс не пошёл.
+   «Все остальные» — не только корзина oldKids из таблицы: сюда же те, кого таблица считает
+   новыми, а Alfa показала занятия до 1 сентября. Иначе такой ребёнок не попал бы никуда. */
+function _obzOldMissed(){
+  if(!_obz||!_obz.roster) return null;
+  const today=_obz.today||_trToday();
+  const seen={}, src=[];
+  (_obz.roster.old||[]).forEach(r=>{ const id=String(r.id); if(seen[id]) return; seen[id]=1; src.push({id:id, r:r, why:""}); });
+  (_obz.roster.new||[]).forEach(r=>{
+    const id=String(r.id); if(seen[id]) return;
+    const pv=(_obz.before||{})[id];
+    if(!(pv&&pv.n>0)) return;
+    seen[id]=1;
+    src.push({id:id, r:r, why:"в таблице числится новым, но в Alfa есть занятия до 1 сентября"+(pv.last?(", последнее "+_obzDay(pv.last)):"")});
+  });
+  const rows=[];
+  src.forEach(s=>{
+    const id=s.id;
+    if(_obzArch(id)) return;
+    const L=(_obz.kids||{})[id]||[];
+    const by={};
+    L.forEach(x=>{
+      const k=String(x.subjectId||0);
+      const b=by[k]||(by[k]={miss:[], ahead:[], came:false});
+      const st=_trLesState(x,today);
+      if(st==="came"||st==="came_free") b.came=true;
+      else if(st==="missed") b.miss.push(x);
+      else if(st==="ahead") b.ahead.push(x);
+    });
+    const lost=Object.keys(by).filter(k=>!by[k].came&&by[k].miss.length)
+      .map(k=>({subjectId:+k, miss:by[k].miss, ahead:by[k].ahead}))
+      .sort((a,b)=>_obzSubj(a.subjectId).localeCompare(_obzSubj(b.subjectId),"ru"));
+    if(!lost.length) return;
+    const goes=Object.keys(by).filter(k=>by[k].came).map(k=>_obzSubj(+k)).sort((a,b)=>a.localeCompare(b,"ru"));
+    rows.push({id:id, name:_obzName(id,s.r.name), phone:_obzPhone(id,s.r.phone), lost:lost, goes:goes, why:s.why});
+  });
+  rows.sort((a,b)=>a.name.localeCompare(b.name,"ru"));
+  return rows;
+}
+
+/* ---- ПЕЧАТЬ ----
+   Оба списка — на лист, альбомно, с пустой клеткой «дозвон»: по бумаге и работают. */
+const OBZ_CSS=`body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;padding:18px;color:#1c1410}
+    h2{margin:0 0 2px;font-size:19px}.sub{color:#8a8178;font-size:12px;margin-bottom:12px}
+    table{border-collapse:collapse;width:100%;margin-bottom:22px}
+    th{background:#1c1410;color:#fff;padding:7px 10px;font-size:12px;text-align:left}
+    td{padding:7px 10px;border-bottom:1px solid #e6ded3;font-size:12px;vertical-align:top}
+    tr:nth-child(even) td{background:#faf6f0}
+    .nm{font-weight:700}.mut{color:#8a8178}.no{color:#b0493d}.ok{color:#3f7d4e}
+    .call{width:26px;border:1px solid #b9b2a7;border-radius:4px;display:inline-block;height:14px}
+    .page{page-break-after:always}
+    @media print{@page{size:landscape;margin:10mm} .page:last-child{page-break-after:auto}}`;
+function _obzWhen(){
+  const b=(_obz&&_obz.builtAt)||"";
+  if(!b) return "";
+  try{ return new Date(b).toLocaleString("ru-RU",{day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"}); }
+  catch(e){ return b; }
+}
+function _obzNewTable(rows){
+  const body=rows.map(r=>`<tr>
+    <td class="nm">${esc(r.name)}</td>
+    <td>${esc(r.phone||"—")}</td>
+    <td>${r.miss.slice(0,6).map(x=>esc(_obzDay(x.date)+" "+(x.from||"")+" · "+_obzSubj(x.subjectId))).join("<br>")}${
+      r.miss.length>6?`<div class="mut">…и ещё ${r.miss.length-6}</div>`:""}</td>
+    <td>${esc(_obzTarText(r.id)||"—")}</td>
+    <td>${(function(){const b=_obzBalance(r.id);return b==null?'<span class="mut">—</span>':String(b);})()}</td>
+    <td class="mut">${esc(_obzEv(r.id)||"")}</td>
+    <td>${r.ahead.length?('<span class="mut">'+esc(_obzDay(r.ahead[0].date))+'</span>'):'<span class="no">нет</span>'}</td>
+    <td><span class="call"></span></td></tr>`).join("");
+  return `<div class="page"><h2>Не дошли из нового набора — работа менеджера</h2>
+    <div class="sub">Ребёнок записан на занятия, они уже прошли, а он не был ни на одном.
+      Детей: ${rows.length} · снимок ${esc(_obzWhen()||"—")} · напечатано ${esc(new Date().toLocaleDateString("ru-RU"))}
+      <br>Возвращенцы прошлого года и архивные карточки Alfa в список не включены.</div>
+    <table><thead><tr><th>Ребёнок</th><th>Телефон</th><th>Куда был записан и не пришёл</th>
+      <th>Абонемент</th><th>Баланс</th><th>ЭВ 26/27</th><th>Впереди</th><th>Дозвон</th></tr></thead>
+    <tbody>${body||'<tr><td colspan="8" class="mut">Пусто — из нового набора дошли все.</td></tr>'}</tbody></table></div>`;
+}
+function _obzOldTable(rows){
+  const body=rows.map(r=>`<tr>
+    <td class="nm">${esc(r.name)}${r.why?`<div class="mut" style="font-weight:400">${esc(r.why)}</div>`:""}</td>
+    <td>${esc(r.phone||"—")}</td>
+    <td>${r.lost.map(l=>`<b>${esc(_obzSubj(l.subjectId))}</b> <span class="mut">— ${
+      esc(_obzDay(l.miss[0].date))}${l.miss.length>1?(" и ещё "+(l.miss.length-1)):""}</span>`).join("<br>")}</td>
+    <td>${r.goes.length?('<span class="ok">'+esc(r.goes.join(", "))+'</span>'):'<span class="no">нигде не появился</span>'}</td>
+    <td>${esc(_obzTarText(r.id)||"—")}</td>
+    <td>${(function(){const b=_obzBalance(r.id);return b==null?'<span class="mut">—</span>':String(b);})()}</td>
+    <td class="mut">${esc(_obzEv(r.id)||"")}</td>
+    <td><span class="call"></span></td></tr>`).join("");
+  return `<div class="page"><h2>Прошлогодние: не пришли на курс — обзвон администраторов</h2>
+    <div class="sub">По каждому курсу отдельно: занятия курса прошли, а ребёнок не был на них ни разу.
+      Детей: ${rows.length} · снимок ${esc(_obzWhen()||"—")} · напечатано ${esc(new Date().toLocaleDateString("ru-RU"))}
+      <br>Колонка «Ходит на» показывает курсы, где ребёнок всё-таки был, — значит он в клубе, не пошёл именно этот курс. Архивные карточки Alfa не включены.</div>
+    <table><thead><tr><th>Ребёнок</th><th>Телефон</th><th>Не пришёл на курс</th><th>Ходит на</th>
+      <th>Абонемент</th><th>Баланс</th><th>ЭВ 26/27</th><th>Дозвон</th></tr></thead>
+    <tbody>${body||'<tr><td colspan="8" class="mut">Пусто — прошлогодние дошли на все свои курсы.</td></tr>'}</tbody></table></div>`;
+}
+function _obzPrint(title, html){
+  const w=window.open("","_blank"); if(!w){ toast("Разрешите всплывающие окна"); return; }
+  w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${esc(title)} — Прознание + CODDY</title>
+    <style>${OBZ_CSS}</style></head><body>${html}</body></html>`);
+  w.document.close();
+  setTimeout(()=>{ try{ w.focus(); w.print(); }catch(e){} }, 300);
+}
+function obzPrintNew(){
+  const rows=_obzNewMissed();
+  if(!rows){ toast("Снимок ещё не собран"); return; }
+  _obzPrint("Не дошли из нового набора", _obzNewTable(rows));
+}
+function obzPrintOld(){
+  const rows=_obzOldMissed();
+  if(!rows){ toast("Снимок ещё не собран"); return; }
+  _obzPrint("Прошлогодние: не пришли на курс", _obzOldTable(rows));
+}
+function obzPrintBoth(){
+  const a=_obzNewMissed(), b=_obzOldMissed();
+  if(!a||!b){ toast("Снимок ещё не собран"); return; }
+  _obzPrint("Списки на обзвон", _obzNewTable(a)+_obzOldTable(b));
+}
+
+/* ---- ЭКРАН ---- */
+function _obzRowsHtml(rows, kind){
+  if(!rows.length) return `<div style="font-size:12px;color:var(--muted);padding:4px 0">Пусто.</div>`;
+  return rows.map(r=>`<div style="padding:5px 0;border-bottom:1px solid var(--line)">
+    <div style="font-weight:600;font-size:13px">${_trKidLink(r.id,r.name)}
+      <span style="font-size:12px;color:var(--muted)">${esc(r.phone||"телефона нет")}</span>
+      ${(function(){const t=_obzTarText(r.id);return t?`<span style="font-size:11px;color:${
+        t==="без абонемента"||t==="только пробный"?"#C9922E":"var(--green)"}"> · ${esc(t)}</span>`:"";})()}
+      ${(function(){const e=_obzEv(r.id);return e?`<span style="font-size:11px;color:var(--muted)"> · ЭВ: ${esc(e)}</span>`:"";})()}</div>
+    ${r.why?`<div style="font-size:11px;color:var(--muted)">${esc(r.why)}</div>`:""}
+    ${kind==="new"
+      ? `<div style="font-size:12px;color:var(--muted)">не пришёл: ${
+          r.miss.slice(0,4).map(x=>esc(_obzDay(x.date)+" "+_obzSubj(x.subjectId))).join(" · ")}${
+          r.miss.length>4?(" · и ещё "+(r.miss.length-4)):""}${
+          r.ahead.length?(" · впереди "+esc(_obzDay(r.ahead[0].date))):" · впереди ничего"}</div>`
+      : `<div style="font-size:12px;color:var(--muted)">не пришёл на: ${
+          r.lost.map(l=>esc(_obzSubj(l.subjectId))+" ("+l.miss.length+")").join(", ")}${
+          r.goes.length?(" · ходит на "+esc(r.goes.join(", "))):" · нигде не появился"}</div>`}
+  </div>`).join("");
+}
+function _obzvonHtml(){
+  const head=`<div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;margin-bottom:8px">
+    <b style="font-size:15px">Списки на обзвон</b>
+    <span style="font-size:12px;color:var(--muted)">Собирается автоматически по воскресеньям в 21:00 — утром в понедельник печатайте готовое.</span>
+    <button class="btn ghost sm" style="margin-left:auto" onclick="obzBuildNow()"${_obzBusy?" disabled":""}>${
+      _obzBusy?("собираю "+esc(_obzProg||"…")):"пересобрать сейчас"}</button>
+    <button class="btn ghost sm" onclick="obzLoad(true)"${_obzBusy?" disabled":""}>обновить</button></div>`;
+  const err=_obzErr?`<div class="callout" style="border-color:var(--red);font-size:12px;margin-bottom:8px">Не получилось: ${esc(_obzErr)}</div>`:"";
+  if(_obzBusy&&!_obz) return head+err+`<div class="callout" style="font-size:12px">⏳ Читаю снимок…</div>`;
+  if(!_obz){
+    const m=_obzMeta&&_obzMeta.roster;
+    return head+err+`<div class="callout" style="font-size:13px">
+      Снимка ещё нет. Роспись на сервере: ${m?(m.new+" новых, "+m.old+" прошлогодних"):"пока не отправлена"}.
+      <div style="margin-top:6px;color:var(--muted);font-size:12px">Нажмите «пересобрать сейчас» — это займёт несколько минут (запрос в Alfa на каждого ребёнка).
+      Дальше снимок будет обновляться сам, по воскресеньям в 21:00.</div></div>`;
+  }
+  const a=_obzNewMissed()||[], b=_obzOldMissed()||[];
+  const when=_obzWhen();
+  const ranBy=(_obz.ranBy==="cron")?"воскресный прогон":"собрано вручную";
+  const info=`<div style="font-size:12px;color:var(--muted);margin-bottom:10px">
+    Снимок от ${esc(when||"—")} (${esc(ranBy)}) · детей в обходе: ${Object.keys(_obz.kids||{}).length} ·
+    занятия с ${esc(_obz.season||"")} по ${esc(_obz.to||"")}
+    <button class="btn ghost sm" style="margin-left:8px" onclick="obzPrintBoth()">🖨 печать обоих списков</button></div>`;
+  const tile=(n,lab,col,ttl)=>`<div title="${esc(ttl||"")}" style="flex:1;min-width:150px;border:1px solid var(--line);border-radius:9px;padding:8px 12px;background:#fff">
+    <div style="font-size:22px;font-weight:700${col?";color:"+col:""}">${n}</div>
+    <div style="font-size:12px;color:var(--muted)">${lab}</div></div>`;
+  const tiles=`<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+    ${tile(a.length,"не дошли из новых","var(--red)","Записаны, занятия прошли, не были ни на одном. С ними работает менеджер")}
+    ${tile(b.length,"прошлогодние без курса","#C9922E","Занятия курса прошли, а ребёнок не был на них ни разу. Обзванивают админы")}
+  </div>`;
+  const blk=(t,hint,rows,kind,btn,fn,col)=>`<details${rows.length?" open":""} style="border:1px solid var(--line);border-radius:9px;padding:8px 12px;margin-bottom:8px;background:#fff">
+    <summary style="cursor:pointer;font-weight:700;font-size:14px;color:${col}">${esc(t)}
+      <span style="color:var(--muted);font-weight:400">— ${rows.length}</span></summary>
+    <div style="font-size:12px;color:var(--muted);margin:4px 0 6px">${hint}
+      <button class="btn ghost sm" style="margin-left:6px" onclick="${fn}()">🖨 ${esc(btn)}</button></div>
+    ${_obzRowsHtml(rows,kind)}</details>`;
+  return head+err+info+tiles
+    +blk("Не дошли из новых","Записан на занятия, они прошли — не был ни на одном. В печати: телефон, куда был записан, абонемент, баланс, ЭВ 26/27.",
+         a,"new","печать списка менеджера","obzPrintNew","var(--red)")
+    +blk("Прошлогодние: не пришли на курс","Все остальные дети клуба, по курсам: где занятия прошли, а ребёнка не было ни разу. В печати: телефон, курс, куда всё-таки ходит, абонемент, баланс, ЭВ 26/27.",
+         b,"печать списка админов","obzPrintOld","#C9922E");
 }
 /* ---- РАСХОДЫ ЕЖЕДНЕВНО ----
    Расходы приходят из Alfa (тип «Расход») со статьёй; их собирает cron в 22:00.
@@ -12884,6 +13211,21 @@ function _salesLastYearFact(W){
     sum+=((+r.present||0)+(+r.all||0))/2; });
   return {dates:dates, from:dates[0], to:dates[6], sum:sum, known:known, withLes:withLes};
 }
+/* Что означает «активных клиентов». С 06.09.2026 это те, кто РЕАЛЬНО пришёл хотя бы на одно
+   занятие за неделю (решение Жанны). Прежний способ — все неархивные ученики базы Alfa —
+   остался запасным: он срабатывает, когда неделю пересобирают задним числом и посещаемости
+   за те дни в хранилище уже нет. Способ надо называть вслух: цифры у них разные в полтора-два
+   раза, и молча подменить одну другой значит соврать отделу продаж. */
+function _salesActiveNote(rep){
+  const src=String(rep.activeSrc||""), prev=+rep.activePrev||0;
+  const was=prev?(" · неделю назад: "+prev):"";
+  if(!+rep.active) return "не посчитались: "+esc(src);
+  if(src.indexOf("attend")===0){
+    const d=+rep.activeDays||0;
+    return "кто пришёл хотя бы на одно занятие за неделю"+(d&&d<7?(" · <b style=\"color:var(--terra-d)\">данные только за "+d+" из 7 дней</b>"):"")+was;
+  }
+  return "учащиеся Alfa в клубных филиалах (посещаемости за ту неделю не осталось)"+was;
+}
 function _salesWeekText(rep){
   const man=rep.man||{}, L=[];
   L.push("Оборот недели: "+_salesNum(rep.fact)+".");
@@ -13046,7 +13388,7 @@ function _salesHtml(){
         value="${man.nextGoal||''}" placeholder="${sug?_gm(sug):'—'}" onchange="salesSet('${_jsStr(W)}','nextGoal',this.value)"></td>
       <td style="font-size:12px;color:var(--muted)">${sug?("предлагаю <b>"+_gm(sug)+"</b> — по вашей истории факт ≈ "+ratio+"% прогноза"):"впишите цель, она станет «Шли на» в следующем отчёте"}</td></tr>
     ${numRow("Активных клиентов", (+rep.active)?(rep.active+((+rep.activePrev)?(' <span style="color:'+(dAct>=0?'var(--green)':'var(--red)')+'">('+(dAct>=0?'+':'')+dAct+')</span>'):'')):'<span style="color:var(--muted)">—</span>',
-             (+rep.active)?("учащиеся Alfa в клубных филиалах"+((+rep.activePrev)?(" · неделю назад: "+rep.activePrev):"")):("не посчитались: "+esc(rep.activeSrc||"")))}
+             _salesActiveNote(rep))}
     <tr><td>Комментарий</td><td colspan="2"><textarea class="cell" rows="2" style="width:100%;min-width:280px"
       placeholder="Например: сейчас самое сложное — удержать тех, у кого закончились абонементы"
       onchange="salesSet('${_jsStr(W)}','note',this.value)">${esc(man.note||"")}</textarea></td></tr>

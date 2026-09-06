@@ -407,6 +407,7 @@ function alfa_realization_day(string $date, ?array $branchFilter = null): array 
     $trialOk = !empty($trials['ok']) && ($trials['filterHonored'] !== false);
     $trialSet = $trialOk ? ($trials['customers'] ?? []) : [];
     $trialDone = 0; $trialMissed = 0; $trialMissedIds = []; $trialDoneIds = []; $trialNoCid = 0;
+    $attIds = [];                       // id детей, отмеченных пришедшими в этот день
     foreach ($les as $L) {
         $bid = (int)$L['branch'];
         if (!isset($byBranch[$bid])) $byBranch[$bid] = ['present' => 0.0, 'all' => 0.0, 'lessons' => 0];
@@ -447,7 +448,12 @@ function alfa_realization_day(string $date, ?array $branchFilter = null): array 
             }
             $att = !empty($dt['is_attend']);
             $all += $c; $nAll++; $byBranch[$bid]['all'] += $c;
-            if ($att) { $present += $c; $nPresent++; $byBranch[$bid]['present'] += $c; }
+            if ($att) { $present += $c; $nPresent++; $byBranch[$bid]['present'] += $c;
+                        /* Кто РЕАЛЬНО пришёл — для «активных клиентов» в отчёте продажам.
+                           Участники занятия уже прочитаны, отдельный обход Alfa ради тех же
+                           данных был бы чистой тратой. */
+                        $cid2 = (int)($dt['customer_id'] ?? 0);
+                        if ($cid2) $attIds[$cid2] = 1; }
             // разбивка по педагогам — для «Рейтинга педагогов» (копится тем же проходом)
             foreach (($L['teachers'] ?? []) as $tid) {
                 if (!isset($byTeacher[$tid])) $byTeacher[$tid] = ['lessons' => 0, 'minutes' => 0, 'seats' => 0, 'revenue' => 0.0, '_les' => []];
@@ -492,6 +498,7 @@ function alfa_realization_day(string $date, ?array $branchFilter = null): array 
     foreach ($byTeacher as &$t) { unset($t['_les']); $t['revenue'] = round($t['revenue'], 2); } unset($t);
     foreach ($wageRows as $tid0 => $rows0) { if (isset($byTeacher[$tid0])) $byTeacher[$tid0]['rows'] = $rows0; }
     return ['date' => $date, 'lessons' => $doneLessons, 'plannedLessons' => $plannedLessons, 'byTeacher' => $byTeacher,
+            'attendedIds' => array_map('intval', array_keys($attIds)),
             'perBranch' => $perBranch, 'statusHist' => $statusHist,
             'branchesUsed' => array_values($branches), 'branchNames' => alfa_branch_names(), 'byBranch' => $byBranch,
             'realizationPresent' => round($present, 2), 'realizationAll' => round($all, 2),
@@ -548,6 +555,45 @@ function alfa_realization_branches(): array {
     $n = cfg()['realization_branch_names'] ?? ['Пожарный'];
     return alfa_branch_ids_by_name(is_array($n) ? $n : ['Пожарный']);
 }
+/* ===== КТО ПРИХОДИЛ ПО ДНЯМ =====
+   «Активные клиенты» в отчёте продажам — это те, кто РЕАЛЬНО пришёл за неделю (решение Жанны
+   06.09.2026). Раньше считали иначе: все неархивные ученики в базе Alfa, то есть цифра мерила
+   порядок в базе, а не посещаемость.
+   Считать неделю можно только по id: ребёнок, пришедший в пн и в ср, — один активный. Держим
+   их ОТДЕЛЬНЫМ файлом, а не в дневном хранилище реализации: то целиком уходит в браузер при
+   каждом открытии раздела, и сотни id на каждый день раздули бы каждый ответ. */
+function alfa_attend_store_path(): string {
+    $salt = substr(hash('sha256', __DIR__ . '|attend1'), 0, 24);
+    return alfa_store_dir() . '/attend_' . $salt . '.json';
+}
+function alfa_attend_read(): array {
+    $f = alfa_attend_store_path();
+    if (!is_file($f)) return [];
+    $j = json_decode((string)@file_get_contents($f), true);
+    return is_array($j) ? $j : [];
+}
+function alfa_attend_write(array $d): void {
+    ksort($d);
+    if (count($d) > 200) $d = array_slice($d, -200, null, true);   // ~7 месяцев, дальше не нужно
+    $f = alfa_attend_store_path();
+    $tmp = $f . '.' . getmypid() . '.tmp';
+    $json = json_encode($d, JSON_UNESCAPED_UNICODE);
+    if (@file_put_contents($tmp, $json, LOCK_EX) !== false) { @chmod($tmp, 0660); @rename($tmp, $f); }
+    else @file_put_contents($f, $json, LOCK_EX);
+}
+/* Сколько РАЗНЫХ детей пришло за неделю. days — по скольким из семи дней есть данные: если
+   день не читали, честнее сказать об этом, чем отдать заниженное число как полное. */
+function alfa_active_attended(string $mon, ?array $att = null): array {
+    $att = $att ?? alfa_attend_read();
+    $ids = []; $days = 0;
+    for ($i = 0; $i < 7; $i++) {
+        $d = date('Y-m-d', strtotime("+$i day", strtotime($mon)));
+        if (!array_key_exists($d, $att)) continue;
+        $days++;
+        foreach ((array)$att[$d] as $id) { $id = (int)$id; if ($id) $ids[$id] = 1; }
+    }
+    return ['count' => count($ids), 'src' => 'attend', 'days' => $days, 'week' => $mon];
+}
 /* Посчитать реализацию за день по выбранным филиалам и записать в хранилище. */
 function alfa_realization_upsert(string $date, ?array $branches = null): array {
     $r = alfa_realization_day($date, $branches);
@@ -561,6 +607,11 @@ function alfa_realization_upsert(string $date, ?array $branches = null): array {
         foreach (['trialDone', 'trialMissed', 'trialNoCid'] as $k) if (isset($r[$k])) $row[$k] = (int)$r[$k];
     }
     if (!empty($r['trialOk'])) foreach (['trialMissedIds', 'trialDoneIds'] as $k) if (!empty($r[$k])) $row[$k] = $r[$k];
+    /* Кто пришёл — в свой файл. День без проведённых занятий пишем пустым списком: это
+       законный ответ «никто», и он должен отличаться от «день не читали». */
+    $att = alfa_attend_read();
+    $att[$r['date']] = array_values((array)($r['attendedIds'] ?? []));
+    alfa_attend_write($att);
     $s = alfa_realization_store_read();
     /* ⚠️ ЗАМОРОЖЕННОЕ «ожидалось» (expect) переносим из старой строки. Иначе его затирал бы
        этот же ежедневный пересчёт: по мере проведения занятий planned падает в ноль, и к концу
@@ -2558,11 +2609,21 @@ function alfa_sales_build(string $runDate, ?array $branches = null, bool $deep =
     // прогноз, который делали НА эту неделю — нужен для медианы «факт ÷ прогноз»
     $prevForecast = $prev ? (float)($prev['next']['forecast'] ?? 0) : round((float)($wp[$mon]['plan'] ?? 0), 2);
 
-    // --- активные клиенты ---
-    $act = ['count' => 0, 'src' => 'skip'];
-    try { $act = alfa_active_count($branches); } catch (Throwable $e) { $act['err'] = $e->getMessage(); }
+    /* --- активные клиенты = кто РЕАЛЬНО пришёл за неделю ---
+       Дни недели только что пересчитаны выше, поэтому id пришедших уже лежат в своём файле —
+       лишних обращений к Alfa здесь нет. Если данных за неделю не оказалось совсем (старый
+       отчёт пересобирают задним числом), падаем на прежний счёт по базе и говорим об этом. */
+    $act = alfa_active_attended($mon);
+    if ((int)$act['days'] === 0) {
+        $act = ['count' => 0, 'src' => 'skip'];
+        try { $act = alfa_active_count($branches) + ['days' => 0]; }
+        catch (Throwable $e) { $act['err'] = $e->getMessage(); }
+    }
     $log = $sales['activeLog']; if ((int)$act['count'] > 0) $log[$run] = (int)$act['count'];
-    $actPrev = $prev ? (int)($prev['active'] ?? 0) : 0;
+    /* Сравнивать можно только с отчётом, посчитанным ТАК ЖЕ. У отчётов до этой правки в active
+       лежит число учеников в базе — против него посещаемость дала бы фантастический минус. */
+    $actPrev = ($prev && (string)($prev['activeSrc'] ?? '') === (string)$act['src'])
+               ? (int)($prev['active'] ?? 0) : 0;
 
     // --- месяц, если он закрылся этим воскресеньем ---
     $month = null;
@@ -2604,6 +2665,7 @@ function alfa_sales_build(string $runDate, ?array $branches = null, bool $deep =
         'next' => ['week' => $nMon, 'forecast' => $nf, 'src' => $nfSrc, 'suggest' => $suggest],
         'active' => (int)$act['count'], 'activePrev' => $actPrev,
         'activeSrc' => (string)$act['src'] . (isset($act['err']) ? (': ' . $act['err']) : ''),
+        'activeDays' => (int)($act['days'] ?? 0),
         'ratio' => round($ratio, 4),
         'month' => $month,
         // ручные поля (что вписала Жанна) переживают пересборку
@@ -2643,4 +2705,156 @@ function alfa_sales_set_manual(string $week, array $man): array {
     $sales['reports'][$key]['man'] = $cur;
     alfa_sales_write($sales);
     return ['ok' => true, 'week' => $key, 'man' => $cur];
+}
+
+/* ===== СПИСКИ НА ОБЗВОН (Дашборд Администратора) =====
+   Жанна: «нужны два печатных списка — кто не дошёл из новых (с балансами и контактами, с этим
+   работает менеджер) и кто из прошлогодних не пришёл на какой курс (этих обзванивают админы).
+   Поставь на автоматический прогон в вс 21:00, чтобы финмодель только формировала, а я
+   распечатывала».
+
+   Разделение труда осознанное: PHP только ХОДИТ В ALFA (это долго — запрос на каждого ребёнка,
+   на весь клуб их под три сотни) и складывает СЫРОЙ снимок занятий, абонементов и карточек.
+   Кто в какую корзину попал, решает та же функция в модели, что рисует воронку на экране.
+   Если написать разбор ещё и здесь, правило «пришёл / не пришёл» будет жить в двух местах и
+   рано или поздно разъедется — а цена расхождения тут прямая: человеку зря звонят.
+
+   Роспись (кто новый, кто прошлогодний, чей телефон) знает только модель: она приходит из
+   Google-таблицы, сервер её не видит. Поэтому модель кладёт роспись сюда, а cron берёт
+   последнюю положенную. Без росписи воскресный прогон честно отвечает «росписи нет». */
+function alfa_obzvon_store_path(): string {
+    $salt = substr(hash('sha256', __DIR__ . '|obzvon1'), 0, 24);
+    return alfa_store_dir() . '/obzvon_' . $salt . '.json';
+}
+function alfa_obzvon_read(): array {
+    $f = alfa_obzvon_store_path();
+    $j = is_file($f) ? json_decode((string)@file_get_contents($f), true) : null;
+    if (!is_array($j)) $j = [];
+    $j['roster'] = is_array($j['roster'] ?? null) ? $j['roster'] : [];
+    $j['snap']   = is_array($j['snap']   ?? null) ? $j['snap']   : [];
+    $j['wip']    = is_array($j['wip']    ?? null) ? $j['wip']    : [];
+    return $j;
+}
+function alfa_obzvon_write(array $d): void {
+    $f = alfa_obzvon_store_path();
+    $tmp = $f . '.' . getmypid() . '.tmp';
+    $json = json_encode($d, JSON_UNESCAPED_UNICODE);
+    if (@file_put_contents($tmp, $json, LOCK_EX) !== false) { @chmod($tmp, 0660); @rename($tmp, $f); }
+    else @file_put_contents($f, $json, LOCK_EX);
+}
+/* Роспись от модели. Чистим жёстко: сюда приходит то, что набрано руками в таблице, а дальше
+   это уедет в печатный список — там мусор виден сразу. */
+function alfa_obzvon_roster_norm(array $rows): array {
+    $out = []; $seen = [];
+    foreach ($rows as $r) {
+        if (!is_array($r)) continue;
+        $id = (int)($r['id'] ?? 0);
+        if ($id <= 0 || isset($seen[$id])) continue;      // без связи с Alfa занятия не спросишь
+        $seen[$id] = 1;
+        $out[] = ['id' => $id,
+                  'name'  => mb_substr(trim((string)($r['name']  ?? '')), 0, 120),
+                  'phone' => mb_substr(trim((string)($r['phone'] ?? '')), 0, 40)];
+    }
+    return $out;
+}
+function alfa_obzvon_roster_set(array $new, array $old): array {
+    $d = alfa_obzvon_read();
+    $n = alfa_obzvon_roster_norm($new);
+    $o = alfa_obzvon_roster_norm($old);
+    /* Ребёнок не может быть одновременно новым и прошлогодним. Модель этого не допускает
+       (корзины _kidClass взаимоисключающие), но роспись приходит по сети — проверяем здесь,
+       иначе один и тот же человек попал бы в оба печатных списка. */
+    $inNew = [];
+    foreach ($n as $r) $inNew[$r['id']] = 1;
+    $o = array_values(array_filter($o, function ($r) use ($inNew) { return empty($inNew[$r['id']]); }));
+    $d['roster'] = ['ts' => time(), 'setAt' => date('c'), 'new' => $n, 'old' => $o];
+    alfa_obzvon_write($d);
+    return ['new' => count($n), 'old' => count($o), 'setAt' => $d['roster']['setAt']];
+}
+/* Начало учебного года — то же 1 сентября, что и в модели (_trYearStart). */
+function alfa_obzvon_season(): string {
+    $y = (int)date('Y'); $m = (int)date('n');
+    return ($m >= 9 ? $y : $y - 1) . '-09-01';
+}
+/* Окно запроса шире сезона на год назад: по занятиям ДО 1 сентября видно, что «новый» ребёнок
+   на самом деле ходил в клуб раньше. Те же границы, что у воронки на экране, — тогда обе
+   стороны попадают в один кэш занятий, и воскресный прогон греет его для понедельника. */
+function alfa_obzvon_from(): string { return ((int)substr(alfa_obzvon_season(), 0, 4) - 1) . '-09-01'; }
+function alfa_obzvon_to(): string   { return date('Y-m-d', strtotime('+30 day')); }
+
+/* Один кусок прогона. Кусками, а не целиком, по той же причине, что и в модели: на триста
+   детей это тысячи запросов в Alfa, и одним куском они не проходят ни в браузере, ни в шлюзе
+   хостинга. Cron гоняет эту же функцию в цикле — код один, отличается только тем, кто крутит
+   цикл.
+
+   Недособранный снимок НЕ заменяет предыдущий: копим в 'wip' и подменяем 'snap' только когда
+   дошли до конца. Иначе оборванный прогон оставил бы Жанну с половиной списка, и в понедельник
+   она бы этого не заметила — печатается ведь то, что есть. */
+function alfa_obzvon_build(int $offset, int $limit, bool $force = false, ?array $branches = null): array {
+    $d = alfa_obzvon_read();
+    $roster = $d['roster'] ?? [];
+    $new = is_array($roster['new'] ?? null) ? $roster['new'] : [];
+    $old = is_array($roster['old'] ?? null) ? $roster['old'] : [];
+    if (!$new && !$old) {
+        return ['ok' => false, 'error' => 'росписи нет: откройте в модели «Дашборд Администратора → Списки на обзвон» — она положит сюда, кто новый, а кто прошлогодний'];
+    }
+    $branches = $branches ?: alfa_realization_branches();
+    $limit = max(1, min(25, $limit));
+    $offset = max(0, $offset);
+
+    $wip = $d['wip'] ?? [];
+    /* Список id фиксируем в начале прогона и дальше не пересобираем: если модель положит новую
+       роспись в середине, куски поедут и кого-то мы просто пропустим. */
+    if ($offset === 0 || empty($wip['ids'])) {
+        $ids = [];
+        foreach ($new as $r) $ids[] = $r['id'];
+        foreach ($old as $r) $ids[] = $r['id'];
+        $wip = ['startedAt' => date('c'), 'season' => alfa_obzvon_season(),
+                'from' => alfa_obzvon_from(), 'to' => alfa_obzvon_to(), 'today' => date('Y-m-d'),
+                'ids' => array_values($ids), 'roster' => ['new' => $new, 'old' => $old],
+                'kids' => [], 'before' => [], 'cards' => [], 'tar' => [], 'subjects' => []];
+        $offset = 0;
+    }
+    $ids = $wip['ids'];
+    $total = count($ids);
+    $slice = array_slice($ids, $offset, $limit);
+    if ($slice) {
+        $les = alfa_kids_lessons($slice, $wip['from'], $wip['to'], $branches, $force, $wip['season']);
+        foreach (($les['kids']   ?? []) as $k => $v) $wip['kids'][(string)$k]   = $v;
+        foreach (($les['before'] ?? []) as $k => $v) $wip['before'][(string)$k] = $v;
+        foreach (($les['cards']  ?? []) as $k => $v) $wip['cards'][(string)$k]  = $v;
+        $tar = alfa_kids_tariffs($slice, $branches, $force);
+        foreach (($tar['tariffs'] ?? []) as $k => $v) $wip['tar'][(string)$k] = $v;
+        /* Названия курсов нужны в печати («не пришёл на Roblox»), а не id предмета. Справочник
+           кэширован на сутки, но спрашиваем один раз за прогон — незачем дёргать его на каждом куске.
+           Педагогов не берём: в обоих списках их нет, а снимок и так тяжёлый. */
+        if (empty($wip['subjects'])) $wip['subjects'] = alfa_simple_ref('subject', $branches);
+    }
+    $done = min($total, $offset + count($slice));
+    $complete = ($done >= $total);
+    if ($complete) {
+        $wip['builtAt'] = date('c');
+        $wip['ranBy'] = !empty($GLOBALS['ALFA_OBZVON_CRON']) ? 'cron' : 'вручную';
+        unset($wip['ids']);
+        $d['snap'] = $wip;
+        $d['wip'] = [];
+    } else {
+        $d['wip'] = $wip;
+    }
+    alfa_obzvon_write($d);
+    return ['ok' => true, 'done' => $done, 'total' => $total, 'complete' => $complete,
+            'nextOffset' => $complete ? 0 : $done,
+            'builtAt' => $complete ? $d['snap']['builtAt'] : ''];
+}
+/* Весь прогон целиком — для cron, где ограничения по времени сняты. */
+function alfa_obzvon_run(?array $branches = null, bool $force = true): array {
+    $GLOBALS['ALFA_OBZVON_CRON'] = true;
+    $off = 0; $r = ['ok' => false];
+    for ($i = 0; $i < 400; $i++) {                 // страховка от бесконечного цикла
+        $r = alfa_obzvon_build($off, 15, $force, $branches);
+        if (empty($r['ok']) || !empty($r['complete'])) break;
+        $off = (int)$r['nextOffset'];
+    }
+    unset($GLOBALS['ALFA_OBZVON_CRON']);
+    return $r;
 }

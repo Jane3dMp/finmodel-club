@@ -25,6 +25,11 @@ function yes(string $name, bool $cond, string $detail = ''): void {
 $STORE = [];
 function alfa_realization_store_read(): array { global $STORE; return $STORE; }
 function alfa_realization_store_write(array $d): void { global $STORE; $STORE = $d; }
+/* Кто пришёл, upsert складывает в отдельный файл — здесь он тоже в памяти. Сам счёт активных
+   проверяет backend/test-active-attended.php, тут важно лишь, что заморозка от него не зависит. */
+$ATT = [];
+function alfa_attend_read(): array { global $ATT; return $ATT; }
+function alfa_attend_write(array $d): void { global $ATT; $ATT = $d; }
 function alfa_iso(string $d): string { return substr($d, 0, 10); }
 function alfa_monday_of(string $iso): string {
     $ts = strtotime(alfa_iso($iso));
