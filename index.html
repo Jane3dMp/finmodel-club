@@ -1916,7 +1916,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-09-06-01";
+const APP_VER="2026-09-06-02";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -1949,23 +1949,49 @@ function load(){
    (локальный режим), где localStorage — единственная копия. Теперь честно говорим и пробуем
    освободить место, выбрасывая самые старые сохранённые версии модели. */
 let _lsFull=false;
+/* Сколько места занято в localStorage и чем — чтобы в предупреждении были цифры, а не общие слова. */
+function _lsUsage(){
+  let total=0; const by={};
+  try{
+    for(let i=0;i<localStorage.length;i++){
+      const k=localStorage.key(i); const v=localStorage.getItem(k)||"";
+      const n=(k.length+v.length)*2;            // UTF-16: примерно два байта на символ
+      total+=n; by[k]=n;
+    }
+  }catch(e){}
+  return {total, by};
+}
+function _lsMb(n){ return (n/1048576).toFixed(1).replace(".",",")+" МБ"; }
 function _lsWarn(where){
   if(_lsFull) return;                                   // не мигаем на каждом сохранении
   _lsFull=true;
+  const u=_lsUsage();
   try{ setSync("err","⚠ Память браузера заполнена"); }catch(e){}
-  try{ toast("Память браузера переполнена — локальная копия не сохраняется. Удалите лишние версии модели (☰ Меню → «⋮ Версии модели») или закройте вкладку и откройте заново."); }catch(e){}
-  console.error("localStorage переполнен при записи:",where);
+  try{ toast("Память браузера переполнена ("+_lsMb(u.total)+") — локальная копия не сохраняется. Нажмите «Сохранить» вверху: все версии уедут в таблицу. Потом удалите лишние в ☰ Меню → «⋮ Версии модели»."); }catch(e){}
+  console.error("localStorage переполнен при записи:",where,"занято:",_lsMb(u.total),u.by);
 }
+/* Освобождаем место, жертвуя ОДНОЙ сохранённой версией — иначе не сохранится и текущая работа.
+   ⚠️ Раньше это делалось молча и бралась просто первая в списке: у Жанны первой после открытой
+   шла версия с названием «Не трогать». Теперь: (1) берём самую давнюю по выгрузке в таблицу,
+   а не случайную; (2) говорим вслух, какую именно и где она осталась. */
 function _lsTrimScenarios(){
-  // освобождаем место: самые старые версии модели (кроме текущей) — под нож
   try{
     if(typeof loadScenarioList!=="function") return false;
-    const list=loadScenarioList(), cur=currentScenarioName();
-    const names=Object.keys(list).filter(n=>n!==cur);
+    const cur=currentScenarioName();
+    let raw={};
+    try{ const r=localStorage.getItem(SCN_KEY); if(r) raw=JSON.parse(r)||{}; }catch(e){}
+    const names=Object.keys(raw).filter(n=>n!==cur);
     if(!names.length) return false;
-    delete list[names[0]];
-    localStorage.setItem(SCN_KEY, JSON.stringify(list));
-    console.warn("localStorage: удалена старая версия модели «"+names[0]+"», чтобы освободить место");
+    names.sort((a,b)=>{
+      const ta=String((raw[a]&&raw[a]._savedAt)||""), tb=String((raw[b]&&raw[b]._savedAt)||"");
+      if(ta!==tb) return ta<tb?-1:1;                    // самая давняя выгрузка — первой под нож
+      return JSON.stringify(raw[b]).length-JSON.stringify(raw[a]).length;   // иначе самая крупная
+    });
+    const victim=names[0];
+    delete raw[victim];
+    localStorage.setItem(SCN_KEY, JSON.stringify(raw));
+    try{ toast("Не хватило памяти браузера: версия «"+victim+"» убрана из локальной копии. Она остаётся в облаке и в Google-таблице, но открыть её отсюда больше нельзя."); }catch(e){}
+    console.warn("localStorage: удалена локальная копия версии «"+victim+"», чтобы освободить место");
     return true;
   }catch(e){ return false; }
 }
@@ -3246,15 +3272,12 @@ function persistLocal(){
     _lastSnap = _snap();
   }
   _persistLocalRaw();
-  // синхронизируем текущий сценарий, чтобы данные не терялись при перезагрузке
-  // (при старте S грузится из списка сценариев, а не только из LS_KEY)
-  try{
-    if(typeof loadScenarioList==="function" && typeof snapshotState==="function"){
-      const list=loadScenarioList();
-      list[currentScenarioName()]=snapshotState();
-      saveScenarioList(list);
-    }
-  }catch(e){}
+  /* Раньше здесь на КАЖДОЕ изменение пересобирался список версий: снимок текущего состояния
+     клался в список и весь список переписывался в localStorage. Теперь открытая версия там не
+     хранится вовсе (см. loadScenarioList), а её данные лежат в LS_KEY строкой выше — то есть
+     этот блок переписывал бы ЧУЖИЕ версии сами в себя, по три сериализации всей модели на
+     каждый чих. На модели в 869 детей это заметно. Список версий пишут те, кто его меняет:
+     создание, переименование, удаление, переключение и выгрузка в таблицу. */
   // пометить как несохранённое и запланировать выгрузку
   if(!_histLock && !_fbApplying){
     if(FB_ON){ _dirty=true; fbSchedulePush(); setSync("warn","● Сохраняю…"); }
@@ -16147,15 +16170,31 @@ function renderConflictBanner(){
 // Структура хранения: S.meta = {scenarioName, ...}; набор сценариев хранится отдельно
 const SCN_KEY="proznanie_finmodel_scenarios_v1";
 function loadScenarioList(){
-  try{ const r=localStorage.getItem(SCN_KEY); if(r) return JSON.parse(r); }catch(e){}
-  return {};  // {name: stateSnapshot}
+  let list={};
+  try{ const r=localStorage.getItem(SCN_KEY); if(r) list=JSON.parse(r)||{}; }catch(e){}
+  /* ⚠️ Открытая версия в SCN_KEY НЕ хранится: её полная копия и так лежит в LS_KEY, а держать
+     второй экземпляр — самый дорогой способ переполнить память браузера. При трёх версиях в
+     браузере лежало ЧЕТЫРЕ полных копии модели, и на модели в 869 детей это упиралось в лимит.
+     Подставляем открытую версию на лету, чтобы все, кто читает список — переключение,
+     переименование, выгрузка в таблицу, слияние с таблицей при старте — видели полный набор
+     ровно как раньше. При старте S грузится из LS_KEY, так что снимок здесь уже актуален. */
+  try{
+    const cur=currentScenarioName();
+    /* ⚠️ Живое состояние перебивает сохранённое ВСЕГДА, а не только когда записи нет. В SCN_KEY
+       может лежать устаревшая копия открытой версии — от прежней версии приложения, которое её
+       туда писало. При старте список сливается с Google-таблицей по _savedAt, и такая копия
+       выиграла бы у настоящих данных (метка у них одна и та же) — то есть работа откатилась бы
+       к последней выгрузке. Первая же запись списка эту копию уберёт, но до неё дожить надо. */
+    if(cur && typeof S!=="undefined" && S) list[cur]=snapshotState();
+  }catch(e){}
+  return list;
 }
 function saveScenarioList(obj){
-  try{ localStorage.setItem(SCN_KEY, JSON.stringify(obj)); return true; }
-  catch(e){
-    if(_lsTrimScenarios()){ try{ localStorage.setItem(SCN_KEY, JSON.stringify(obj)); return true; }catch(e2){} }
-    _lsWarn("список версий модели"); return false;
-  }
+  let cur=""; try{ cur=currentScenarioName(); }catch(e){}
+  const out={};
+  for(const k in obj) if(k!==cur) out[k]=obj[k];       // открытую не дублируем, см. loadScenarioList
+  try{ localStorage.setItem(SCN_KEY, JSON.stringify(out)); return true; }
+  catch(e){ _lsWarn("список версий модели"); return false; }
 }
 
 function currentScenarioName(){ return (S.meta&&S.meta.name)||"Основной"; }
