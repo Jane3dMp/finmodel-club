@@ -1932,7 +1932,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-09-06-30";
+const APP_VER="2026-09-06-31";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -13114,7 +13114,7 @@ function _progPlanCell(key, snap){
   const v=+snap.plan||0, man=(snap.src==="manual");
   if(_progLocked(key,snap)){
     const t="Зафиксирован "+_tsDMYHM(snap.ts)+(man?" · поправлено руками"+(snap.by?(" ("+snap.by+")"):""):"")
-           +". Нажмите замок, чтобы поправить.";
+           +". Нажмите замок, чтобы поправить. Воскресный cron пересчитает эту неделю и под замком.";
     return `<span style="color:var(--terra-d)" title="${esc(t)}">${_gm(v)}</span>`+_progLockBtn(key,false,"Снять замок и поправить руками");
   }
   return `<input class="cell" type="number" step="0.01" style="width:96px;text-align:right"
@@ -13151,7 +13151,7 @@ function _progHtml(){
   });
   const tPct=(tPlan>0&&tFact>0)?(100*tFact/tPlan):null;
   const haveAny=weeks.some(w=>_progWeekAlfa(w)!=null);
-  return `<div class="callout" style="margin-bottom:10px;font-size:12px">Недели учебного года (пн–вс). <b>Прогноз Alfa</b> — сумма списаний по запланированным занятиям (сверено с отчётом «Прогноз оплаты»: совпадает), фиксируется 🔒 в воскресенье 22:00. Замок держит цифру: под ним её не изменит ни «Зафиксировать неделю», ни cron. Нажмите 🔒, чтобы снять его и поправить прогноз руками, и 🔓 — чтобы запереть обратно. <b>Доход (факт)</b> — реализация за дни недели: каждый день в 22:00 cron забирает доход из Alfa и он суммируется в свою неделю.</div>
+  return `<div class="callout" style="margin-bottom:10px;font-size:12px">Недели учебного года (пн–вс). <b>Прогноз Alfa</b> — сумма списаний по запланированным занятиям (сверено с отчётом «Прогноз оплаты»: совпадает), фиксируется 🔒 в воскресенье 22:00. Замок держит цифру от случайного нажатия: под ним её не изменит ни «Зафиксировать неделю», ни правка руками. Воскресный cron — исключение, он пересобирает прогноз в любом случае. Нажмите 🔒, чтобы снять замок и поправить прогноз руками, и 🔓 — чтобы запереть обратно. <b>Доход (факт)</b> — реализация за дни недели: каждый день в 22:00 cron забирает доход из Alfa и он суммируется в свою неделю.</div>
   <div class="hd-actions" style="margin-bottom:10px">
     <button class="btn sm" id="progPullBtn" onclick="progPull()">🔄 Обновить факт из Alfa</button>
     <button class="btn ghost sm" id="fcWeekBtn" onclick="progForecastWeek()" title="Посчитать прогноз текущей недели сейчас (обычно это делает cron)">🧮 Посчитать прогноз недели</button>

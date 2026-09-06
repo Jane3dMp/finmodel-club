@@ -53,6 +53,8 @@ check('видна цифра', plain(locked).indexOf('29 884') > 0, locked);
 check('поля для правки нет', locked.indexOf('<input') < 0, locked);
 check('замок закрыт', locked.indexOf('🔒') > 0, locked);
 check('и по нему снимают замок', locked.indexOf("progLock('2026-08-31',false)") > 0, locked);
+// про исключение надо сказать прямо в ячейке: иначе перезапись под замком выглядит поломкой
+check('в подсказке названо исключение — воскресный cron', locked.indexOf('cron') > 0, locked);
 check('в подсказке — когда зафиксировано, местным временем',
       locked.indexOf('Зафиксирован 30.08 22:00') > 0, locked);
 

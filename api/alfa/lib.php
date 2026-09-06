@@ -1779,7 +1779,10 @@ function alfa_monday_of(string $iso): string {
 }
 /* Снимок прогноза на неделю: считаем 7 дней и складываем
    ожидаемое (planned) + уже проведённое (среднее без/с пропусками). */
-function alfa_weekplan_snapshot(string $mondayIso, ?array $branches = null): array {
+/* $ignoreLock — только для воскресного cron_weekplan.php. Замок защищает от случайного нажатия
+   человеком, а не от планового пересчёта: cron снимает прогноз по самому свежему расписанию,
+   и это ровно то, ради чего он заведён. Кнопка «Зафиксировать неделю» замок уважает. */
+function alfa_weekplan_snapshot(string $mondayIso, ?array $branches = null, bool $ignoreLock = false): array {
     $mon = alfa_monday_of($mondayIso);
     $branches = $branches ?: alfa_realization_branches();
     /* Прогноз недели = сумма списаний по запланированным занятиям Alfa (status=1). Сверено с её
@@ -1815,7 +1818,7 @@ function alfa_weekplan_snapshot(string $mondayIso, ?array $branches = null): arr
     $exp = alfa_expect_freeze($mon, $branches, $fresh);
     $store = alfa_weekplan_read();
     $old = $store[$mon] ?? null;
-    $locked = alfa_weekplan_locked($mon, $old);
+    $locked = !$ignoreLock && alfa_weekplan_locked($mon, $old);
     $rec = ['plan' => $fc['forecast'], 'lessons' => $fc['lessons'], 'groups' => ($fc['groups'] ?? 0),
             'alreadyDone' => round($donePart, 2), 'src' => 'alfa', 'ts' => date('c'),
             'expect' => $exp['total'], 'expectFrozen' => $exp['frozen']];

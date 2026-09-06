@@ -41,7 +41,9 @@ $weeks = max(1, min(12, $weeks));
 $snaps = [];
 for ($i = 0; $i < $weeks; $i++) {
     $wk = date('Y-m-d', strtotime("+" . ($i * 7) . " day", strtotime(alfa_monday_of($target))));
-    $s = alfa_weekplan_snapshot($wk, $branches);
+    // третий аргумент: воскресный пересчёт замок не останавливает — он для защиты от случайного
+    // нажатия человеком, а не от плановой работы. Кнопка в интерфейсе замок уважает.
+    $s = alfa_weekplan_snapshot($wk, $branches, true);
     $snaps[$wk] = ['plan' => $s['plan'], 'lessons' => $s['lessons'], 'groups' => $s['groups']];
 }
 
