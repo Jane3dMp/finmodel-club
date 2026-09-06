@@ -1923,7 +1923,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-09-06-18";
+const APP_VER="2026-09-06-19";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -10605,6 +10605,7 @@ function _trListHtml(title, rows, color, hint){
     <div style="padding:6px 0 4px 4px">${rows.map(r=>`
       <div style="padding:4px 0;border-bottom:1px solid var(--line)">
         <div style="font-weight:600;font-size:13px">${_trKidLink(r.id)}${_trArchBadge(r.id)}${_trTarHtml(r.id)}</div>
+        ${_trEvHtml(r.id)}
         ${(function(){
           /* Прошедшие занятия показываем все — по ним и видно, что ребёнок пропустил. А из
              будущих оставляем только БЛИЖАЙШЕЕ по каждому курсу: расписание регулярное до мая,
@@ -10646,6 +10647,14 @@ function trOpenKid(id, name){
 function _trArchived(id){
   const c=_trCards[String(id)]||_trCards[Number(id)];
   return !!(c&&c.archived);
+}
+/* ЭВ 26/27 из Alfa — «этап взаимодействия»: что менеджер записал про этого клиента.
+   Приходит той же карточкой, что имя и архив. */
+function _trEvHtml(id){
+  const c=_trCards[String(id)]||_trCards[Number(id)];
+  const ev=c&&c.evzz?String(c.evzz).trim():"";
+  if(!ev) return "";
+  return `<div style="font-size:11px;color:var(--muted);padding:1px 0 2px">ЭВ 26/27: <span style="color:var(--coal)">${esc(ev)}</span></div>`;
 }
 function _trArchBadge(id){
   return _trArchived(id)
@@ -10755,7 +10764,9 @@ function _trFunnelHtml(){
         <span style="color:var(--muted);font-weight:400">— ${byDay[d].length}</span></summary>
       <div style="padding-top:4px">${byDay[d].sort((a,b)=>String(a.les.from).localeCompare(String(b.les.from))).map(a=>`<div style="display:flex;gap:8px;align-items:baseline;padding:1px 0">
         <span style="width:44px;color:var(--muted);font-size:12px">${esc(a.les.from||"")}</span>
-        <span style="flex:1">${_trKidLink(a.id)}${_trArchBadge(a.id)}</span>
+        <span style="flex:1">${_trKidLink(a.id)}${_trArchBadge(a.id)}
+          ${(function(){const c=_trCards[String(a.id)]||_trCards[Number(a.id)];const ev=c&&c.evzz?String(c.evzz).trim():"";
+            return ev?`<span style="font-size:11px;color:var(--muted)"> · ЭВ: ${esc(ev)}</span>`:"";})()}</span>
         <span style="font-size:12px;color:var(--muted)">${esc(_trRefs.subjects[a.les.subjectId]||"")}</span>
       </div>`).join("")}</div></details>`).join("")}</div>`
     : `<div style="font-size:12px;color:var(--muted);margin-top:4px">Впереди занятий у детей набора не запланировано.</div>`;

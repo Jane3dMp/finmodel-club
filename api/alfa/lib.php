@@ -754,9 +754,9 @@ function alfa_trial_state(float $commission, $isAttend, bool $lessonDone): strin
 /* Имена детей по id. В строке участника имени нет, а тянуть весь справочник клиентов ради
    десятка детей на этом хостинге нельзя — точечно и с долгим кэшем (имена не меняются). */
 function alfa_names_cache_path(): string {
-    return alfa_store_dir() . '/custnames_' . substr(hash('sha256', __DIR__ . '|names2'), 0, 20) . '.json';
+    return alfa_store_dir() . '/custnames_' . substr(hash('sha256', __DIR__ . '|names3'), 0, 20) . '.json';
 }
-/* Карточка ребёнка: имя и «в архиве ли». Архив в Alfa — это removed, а НЕ is_study=0:
+/* Карточка ребёнка: имя, «в архиве ли» и ЭВ 26/27. Архив в Alfa — это removed, а НЕ is_study=0:
    is_study=0 означает лида (заявка заведена, ребёнок не оформлен), и путать их нельзя —
    лид как раз тот, кого мы ждём, а архивный уже ушёл. Флаг берём тем же запросом, что и
    имя, то есть бесплатно. */
@@ -769,7 +769,9 @@ function alfa_customer_cards(array $ids, ?array $branches = null): array {
     $out = []; $miss = [];
     foreach ($ids as $id) {
         $c = $cache[(string)$id] ?? null;
-        if (is_array($c) && ($c['n'] ?? '') !== '') $out[$id] = ['name' => (string)$c['n'], 'archived' => !empty($c['a'])];
+        if (is_array($c) && ($c['n'] ?? '') !== '') $out[$id] = ['name' => (string)$c['n'],
+                                                                 'archived' => !empty($c['a']),
+                                                                 'evzz' => (string)($c['e'] ?? '')];
         else $miss[] = $id;
     }
     if ($miss) {
@@ -788,8 +790,12 @@ function alfa_customer_cards(array $ids, ?array $branches = null): array {
                 /* Разные установки Alfa помечают архив по-разному, поэтому смотрим все
                    известные поля разом (их список уже собран в alfa_flags). */
                 $arch = !empty($hit['removed']) || !empty($hit['is_archive']) || !empty($hit['archived']);
-                if ($nm !== '') { $out[$id] = ['name' => $nm, 'archived' => $arch];
-                                  $cache[(string)$id] = ['n' => $nm, 'a' => $arch ? 1 : 0]; $found = true; }
+                /* ЭВ 26/27 — кастомное поле Alfa custom_evzz. Ключ тот же, что использует
+                   карточка ребёнка; берём его этим же запросом, отдельного не нужно. */
+                $ev = $hit['custom_evzz'] ?? ($hit['evzz'] ?? '');
+                $ev = is_scalar($ev) ? trim((string)$ev) : '';
+                if ($nm !== '') { $out[$id] = ['name' => $nm, 'archived' => $arch, 'evzz' => $ev];
+                                  $cache[(string)$id] = ['n' => $nm, 'a' => $arch ? 1 : 0, 'e' => $ev]; $found = true; }
                 break;
             }
         }

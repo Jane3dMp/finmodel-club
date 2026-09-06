@@ -45,7 +45,7 @@ function build(kids, newIds, opts) {
     Date, String, Number, Object, Set, Math,
   };
   return new Function(...Object.keys(scope),
-    grab('_trPrevSeasonStart') + grab('_trNewSet') + grab('_trLesState') + grab('_trFunnel') + grab('_trKidName') + grab('_trArchived') + grab('_trArchBadge') + grab('_trTarHtml') + grab('_trKidLink') + grab('_trListHtml')
+    grab('_trPrevSeasonStart') + grab('_trNewSet') + grab('_trLesState') + grab('_trFunnel') + grab('_trKidName') + grab('_trArchived') + grab('_trEvHtml') + grab('_trArchBadge') + grab('_trTarHtml') + grab('_trKidLink') + grab('_trListHtml')
     + grab('_trDayLabel') + grab('_trFunnelHtml')
     + '; return {f:_trFunnel(), html:_trFunnelHtml(), st:_trLesState};'
   )(...Object.values(scope));
@@ -253,6 +253,21 @@ t('нулевой остаток не выводим', !r.html.includes('ост�
 
 r = build({ 84: [les('2026-09-01', true, 15, true)] }, [84], {});
 t('пока абонементы не загружены — ничего не выдумываем', !r.html.includes('без абонемента'));
+
+
+console.log('--- 16. ЭВ 26/27 из Альфы ---');
+// Жанна: «добавь всем кто тут есть блок из альфа ЭВ 26/27». Это этап взаимодействия —
+// что менеджер записал про клиента; поле custom_evzz в карточке Alfa.
+r = build({ 90: [les('2026-09-20', false)], 91: [les('2026-09-20', false)] }, [90, 91],
+  { cards: { 90: { name: 'С этапом', archived: false, evzz: 'новый набор' },
+             91: { name: 'Без этапа', archived: false, evzz: '' } } });
+t('ЭВ показан', r.html.includes('ЭВ 26/27: '));
+t('и значение выведено', r.html.includes('новый набор'));
+t('пустой ЭВ строку не рисует', r.html.split('ЭВ 26/27:').length - 1 === 1);
+t('в прогнозе ЭВ тоже есть', r.html.includes('· ЭВ: '));
+
+r = build({ 92: [les('2026-09-20', false)] }, [92], {});
+t('без карточек ЭВ не выдумывается', !r.html.includes('ЭВ 26/27:'));
 
 if (bad) { console.log(NL + 'провалено проверок: ' + bad); process.exit(1); }
 console.log(NL + 'всё сошлось');
