@@ -147,7 +147,7 @@ delete ctx.S.children['201'];
   {
     const html2 = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
     let s2 = '';
-    for (const n of ['_trPayDays', '_trPaySum', '_trPayHtml', '_trMgrUnknownHtml', '_trMgrStats', '_trMgrTableHtml']) {
+    for (const n of ['_trPayDays', '_trPaySum', '_trPayHtml', '_trMoneyStage', '_trMgrKidsHtml', '_trMgrUnknownHtml', '_trMgrStats', '_trMgrTableHtml']) {
       const m = html2.match(new RegExp('\\nfunction ' + n + '\\([^)]*\\)\\s*\\{[\\s\\S]*?\\n\\}', 'm'));
       if (!m) { console.log('не найдено в index.html: ' + n); process.exit(1); }
       s2 += m[0] + '\n';
@@ -183,6 +183,10 @@ delete ctx.S.children['201'];
       _trFunnel: () => FN,
       _trMgrOf: id => mgrOf[String(id)] || '',
     _trKidName: id => 'Ребёнок ' + id,
+    _trArchBadge: () => '', _fmlKid: n => 'детей',
+    _TR_BUCK: { came: ['дошёл', 'g'], missed: ['не дошёл', 'r'], waiting: ['ждём', 't'],
+                noLes: ['без занятий', 'm'], back: ['ходил раньше', 'm'] },
+    _TR_BORD: ['came', 'missed', 'waiting', 'noLes', 'back'],
     _trKidLink: id => '<a>Ребёнок ' + id + '</a>',
     _trPhone: id => ({ '208': '+375291110000' })[String(id)] || '',
     _phoneKey: p => { const d = String(p || '').replace(/[^0-9]/g, ''); return d.length >= 9 ? d.slice(-9) : ''; },
@@ -192,7 +196,7 @@ delete ctx.S.children['201'];
       esc: x => String(x),
     };
     const A2 = new Function('ctx', 'with (ctx) { ' + s2 +
-    ' return {_trMgrStats,_trMgrTableHtml,_trMgrUnknownHtml,_trPaySum,_trPayDays,_trPayHtml}; }')(ctx2);
+    ' return {_trMgrStats,_trMgrTableHtml,_trMgrUnknownHtml,_trMgrKidsHtml,_trMoneyStage,_trPaySum,_trPayDays,_trPayHtml}; }')(ctx2);
 
     const st = A2._trMgrStats();
     eq('менеджеров в рейтинге', st.length, 3);            // Ольга, Мария и «не определён»
@@ -278,6 +282,34 @@ delete ctx.S.children['201'];
         funnelSrc && funnelSrc[0].indexOf('_trMgrTableHtml()') < 0, 'рейтинг остался в «Работе»');
   check('но «чей пробник» в строках остался', html2.indexOf('_trMgrHtml(r.id)') > 0);
   check('раздел заведён в дашборде руководителя', html2.indexOf('["mgr","🏅 Рейтинг менеджеров"]') > 0);
+
+
+  /* --- где ребёнок «именно сейчас»: два независимых этапа ---
+     По занятиям (дошёл / не дошёл / ждём / без занятий / раньше) и по деньгам. Именно их
+     независимость и объясняет, почему «Купили» бывает больше «Дошли»: оплатить абонемент можно,
+     ещё не придя на первое занятие. */
+  eq('оплативший в сезоне — самый дальний этап', A2._trMoneyStage(202)[0], 'оплатил 300 р');
+  ctx2._trTar = { '201': { paid: true, tariffs: [{ trial: false }] } };
+  eq('абонемент есть, а платежей в сезон нет', A2._trMoneyStage(201)[0], 'абонемент есть, оплаты в сезон не видно');
+  ctx2._trTar = { '201': { paid: false, tariffs: [{ trial: true }] } };
+  eq('только пробный', A2._trMoneyStage(201)[0], 'только пробный абонемент');
+  ctx2._trTar = { '201': { paid: false, tariffs: [] } };
+  eq('без абонемента', A2._trMoneyStage(201)[0], 'без абонемента');
+  ctx2._trTar = {};
+  eq('абонементы не загружены — так и пишем', A2._trMoneyStage(201)[0], 'абонементы не загружены');
+  ctx2._trTar = { '202': {} };
+
+  const hk = A2._trMgrKidsHtml(A2._trMgrStats());
+  check('раскрывашки по менеджерам есть', hk.indexOf('Дети по менеджерам') > 0, hk.slice(0, 120));
+  check('в шапке менеджера — сводка', hk.indexOf('дошли 2 · купили 1') > 0, hk.slice(0, 700));
+  check('дети перечислены', hk.indexOf('Ребёнок 201') > 0);
+  check('этап по занятиям виден', hk.indexOf('дошёл') > 0);
+  check('этап по деньгам виден', hk.indexOf('оплатил 300 р') > 0, hk);
+  check('объяснено, почему купили > дошли', hk.indexOf('ещё не придя на первое занятие') > 0);
+  // порядок внутри менеджера: сначала дошедшие, потом не дошедшие, ждущие и остальные
+  const ol = hk.slice(hk.indexOf('Ольга'));
+  check('дошедшие идут раньше не дошедших',
+        ol.indexOf('дошёл') < ol.indexOf('не дошёл'), 'порядок внутри менеджера');
 
 
     // менеджеры не подтянуты — рейтинга нет вовсе
