@@ -1923,7 +1923,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-09-06-24";
+const APP_VER="2026-09-06-25";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -11392,6 +11392,37 @@ function _kassaMonth(ym){
   }
   return {ym:ym, byIn:byIn, byOut:byOut, income:inc, expense:out, days:have, count:cnt, missing:missing};
 }
+/* ВРЕМЯ СНИМКА. В хранилище лежат ДВЕ разные метки: серверная date('c') со смещением пояса
+   и браузерная toISOString() — она всегда в UTC. Раньше обе просто резали по символам, и метка
+   из браузера показывала время на три часа назад: только что пересчитанная касса выглядела
+   «старой». Разбираем как момент времени и печатаем в поясе браузера. */
+function _tsHM(ts){
+  const d=new Date(String(ts||""));
+  if(isNaN(d.getTime())) return "";
+  const z=n=>String(n).padStart(2,"0");
+  return z(d.getHours())+":"+z(d.getMinutes());
+}
+function _tsDMYHM(ts){
+  const d=new Date(String(ts||"")); if(isNaN(d.getTime())) return String(ts||"").slice(0,16).replace("T"," ");
+  const z=n=>String(n).padStart(2,"0");
+  return z(d.getDate())+"."+z(d.getMonth()+1)+" "+z(d.getHours())+":"+z(d.getMinutes());
+}
+function _tsAgo(ts){
+  const d=new Date(String(ts||"")); if(isNaN(d.getTime())) return "";
+  const m=Math.round((Date.now()-d.getTime())/60000);
+  if(m<1) return "только что";
+  if(m<60) return m+" мин назад";
+  const h=Math.floor(m/60);
+  if(h<24) return h+" ч назад";
+  return Math.floor(h/24)+" дн назад";
+}
+/* Возраст снимка показываем ВСЕГДА: по одному времени нельзя понять, свежий это пересчёт или
+   вчерашний, а именно этот вопрос и задаёт админ, глядя на кассу. */
+function _tsFreshHtml(ts, staleMin){
+  const hm=_tsHM(ts); if(!hm) return "";
+  const old=(Date.now()-new Date(String(ts)).getTime())>(staleMin||30)*60000;
+  return " · обновлено "+hm+" <span style='color:"+(old?"var(--terra-d)":"var(--muted)")+"'>("+_tsAgo(ts)+")</span>";
+}
 function _kassaDMY(iso){ const p=String(iso||"").split('-'); return p.length===3?(p[2]+'.'+p[1]):iso; }
 /* Две карточки над сверкой: касса сегодня и итог за месяц выбранной даты. */
 function _kassaTopHtml(){
@@ -11399,12 +11430,14 @@ function _kassaTopHtml(){
   // --- сегодня ---
   let todayCard;
   if(sn){
-    const ts=String(sn.ts||"").slice(11,16);
     todayCard=_kassaNetTable(sn.byIn,sn.byOut,{compact:true,empty:"операций пока нет"})
-      +`<div class="hint" style="margin-top:6px">операций: ${sn.count||0}${ts?(" · обновлено "+ts):""}</div>`;
+      +`<div class="hint" style="margin-top:6px">операций: ${sn.count||0}${_tsFreshHtml(sn.ts)}</div>`;
   } else {
-    todayCard=`<div style="color:var(--muted);font-size:13px;padding:6px 0">${_paySnap
-      ? 'Считаю из Alfa…' : '⏳ Читаю сохранённые снимки…'}</div>`;
+    /* Пустая карточка не должна вечно обещать «считаю»: если пересчёт отвалился, ниже уже
+       висит ошибка, и обещание рядом с ней читалось бы как «всё идёт по плану». */
+    todayCard=`<div style="color:var(--muted);font-size:13px;padding:6px 0">${
+      !_paySnap ? '⏳ Читаю сохранённые снимки…'
+      : (_kassaTodayErr && !_kassaTodayBusy ? 'За сегодня цифр нет — пересчёт не прошёл.' : 'Считаю из Alfa…')}</div>`;
   }
 
   // --- месяц выбранной даты ---
@@ -11426,7 +11459,10 @@ function _kassaTopHtml(){
       <h3 style="margin:0 0 2px">Касса сегодня</h3>
       <div class="hint" style="margin-bottom:6px">${esc(_kassaDMY(today))} · по данным Alfa на сейчас</div>
       ${todayCard}
-      <button class="btn ghost sm" style="margin-top:8px" onclick="kassaToday(true)" title="Пересчитать сегодняшний день из Alfa">🔄 Обновить</button>
+      <button class="btn ghost sm" style="margin-top:8px" onclick="kassaToday(true)"${_kassaTodayBusy?" disabled":""}
+        title="Пересчитать сегодняшний день из Alfa">${_kassaTodayBusy?"⏳ Считаю из Alfa…":"🔄 Обновить"}</button>
+      ${_kassaTodayBusy?`<div class="hint" style="margin-top:4px">Alfa отдаёт журнал платежей целиком, поэтому пересчёт занимает до минуты.</div>`:""}
+      ${_kassaTodayErr}
     </div>
     <div class="card" style="flex:1 1 260px;min-width:260px">
       <h3 style="margin:0 0 2px">Касса за ${esc(mLab)}</h3>
@@ -11464,17 +11500,25 @@ async function kassaFillMonth(){
 }
 /* Подтянуть сегодняшний день из Alfa, не сбивая выбранную дату сверки.
    Нужно потому, что снимок за сегодня cron положит только в 22:00, а касса нужна сейчас. */
-let _kassaAutoDone=false, _kassaTodayBusy=false;
+let _kassaAutoDone=false, _kassaTodayBusy=false, _kassaTodayErr="";
+function _kassaPaint(){ if(_admSec==="kassa"){ const b=document.getElementById("admBody"); if(b) b.innerHTML=_kassaHtml(); } }
 async function kassaToday(force){
   const today=_todayIso();
+  if(_kassaTodayBusy) return;              // второе нажатие поверх работающего запроса
   if(!force && ((_paySnap||{})[today] || _kassaAutoDone || _kassaBusy)) return;
-  _kassaAutoDone=true; _kassaTodayBusy=true;
+  _kassaAutoDone=true; _kassaTodayBusy=true; _kassaTodayErr=""; _kassaPaint();
   try{
     const j=await _pubCall("paymentsDay",{date:today});
     if(j.snapshot){ _paySnap=_paySnap||{}; _paySnap[today]=Object.assign({},j.snapshot,{ts:new Date().toISOString()}); }
-    if(_admSec==="kassa"){ const b=document.getElementById("admBody"); if(b) b.innerHTML=_kassaHtml(); }
-  }catch(e){ console.warn("касса за сегодня не посчиталась",e); }
-  finally{ _kassaTodayBusy=false; if(_admSec==="kassa"){ const b=document.getElementById("admBody"); if(b) b.innerHTML=_kassaHtml(); } }
+    /* Alfa ответила, но снимок не собрался: цифры остались прежними, и молчать об этом нельзя —
+       со стороны это неотличимо от «обновилось». */
+    else _kassaTodayErr=`<div class="callout" style="border-color:var(--red);margin-top:8px;font-size:12px">Alfa ответила, но снимок дня не собрался — цифры на карточке прежние.</div>`;
+  }catch(e){
+    /* Раньше ошибка уходила только в консоль F12. Карточка оставалась со старым снимком и старым
+       временем, и нажатие «Обновить» выглядело так, будто оно ничего не делает. */
+    _kassaTodayErr=_pubErrHtml(e,"касса за сегодня");
+  }
+  finally{ _kassaTodayBusy=false; _kassaPaint(); }
 }
 function _kassaHtml(){
   const D=_kassaDay;
@@ -11589,7 +11633,7 @@ function _kassaFromSnap(sn){
           <td style="text-align:right">${d==null?'—':(Math.abs(d)<0.005?'<b style="color:var(--green)">сходится ✓</b>':('<b style="color:var(--red)">'+(d>0?'+':'')+_gm(d)+'</b>'))}</td></tr>
       </tbody></table></div>`;
   };
-  return `<div style="font-size:12px;color:var(--muted);margin-bottom:6px">Автоснимок от ${esc(String(sn.ts||'').slice(0,16).replace('T',' '))} · операций: ${sn.count||0}. Для списка операций нажмите «Загрузить из Alfa».</div>`
+  return `<div style="font-size:12px;color:var(--muted);margin-bottom:6px">Автоснимок от ${esc(_tsDMYHM(sn.ts))} · операций: ${sn.count||0}. Для списка операций нажмите «Загрузить из Alfa».</div>`
     + tbl('Приход', sn.byIn, '', 'var(--green)') + tbl('Расход', sn.byOut, 'out:', 'var(--red)')
     + `<h3 style="margin:12px 0 6px">Приход − расход по кассам за день</h3><div style="max-width:700px">${_kassaNetTable(sn.byIn,sn.byOut)}</div>`;
 }
@@ -11659,7 +11703,7 @@ function _realSnapNote(mon){
   const w=(_weekPlans||{})[mon];
   if(!w||!w.ts) return `Снимка на неделю с ${esc(mon)} ещё не было. Если он не появится после воскресенья 22:00 — задача cron_weekplan.php в панели хостинга не заведена.`;
   const d=new Date(w.ts); const dn=["вс","пн","вт","ср","чт","пт","сб"];
-  const t=String(w.ts).replace("T"," ").slice(0,16);
+  const t=_tsDMYHM(w.ts);
   const stale=isNaN(d.getTime())||(Date.now()-d.getTime())>8*24*3600*1000;
   return `Снимок недели с ${esc(mon)} сделан ${esc(t)}${isNaN(d.getTime())?"":" ("+dn[d.getDay()]+")"}${
     w.expectFrozen!=null?(", дней зафиксировано: "+w.expectFrozen):""}.${

@@ -2186,8 +2186,11 @@ function alfa_pay_kassa_name(array $x, array $refs): string {
     return $t !== '' ? $t : 'Без кассы';
 }
 /* Снимок платежей за день по кассам (для cron в 22:00) — с названиями и списком операций. */
-function alfa_payments_upsert(string $date, ?array $branches = null): array {
-    $r = alfa_payments_day($date, $branches);
+/* $pre — уже посчитанный результат alfa_payments_day(). Действие paymentsDay читает журнал само,
+   и без этого параметра один запрос проходил 33 тысячи записей ДВАЖДЫ: вдвое дольше и вдвое чаще
+   обрывался шлюзом хостинга — а обрыв здесь выглядел как «нажимаю обновить, а данные старые». */
+function alfa_payments_upsert(string $date, ?array $branches = null, ?array $pre = null): array {
+    $r = (is_array($pre) && isset($pre['rows'], $pre['date'])) ? $pre : alfa_payments_day($date, $branches);
     $refs = alfa_pay_refs();
     $inc = 0.0; $out = 0.0; $byIn = []; $byOut = []; $byItem = [];
     foreach ($r['rows'] as $x) {

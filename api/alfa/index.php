@@ -1462,7 +1462,7 @@ switch ($action) {
         }
         // заодно кладём снимок дня в хранилище — вкладка потом открывается мгновенно
         $snap = null;
-        try { $snap = alfa_payments_upsert($date, $branches); } catch (\Throwable $e) { $snap = null; }
+        try { $snap = alfa_payments_upsert($date, $branches, $res); } catch (\Throwable $e) { $snap = null; }
         json_out(['ok' => true, 'date' => $date, 'count' => count($rows),
                   'incomeTotal' => round($in_, 2), 'expenseTotal' => round($out_, 2),
                   'payments' => $rows, 'refs' => $refs, 'snapshot' => $snap,

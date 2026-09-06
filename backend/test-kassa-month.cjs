@@ -4,6 +4,9 @@
 // Проверяется НАСТОЯЩИЙ код из index.html. Месяц складывается из дневных снимков, которые
 // копит cron в 22:00: если снимка за прошедший день нет, сумма неполная — и об этом должно
 // быть сказано, иначе Жанна примет заниженный приход за правду.
+// Часовой пояс закрепляем: время снимка печатается в поясе браузера, и без этой строки
+// тест давал бы разный результат на машине в Минске и на сервере в UTC.
+process.env.TZ = 'Europe/Minsk';
 const fs = require('fs');
 const path = require('path');
 
@@ -16,6 +19,7 @@ function eq(name, got, want) { check(name, got === want, JSON.stringify(got) + '
 
 const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
 const NAMES = ['_kassaMonth', '_kassaTopHtml', '_kassaDayWord',
+               '_tsHM', '_tsDMYHM', '_tsAgo', '_tsFreshHtml',
                '_kassaMerge', '_kassaNetTable', '_kassaAccNames', '_kassaCashAcc', '_kassaCash', '_kassaCashCard'];
 const ONE_LINERS = ['_kassaDMY', '_kassaOpen'];
 let src = '';
@@ -45,7 +49,7 @@ const ctx = {
   _gm: n => Math.round(+n || 0).toLocaleString('ru-RU'),
   esc: s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'),
   _kassaSheet: () => ({}),
-  S: { kassaOpen: {} }, persistLocal: () => {}, _kassaTodayBusy: false, _kassaProbeLast: '',
+  S: { kassaOpen: {} }, persistLocal: () => {}, _kassaTodayBusy: false, _kassaTodayErr: '', _kassaProbeLast: '',
   _dIso: d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'),
 };
 const API = new Function('ctx', 'with (ctx) { ' + src +

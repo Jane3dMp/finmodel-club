@@ -3,6 +3,7 @@
 //
 // Проверяется НАСТОЯЩИЙ _realHtml из index.html. Серверная заморозка — отдельно:
 // php backend/test-expect-freeze.php
+process.env.TZ = 'Europe/Minsk';   // подпись про снимок печатается в поясе браузера
 const fs = require('fs');
 const path = require('path');
 
@@ -20,7 +21,14 @@ const m = html.match(/\nfunction _realHtml\([^)]*\)\s*\{[\s\S]*?\n\}/m);
 const iSnap = html.indexOf('function _realSnapNote(');
 const eSnap = html.indexOf(String.fromCharCode(10) + '}', iSnap);
 if (iSnap < 0 || eSnap < 0) { console.log('не найдено в index.html: _realSnapNote'); process.exit(1); }
-const snapSrc = html.slice(iSnap, eSnap + 2);
+const snapSrc = html.slice(iSnap, eSnap + 2)
+  // время снимка печатается в поясе браузера — помощник берём оттуда же, настоящий
+  + (function () {
+      const i = html.indexOf("function _tsDMYHM(");
+      const e = html.indexOf(String.fromCharCode(10) + "}", i);
+      if (i < 0 || e < 0) { console.log("не найдено в index.html: _tsDMYHM"); process.exit(1); }
+      return String.fromCharCode(10) + html.slice(i, e + 2);
+    })();
 if (!m) { console.log('не найдено в index.html: _realHtml'); process.exit(1); }
 
 /* --- сентябрь 2026, сегодня 10-е ---
