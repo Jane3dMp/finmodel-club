@@ -32,6 +32,9 @@ function build(kids, newIds, opts) {
     S: { children: {} },
     _trFun: { kids, before: (o.before || {}), from: '2026-09-01', to: '2026-10-10' },
     _trFunBusy: !!o.busy,
+    // менеджеры из amo подтягиваются отдельной кнопкой; здесь их нет — воронка должна рисоваться и так
+    _trMgr: o.mgr || null, _trMgrBusy: false, _trMgrErr: '', _trMgrStat: null,
+    _trMgrHtml: () => '', _trMgrOf: () => '',
     _trFunProg: o.prog || '',
     _trRefs: { subjects: { 7: 'Арт-студия', 9: 'Пескография' }, teachers: {} },
     _trCards: o.cards || {},

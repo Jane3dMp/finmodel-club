@@ -1936,7 +1936,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-09-06-37";
+const APP_VER="2026-09-06-38";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -10646,7 +10646,7 @@ function _trListHtml(title, rows, color, hint){
       ${hint?`<span style="color:var(--muted);font-size:12px"> · ${esc(hint)}</span>`:""}</summary>
     <div style="padding:6px 0 4px 4px">${rows.map(r=>`
       <div style="padding:4px 0;border-bottom:1px solid var(--line)">
-        <div style="font-weight:600;font-size:13px">${_trKidLink(r.id)}${_trArchBadge(r.id)}${_trTarHtml(r.id)}</div>
+        <div style="font-weight:600;font-size:13px">${_trKidLink(r.id)}${_trArchBadge(r.id)}${_trMgrHtml(r.id)}${_trTarHtml(r.id)}</div>
         ${r.prev?`<div style="font-size:11px;color:var(--muted);padding:1px 0">до 1 сентября: ${r.prev.n} занятий${
           r.prev.last?`, последнее ${esc(_trDayLabel(r.prev.last))}`:""} — поэтому не считаем его новым</div>`:""}
         ${_trEvHtml(r.id)}
@@ -10777,11 +10777,71 @@ function _trWeekMissed(){
     const came=L.some(x=>{ const st=_trLesState(x,today); return st==="came"||st==="came_free"; });
     rows.push({id:idStr, miss:miss, came:came});
   });
-  rows.sort((a,b)=>_trKidName(a.id).localeCompare(_trKidName(b.id),"ru"));
+  /* Список печатают и раздают: сортируем по менеджеру, чтобы каждый видел своих подряд и не
+     выискивал их по всей странице. Внутри менеджера — по алфавиту. «Не определён» уходит вниз. */
+  rows.sort((a,b)=>{
+    const ma=_trMgrOf(a.id)||"яяя", mb=_trMgrOf(b.id)||"яяя";
+    if(ma!==mb) return ma.localeCompare(mb,"ru");
+    return _trKidName(a.id).localeCompare(_trKidName(b.id),"ru");
+  });
   return {from:from, to:today, rows:rows};
+}
+/* ===== ЧЕЙ КЛИЕНТ =====
+   Жанна: «чтобы было написано, чей клиент не дошёл до пробного, и они звонили каждый своему».
+   Берём ответственного из amo и связываем со ребёнком по телефону (последние 9 цифр — тот же
+   ключ, которым модель уже сверяет имена с Alfa).
+   ⚠️ Читаем ВСЮ воронку, а не отслеживаемый этап: недошедший может стоять на любом этапе.
+   Кого связать не удалось, не прячем — он попадает в «менеджер не определён», иначе ребёнок
+   тихо выпал бы из обзвона. */
+let _trMgr=null, _trMgrBusy=false, _trMgrErr="", _trMgrStat=null;
+async function trLoadManagers(force){
+  if(_trMgrBusy) return;
+  if(_trMgr && !force) return;
+  const w=(typeof _amoWatch==="function")?_amoWatch():null;
+  if(!w||!w.pipelineId){ _trMgrErr="Воронка amoCRM не выбрана — откройте «Клиенты → Новые из amoCRM» и отметьте этап."; renderTrials(); return; }
+  _trMgrBusy=true; _trMgrErr=""; renderTrials();
+  try{
+    const j=await _amoCall("leads",{pipelineId:w.pipelineId});
+    const users=j.users||{}, cts=j.contacts||{};
+    const map={}; let withMgr=0;
+    /* Сделки идут от свежих к старым; у одного телефона их бывает несколько (разные курсы).
+       Чей клиент — решает САМАЯ СВЕЖАЯ сделка, поэтому сортируем по дате и пишем по порядку. */
+    const leads=(j.leads||[]).slice().sort((a,b)=>(+a.created_at||0)-(+b.created_at||0));
+    leads.forEach(l=>{
+      const nm=users[String(l.responsible)]||users[l.responsible]||"";
+      if(!nm) return;
+      withMgr++;
+      (l.contactIds||[]).forEach(cid=>{
+        const c=cts[String(cid)]||cts[cid]; if(!c) return;
+        const k=_phoneKey(c.phone); if(!k) return;
+        map[k]={name:nm, leadId:l.id};
+      });
+    });
+    _trMgr=map;
+    _trMgrStat={leads:(j.leads||[]).length, withMgr:withMgr, phones:Object.keys(map).length};
+  }catch(e){ _trMgrErr=(e&&e.message)||String(e); }
+  finally{ _trMgrBusy=false; renderTrials(); }
+}
+function _trMgrOf(id){
+  if(!_trMgr) return "";
+  const k=_phoneKey(_trPhone(id));
+  if(!k) return "";
+  const m=_trMgr[k];
+  return m?m.name:"";
+}
+function _trMgrHtml(id){
+  if(!_trMgr) return "";
+  const nm=_trMgrOf(id);
+  if(nm) return ` <span style="font-size:11px;color:var(--blue)">· ${esc(nm)}</span>`;
+  const ph=_trPhone(id);
+  return ` <span style="font-size:11px;color:var(--muted)" title="${esc(ph?("телефон "+ph+" не нашёлся ни в одной сделке воронки"):"у ребёнка нет телефона ни в Alfa, ни в расписании")}">· менеджер не определён</span>`;
 }
 function _trPhone(id){
   const s=String(id);
+  /* Сначала карточка Alfa: у нового ребёнка, которого ещё не внесли в расписание модели,
+     это единственный источник телефона — а без телефона его не связать со сделкой в amo. */
+  const card=_trCards[s]||_trCards[Number(id)];
+  if(card&&card.phone) return card.phone;
   const c=(S.children||{})[s];
   if(c&&c.phone) return c.phone;
   let ph="";
@@ -10813,6 +10873,7 @@ function trPrintMissedWeek(){
   const dn=["вс","пн","вт","ср","чт","пт","сб"];
   const dl=x=>{ const t=new Date(x+"T12:00:00"); return x.slice(8)+"."+x.slice(5,7)+" "+(dn[t.getDay()]||""); };
   const body=d.rows.map(r=>`<tr>
+    <td>${esc(_trMgrOf(r.id)||"—")}</td>
     <td class="nm">${esc(_trKidName(r.id))}</td>
     <td>${esc(_trPhone(r.id)||"—")}</td>
     <td>${r.miss.map(x=>esc(dl(x.date)+" "+(x.from||"")+" · "+(_trRefs.subjects[x.subjectId]||""))).join("<br>")}</td>
@@ -10823,8 +10884,9 @@ function trPrintMissedWeek(){
   w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Не пришли за неделю — Прознание + CODDY</title><style>${css}</style></head>
     <body><h2>Не пришли за неделю · новый набор</h2>
     <div class="sub">${esc(dl(d.from))} — ${esc(dl(d.to))} · детей: ${d.rows.length} · напечатано ${esc(new Date().toLocaleDateString("ru-RU"))}
-      <br>Возвращенцы прошлого года и архивные в список не включены.</div>
-    <table><thead><tr><th>Ребёнок</th><th>Телефон</th><th>Пропустил</th><th>Приходил ли вообще</th><th>Абонемент</th><th>ЭВ 26/27</th><th>Дозвон</th></tr></thead>
+      <br>Возвращенцы прошлого года и архивные в список не включены.
+      ${_trMgr?"<br>Менеджер — ответственный по сделке в amoCRM, связь по телефону. Прочерк значит, что сделку по этому номеру не нашли.":"<br>Менеджеры не подтянуты: нажмите «Кто чей клиент» перед печатью."}</div>
+    <table><thead><tr><th>Менеджер</th><th>Ребёнок</th><th>Телефон</th><th>Пропустил</th><th>Приходил ли вообще</th><th>Абонемент</th><th>ЭВ 26/27</th><th>Дозвон</th></tr></thead>
     <tbody>${body}</tbody></table></body></html>`);
   w.document.close();
   setTimeout(()=>{ try{ w.focus(); w.print(); }catch(e){} }, 300);
@@ -10850,7 +10912,12 @@ function _trFunnelHtml(){
       onclick="trToggleHidePaid()"
       title="Прячет тех, у кого есть действующий платный абонемент или остаток на балансе. Остаются те, кто пробное прошёл, а абонемент не купил">${_trHidePaid?"✓ ":""}скрыть купивших</button>
     <button class="btn ghost sm" onclick="trPrintMissedWeek()" title="Список для обзвона: кто из набора пропустил занятие за последние 7 дней">🖨 не пришли за неделю</button>
-    <button class="btn ghost sm" onclick="trLoadFunnel(true)"${_trFunBusy?" disabled":""}>обновить</button></div>`;
+    <button class="btn ghost sm" onclick="trLoadManagers(true)"${_trMgrBusy?" disabled":""}
+      title="Читает всю воронку amoCRM и связывает детей со сделками по телефону — тогда видно, чей клиент не дошёл">${
+      _trMgrBusy?"читаю amo…":(_trMgr?"обновить менеджеров":"👤 Кто чей клиент")}</button>
+    <button class="btn ghost sm" onclick="trLoadFunnel(true)"${_trFunBusy?" disabled":""}>обновить</button></div>`
+    +(_trMgrErr?`<div class="callout" style="border-color:var(--red);font-size:12px;margin-bottom:8px">Менеджеры не подтянулись: ${esc(_trMgrErr)}</div>`:"")
+    +(_trMgrStat?`<div class="hint" style="margin:-4px 0 8px">Из amoCRM: сделок ${_trMgrStat.leads}, с ответственным ${_trMgrStat.withMgr}, телефонов для связки ${_trMgrStat.phones}. Связываем по последним 9 цифрам номера.</div>`:"");
   const tiles=`<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">
     ${tile(f.enrolled,"вписаны на занятия","","Детей набора, у которых есть хотя бы одно занятие в периоде")}
     ${tile(f.came,"дошли","var(--green)","Были хотя бы на одном занятии")}

@@ -101,6 +101,26 @@ function amo_fields_map(array $entity): array {
 }
 
 // Контакты пачкой по id (amo отдаёт до 250 за раз).
+/* Сотрудники amo: id → имя. Нужны, чтобы у сделки был не номер ответственного, а человек.
+   Список маленький и меняется редко — читаем один раз на запрос. */
+function amo_users(): array {
+    static $memo = null;
+    if ($memo !== null) return $memo;
+    $out = [];
+    for ($page = 1; $page <= 5; $page++) {
+        $r = amo_http('GET', '/api/v4/users', ['limit' => 250, 'page' => $page]);
+        if (($r['__status'] ?? 200) === 204) break;
+        $items = (array)($r['data']['_embedded']['users'] ?? []);
+        foreach ($items as $u) {
+            if (!is_array($u) || !isset($u['id'])) continue;
+            $nm = trim((string)($u['name'] ?? ''));
+            if ($nm === '') $nm = trim((string)($u['email'] ?? ''));
+            $out[(int)$u['id']] = $nm;
+        }
+        if (count($items) < 250) break;
+    }
+    return $memo = $out;
+}
 function amo_contacts_by_ids(array $ids): array {
     $ids = array_values(array_unique(array_filter(array_map('intval', $ids))));
     $out = [];

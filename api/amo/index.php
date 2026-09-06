@@ -89,6 +89,8 @@ switch ($action) {
                     'created_at' => $l['created_at'] ?? null,
                     'fields'     => amo_fields_map($l),
                     'contactIds' => $cids,
+                    // ответственный менеджер: по нему в финмодели видно, чей клиент не дошёл
+                    'responsible' => (int)($l['responsible_user_id'] ?? 0),
                 ];
             }
             if (count($items) < $LIMIT) break;
@@ -96,6 +98,9 @@ switch ($action) {
 
         $contacts = $contactIds ? amo_contacts_by_ids($contactIds) : [];
         json_out(['ok' => true, 'leads' => $leads, 'contacts' => $contacts,
+                  // справочник сотрудников кладём сюда же: он крошечный, а отдельный запрос
+                  // из браузера стоил бы ещё одного прохода через антибот хостинга
+                  'users' => amo_users(),
                   'count' => count($leads), 'pages' => $pages,
                   'debug' => ['sampleLead' => $sample, 'sampleContact' => $contacts ? reset($contacts) : null]]);
         break;
