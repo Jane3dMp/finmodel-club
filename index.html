@@ -1923,7 +1923,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-09-06-27";
+const APP_VER="2026-09-06-28";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -12639,7 +12639,7 @@ function _fmlMinFill(course,fixPer){
   return null;
 }
 function _formulaHtml(){
-  const head=`<div class="callout" style="margin-bottom:10px;font-size:12px">Из чего складывается прибыль клуба — в разрезе <b>одного занятия</b>, <b>одной группы</b> и <b>одного ребёнка</b>. Считается по живому расписанию (только запущенные группы с подтвердившими детьми) и по тем же статьям расходов, что в «Налоги РБ и ФОТ → Расходы по статьям», поэтому цифры сходятся: прибыль всех занятий = прибыль периода. Постоянные расходы (аренда, админ-команда, ЗП собственника) делятся поровну на занятия — они идут независимо от набора.</div>`;
+  const head=`<div class="callout" style="margin-bottom:10px;font-size:12px">Из чего складывается прибыль клуба — в разрезе <b>одного занятия</b>, <b>одной группы</b> и <b>одного ребёнка</b>. Считается по живому расписанию (только запущенные группы с подтвердившими детьми) и по тем же статьям расходов, что в «Налоги РБ и ФОТ → Расходы по статьям», поэтому цифры сходятся: прибыль всех занятий = прибыль периода. Постоянные расходы (аренда, коммуналка, админ-команда со взносами) делятся поровну на занятия — они идут независимо от набора.</div>`;
   const D=_fmlData(_fmlMonth);
   if(!D){
     if(_fmlMonth){ _fmlMonth=""; try{ localStorage.setItem("fml_month",""); }catch(e){} return _formulaHtml(); }
@@ -12736,7 +12736,7 @@ function _formulaHtml(){
       ${R.pct?step("Расходы % от оборота ("+fmt1(R.pct)+"%)",L.pct,"-","бытовые и прочие"):""}
       ${step("Взносы "+fmt1(R.con)+"%",L.con,"-","ФСЗН и Белгосстрах с ЗП педагога")}
       <tr style="border-top:1px solid var(--line)">${`<td style="text-align:left"><b>= вклад занятия</b> <span class="hint">идёт на покрытие постоянных</span></td><td class="num"><b style="color:var(--terra-d)">${money(L.contrib)}</b></td>`}</tr>
-      ${step("Доля постоянных",L.fix,"-","аренда, админ-команда, ЗП собственника ÷ "+(one?E.lessonsY:Math.round(D.lessonsM))+" занятий в месяц")}
+      ${step("Доля постоянных",L.fix,"-","аренда, коммуналка, админ-команда со взносами ÷ "+(one?E.lessonsY:Math.round(D.lessonsM))+" занятий в месяц")}
       <tr style="border-top:2px solid var(--line)"><td style="text-align:left"><b>= прибыль занятия</b></td>
         <td class="num"><b style="color:${L.profit<0?'var(--red)':'var(--green)'}">${money(L.profit)}</b></td></tr>
     </tbody></table></div>
