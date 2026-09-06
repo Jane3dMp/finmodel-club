@@ -982,6 +982,7 @@ details.client .cli-cols .cc-bal{width:74px;font-weight:600}
  <button class="tab" data-t="scenario">Сценарии</button>
  <button class="tab" data-t="settings">Параметры</button>
  <button class="tab" data-t="ruk">Дашборд Руководителя</button>
+ <button class="tab" data-t="trials">Пробные</button>
  <button class="tab" data-t="adm">Дашборд Администратора</button>
  </div>
 </div></nav>
@@ -1348,6 +1349,12 @@ details.client .cli-cols .cc-bal{width:74px;font-weight:600}
  <div class="sec-desc">Сводка для руководителя. Видно только вам. Строим по разделам.</div>
  <div id="rukNav" class="hd-actions" style="margin:6px 0 12px;flex-wrap:wrap"></div>
  <div id="rukBody"></div>
+</section>
+
+<section class="panel" id="trials">
+ <h2 class="sec">Пробные занятия</h2>
+ <div class="sec-desc">Утром — кого ждём сегодня. Вечером — кто дошёл, а кто нет. Пробный узнаётся по сумме списания: обычная цена занятия другая, а 0 значит, что шаблон абонемента ещё не проставили.</div>
+ <div id="trialsBody"></div>
 </section>
 
 <section class="panel" id="adm">
@@ -1916,7 +1923,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-09-06-03";
+const APP_VER="2026-09-06-04";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -2810,7 +2817,9 @@ function fbStart(){
 const TAB_DEFS=[["dash","Дашборд"],["report","Отчёт по набору"],["courses","Курсы и маржа"],["real","Реальный оборот"],["planner","Планировщик загрузки"],["goals","Набор"],["grid","Расписание (сетка)"],["groups","Группы"],["compos","Состав групп"],["clients","Клиенты"],["price","Прайс"],["cards","О курсах"],["may","Майский"],["staff","Педсостав и ФОТ"],["fixed","Постоянные расходы"],["tax","Налоги РБ и ФОТ"],["break","Точка безубыточности"],["scenario","Сценарии"],["settings","Параметры"],["ruk","Дашборд Руководителя"],["adm","Дашборд Администратора"]];
 const MANAGER_DEFAULT_TABS=["grid","groups","clients","may","goals"];
 const ALWAYS_TABS={clients:1,price:1,goals:1,cards:1};   // видны всем ролям, даже если не отмечены в доступах
-const ADMIN_TABS={report:1};     // только для админа, не назначаются менеджерам
+/* «Пробные» — админская, а не владельческая: контроль пробных это ежедневная работа админа
+   утром и вечером, а дашборды ruk/adm видны только Жанне. */
+const ADMIN_TABS={report:1,trials:1};   // только для админа, не назначаются менеджерам
 // Дашборды руководителя/администратора — ТОЛЬКО владельцу (Жанне), не всем админам
 const OWNER_TABS={ruk:1,adm:1};
 const OWNER_EMAILS=["smalprince@gmail.com","proznanie.mogilev@gmail.com"];
@@ -10392,6 +10401,81 @@ function _alfaRosterPrint(){
   setTimeout(()=>{ try{ w.focus(); w.print(); }catch(e){} },300);
 }
 
+/* ===== ПРОБНЫЕ ЗА ДЕНЬ =====
+   Жанна: «утром надо знать, сколько таких детей ожидается, а вечером — кто пришёл и кто нет.
+   Это нужно для контроля пробных и чтобы их не терять. В ручном режиме это сложно».
+   Пробный опознаётся по СУММЕ списания: 0 значит, что шаблон абонемента ещё не проставили —
+   их часто ставят прямо на занятии, — и такой ребёнок почти наверняка пробник.
+   Вкладка видна администраторам, а не только владельцу: утром и вечером с ней работает админ. */
+let _trDate=null, _trData=null, _trBusy=false, _trErr=null;
+function _trToday(){ const d=new Date(),z=n=>String(n).padStart(2,'0');
+  return d.getFullYear()+'-'+z(d.getMonth()+1)+'-'+z(d.getDate()); }
+function trSetDate(v){ if(v){ _trDate=v; _trData=null; _trErr=null; } renderTrials(); }
+async function trLoad(force){
+  if(_trBusy) return;
+  const d=_trDate||_trToday();
+  if(!force && _trData && _trData.date===d) return;
+  _trBusy=true; _trErr=null; renderTrials();
+  try{ _trData=await _pubCall("trialsDay",{date:d}); }
+  catch(e){ _trErr=e; _trData=null; }
+  finally{ _trBusy=false; renderTrials(); }
+}
+const TR_STATE={
+  waiting:  {t:"ждём",                      c:"var(--muted)",  ic:"○"},
+  came:     {t:"пришёл, списано",           c:"var(--green)",  ic:"✓"},
+  came_free:{t:"пришёл, абонемент не проставлен", c:"#C9922E", ic:"!"},
+  missed:   {t:"не пришёл",                 c:"var(--red)",    ic:"×"}
+};
+function renderTrials(){
+  const el=document.getElementById("trialsBody"); if(!el) return;
+  const d=_trDate||_trToday();
+  const bar=`<div class="hd-actions" style="margin-bottom:10px">
+    <input type="date" class="cell" style="width:auto" value="${esc(d)}" onchange="trSetDate(this.value)">
+    <button class="btn sm" onclick="trLoad(true)"${_trBusy?" disabled":""}>${_trBusy?"Читаю Alfa…":"🔄 Обновить из Alfa"}</button>
+    <span style="font-size:12px;color:var(--muted)">Пробным считается ребёнок, у которого списывается ${
+      _trData&&_trData.prices?esc(_trData.prices.map(x=>x===0?"0":String(x)).join(" или ")):"0 или 15"} — обычная цена занятия другая.</span>
+  </div>`;
+  if(_trErr){ el.innerHTML=bar+_pubErrHtml(_trErr,"пробные за день"); return; }
+  if(_trBusy&&!_trData){ el.innerHTML=bar+`<div class="callout">⏳ Читаю занятия дня из Alfa…</div>`; return; }
+  if(!_trData){ el.innerHTML=bar+`<div class="callout">Нажмите «Обновить из Alfa», чтобы посмотреть пробных за ${esc(d)}.</div>`; return; }
+  const c=_trData.counts||{};
+  const les=_trData.lessons||[];
+  if(!les.length){
+    el.innerHTML=bar+`<div class="callout">За ${esc(_trData.date)} пробных не нашлось. Просмотрено занятий: ${_trData.lessonsScanned||0}.
+      <br><span style="font-size:12px;color:var(--muted)">Ищем детей со списанием ${esc((_trData.prices||[0,15]).join(" или "))}. Если у вас пробные оформляются другой суммой — скажите, поправлю.</span></div>`;
+    return;
+  }
+  const tile=(k,n)=>`<div style="flex:1;min-width:120px;border:1px solid var(--line);border-radius:9px;padding:8px 12px;background:#fff">
+    <div style="font-size:22px;font-weight:700;color:${TR_STATE[k].c}">${n||0}</div>
+    <div style="font-size:12px;color:var(--muted)">${TR_STATE[k].t}</div></div>`;
+  const total=(c.waiting||0)+(c.came||0)+(c.came_free||0)+(c.missed||0);
+  const tiles=`<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+    <div style="flex:1;min-width:120px;border:1px solid var(--line);border-radius:9px;padding:8px 12px;background:var(--sand-l)">
+      <div style="font-size:22px;font-weight:700">${total}</div>
+      <div style="font-size:12px;color:var(--muted)">всего пробных за день</div></div>
+    ${c.waiting?tile("waiting",c.waiting):""}${tile("came",c.came)}${c.came_free?tile("came_free",c.came_free):""}${tile("missed",c.missed)}</div>`;
+  const warn=c.came_free?`<div class="callout" style="border-color:#C9922E;font-size:13px;margin-bottom:10px">
+    <b>Пришли, но абонемент не проставлен: ${c.came_free}.</b> Занятие состоялось, а деньги не списались — это прямая потеря. Проставьте шаблон в Alfa, и сумма встанет сама.</div>`:"";
+  const rows=les.map(L=>{
+    const kids=L.kids.map(k=>{
+      const s=TR_STATE[k.state]||TR_STATE.waiting;
+      return `<div style="display:flex;gap:8px;align-items:baseline;padding:2px 0">
+        <span style="color:${s.c};font-weight:700;width:14px;text-align:center">${s.ic}</span>
+        <span style="flex:1">${esc(k.name)}</span>
+        <span style="color:${s.c};font-size:12px">${esc(s.t)}</span>
+        <span style="color:var(--muted);font-size:12px;width:52px;text-align:right">${k.sum?_gm(k.sum):"—"}</span></div>`;
+    }).join("");
+    return `<div style="border:1px solid var(--line);border-radius:9px;padding:10px 12px;margin-bottom:8px;background:#fff">
+      <div style="display:flex;gap:10px;align-items:baseline;margin-bottom:6px;flex-wrap:wrap">
+        <b style="font-size:14px">${esc(L.from||"")}${L.to?"–"+esc(L.to):""}</b>
+        <span>${esc(L.subject||"занятие")}</span>
+        <span style="color:var(--muted);font-size:12px">${esc(L.teacher||"")}</span>
+        <span style="margin-left:auto;font-size:12px;color:var(--muted)">${L.done?"проведено":"ещё не проведено"} · в группе ${L.seats}</span>
+      </div>${kids}</div>`;
+  }).join("");
+  el.innerHTML=bar+tiles+warn+rows;
+}
+
 /* ==================== ДАШБОРД РУКОВОДИТЕЛЯ / АДМИНИСТРАТОРА (только владельцу) ====================
    Две вкладки-сводки. Строим по разделам. Первый готовый раздел — «Важные ссылки»
    (редактируемый список, синхронизируется как остальные данные модели). */
@@ -16324,6 +16408,7 @@ document.querySelectorAll(".tab").forEach(tb=>tb.onclick=()=>{
   if(tb.dataset.t==="compos" && typeof renderCompos==="function") renderCompos();
   if(tb.dataset.t==="ruk" && typeof renderRuk==="function") renderRuk();
   if(tb.dataset.t==="adm" && typeof renderAdm==="function") renderAdm();
+  if(tb.dataset.t==="trials" && typeof renderTrials==="function"){ renderTrials(); if(!_trData) trLoad(); }
   _scrollTabIntoView(tb);
   updateNavHeightDelayed();
 });

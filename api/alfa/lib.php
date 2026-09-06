@@ -717,6 +717,183 @@ function alfa_trial_count_details(array $details, array $trialByCustomer, string
             'missedIds' => $missedIds, 'noCid' => $noCid, 'seen' => $seen];
 }
 
+/* ===================== ПРОБНЫЕ ЗА ДЕНЬ =====================
+   Жанна: «утром надо знать, сколько таких детей ожидается, а вечером — кто пришёл и кто нет.
+   В ручном режиме это сложно». Пробный опознаётся по СУММЕ списания, а не по названию тарифа:
+   шаблон абонемента часто ставят прямо на занятии, поэтому ребёнок без абонемента (0,00) —
+   скорее всего пробник, а не «нет данных».
+
+   Проверено на живом ответе Alfa (зонд 06.09.2026): строка участника выглядит так —
+   {"id":310985,"branch_id":1,"customer_id":2439,"lesson_id":38382,"ctt_id":13904,
+    "is_attend":null,"commission":"46.00",...}. То есть customer_id есть, ИМЕНИ НЕТ (достаём
+   отдельно), commission приходит СТРОКОЙ, а is_attend у запланированных пустой. */
+
+/* Суммы, по которым узнаём пробного. 0 — шаблон абонемента ещё не проставлен. */
+function alfa_trial_prices(): array {
+    $p = cfg()['trial_prices'] ?? [0, 15];
+    $out = [];
+    foreach ((array)$p as $x) if (is_numeric($x)) $out[] = round((float)$x, 2);
+    return $out ?: [0.0, 15.0];
+}
+function alfa_is_trial_sum(float $c): bool {
+    foreach (alfa_trial_prices() as $p) if (abs($c - $p) < 0.005) return true;
+    return false;
+}
+/* Три состояния вечером. Деньги — главный признак, но у ребёнка БЕЗ абонемента спишется 0 и
+   в том случае, если он пришёл: отличить можно только по отметке присутствия. Поэтому:
+     came      — списали: пробное состоялось и оплачено;
+     came_free — отметка есть, а списания нет: пришёл, но абонемент не проставили (потеря денег);
+     missed    — ни отметки, ни списания;
+     waiting   — занятие ещё не проведено. */
+function alfa_trial_state(float $commission, $isAttend, bool $lessonDone): string {
+    if (!$lessonDone) return 'waiting';
+    if ($commission > 0.005) return 'came';
+    $att = ($isAttend === true || $isAttend === 1 || $isAttend === '1');
+    return $att ? 'came_free' : 'missed';
+}
+/* Имена детей по id. В строке участника имени нет, а тянуть весь справочник клиентов ради
+   десятка детей на этом хостинге нельзя — точечно и с долгим кэшем (имена не меняются). */
+function alfa_names_cache_path(): string {
+    return alfa_store_dir() . '/custnames_' . substr(hash('sha256', __DIR__ . '|names1'), 0, 20) . '.json';
+}
+function alfa_customer_names(array $ids, ?array $branches = null): array {
+    $ids = array_values(array_unique(array_map('intval', array_filter($ids))));
+    if (!$ids) return [];
+    $f = alfa_names_cache_path();
+    $cache = [];
+    if (is_file($f)) { $j = json_decode((string)@file_get_contents($f), true); if (is_array($j)) $cache = $j; }
+    $out = []; $miss = [];
+    foreach ($ids as $id) {
+        if (!empty($cache[(string)$id])) $out[$id] = (string)$cache[(string)$id];
+        else $miss[] = $id;
+    }
+    if ($miss) {
+        $host = 'https://' . alfa_host(); $token = alfa_token();
+        $branches = $branches ?: alfa_realization_branches();
+        $found = false;
+        foreach ($miss as $id) {
+            foreach ($branches as $bid) {
+                $r = alfa_http('POST', "$host/v2api/" . (int)$bid . "/customer/index?id=" . $id,
+                    ['id' => $id, 'page' => 0, 'count' => 1], $token, true, 8);
+                if (isset($r['__err'])) continue;
+                $hit = null;
+                foreach (($r['items'] ?? []) as $c) if ((int)($c['id'] ?? 0) === $id) { $hit = $c; break; }
+                if (!$hit) continue;
+                $nm = trim((string)($hit['name'] ?? ''));
+                if ($nm !== '') { $out[$id] = $nm; $cache[(string)$id] = $nm; $found = true; }
+                break;
+            }
+        }
+        if ($found) @file_put_contents($f, json_encode($cache, JSON_UNESCAPED_UNICODE), LOCK_EX);
+    }
+    return $out;
+}
+/* Справочник (педагоги, предметы) с суточным кэшем — чтобы в списке были живые названия, а не
+   идентификаторы. Тяжёлое действие refs сюда не тянем: оно обходит шесть справочников по каждому
+   филиалу и на этом хостинге рискует упереться в таймаут. */
+function alfa_simple_ref(string $entity, array $branches): array {
+    $safe = preg_replace('/[^a-z\-]/', '', $entity);
+    $f = alfa_store_dir() . '/ref_' . $safe . '_' . substr(hash('sha256', __DIR__ . '|ref1'), 0, 12) . '.json';
+    if (is_file($f)) {
+        $j = json_decode((string)@file_get_contents($f), true);
+        if (is_array($j) && (int)($j['ts'] ?? 0) > time() - 86400 && !empty($j['m'])) {
+            $m = [];
+            foreach ($j['m'] as $k => $v) $m[(int)$k] = (string)$v;
+            return $m;
+        }
+    }
+    $m = [];
+    foreach ($branches as $bid) {
+        $r = alfa_index_all((int)$bid, $entity, [], 10, 12);
+        foreach ($r['items'] as $it) {
+            if (!is_array($it)) continue;
+            $id = (int)($it['id'] ?? 0);
+            if ($id) $m[$id] = trim((string)($it['name'] ?? ''));
+        }
+    }
+    if ($m) @file_put_contents($f, json_encode(['ts' => time(), 'm' => $m], JSON_UNESCAPED_UNICODE), LOCK_EX);
+    return $m;
+}
+/* Занятия дня с участниками. У ЗАПЛАНИРОВАННЫХ Alfa кладёт участников прямо в ответ
+   lesson/index (подтверждено зондом), у ПРОВЕДЁННЫХ их приходится добирать отдельным запросом
+   по одному из участников — так же, как это делает alfa_realization_day. */
+function alfa_trials_day(string $date, ?array $branches = null): array {
+    $date = alfa_iso($date);
+    $branches = $branches ?: alfa_realization_branches();
+    $host = 'https://' . alfa_host();
+    $token = alfa_token();
+    $teachers = alfa_simple_ref('teacher', $branches);
+    $subjects = alfa_simple_ref('subject', $branches);
+    $lessons = []; $ids = []; $seen = []; $PER = 50; $scanned = 0;
+    foreach ($branches as $bid) {
+        $bid = (int)$bid;
+        for ($p = 0; $p < 40; $p++) {
+            $r = alfa_http('POST', "$host/v2api/$bid/lesson/index",
+                ['date_from' => $date, 'date_to' => $date, 'page' => $p, 'count' => $PER], $token, true, 15);
+            $items = isset($r['__err']) ? [] : ($r['items'] ?? []);
+            foreach ($items as $ls) {
+                if (!is_array($ls)) continue;
+                if (substr((string)($ls['date'] ?? ''), 0, 10) !== $date) continue;
+                $st = (int)($ls['status'] ?? 0);
+                if ($st !== 1 && $st !== 2 && $st !== 3) continue;
+                $lid = (int)($ls['id'] ?? 0);
+                if (!$lid || isset($seen[$lid])) continue;
+                $seen[$lid] = 1; $scanned++;
+                $done = ($st === 3);
+                $det = (array)($ls['details'] ?? []);
+                if (!$det) {
+                    $cids = (array)($ls['customer_ids'] ?? []);
+                    $cid0 = (int)($cids[0] ?? 0);
+                    if ($cid0) {
+                        $rr = alfa_http('POST', "$host/v2api/$bid/lesson/index",
+                            ['customer_id' => $cid0, 'date_from' => $date, 'date_to' => $date,
+                             'page' => 0, 'count' => 50], $token, true, 12);
+                        foreach (($rr['items'] ?? []) as $x) {
+                            if ((int)($x['id'] ?? 0) === $lid) { $det = (array)($x['details'] ?? []); break; }
+                        }
+                    }
+                }
+                $kids = [];
+                foreach ($det as $dt) {
+                    if (!is_array($dt)) continue;
+                    $c = (float)($dt['commission'] ?? 0);
+                    if (!alfa_is_trial_sum($c)) continue;
+                    $cid = (int)($dt['customer_id'] ?? 0);
+                    if ($cid) $ids[$cid] = 1;
+                    $kids[] = ['customerId' => $cid, 'sum' => round($c, 2),
+                               'cttId' => (int)($dt['ctt_id'] ?? 0),
+                               'state' => alfa_trial_state($c, $dt['is_attend'] ?? null, $done)];
+                }
+                if (!$kids) continue;
+                $tn = [];
+                foreach ((array)($ls['teacher_ids'] ?? []) as $tid) {
+                    $tid = (int)$tid;
+                    if (!empty($teachers[$tid])) $tn[] = $teachers[$tid];
+                }
+                $lessons[] = ['id' => $lid, 'branch' => $bid, 'done' => $done,
+                              'from' => substr((string)($ls['time_from'] ?? ''), 11, 5),
+                              'to' => substr((string)($ls['time_to'] ?? ''), 11, 5),
+                              'subject' => (string)($subjects[(int)($ls['subject_id'] ?? 0)] ?? ''),
+                              'teacher' => implode(', ', $tn),
+                              'seats' => count($det), 'kids' => $kids];
+            }
+            if (count($items) < $PER) break;
+        }
+    }
+    $names = alfa_customer_names(array_keys($ids), $branches);
+    $counts = ['waiting' => 0, 'came' => 0, 'came_free' => 0, 'missed' => 0];
+    foreach ($lessons as $i => $L) {
+        foreach ($L['kids'] as $k2 => $kid) {
+            $nm = $names[$kid['customerId']] ?? ('id ' . $kid['customerId']);
+            $lessons[$i]['kids'][$k2]['name'] = $nm;
+            $counts[$kid['state']] = ($counts[$kid['state']] ?? 0) + 1;
+        }
+    }
+    usort($lessons, function ($a, $b) { return strcmp((string)$a['from'], (string)$b['from']); });
+    return ['date' => $date, 'lessons' => $lessons, 'counts' => $counts,
+            'prices' => alfa_trial_prices(), 'lessonsScanned' => $scanned, 'branches' => $branches];
+}
+
 /* ===== ПРОГНОЗ ОПЛАТЫ «как в Alfa» =====
    В Alfa есть отчёт «Прогноз оплаты» (Расход за период), но наружу v2api его не отдаёт (404).
    Механику повторяем: будущих уроков в lesson/index нет, зато есть РЕГУЛЯРНОЕ расписание.
