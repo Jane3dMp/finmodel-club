@@ -1923,7 +1923,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-09-06-19";
+const APP_VER="2026-09-06-20";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -10496,6 +10496,18 @@ let _trCards={};
 /* Абонементы детей: купил ли клиент после пробного. Грузятся отдельно и после занятий —
    один запрос на ребёнка, внутри основной загрузки они удвоили бы её стоимость. */
 let _trTar={}, _trTarBusy=false, _trTarProg="";
+/* Фильтр «скрыть купивших»: остаются те, кто пробное прошёл, а абонемент не купил — с ними
+   и нужно работать. Прячем по ДВУМ признакам сразу: есть действующий платный абонемент ИЛИ
+   положительный остаток. Одного остатка мало: у только что выданного абонемента Alfa часто
+   отдаёт ноль (деньги ещё не внесены), и такой ребёнок ошибочно попал бы в «не купил». */
+let _trHidePaid=false;
+function trToggleHidePaid(){ _trHidePaid=!_trHidePaid; renderTrials(); }
+function _trHasPaid(id){
+  const t=_trTar[String(id)]||_trTar[Number(id)];
+  if(!t) return false;                       // абонементы ещё не загружены — никого не прячем
+  if(t.paid) return true;
+  return (t.tariffs||[]).some(x=>x&&x.balance!=null&&x.balance>0);
+}
 function _trYearStart(){
   const d=new Date(), y=d.getFullYear(), m=d.getMonth()+1;
   return (m>=9?y:y-1)+"-09-01";     // учебный год начинается 1 сентября
@@ -10597,10 +10609,18 @@ function _trFunnel(){
    по своей природе, и глазами видно то, чего не видно в счётчике. */
 function _trListHtml(title, rows, color, hint){
   if(!rows||!rows.length) return "";
+  let paidHidden=0;
+  if(_trHidePaid){
+    const kept=rows.filter(r=>!_trHasPaid(r.id));
+    paidHidden=rows.length-kept.length;
+    rows=kept;
+    if(!rows.length) return "";
+  }
   const LES={came:["пришёл","var(--green)"], came_free:["пришёл, без списания","#C9922E"],
              missed:["не пришёл","var(--red)"], ahead:["впереди","var(--terra)"]};
   return `<details style="margin-bottom:6px"><summary style="cursor:pointer;font-size:13px">
-      <b style="color:${color}">${esc(title)}</b> <span style="color:var(--muted)">— ${rows.length}</span>
+      <b style="color:${color}">${esc(title)}</b> <span style="color:var(--muted)">— ${rows.length}${
+        paidHidden?(" · скрыто купивших "+paidHidden):""}</span>
       ${hint?`<span style="color:var(--muted);font-size:12px"> · ${esc(hint)}</span>`:""}</summary>
     <div style="padding:6px 0 4px 4px">${rows.map(r=>`
       <div style="padding:4px 0;border-bottom:1px solid var(--line)">
@@ -10726,7 +10746,10 @@ function _trFunnelHtml(){
   const head=`<div style="display:flex;align-items:baseline;gap:8px;margin:4px 0 6px">
     <b style="font-size:14px">Новый набор целиком</b>
     <span style="font-size:12px;color:var(--muted)">с ${esc(_trFun.from)} по ${esc(_trFun.to)}${prog}</span>
-    <button class="btn ghost sm" style="margin-left:auto" onclick="trLoadFunnel(true)"${_trFunBusy?" disabled":""}>обновить</button></div>`;
+    <button class="btn ghost sm" style="margin-left:auto${_trHidePaid?';background:var(--graphite);color:#fff;border-color:var(--graphite)':''}"
+      onclick="trToggleHidePaid()"
+      title="Прячет тех, у кого есть действующий платный абонемент или остаток на балансе. Остаются те, кто пробное прошёл, а абонемент не купил">${_trHidePaid?"✓ ":""}скрыть купивших</button>
+    <button class="btn ghost sm" onclick="trLoadFunnel(true)"${_trFunBusy?" disabled":""}>обновить</button></div>`;
   const tiles=`<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">
     ${tile(f.enrolled,"вписаны на занятия","","Детей набора, у которых есть хотя бы одно занятие в периоде")}
     ${tile(f.came,"дошли","var(--green)","Были хотя бы на одном занятии")}

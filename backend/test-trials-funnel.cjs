@@ -36,6 +36,7 @@ function build(kids, newIds, opts) {
     _trRefs: { subjects: { 7: 'Арт-студия', 9: 'Пескография' }, teachers: {} },
     _trCards: o.cards || {},
     _trTar: o.tar || {}, _trTarBusy: !!o.tarBusy, _trTarProg: '',
+    _trHidePaid: !!o.hidePaid, trToggleHidePaid: () => {},
     _trToday: () => TODAY,
     _goalsKidLists: () => ({ newKids: (newIds || []).map(id => (o.noModelNames ? { alfaId: id } : { alfaId: id, name: 'Ребёнок ' + id })) }),
     trLoadFunnel: () => {},
@@ -45,7 +46,7 @@ function build(kids, newIds, opts) {
     Date, String, Number, Object, Set, Math,
   };
   return new Function(...Object.keys(scope),
-    grab('_trPrevSeasonStart') + grab('_trNewSet') + grab('_trLesState') + grab('_trFunnel') + grab('_trKidName') + grab('_trArchived') + grab('_trEvHtml') + grab('_trArchBadge') + grab('_trTarHtml') + grab('_trKidLink') + grab('_trListHtml')
+    grab('_trPrevSeasonStart') + grab('_trNewSet') + grab('_trLesState') + grab('_trFunnel') + grab('_trKidName') + grab('_trArchived') + grab('_trEvHtml') + grab('_trArchBadge') + grab('_trTarHtml') + grab('_trHasPaid') + grab('_trKidLink') + grab('_trListHtml')
     + grab('_trDayLabel') + grab('_trFunnelHtml')
     + '; return {f:_trFunnel(), html:_trFunnelHtml(), st:_trLesState};'
   )(...Object.values(scope));
@@ -268,6 +269,34 @@ t('в прогнозе ЭВ тоже есть', r.html.includes('· ЭВ: '));
 
 r = build({ 92: [les('2026-09-20', false)] }, [92], {});
 t('без карточек ЭВ не выдумывается', !r.html.includes('ЭВ 26/27:'));
+
+
+console.log('--- 17. фильтр «скрыть купивших» ---');
+// Жанна: «добавь фильтр — скрыть с остатком на балансе, чтобы видеть, кто не купил абонементы».
+// Прячем по двум признакам: платный абонемент ИЛИ положительный остаток. Одного остатка мало:
+// у только что выданного абонемента Alfa часто отдаёт ноль (деньги ещё не внесены).
+const TAR = {
+  100: { paid: true,  tariffs: [{ name: 'Digital Art', balance: 184, trial: false }] },   // купил
+  101: { paid: true,  tariffs: [{ name: 'Арт-студия',  balance: 0,   trial: false }] },   // купил, не оплатил
+  102: { paid: false, tariffs: [{ name: 'Пробное',     balance: 0,   trial: true  }] },   // только пробное
+  103: { paid: false, tariffs: [] },                                                      // без абонемента
+};
+const KIDS = { 100: [les('2026-09-01', true, 15, true)], 101: [les('2026-09-01', true, 15, true)],
+               102: [les('2026-09-01', true, 15, true)], 103: [les('2026-09-01', true, 15, true)] };
+r = build(KIDS, [100, 101, 102, 103], { tar: TAR });
+t('без фильтра видны все четверо', ['100','101','102','103'].every(id => r.html.includes('Ребёнок ' + id)));
+
+r = build(KIDS, [100, 101, 102, 103], { tar: TAR, hidePaid: true });
+t('купивший с остатком скрыт', !r.html.includes('Ребёнок 100'));
+t('купивший с нулевым остатком тоже скрыт', !r.html.includes('Ребёнок 101'));
+t('с одним пробным остался', r.html.includes('Ребёнок 102'));
+t('без абонемента остался', r.html.includes('Ребёнок 103'));
+t('сказано, сколько скрыто', r.html.includes('скрыто купивших 2'));
+t('кнопка помечена включённой', r.html.includes('✓ скрыть купивших'));
+
+// пока абонементы не загружены — никого не прячем, иначе список пустел бы на ровном месте
+r = build(KIDS, [100, 101, 102, 103], { hidePaid: true });
+t('без данных об абонементах никто не скрыт', r.html.includes('Ребёнок 100'));
 
 if (bad) { console.log(NL + 'провалено проверок: ' + bad); process.exit(1); }
 console.log(NL + 'всё сошлось');
