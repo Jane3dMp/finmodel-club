@@ -21,7 +21,7 @@ function eq(name, got, want) { check(name, got === want, JSON.stringify(got) + '
 
 const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
 let src = '';
-for (const n of ['trLoadManagers', '_trMgrOf', '_trMgrHtml', '_trPhone']) {
+for (const n of ['trLoadManagers', '_trLeadPhones', '_trMgrOf', '_trMgrHtml', '_trPhone']) {
   const m = html.match(new RegExp('\\n(?:async )?function ' + n + '\\([^)]*\\)\\s*\\{[\\s\\S]*?\\n\\}', 'm'));
   if (!m) { console.log('не найдено в index.html: ' + n); process.exit(1); }
   src += m[0] + '\n';
@@ -35,11 +35,13 @@ src += one + '\n';
 const LEADS = {
   ok: true,
   users: { '11': 'Ольга Ковалёва', '12': 'Мария Титова' },
+  // ⚠️ форма как у настоящего прокси: phones — МАССИВ (amo_field_values по коду PHONE).
+  // Первый заход читал c.phone и молча не находил ни одного номера из 1257 сделок.
   contacts: {
-    '101': { phone: '+375 (29) 111-22-33' },
-    '102': { phone: '80291112244' },
-    '103': { phone: '375291112255' },
-    '104': { phone: '' },                       // контакт без телефона — связать нечем
+    '101': { phones: ['+375 (29) 111-22-33'] },
+    '102': { phones: ['80291112244', '+375 33 777-88-99'] },   // у родителя два номера
+    '103': { phones: ['375291112255'] },
+    '104': { phones: [] },                      // контакт без телефона — связать нечем
   },
   leads: [
     { id: 1, responsible: 11, created_at: 1000, contactIds: [101] },
@@ -48,6 +50,9 @@ const LEADS = {
     { id: 3, responsible: 12, created_at: 3000, contactIds: [101] },
     { id: 4, responsible: 99, created_at: 4000, contactIds: [103] },   // менеджера нет в справочнике
     { id: 5, responsible: 11, created_at: 5000, contactIds: [104] },
+    // контактов нет, номер вписан в саму сделку — так делают в части клубов
+    { id: 6, responsible: 11, created_at: 6000, contactIds: [],
+      fields: { 'Телефон': ['+375 44 555-66-77'], 'Номер договора': ['1234567890123'] } },
   ],
 };
 
@@ -59,6 +64,9 @@ const ctx = {
     '203': { name: 'Сидоров Сидор', phone: '375291112255' },
     '204': { name: 'Кузнецов Кузьма', phone: '+375291119999' },   // такого номера в воронке нет
     '205': { name: 'Без Телефона', phone: '' },
+    '206': { name: 'Второй Номер', phone: '+375337778899' },       // второй номер того же родителя
+    '207': { name: 'Из Поля Сделки', phone: '+375445556677' },
+    '208': { name: 'Похож На Договор', phone: '+375121234567' },   // цифры договора телефоном не считаем
   },
   _trMgr: null, _trMgrBusy: false, _trMgrErr: '', _trMgrStat: null,
   _amoWatch: () => ({ pipelineId: 7, statusIds: [] }),
@@ -68,7 +76,7 @@ const ctx = {
   esc: s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'),
 };
 const API = new Function('ctx', 'with (ctx) { ' + src +
-  ' return {trLoadManagers,_trMgrOf,_trMgrHtml,_trPhone,_phoneKey,peek:()=>({mgr:_trMgr,err:_trMgrErr,stat:_trMgrStat})}; }')(ctx);
+  ' return {trLoadManagers,_trLeadPhones,_trMgrOf,_trMgrHtml,_trPhone,_phoneKey,peek:()=>({mgr:_trMgr,err:_trMgrErr,stat:_trMgrStat})}; }')(ctx);
 
 /* ================= ключ телефона ================= */
 eq('+375 и 8 дают один ключ', API._phoneKey('+375291112233'), API._phoneKey('80291112233'));
@@ -88,15 +96,29 @@ delete ctx.S.children['201'];
   await API.trLoadManagers(true);
   const st = API.peek();
   eq('ошибок нет', st.err, '');
-  eq('сделок прочитано', st.stat.leads, 5);
-  eq('сделок с известным ответственным', st.stat.withMgr, 4);   // id 99 нет в справочнике
-  eq('телефонов в карте', st.stat.phones, 2);                   // 101 и 102; у 103 менеджер неизвестен, у 104 нет телефона
+  eq('сделок прочитано', st.stat.leads, 6);
+  eq('сделок с известным ответственным', st.stat.withMgr, 5);   // id 99 нет в справочнике
+  // 101 (1) + 102 (2 номера) + поле сделки №6 (1) = 4; у 103 менеджер неизвестен, у 104 номера нет
+  eq('телефонов в карте', st.stat.phones, 4);
 
   eq('менеджер по последней сделке, а не по первой', API._trMgrOf(201), 'Мария Титова');
   eq('второй клиент — свой менеджер', API._trMgrOf(202), 'Мария Титова');
   eq('менеджера нет в справочнике — не гадаем', API._trMgrOf(203), '');
   eq('номера нет в воронке', API._trMgrOf(204), '');
   eq('нет телефона — нет менеджера', API._trMgrOf(205), '');
+  eq('второй номер родителя тоже связывает', API._trMgrOf(206), 'Мария Титова');
+  eq('номер из поля сделки подхвачен', API._trMgrOf(207), 'Ольга Ковалёва');
+  eq('цифры из «номера договора» телефоном не считаем', API._trMgrOf(208), '');
+
+  /* --- сборщик телефонов отдельно: именно тут первый заход и промахнулся --- */
+  const cts = LEADS.contacts;
+  eq('из контакта берём ВСЕ номера', API._trLeadPhones({ contactIds: [102] }, cts).length, 2);
+  eq('старая форма phone тоже понимается',
+     API._trLeadPhones({ contactIds: [900] }, { '900': { phone: '+375291110000' } }).length, 1);
+  eq('поле сделки берётся только когда контактов нет',
+     API._trLeadPhones({ contactIds: [101], fields: { 'Телефон': ['+375440000000'] } }, cts).length, 1);
+  eq('поле не про телефон игнорируем',
+     API._trLeadPhones({ contactIds: [], fields: { 'Номер договора': ['1234567890123'] } }, cts).length, 0);
 
   /* --- как это выглядит --- */
   const h1 = API._trMgrHtml(201);

@@ -1936,7 +1936,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-09-06-38";
+const APP_VER="2026-09-06-39";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -10811,9 +10811,8 @@ async function trLoadManagers(force){
       const nm=users[String(l.responsible)]||users[l.responsible]||"";
       if(!nm) return;
       withMgr++;
-      (l.contactIds||[]).forEach(cid=>{
-        const c=cts[String(cid)]||cts[cid]; if(!c) return;
-        const k=_phoneKey(c.phone); if(!k) return;
+      _trLeadPhones(l,cts).forEach(p=>{
+        const k=_phoneKey(p); if(!k) return;
         map[k]={name:nm, leadId:l.id};
       });
     });
@@ -10821,6 +10820,29 @@ async function trLoadManagers(force){
     _trMgrStat={leads:(j.leads||[]).length, withMgr:withMgr, phones:Object.keys(map).length};
   }catch(e){ _trMgrErr=(e&&e.message)||String(e); }
   finally{ _trMgrBusy=false; renderTrials(); }
+}
+/* Телефоны сделки. ⚠️ У контакта amo номера лежат в МАССИВЕ phones (поле PHONE), а не в
+   phone — на этом первый заход и сломался: менеджеры прочитались все 1257, а телефонов
+   для связки нашлось ноль. Берём все номера контакта: у родителя их бывает два, а в Alfa
+   записан какой-то один.
+   Если контактов у сделки нет вовсе, смотрим её собственные поля — в части клубов номер
+   вписывают прямо в сделку. Берём только поля, названные телефоном: любое числовое поле
+   с девятью цифрами могло бы оказаться чем угодно, а ошибка здесь — звонок не тому. */
+function _trLeadPhones(l, cts){
+  const out=[];
+  (l.contactIds||[]).forEach(cid=>{
+    const c=cts[String(cid)]||cts[cid]; if(!c) return;
+    const list=(c.phones&&c.phones.length)?c.phones:(c.phone?[c.phone]:[]);
+    list.forEach(p=>{ if(p) out.push(p); });
+  });
+  if(!out.length){
+    const fl=l.fields||{};
+    Object.keys(fl).forEach(k=>{
+      if(!/тел|phone|моб/i.test(k)) return;
+      (fl[k]||[]).forEach(v=>{ if(String(v).replace(/[^0-9]/g,"").length>=9) out.push(v); });
+    });
+  }
+  return out;
 }
 function _trMgrOf(id){
   if(!_trMgr) return "";
