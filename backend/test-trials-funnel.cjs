@@ -46,9 +46,9 @@ function build(kids, newIds, opts) {
     Date, String, Number, Object, Set, Math,
   };
   return new Function(...Object.keys(scope),
-    grab('_trPrevSeasonStart') + grab('_trNewSet') + grab('_trLesState') + grab('_trFunnel') + grab('_trKidName') + grab('_trArchived') + grab('_trEvHtml') + grab('_trArchBadge') + grab('_trTarHtml') + grab('_trHasPaid') + grab('_trKidLink') + grab('_trListHtml')
+    grab('_trWeekMissed') + grab('_trPrevSeasonStart') + grab('_trNewSet') + grab('_trLesState') + grab('_trFunnel') + grab('_trKidName') + grab('_trArchived') + grab('_trEvHtml') + grab('_trArchBadge') + grab('_trTarHtml') + grab('_trHasPaid') + grab('_trKidLink') + grab('_trListHtml')
     + grab('_trDayLabel') + grab('_trFunnelHtml')
-    + '; return {f:_trFunnel(), html:_trFunnelHtml(), st:_trLesState};'
+    + '; return {f:_trFunnel(), html:_trFunnelHtml(), st:_trLesState, week:_trWeekMissed()};'
   )(...Object.values(scope));
 }
 const les = (date, done, sum, attend, subjectId) =>
@@ -312,6 +312,36 @@ t('в подписи объяснено, почему', r.html.includes('сег�
 r = build({ 112: [les(TODAY, false)] }, [112]);
 t('если впереди только сегодня — прогноза нет', !r.html.includes('Кого ждём в следующие дни'));
 t('и сказано об этом', r.html.includes('На следующие дни занятий'));
+
+
+console.log('--- 19. печать: кто не пришёл за неделю ---');
+// Жанна: «добавь опцию печать тех, кто не пришёл за неделю» — список для обзвона.
+// TODAY = 2026-09-10, значит окно 04.09–10.09.
+r = build({
+  120: [les('2026-09-08', true, 0, null)],                                  // пропустил в окне
+  121: [les('2026-09-01', true, 0, null)],                                  // пропустил ДО окна
+  122: [les('2026-09-08', true, 15, true)],                                 // пришёл
+  123: [les('2026-09-08', true, 0, null), les('2026-09-09', true, 15, true)], // пропустил, но приходил
+  124: [les('2026-09-08', true, 0, null)],                                  // возвращенец
+  125: [les('2026-09-08', true, 0, null)],                                  // в архиве
+}, [120, 121, 122, 123, 124, 125], {
+  before: { 124: { n: 20, last: '2026-05-01' } },
+  cards: { 125: { name: 'Архивный', archived: true } },
+});
+const ids = r.week.rows.map(x => String(x.id));
+t('окно — последние 7 дней', r.week.from === '2026-09-04' && r.week.to === '2026-09-10');
+t('пропустивший в окне попал', ids.indexOf('120') >= 0);
+t('пропустивший ДО окна не попал', ids.indexOf('121') < 0);
+t('пришедший не попал', ids.indexOf('122') < 0);
+t('пропустивший, но приходивший — попал', ids.indexOf('123') >= 0);
+t('и помечен, что был на других занятиях', (r.week.rows.find(x => String(x.id) === '123') || {}).came === true);
+t('а тот, кто не был ни разу, помечен иначе', (r.week.rows.find(x => String(x.id) === '120') || {}).came === false);
+t('возвращенец в обзвон не идёт', ids.indexOf('124') < 0);
+t('архивный в обзвон не идёт', ids.indexOf('125') < 0);
+t('список отсортирован по имени', ids.length === 2);
+
+r = build({ 126: [les('2026-09-08', true, 15, true)] }, [126]);
+t('когда никто не пропустил — список пуст', r.week.rows.length === 0);
 
 if (bad) { console.log(NL + 'провалено проверок: ' + bad); process.exit(1); }
 console.log(NL + 'всё сошлось');

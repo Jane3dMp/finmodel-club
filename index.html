@@ -1923,7 +1923,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-09-06-21";
+const APP_VER="2026-09-06-22";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -10729,6 +10729,82 @@ function _trTarHtml(id){
   const nm=paid.map(x=>esc(x.name)+((x.balance!=null&&x.balance>0)?(' · остаток '+_gm(x.balance)):'')).join(', ');
   return ' <span style="font-size:11px;color:var(--green)">'+nm+'</span>';
 }
+/* ===== ПЕЧАТЬ: КТО НЕ ПРИШЁЛ ЗА НЕДЕЛЮ =====
+   Список для обзвона: ребёнок из нового набора, у которого за последние 7 дней было занятие,
+   а его не было. Печатаем ровно то, что нужно в разговоре: имя, телефон, что именно пропустил,
+   этап взаимодействия и куплен ли абонемент. */
+function _trWeekMissed(){
+  if(!_trFun) return null;
+  const today=_trToday();
+  const from=(function(){ const d=new Date(today+"T12:00:00"); d.setDate(d.getDate()-6);
+    const z=x=>String(x).padStart(2,'0');
+    return d.getFullYear()+'-'+z(d.getMonth()+1)+'-'+z(d.getDate()); })();
+  const set=_trNewSet()||new Set();
+  const rows=[];
+  set.forEach(idStr=>{
+    /* Возвращенцев и архивных в обзвон не берём: первые не новые клиенты, вторые уже ушли,
+       и звонок им — потраченное время администратора. */
+    const pv=_trFun.before[idStr]||_trFun.before[Number(idStr)];
+    if(pv&&pv.n>0) return;
+    if(_trArchived(idStr)) return;
+    const L=_trFun.kids[idStr]||_trFun.kids[Number(idStr)]||[];
+    const miss=L.filter(x=>x.date>=from&&x.date<=today&&_trLesState(x,today)==="missed");
+    if(!miss.length) return;
+    const came=L.some(x=>{ const st=_trLesState(x,today); return st==="came"||st==="came_free"; });
+    rows.push({id:idStr, miss:miss, came:came});
+  });
+  rows.sort((a,b)=>_trKidName(a.id).localeCompare(_trKidName(b.id),"ru"));
+  return {from:from, to:today, rows:rows};
+}
+function _trPhone(id){
+  const s=String(id);
+  const c=(S.children||{})[s];
+  if(c&&c.phone) return c.phone;
+  let ph="";
+  try{ (S.grid||[]).some(l=>kidsOf(l).some(k=>{ if(String(k.alfaId||"")===s&&k.phone){ ph=k.phone; return true; } return false; })); }catch(e){}
+  return ph;
+}
+function _trTarText(id){
+  const t=_trTar[String(id)]||_trTar[Number(id)];
+  if(!t) return "";
+  if(!t.tariffs||!t.tariffs.length) return "без абонемента";
+  if(!t.paid) return "только пробный";
+  return t.tariffs.filter(x=>!x.trial)
+    .map(x=>x.name+((x.balance!=null&&x.balance>0)?(" · остаток "+x.balance):"")).join(", ");
+}
+function trPrintMissedWeek(){
+  const d=_trWeekMissed();
+  if(!d){ toast("Сначала соберите общую картину по набору"); return; }
+  if(!d.rows.length){ toast("За неделю никто из набора не пропустил занятий"); return; }
+  const w=window.open("","_blank"); if(!w){ toast("Разрешите всплывающие окна"); return; }
+  const css=`body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;padding:18px;color:#1c1410}
+    h2{margin:0 0 2px}.sub{color:#8a8178;font-size:12px;margin-bottom:14px}
+    table{border-collapse:collapse;width:100%}
+    th{background:#1c1410;color:#fff;padding:7px 10px;font-size:12px;text-align:left}
+    td{padding:7px 10px;border-bottom:1px solid #e6ded3;font-size:12px;vertical-align:top}
+    tr:nth-child(even) td{background:#faf6f0}
+    .nm{font-weight:700}.mut{color:#8a8178}.no{color:#b0493d}
+    .call{width:26px;border:1px solid #b9b2a7;border-radius:4px;display:inline-block;height:14px}
+    @media print{@page{size:landscape;margin:10mm}}`;
+  const dn=["вс","пн","вт","ср","чт","пт","сб"];
+  const dl=x=>{ const t=new Date(x+"T12:00:00"); return x.slice(8)+"."+x.slice(5,7)+" "+(dn[t.getDay()]||""); };
+  const body=d.rows.map(r=>`<tr>
+    <td class="nm">${esc(_trKidName(r.id))}</td>
+    <td>${esc(_trPhone(r.id)||"—")}</td>
+    <td>${r.miss.map(x=>esc(dl(x.date)+" "+(x.from||"")+" · "+(_trRefs.subjects[x.subjectId]||""))).join("<br>")}</td>
+    <td>${r.came?'<span class="mut">был на других занятиях</span>':'<span class="no">не был ни разу</span>'}</td>
+    <td>${esc(_trTarText(r.id)||"—")}</td>
+    <td class="mut">${esc((function(){const c=_trCards[String(r.id)]||_trCards[Number(r.id)];return (c&&c.evzz)||"";})())}</td>
+    <td><span class="call"></span></td></tr>`).join("");
+  w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Не пришли за неделю — Прознание + CODDY</title><style>${css}</style></head>
+    <body><h2>Не пришли за неделю · новый набор</h2>
+    <div class="sub">${esc(dl(d.from))} — ${esc(dl(d.to))} · детей: ${d.rows.length} · напечатано ${esc(new Date().toLocaleDateString("ru-RU"))}
+      <br>Возвращенцы прошлого года и архивные в список не включены.</div>
+    <table><thead><tr><th>Ребёнок</th><th>Телефон</th><th>Пропустил</th><th>Приходил ли вообще</th><th>Абонемент</th><th>ЭВ 26/27</th><th>Дозвон</th></tr></thead>
+    <tbody>${body}</tbody></table></body></html>`);
+  w.document.close();
+  setTimeout(()=>{ try{ w.focus(); w.print(); }catch(e){} }, 300);
+}
 function _trFunnelHtml(){
   const set=_trNewSet();
   if(!set||!set.size) return "";
@@ -10749,6 +10825,7 @@ function _trFunnelHtml(){
     <button class="btn ghost sm" style="margin-left:auto${_trHidePaid?';background:var(--graphite);color:#fff;border-color:var(--graphite)':''}"
       onclick="trToggleHidePaid()"
       title="Прячет тех, у кого есть действующий платный абонемент или остаток на балансе. Остаются те, кто пробное прошёл, а абонемент не купил">${_trHidePaid?"✓ ":""}скрыть купивших</button>
+    <button class="btn ghost sm" onclick="trPrintMissedWeek()" title="Список для обзвона: кто из набора пропустил занятие за последние 7 дней">🖨 не пришли за неделю</button>
     <button class="btn ghost sm" onclick="trLoadFunnel(true)"${_trFunBusy?" disabled":""}>обновить</button></div>`;
   const tiles=`<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">
     ${tile(f.enrolled,"вписаны на занятия","","Детей набора, у которых есть хотя бы одно занятие в периоде")}
