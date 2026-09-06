@@ -895,6 +895,51 @@ function alfa_trials_day(string $date, ?array $branches = null): array {
             'prices' => alfa_trial_prices(), 'lessonsScanned' => $scanned, 'branches' => $branches];
 }
 
+/* Снимок дня по пробным. Жанна: «нужна переключашка между днями, не нужно каждый раз
+   анализировать прошлый период. Один снимок сделан — в память. Мы же не можем изменить прошлое».
+   Так и делаем: ПРОШЕДШИЙ день отдаём из хранилища не трогая Alfa, а сегодняшний и будущие
+   всегда считаем заново — они ещё меняются в течение дня (утром «ждём», вечером «пришёл»). */
+function alfa_trials_store_path(): string {
+    return alfa_store_dir() . '/trialsdays_' . substr(hash('sha256', __DIR__ . '|trialsdays1'), 0, 20) . '.json';
+}
+function alfa_trials_store_read(): array {
+    $f = alfa_trials_store_path();
+    if (!is_file($f)) return [];
+    $j = json_decode((string)@file_get_contents($f), true);
+    return is_array($j) ? $j : [];
+}
+function alfa_trials_store_write(array $d): void {
+    $f = alfa_trials_store_path();
+    $tmp = $f . '.' . getmypid() . '.tmp';
+    $json = json_encode($d, JSON_UNESCAPED_UNICODE);
+    if (@file_put_contents($tmp, $json, LOCK_EX) !== false) { @chmod($tmp, 0660); @rename($tmp, $f); }
+    else @file_put_contents($f, $json, LOCK_EX);
+}
+/* День с памятью. $force — пересчитать даже прошедший (расписание правят задним числом). */
+function alfa_trials_day_cached(string $date, ?array $branches = null, bool $force = false): array {
+    $date = alfa_iso($date);
+    $today = date('Y-m-d');
+    $store = alfa_trials_store_read();
+    if (!$force && $date < $today && !empty($store[$date])) {
+        $r = $store[$date];
+        $r['fromStore'] = true;
+        return $r;
+    }
+    $r = alfa_trials_day($date, $branches);
+    $r['fromStore'] = false;
+    $r['builtAt'] = date('c');
+    /* Кладём в память только ПРОШЕДШИЕ дни: сегодняшний ещё изменится, и запомнить его утром
+       значило бы навсегда оставить «ждём» вместо вечернего результата. */
+    if ($date < $today) {
+        $store[$date] = $r;
+        /* Держим последние 120 дней: файл читается целиком на каждый запрос. */
+        if (count($store) > 120) { ksort($store); $store = array_slice($store, -120, null, true); }
+        ksort($store);
+        alfa_trials_store_write($store);
+    }
+    return $r;
+}
+
 /* ===== БЫЛ ЛИ РЕБЁНОК НА ЭТОМ КУРСЕ РАНЬШЕ =====
    Жанна: «вижу тут детей, которые ходили ранее, и у них просто нет шаблона абонемента на
    продолжение курса в этом году. Они не пробники». И правда: у постоянного ребёнка без

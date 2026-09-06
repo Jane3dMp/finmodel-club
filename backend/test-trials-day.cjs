@@ -1,11 +1,14 @@
 // Вкладка «Пробные» — рендер дня. Запуск: node backend/test-trials-day.cjs
 //
-// Правило Жанны: пробный опознаётся по СУММЕ списания (0 или 15), потому что шаблон абонемента
-// часто ставят прямо на занятии. Но одной суммы мало: у ПОСТОЯННОГО ребёнка без абонемента
-// спишется 0 ровно так же, а если он ещё и пропустил занятие — выглядит как непришедший
-// пробник. Поэтому отсеиваем тех, кто на ЭТОТ курс уже ходил.
+// Пробный опознаётся по СУММЕ списания (0 или 15): шаблон абонемента часто ставят прямо на
+// занятии. Но одной суммы мало — у ПОСТОЯННОГО ребёнка без абонемента спишется 0 ровно так же,
+// а если он ещё и пропустил занятие, то выглядит как непришедший пробник. Первый живой прогон
+// дал 78 «пробных» за день, из них 50 «не пришёл».
 //
-// И вечером состояний три, а не два: у ребёнка без абонемента 0 спишется и когда он пришёл,
+// Жанна попросила упростить: следить за детьми из «нового набора». Прежний режим (кто не ходил
+// на этот курс) оставлен — доработаем позже.
+//
+// Вечером состояний три, а не два: у ребёнка без абонемента 0 спишется и когда он пришёл,
 // отличить можно только по отметке присутствия. «Пришёл, а списания нет» — потеря денег.
 const fs = require('fs');
 const path = require('path');
@@ -39,14 +42,15 @@ function render(data, opts) {
     _trErr: o.err || null,
     _trHist: o.hist === undefined ? null : o.hist,
     _trHistBusy: !!o.histBusy,
-    _trShowAll: !!o.showAll,
-    trToggleAll: () => {},
+    _trMode: o.mode || 'new',
+    _goalsKidLists: o.newKids === null ? undefined : () => ({ newKids: o.newKids || [] }),
+    trSetMode: () => {}, trShiftDay: () => {}, trSetDate: () => {}, trLoad: () => {},
     _pubErrHtml: (e) => '<div class="callout">ошибка: ' + esc(String((e && e.message) || e)) + '</div>',
     document: { getElementById: (id) => (id === 'trialsBody' ? { set innerHTML(v) { out = v; } } : null) },
     Date, String, Math, Number, Object, Set,
   };
   new Function(...Object.keys(scope),
-    stateSrc + grab('_trToday') + grab('_trIsNew') + grab('renderTrials') + '; renderTrials();'
+    stateSrc + grab('_trToday') + grab('_trIsNew') + grab('_trNewSet') + grab('renderTrials') + '; renderTrials();'
   )(...Object.values(scope));
   return out;
 }
@@ -56,82 +60,62 @@ const lesson = (subjectId, kids, done) => ({
   id: 1, done: !!done, from: '10:00', to: '11:30', subjectId,
   subject: '3D Blender и Unity', teacher: 'Винтилов Сергей', seats: 8, kids,
 });
-const day = (lessons) => ({
-  date: '2026-09-05', prices: [0, 15], lessonsScanned: 29,
-  counts: {}, lessons,
-});
+const day = (lessons, extra) => Object.assign({
+  date: '2026-09-05', prices: [0, 15], lessonsScanned: 29, counts: {}, lessons,
+}, extra || {});
+const NEW = [{ alfaId: 1 }, { alfaId: 2 }];   // «новый набор» — дети 1 и 2
 
-console.log('--- 1. утро: занятие ещё не проведено ---');
-let h = render(day([lesson(7, [kid(1, 'Крючкова Ева', 15, 'waiting'), kid(2, 'Серова Анна', 0, 'waiting')], false)]),
-  { hist: { 1: { subjects: {}, total: 0 }, 2: { subjects: {}, total: 0 } } });
-t('видно, кого ждём', h.includes('ждём'));
-t('оба ребёнка в списке', h.includes('Крючкова Ева') && h.includes('Серова Анна'));
-t('пробных за день — 2', h.includes('>2</div>'));
-t('помечено, что занятие ещё не проведено', h.includes('ещё не проведено'));
-t('время и педагог показаны', h.includes('10:00') && h.includes('Винтилов Сергей'));
-
-console.log('--- 2. вечер: три состояния ---');
-h = render(day([lesson(7, [
+console.log('--- 1. ГЛАВНОЕ: показываем только новый набор ---');
+let h = render(day([lesson(7, [
   kid(1, 'Крючкова Ева', 15, 'came'),
-  kid(2, 'Марочков Степан', 0, 'came_free'),
-  kid(3, 'Серова Анна', 0, 'missed'),
-], true)]), { hist: { 1: { subjects: {} }, 2: { subjects: {} }, 3: { subjects: {} } } });
-t('пришёл и списано', h.includes('пришёл, списано'));
-t('пришёл, но абонемент не проставлен', h.includes('абонемент не проставлен'));
-t('не пришёл', h.includes('не пришёл'));
-t('про потерю денег сказано отдельно', h.includes('прямая потеря'));
-t('и названо число таких детей', h.includes('абонемент не проставлен: 1'));
-
-console.log('--- 3. ГЛАВНОЕ: кто уже ходил на этот курс — не пробник ---');
-// Белецкая ходила на этот же курс (предмет 7) — её быть не должно
-h = render(day([lesson(7, [
-  kid(1, 'Крючкова Ева', 15, 'came'),
-  kid(2, 'Белецкая Анна', 0, 'missed'),
-], true)]), { hist: { 1: { subjects: {} }, 2: { subjects: { 7: 12 } } } });
-t('постоянный ребёнок скрыт', !h.includes('Белецкая'));
-t('настоящий пробник остался', h.includes('Крючкова Ева'));
-t('в счёт попал только он', h.includes('>1</div>'));
+  kid(9, 'Белецкая Анна', 0, 'missed'),
+], true)]), { newKids: NEW });
+t('ребёнок из набора показан', h.includes('Крючкова Ева'));
+t('чужой скрыт', !h.includes('Белецкая'));
+t('в счёт попал только свой', h.includes('>1</div>'));
+t('подпись плитки про набор', h.includes('из нового набора'));
 t('сказано, сколько скрыто', h.includes('Скрыто 1'));
-t('есть кнопка «показать всех»', h.includes('показать всех'));
 
-console.log('--- 4. ходил на ДРУГОЙ курс — всё равно пробник этого ---');
-h = render(day([lesson(7, [kid(2, 'Белецкая Анна', 0, 'missed')], true)]),
-  { hist: { 2: { subjects: { 99: 30 } } } });
-t('ребёнок остался в списке', h.includes('Белецкая'));
-t('и посчитан', h.includes('>1</div>'));
+console.log('--- 2. переключение режимов ---');
+h = render(day([lesson(7, [kid(1, 'Ева', 15, 'came'), kid(9, 'Аня', 0, 'missed')], true)]),
+  { newKids: NEW, mode: 'all' });
+t('режим «все» показывает обоих', h.includes('Ева') && h.includes('Аня'));
+t('и считает обоих', h.includes('>2</div>'));
+h = render(day([lesson(7, [kid(1, 'Ева', 15, 'came'), kid(9, 'Аня', 0, 'missed')], true)]),
+  { newKids: NEW, mode: 'course', hist: { 1: { subjects: {} }, 9: { subjects: { 7: 12 } } } });
+t('режим «не ходил на курс» работает как раньше', h.includes('Ева') && !h.includes('Аня'));
+t('все три режима есть в переключателе', h.includes('Только новый набор') && h.includes('Не ходил на этот курс') && h.includes('Все кандидаты'));
 
-console.log('--- 5. «показать всех» возвращает скрытых с пометкой ---');
+console.log('--- 3. переключение дней ---');
+h = render(day([lesson(7, [kid(1, 'Ева', 15, 'came')], true)]), { newKids: NEW });
+t('есть стрелки', h.includes('trShiftDay(-1)') && h.includes('trShiftDay(1)'));
+t('есть кнопка «сегодня» для прошлой даты', h.includes('сегодня'));
+h = render(day([lesson(7, [kid(1, 'Ева', 15, 'came')], true)], { fromStore: true }), { newKids: NEW });
+t('видно, что день взят из памяти', h.includes('из памяти'));
+h = render(day([lesson(7, [kid(1, 'Ева', 15, 'came')], true)], { fromStore: false }), { newKids: NEW });
+t('свежий день так не помечен', !h.includes('из памяти'));
+
+console.log('--- 4. три состояния вечером ---');
 h = render(day([lesson(7, [
-  kid(1, 'Крючкова Ева', 15, 'came'),
-  kid(2, 'Белецкая Анна', 0, 'missed'),
-], true)]), { hist: { 1: { subjects: {} }, 2: { subjects: { 7: 12 } } }, showAll: true });
-t('скрытый показан', h.includes('Белецкая'));
-t('и помечен', h.includes('уже ходил на этот курс'));
-t('но в счёт не попал', h.includes('>1</div>'));
+  kid(1, 'Ева', 15, 'came'), kid(2, 'Степан', 0, 'came_free'),
+], true)]), { newKids: NEW });
+t('пришёл и списано', h.includes('пришёл, списано'));
+t('пришёл, абонемент не проставлен', h.includes('абонемент не проставлен'));
+t('про потерю денег сказано отдельно', h.includes('прямая потеря'));
 
-console.log('--- 6. пока история не пришла — не судим и говорим об этом ---');
-h = render(day([lesson(7, [kid(1, 'Ева', 15, 'came'), kid(2, 'Аня', 0, 'missed')], true)]),
-  { hist: {}, histBusy: true });
-t('оба показаны', h.includes('Ева') && h.includes('Аня'));
-t('счёт назван предварительным', h.includes('предварительный'));
+console.log('--- 5. список нового набора недоступен ---');
+h = render(day([lesson(7, [kid(1, 'Ева', 15, 'came')], true)]), { newKids: null });
+t('объяснено, что делать', h.includes('Откройте её один раз'));
+t('и предложен запасной режим', h.includes('не ходил на этот курс'));
 
-console.log('--- 7. история не загрузилась — предупреждаем честно ---');
-h = render(day([lesson(7, [kid(1, 'Ева', 15, 'came')], true)]), { hist: null });
-t('сказано, что отсев не сработал', h.includes('не отсеяны'));
-
-console.log('--- 8. все кандидаты оказались постоянными ---');
-h = render(day([lesson(7, [kid(2, 'Белецкая Анна', 0, 'missed')], true)]),
-  { hist: { 2: { subjects: { 7: 12 } } } });
-t('список пуст и объяснён', h.includes('настоящих пробных не нашлось'));
-t('счётчик — ноль', h.includes('>0</div>'));
-
-console.log('--- 9. пробных нет вовсе / ошибка / загрузка ---');
-h = render({ date: '2026-09-05', prices: [0, 15], lessonsScanned: 29, counts: {}, lessons: [] });
-t('сказано прямо', h.includes('пробных не нашлось'));
-t('видно, сколько занятий просмотрено', h.includes('29'));
-h = render(null, { err: new Error('Хостинг не пропустил запрос') });
+console.log('--- 6. пусто / ошибка / загрузка ---');
+h = render(day([]), { newKids: NEW });
+t('пробных нет вовсе', h.includes('пробных не нашлось'));
+h = render(day([lesson(7, [kid(9, 'Аня', 0, 'missed')], true)]), { newKids: NEW });
+t('никого из набора не нашлось', h.includes('никого не нашлось'));
+h = render(null, { err: new Error('Хостинг не пропустил запрос'), newKids: NEW });
 t('ошибка показана', h.includes('Хостинг не пропустил'));
-h = render(null, { busy: true });
+h = render(null, { busy: true, newKids: NEW });
 t('видно, что идёт чтение', h.includes('Читаю занятия дня'));
 
 if (bad) { console.log(NL + 'провалено проверок: ' + bad); process.exit(1); }

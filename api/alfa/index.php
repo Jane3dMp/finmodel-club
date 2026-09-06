@@ -1616,7 +1616,7 @@ switch ($action) {
         $branches = alfa_realization_branches();
         if (!$branches) json_out(['ok' => false, 'error' => 'Филиал «Пожарный» не найден в Alfa'], 400);
         $d = alfa_iso((string)($in['date'] ?? date('Y-m-d')));
-        json_out(['ok' => true] + alfa_trials_day($d, $branches));
+        json_out(['ok' => true] + alfa_trials_day_cached($d, $branches, !empty($in['force'])));
         break;
 
     // --- ВОССТАНОВИТЬ «ОЖИДАЛОСЬ» ЗА ПРОШЕДШУЮ НЕДЕЛЮ по регулярному расписанию ---
