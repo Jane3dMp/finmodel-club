@@ -1923,7 +1923,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-09-06-22";
+const APP_VER="2026-09-06-23";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -10578,7 +10578,15 @@ function _trFunnel(){
     /* Ходил в клубе до начала учебного года — значит не новый клиент, сколько бы модель ни
        говорила обратное. Считаем отдельно и в основные корзины не пускаем. */
     const pv=_trFun.before[idStr]||_trFun.before[Number(idStr)];
-    if(pv&&pv.n>0){ f.returning++; f.lists.returning.push({id:idStr, les:[], prev:pv}); return; }
+    if(pv&&pv.n>0){
+      f.returning++;
+      /* Занятия этого сезона у них показываем, но в f.ahead НЕ добавляем: в прогноз они не
+         идут. Раньше сюда клался пустой массив, и под каждым стояло «занятий в расписании
+         нет» — прямо противоположное правде: они здесь именно потому, что занятия у них есть. */
+      f.lists.returning.push({id:idStr, prev:pv,
+        les:L.map(x=>Object.assign({}, x, {st:_trLesState(x,today)}))});
+      return;
+    }
     if(!L.length){ f.noLessons++; f.lists.noLessons.push({id:idStr, les:[]}); return; }
     f.enrolled++;
     let came=false, cameFree=false, ahead=false, past=false;
@@ -10625,6 +10633,8 @@ function _trListHtml(title, rows, color, hint){
     <div style="padding:6px 0 4px 4px">${rows.map(r=>`
       <div style="padding:4px 0;border-bottom:1px solid var(--line)">
         <div style="font-weight:600;font-size:13px">${_trKidLink(r.id)}${_trArchBadge(r.id)}${_trTarHtml(r.id)}</div>
+        ${r.prev?`<div style="font-size:11px;color:var(--muted);padding:1px 0">до 1 сентября: ${r.prev.n} занятий${
+          r.prev.last?`, последнее ${esc(_trDayLabel(r.prev.last))}`:""} — поэтому не считаем его новым</div>`:""}
         ${_trEvHtml(r.id)}
         ${(function(){
           /* Прошедшие занятия показываем все — по ним и видно, что ребёнок пропустил. А из
