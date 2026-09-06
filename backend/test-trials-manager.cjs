@@ -147,7 +147,7 @@ delete ctx.S.children['201'];
   {
     const html2 = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
     let s2 = '';
-    for (const n of ['_trMgrStats', '_trMgrTableHtml']) {
+    for (const n of ['_trPayDays', '_trPaySum', '_trPayHtml', '_trMgrStats', '_trMgrTableHtml']) {
       const m = html2.match(new RegExp('\\nfunction ' + n + '\\([^)]*\\)\\s*\\{[\\s\\S]*?\\n\\}', 'm'));
       if (!m) { console.log('не найдено в index.html: ' + n); process.exit(1); }
       s2 += m[0] + '\n';
@@ -169,6 +169,17 @@ delete ctx.S.children['201'];
                     '205': 'Мария', '206': 'Мария', '207': 'Мария' };   // у 208 менеджера нет
     const ctx2 = {
       _trMgr: {}, _trTar: { '202': {} },
+    // касса по дням: у 04.09 разбивки по клиентам ещё нет — сумма должна быть честно неполной
+    _trFun: { from: '2026-09-01' },
+    _trPayBusy: false, _trPayProg: '',
+    _trToday: () => '2026-09-06',
+    _paySnap: {
+      '2026-08-31': { byCust: { '202': 999 } },              // до сезона — не считаем
+      '2026-09-02': { byCust: { '202': 195, '206': 300 } },
+      '2026-09-03': { byCust: { '202': 105 } },
+      '2026-09-04': { income: 500 },                          // снимок без разбивки
+      '2026-09-09': { byCust: { '202': 777 } },               // будущее — не считаем
+    },
       _trFunnel: () => FN,
       _trMgrOf: id => mgrOf[String(id)] || '',
       _trHasPaid: id => !!paid[String(id)],
@@ -176,7 +187,8 @@ delete ctx.S.children['201'];
       _gm: n => Math.round(+n || 0).toLocaleString('ru-RU'),
       esc: x => String(x),
     };
-    const A2 = new Function('ctx', 'with (ctx) { ' + s2 + ' return {_trMgrStats,_trMgrTableHtml}; }')(ctx2);
+    const A2 = new Function('ctx', 'with (ctx) { ' + s2 +
+    ' return {_trMgrStats,_trMgrTableHtml,_trPaySum,_trPayDays,_trPayHtml}; }')(ctx2);
 
     const st = A2._trMgrStats();
     eq('менеджеров в рейтинге', st.length, 3);            // Ольга, Мария и «не определён»
@@ -215,6 +227,29 @@ delete ctx.S.children['201'];
     check('про незагруженные абонементы сказано',
           A2._trMgrTableHtml().indexOf('Абонементы ещё не загружены') > 0);
     ctx2._trTar = { '202': {} };
+
+    /* --- настоящие деньги: платежи клиента в кассу --- */
+    // «Списано» и «Оплачено» — разные вещи: абонемент могли купить в понедельник, а списывается
+    // он по занятиям всю неделю. Путать их нельзя, поэтому колонки две.
+    eq('платежи клиента за сезон', A2._trPaySum(202), 195 + 105);
+    eq('до начала сезона не считаем', A2._trPaySum(202) < 999, true);
+    eq('будущие дни тоже не считаем', A2._trPaySum(202), 300);
+    eq('второй клиент', A2._trPaySum(206), 300);
+    eq('у кого платежей нет — ноль', A2._trPaySum(201), 0);
+    check('в строке ребёнка видна сумма', A2._trPayHtml(202).indexOf('оплачено') > 0, A2._trPayHtml(202));
+    eq('без платежей строка пустая', A2._trPayHtml(201), '');
+
+    const pd = A2._trPayDays();
+    eq('дней сезона в хранилище', pd.have, 3);          // 02, 03, 04 сентября
+    eq('из них с разбивкой по клиентам', pd.withCust, 2);
+
+    const st2 = A2._trMgrStats();
+    eq('деньги Ольги', st2.find(x => x.name === 'Ольга').pay, 300);   // только 202
+    eq('деньги Марии', st2.find(x => x.name === 'Мария').pay, 300);   // только 206
+    const h3 = A2._trMgrTableHtml();
+    check('колонка «Оплачено» есть', h3.indexOf('>Оплачено<') > 0);
+    check('сказано, что снимки неполные', h3.indexOf('из 3') > 0, h3.slice(h3.indexOf('Оплачено') - 200, h3.indexOf('Оплачено') + 60));
+
 
     // менеджеры не подтянуты — рейтинга нет вовсе
     ctx2._trMgr = null;

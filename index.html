@@ -1936,7 +1936,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-09-06-40";
+const APP_VER="2026-09-06-41";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -10442,6 +10442,9 @@ async function trLoad(force){
   catch(e){ _trErr=e; _trData=null; }
   finally{ _trBusy=false; renderTrials(); }
   if(_trData && _trMode==="course") trLoadHistory();
+  /* Платежи лежат в том же дневном хранилище, что и касса администратора: без него колонка
+     «Оплачено» была бы пустой, а раздел молчал бы о причине. */
+  if(!_paySnap) _payLoadStore().then(()=>renderTrials()).catch(()=>{});
 }
 /* Историю тянем ПОСЛЕ дня и пачками по 25: кандидатов за день бывает под сотню, и один
    большой запрос упёрся бы в таймаут шлюза. Пока история грузится, список уже виден. */
@@ -10646,7 +10649,7 @@ function _trListHtml(title, rows, color, hint){
       ${hint?`<span style="color:var(--muted);font-size:12px"> · ${esc(hint)}</span>`:""}</summary>
     <div style="padding:6px 0 4px 4px">${rows.map(r=>`
       <div style="padding:4px 0;border-bottom:1px solid var(--line)">
-        <div style="font-weight:600;font-size:13px">${_trKidLink(r.id)}${_trArchBadge(r.id)}${_trMgrHtml(r.id)}${_trTarHtml(r.id)}</div>
+        <div style="font-weight:600;font-size:13px">${_trKidLink(r.id)}${_trArchBadge(r.id)}${_trMgrHtml(r.id)}${_trTarHtml(r.id)}${_trPayHtml(r.id)}</div>
         ${r.prev?`<div style="font-size:11px;color:var(--muted);padding:1px 0">до 1 сентября: ${r.prev.n} занятий${
           r.prev.last?`, последнее ${esc(_trDayLabel(r.prev.last))}`:""} — поэтому не считаем его новым</div>`:""}
         ${_trEvHtml(r.id)}
@@ -10919,13 +10922,72 @@ function trPrintMissedWeek(){
    Всё, что можно достать из этих данных: сколько детей за менеджером, сколько вписано,
    дошло, не дошло, ждём, доходимость, сколько купили абонемент, конверсия из дошедших
    в оплату, сколько списано по проведённым занятиям, без занятий, возвращенцы, в архиве. */
+/* ===== ДЕНЬГИ КЛИЕНТА =====
+   «Списано» — это списания по проведённым занятиям, а не касса. Настоящие деньги лежат в
+   платежах Alfa, и каждый платёж привязан к клиенту, поэтому их можно сложить по ребёнку.
+   ⚠️ Считаем только по тем дням сезона, снимок которых есть в хранилище: у дней, снятых до
+   этой правки, разбивки по клиентам нет — они дадут ноль. Сколько дней посчитано, пишем
+   рядом с цифрой, иначе неполная сумма выглядела бы как полная. */
+/* Пересобрать дневные снимки кассы за сезон — только те, где разбивки по клиентам ещё нет.
+   Каждый день это отдельный проход по журналу Alfa, поэтому идём по одному и показываем счёт.
+   ⚠️ «Обновить месяц из Alfa» в «Реализации» здесь НЕ помогает: она пересчитывает занятия,
+   а платежи снимает отдельное действие. */
+let _trPayBusy=false, _trPayProg="";
+async function trPullPayments(){
+  if(_trPayBusy) return;
+  const from=(_trFun&&_trFun.from)||"", to=_trToday();
+  if(!from){ toast("Сначала соберите общую картину по набору"); return; }
+  const need=[];
+  for(let d=new Date(from+"T12:00:00"); _dIso(d)<=to; d.setDate(d.getDate()+1)){
+    const k=_dIso(d), sn=(_paySnap||{})[k];
+    if(!sn || !sn.byCust) need.push(k);
+  }
+  if(!need.length){ toast("Платежи за сезон уже разложены по клиентам"); return; }
+  _trPayBusy=true; _trPayProg="0/"+need.length; renderTrials();
+  try{
+    for(let i=0;i<need.length;i++){
+      _trPayProg=(i+1)+"/"+need.length; renderTrials();
+      const j=await _pubCall("paymentsDay",{date:need[i]});
+      if(j.snapshot){ _paySnap=_paySnap||{}; _paySnap[need[i]]=Object.assign({},j.snapshot,{ts:new Date().toISOString()}); }
+    }
+  }catch(e){ toast("Не получилось: "+((e&&e.message)||e)); }
+  finally{ _trPayBusy=false; _trPayProg=""; renderTrials(); }
+}
+function _trPayDays(){
+  const from=(_trFun&&_trFun.from)||"", to=_trToday();
+  if(!from||!_paySnap) return {have:0, withCust:0, from:from, to:to};
+  let have=0, withCust=0;
+  Object.keys(_paySnap).forEach(k=>{
+    if(k<from||k>to) return;
+    have++;
+    if(_paySnap[k]&&_paySnap[k].byCust) withCust++;
+  });
+  return {have:have, withCust:withCust, from:from, to:to};
+}
+function _trPaySum(id){
+  const from=(_trFun&&_trFun.from)||"", to=_trToday();
+  if(!from||!_paySnap) return 0;
+  const s=String(id); let sum=0;
+  Object.keys(_paySnap).forEach(k=>{
+    if(k<from||k>to) return;
+    const bc=_paySnap[k]&&_paySnap[k].byCust; if(!bc) return;
+    const v=bc[s]!=null?bc[s]:bc[Number(id)];
+    if(v) sum+=(+v||0);
+  });
+  return sum;
+}
+function _trPayHtml(id){
+  const v=_trPaySum(id);
+  if(!v) return "";
+  return ` <span style="font-size:11px;color:var(--green)" title="Платежи этого клиента в кассу за сезон">оплачено ${_gm(v)}</span>`;
+}
 function _trMgrStats(){
   const fn=_trFunnel(); if(!fn||!_trMgr) return null;
   const by={};
   const pick=nm=>{
     const k=nm||"менеджер не определён";
     return by[k]||(by[k]={name:k, unknown:!nm, kids:0, enrolled:0, came:0, missed:0,
-                          waiting:0, noLes:0, back:0, paid:0, sum:0, arch:0});
+                          waiting:0, noLes:0, back:0, paid:0, sum:0, pay:0, arch:0});
   };
   const add=(rows,bucket)=>rows.forEach(r=>{
     const m=pick(_trMgrOf(r.id));
@@ -10936,6 +10998,7 @@ function _trMgrStats(){
     /* Списание по проведённому занятию — единственные настоящие деньги в этих данных.
        Это НЕ оплата в кассу: абонемент могли купить раньше, а списывается он по занятиям. */
     (r.les||[]).forEach(x=>{ if(x.done) m.sum+=(+x.sum||0); });
+    m.pay+=_trPaySum(r.id);            // настоящие деньги: платежи клиента в кассу за сезон
   });
   add(fn.lists.came,"came"); add(fn.lists.missedAll,"missed"); add(fn.lists.waiting,"waiting");
   add(fn.lists.noLessons,"noLes"); add(fn.lists.returning,"back");
@@ -10955,7 +11018,7 @@ function _trMgrTableHtml(){
   const rows=_trMgrStats();
   if(!rows||!rows.length) return "";
   const pc=v=>v==null?`<span style="color:var(--muted)">—</span>`:`<b style="color:${v>=70?"var(--green)":(v>=40?"#C9922E":"var(--red)")}">${Math.round(v)}%</b>`;
-  const T={kids:0,enrolled:0,came:0,missed:0,waiting:0,noLes:0,back:0,paid:0,sum:0,arch:0};
+  const T={kids:0,enrolled:0,came:0,missed:0,waiting:0,noLes:0,back:0,paid:0,sum:0,pay:0,arch:0};
   rows.forEach(m=>Object.keys(T).forEach(k=>T[k]+=m[k]));
   const tr=m=>`<tr${m.unknown?" style=\"color:var(--muted)\"":""}>
     <td style="text-align:left">${m.unknown?"":"<b>"}${esc(m.name)}${m.unknown?"":"</b>"}</td>
@@ -10965,19 +11028,27 @@ function _trMgrTableHtml(){
     <td class="num">${m.waiting}</td><td class="num">${pc(m.reach)}</td>
     <td class="num">${m.paid}</td><td class="num">${pc(m.conv)}</td>
     <td class="num">${_gm(m.sum)}</td>
+    <td class="num"><b style="color:var(--green)">${m.pay?_gm(m.pay):""}</b></td>
     <td class="num" style="color:var(--muted)">${m.noLes||""}</td>
     <td class="num" style="color:var(--muted)">${m.back||""}</td>
     <td class="num" style="color:var(--muted)">${m.arch||""}</td></tr>`;
+  const pd=_trPayDays();
+  const payNote=(!pd.withCust)
+    ? `<div class="hint" style="margin:6px 0;color:var(--terra-d)">Колонка «Оплачено» пуста: дневные снимки кассы за сезон сняты до того, как модель научилась раскладывать платежи по клиентам.<button class="btn ghost sm" style="margin-left:6px" onclick="trPullPayments()"${_trPayBusy?" disabled":""}>${_trPayBusy?("собираю "+esc(_trPayProg)):"собрать платежи за сезон"}</button></div>`
+    : (pd.withCust<pd.have
+      ? `<div class="hint" style="margin:6px 0;color:var(--terra-d)">«Оплачено» посчитано по ${pd.withCust} дням из ${pd.have} — у остальных снимков разбивки по клиентам нет, сумма неполная.<button class="btn ghost sm" style="margin-left:6px" onclick="trPullPayments()"${_trPayBusy?" disabled":""}>${_trPayBusy?("собираю "+esc(_trPayProg)):"собрать платежи за сезон"}</button></div>`
+      : "");
   const tarNote=(!_trTar||!Object.keys(_trTar).length)
     ? `<div class="hint" style="margin:6px 0">Абонементы ещё не загружены — колонки «купили» и «конверсия» пока пустые.</div>` : "";
   return `<details style="margin:10px 0" open><summary style="cursor:pointer;font-weight:600">🏅 Рейтинг менеджеров (${rows.length})</summary>
     <div class="hint" style="margin:6px 0">Считается по тем же корзинам, что и цифры выше, только по этому набору. Менеджер — ответственный по сделке amoCRM, связь по телефону. <b>Доходимость</b> = дошли ÷ (дошли + не дошли), ждущие не в счёт. <b>Конверсия</b> = купили абонемент ÷ дошли. <b>Списано</b> — сумма списаний по проведённым занятиям, а не деньги в кассе.</div>
-    ${tarNote}
+    ${tarNote}${payNote}
     <div class="tscroll"><table><thead><tr>
       <th style="text-align:left">Менеджер</th><th class="num">Детей</th><th class="num" title="Есть хотя бы одно занятие в расписании">Вписаны</th>
       <th class="num">Дошли</th><th class="num">Не дошли</th><th class="num">Ждём</th><th class="num">Доходимость</th>
       <th class="num" title="Есть действующий платный абонемент или остаток на балансе">Купили</th><th class="num">Конверсия</th>
       <th class="num" title="Сумма списаний по проведённым занятиям этих детей">Списано</th>
+      <th class="num" title="Платежи этих клиентов в кассу Alfa за сезон — настоящие деньги">Оплачено</th>
       <th class="num" title="Ребёнок в наборе есть, а занятий в расписании нет">Без занятий</th>
       <th class="num" title="Занимались до 1 сентября — не новые клиенты">Раньше</th>
       <th class="num" title="Ребёнок уже в архиве Alfa">В архиве</th>
@@ -10991,6 +11062,7 @@ function _trMgrTableHtml(){
       <td class="num"><b>${T.paid}</b></td>
       <td class="num">${pc(T.came?(100*T.paid/T.came):null)}</td>
       <td class="num"><b>${_gm(T.sum)}</b></td>
+      <td class="num"><b style="color:var(--green)">${_gm(T.pay)}</b></td>
       <td class="num">${T.noLes||""}</td><td class="num">${T.back||""}</td><td class="num">${T.arch||""}</td></tr>
     </tbody></table></div></details>`;
 }

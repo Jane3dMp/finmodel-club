@@ -2344,6 +2344,9 @@ function alfa_payments_upsert(string $date, ?array $branches = null, ?array $pre
     $r = (is_array($pre) && isset($pre['rows'], $pre['date'])) ? $pre : alfa_payments_day($date, $branches);
     $refs = alfa_pay_refs();
     $inc = 0.0; $out = 0.0; $byIn = []; $byOut = []; $byItem = [];
+    /* Приход по КЛИЕНТАМ: платёж в Alfa привязан к customer_id, и это единственный способ
+       сказать, сколько денег принёс конкретный ребёнок. Дневные агрегаты этого не знали. */
+    $byCust = [];
     foreach ($r['rows'] as $x) {
         $name = alfa_pay_kassa_name($x, $refs);
         $isOut = (mb_stripos((string)$x['pay_type_name'], 'расход') !== false) || ((float)$x['income'] < 0);
@@ -2354,7 +2357,9 @@ function alfa_payments_upsert(string $date, ?array $branches = null, ?array $pre
             $item = $refs['payItems'][(int)($x['pay_item_id'] ?? 0)] ?? 'Без статьи';
             $byItem[$item] = round(($byItem[$item] ?? 0) + $v, 2);
         }
-        else        { $byIn[$name]  = round(($byIn[$name]  ?? 0) + $v, 2); $inc += $v; }
+        else        { $byIn[$name]  = round(($byIn[$name]  ?? 0) + $v, 2); $inc += $v;
+                      $cid = (int)($x['customer_id'] ?? 0);
+                      if ($cid) $byCust[$cid] = round(($byCust[$cid] ?? 0) + $v, 2); }
     }
     $st = alfa_pay_store_read();
     /* Касса задним числом: платёж могли исправить, перенести на другой день или удалить.
@@ -2367,12 +2372,13 @@ function alfa_payments_upsert(string $date, ?array $branches = null, ?array $pre
     }
     $st[$r['date']] = ['income' => round($inc, 2), 'expense' => round($out, 2),
                        'count' => count($r['rows']), 'byIn' => $byIn, 'byOut' => $byOut,
-                       'byItem' => $byItem, 'ts' => date('c')];
+                       'byItem' => $byItem, 'byCust' => $byCust, 'ts' => date('c')];
     ksort($st);
     if (count($st) > 400) $st = array_slice($st, -400, null, true);   // храним последние ~13 месяцев
     alfa_pay_store_write($st);
     return ['date' => $r['date'], 'income' => round($inc, 2), 'expense' => round($out, 2),
-            'count' => count($r['rows']), 'byIn' => $byIn, 'byOut' => $byOut, 'byItem' => $byItem];
+            'count' => count($r['rows']), 'byIn' => $byIn, 'byOut' => $byOut, 'byItem' => $byItem,
+            'byCust' => $byCust];
 }
 
 /* ===== ПЛАТЕЖИ ЗА ДЕНЬ (кассы) =====
