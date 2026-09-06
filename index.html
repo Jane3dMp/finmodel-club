@@ -1923,7 +1923,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-09-06-16";
+const APP_VER="2026-09-06-17";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -10601,15 +10601,27 @@ function _trListHtml(title, rows, color, hint){
     <div style="padding:6px 0 4px 4px">${rows.map(r=>`
       <div style="padding:4px 0;border-bottom:1px solid var(--line)">
         <div style="font-weight:600;font-size:13px">${_trKidLink(r.id)}${_trArchBadge(r.id)}</div>
-        ${r.les.length?r.les.map(x=>{
-          const s=LES[x.st]||["",""];
-          return `<div style="display:flex;gap:8px;font-size:12px;color:var(--muted);padding:1px 0">
-            <span style="width:96px">${esc(_trDayLabel(x.date))}</span>
-            <span style="width:44px">${esc(x.from||"")}</span>
-            <span style="flex:1">${esc(_trRefs.subjects[x.subjectId]||("предмет "+x.subjectId))}</span>
-            <span style="color:${s[1]}">${esc(s[0])}</span>
-            <span style="width:44px;text-align:right">${x.sum?String(x.sum):""}</span></div>`;
-        }).join(""):`<div style="font-size:12px;color:var(--muted)">занятий в расписании нет</div>`}
+        ${(function(){
+          /* Прошедшие занятия показываем все — по ним и видно, что ребёнок пропустил. А из
+             будущих оставляем только БЛИЖАЙШЕЕ по каждому курсу: расписание регулярное до мая,
+             и четыре одинаковых строки «впереди» ничего не сообщают, только удлиняют список. */
+          const seen={}; let cut=0;
+          const rows=r.les.filter(x=>{
+            if(x.st!=="ahead") return true;
+            if(seen[x.subjectId]){ cut++; return false; }
+            seen[x.subjectId]=1; return true;
+          });
+          if(!rows.length) return `<div style="font-size:12px;color:var(--muted)">занятий в расписании нет</div>`;
+          return rows.map(x=>{
+            const st=LES[x.st]||["",""];
+            return `<div style="display:flex;gap:8px;font-size:12px;color:var(--muted);padding:1px 0">
+              <span style="width:96px">${esc(_trDayLabel(x.date))}</span>
+              <span style="width:44px">${esc(x.from||"")}</span>
+              <span style="flex:1">${esc(_trRefs.subjects[x.subjectId]||("предмет "+x.subjectId))}</span>
+              <span style="color:${st[1]}">${esc(st[0])}</span>
+              <span style="width:44px;text-align:right">${x.sum?String(x.sum):""}</span></div>`;
+          }).join("")+(cut?`<div style="font-size:11px;color:var(--muted);padding:1px 0">…и ещё ${cut} занятий по тому же расписанию</div>`:"");
+        })()}
       </div>`).join("")}</div></details>`;
 }
 /* Имя ребёнка — ссылка на его карточку в модели: куда ещё ходит, телефон, абонементы.
