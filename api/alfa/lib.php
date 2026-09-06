@@ -827,9 +827,13 @@ function alfa_trials_day(string $date, ?array $branches = null): array {
     $lessons = []; $ids = []; $seen = []; $PER = 50; $scanned = 0;
     foreach ($branches as $bid) {
         $bid = (int)$bid;
+        /* ⚠️ Два прохода: по умолчанию lesson/index отдаёт ТОЛЬКО проведённые (status=3),
+           поэтому утренний сценарий «кого ждём сегодня» без второго запроса не работал вовсе —
+           запланированных занятий в ответе просто не было. */
+        foreach ([[], ['status' => 1]] as $mode) {
         for ($p = 0; $p < 40; $p++) {
             $r = alfa_http('POST', "$host/v2api/$bid/lesson/index",
-                ['date_from' => $date, 'date_to' => $date, 'page' => $p, 'count' => $PER], $token, true, 15);
+                $mode + ['date_from' => $date, 'date_to' => $date, 'page' => $p, 'count' => $PER], $token, true, 15);
             $items = isset($r['__err']) ? [] : ($r['items'] ?? []);
             foreach ($items as $ls) {
                 if (!is_array($ls)) continue;
@@ -880,6 +884,7 @@ function alfa_trials_day(string $date, ?array $branches = null): array {
             }
             if (count($items) < $PER) break;
         }
+        }
     }
     $names = alfa_customer_names(array_keys($ids), $branches);
     $counts = ['waiting' => 0, 'came' => 0, 'came_free' => 0, 'missed' => 0];
@@ -929,10 +934,15 @@ function alfa_kids_lessons(array $ids, string $from, string $to, ?array $branche
             $out[$id] = (array)($c['lessons'] ?? []);
             continue;
         }
-        $rows = [];
+        $rows = []; $seenLes = [];
         foreach ($branches as $bid) {
+        /* ⚠️ ДВА запроса, а не один: lesson/index по умолчанию отдаёт ТОЛЬКО проведённые
+           (status=3), и будущие занятия в ответ не попадают вовсе. Из-за этого ребёнок, у
+           которого занятия только впереди, выглядел как «без занятий», а корзина «ждём»
+           всегда была пустой. Запланированные берём отдельно, со status=1. */
+        foreach ([[], ['status' => 1]] as $mode) {
             $r = alfa_http('POST', "$host/v2api/" . (int)$bid . "/lesson/index",
-                ['customer_id' => $id, 'date_from' => $from, 'date_to' => $to, 'page' => 0, 'count' => 200],
+                $mode + ['customer_id' => $id, 'date_from' => $from, 'date_to' => $to, 'page' => 0, 'count' => 200],
                 $token, true, 15);
             $asked++;
             if (isset($r['__err'])) continue;
@@ -950,11 +960,15 @@ function alfa_kids_lessons(array $ids, string $from, string $to, ?array $branche
                     $att = $dt['is_attend'] ?? null;
                     break;
                 }
+                $lid = (int)($ls['id'] ?? 0);
+                if ($lid && isset($seenLes[$lid])) continue;      // одно занятие в оба ответа не попадёт дважды
+                if ($lid) $seenLes[$lid] = 1;
                 $rows[] = ['date' => $d, 'subjectId' => (int)($ls['subject_id'] ?? 0),
                            'from' => substr((string)($ls['time_from'] ?? ''), 11, 5),
                            'to' => substr((string)($ls['time_to'] ?? ''), 11, 5),
                            'teacherIds' => array_values(array_map('intval', (array)($ls['teacher_ids'] ?? []))),
                            'done' => ($st === 3), 'sum' => $sum, 'attend' => $att];
+            }
             }
         }
         usort($rows, function ($a, $b) {
