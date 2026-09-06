@@ -1923,7 +1923,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-09-06-20";
+const APP_VER="2026-09-06-21";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -10767,8 +10767,12 @@ function _trFunnelHtml(){
      говорит. Если ребёнок не придёт сегодня и его не уберут в архив, то же занятие само
      всплывёт завтра — уже как ближайшее. f.ahead отсортирован по дате, поэтому первый и есть
      ближайший. */
-  const seenAhead={}; const aheadOne=[];
+  const seenAhead={}; const aheadOne=[]; const today=_trToday();
   f.ahead.forEach(a=>{
+    /* Сегодняшний день в прогноз не берём: он целиком показан блоком ниже — с группами,
+       педагогами и статусами, то есть подробнее. Раньше эти же дети выводились дважды на
+       одном экране, и было непонятно, одни это люди или разные. */
+    if(a.les.date<=today) return;
     const k=a.id+"|"+a.les.subjectId;
     if(seenAhead[k]) return;
     seenAhead[k]=1; aheadOne.push(a);
@@ -10779,8 +10783,8 @@ function _trFunnelHtml(){
   const hidRep=f.ahead.length-aheadOne.length;
   /* Дни — раскрывашками, открыт только первый: при полутора сотнях детей развёрнутый список
      занимает несколько экранов и листать его неудобно. */
-  const fc=days.length?`<div style="margin-top:6px"><b style="font-size:14px">Кого ждём дальше</b>
-    <div style="font-size:12px;color:var(--muted);margin-bottom:6px">Ближайшее занятие каждого ребёнка по каждому курсу. Дальше ${days.length} дн.${
+  const fc=days.length?`<div style="margin-top:6px"><b style="font-size:14px">Кого ждём в следующие дни</b>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:6px">Ближайшее занятие каждого ребёнка по каждому курсу, начиная с завтра — сегодняшний день показан ниже отдельно. Дней: ${days.length}.${
       hidRep?` Повторы того же ребёнка на том же курсе не показываю — их ${hidRep}.`:""}</div>
     ${days.map((d,i)=>`<details${i===0?" open":""} style="border:1px solid var(--line);border-radius:9px;padding:8px 12px;margin-bottom:6px;background:#fff">
       <summary style="cursor:pointer;font-weight:700;font-size:13px">${esc(_trDayLabel(d))}
@@ -10792,7 +10796,7 @@ function _trFunnelHtml(){
             return ev?`<span style="font-size:11px;color:var(--muted)"> · ЭВ: ${esc(ev)}</span>`:"";})()}</span>
         <span style="font-size:12px;color:var(--muted)">${esc(_trRefs.subjects[a.les.subjectId]||"")}</span>
       </div>`).join("")}</div></details>`).join("")}</div>`
-    : `<div style="font-size:12px;color:var(--muted);margin-top:4px">Впереди занятий у детей набора не запланировано.</div>`;
+    : `<div style="font-size:12px;color:var(--muted);margin-top:4px">На следующие дни занятий у детей набора не запланировано.</div>`;
   /* Списки под цифрами: Жанна просила «дай список тех и куда шли, чтобы понять, верно ли
      собираются данные». Правило «пробный по сумме» неточное по природе, и проверять его надо
      глазами, а не верить счётчику. */
