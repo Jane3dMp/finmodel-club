@@ -873,6 +873,7 @@ function alfa_trials_day(string $date, ?array $branches = null): array {
                 $lessons[] = ['id' => $lid, 'branch' => $bid, 'done' => $done,
                               'from' => substr((string)($ls['time_from'] ?? ''), 11, 5),
                               'to' => substr((string)($ls['time_to'] ?? ''), 11, 5),
+                              'subjectId' => (int)($ls['subject_id'] ?? 0),   // по нему сверяем историю ребёнка
                               'subject' => (string)($subjects[(int)($ls['subject_id'] ?? 0)] ?? ''),
                               'teacher' => implode(', ', $tn),
                               'seats' => count($det), 'kids' => $kids];
@@ -892,6 +893,67 @@ function alfa_trials_day(string $date, ?array $branches = null): array {
     usort($lessons, function ($a, $b) { return strcmp((string)$a['from'], (string)$b['from']); });
     return ['date' => $date, 'lessons' => $lessons, 'counts' => $counts,
             'prices' => alfa_trial_prices(), 'lessonsScanned' => $scanned, 'branches' => $branches];
+}
+
+/* ===== БЫЛ ЛИ РЕБЁНОК НА ЭТОМ КУРСЕ РАНЬШЕ =====
+   Жанна: «вижу тут детей, которые ходили ранее, и у них просто нет шаблона абонемента на
+   продолжение курса в этом году. Они не пробники». И правда: у постоянного ребёнка без
+   абонемента списывается 0 ровно так же, как у пробника, а если он ещё и пропустил занятие —
+   выглядит как непришедший пробник. Одной суммы мало, нужна история посещений.
+
+   Считаем ПО КУРСУ (subject), а не «ходил ли вообще»: ребёнок, который год занимался
+   каллиграфией и впервые пришёл на 3D, — настоящий пробник этого курса.
+
+   ⚠️ Историю НЕ берём внутри alfa_trials_day: детей-кандидатов за день бывает под сотню, и
+   запрос на каждого гарантированно упёрся бы в таймаут шлюза. Клиент спрашивает пачками. */
+function alfa_hist_cache_path(): string {
+    return alfa_store_dir() . '/kidhist_' . substr(hash('sha256', __DIR__ . '|hist1'), 0, 20) . '.json';
+}
+/* Что ребёнок посещал ДО даты: сколько проведённых занятий по каждому предмету.
+   Кэш: найденная история постоянна и живёт долго; «истории нет» — состояние временное
+   (завтра появится), поэтому такой ответ держим сутки. */
+function alfa_kids_history(array $ids, string $before, ?array $branches = null): array {
+    $ids = array_values(array_unique(array_map('intval', array_filter($ids))));
+    if (!$ids) return ['history' => [], 'asked' => 0];
+    $branches = $branches ?: alfa_realization_branches();
+    $before = alfa_iso($before);
+    $prev = date('Y-m-d', strtotime('-1 day', strtotime($before)));
+    $f = alfa_hist_cache_path();
+    $cache = [];
+    if (is_file($f)) { $j = json_decode((string)@file_get_contents($f), true); if (is_array($j)) $cache = $j; }
+    $host = 'https://' . alfa_host(); $token = alfa_token();
+    $out = []; $asked = 0; $dirty = false;
+    foreach ($ids as $id) {
+        $k = (string)$id;
+        $c = $cache[$k] ?? null;
+        /* Годный кэш: либо история уже найдена и посчитана не раньше нужной даты, либо
+           «пусто», но записанное меньше суток назад. */
+        if (is_array($c) && (string)($c['upTo'] ?? '') >= $prev
+            && (!empty($c['subjects']) || (int)($c['ts'] ?? 0) > time() - 86400)) {
+            $out[$id] = ['subjects' => (array)($c['subjects'] ?? []), 'total' => (int)($c['total'] ?? 0)];
+            continue;
+        }
+        $subjects = []; $total = 0;
+        foreach ($branches as $bid) {
+            $r = alfa_http('POST', "$host/v2api/" . (int)$bid . "/lesson/index",
+                ['customer_id' => $id, 'status' => 3, 'date_to' => $prev, 'page' => 0, 'count' => 100],
+                $token, true, 12);
+            $asked++;
+            if (isset($r['__err'])) continue;
+            foreach (($r['items'] ?? []) as $ls) {
+                if (!is_array($ls)) continue;
+                if (substr((string)($ls['date'] ?? ''), 0, 10) > $prev) continue;   // на всякий случай
+                $sid = (int)($ls['subject_id'] ?? 0);
+                $subjects[(string)$sid] = ($subjects[(string)$sid] ?? 0) + 1;
+                $total++;
+            }
+        }
+        $out[$id] = ['subjects' => $subjects, 'total' => $total];
+        $cache[$k] = ['ts' => time(), 'upTo' => $prev, 'subjects' => $subjects, 'total' => $total];
+        $dirty = true;
+    }
+    if ($dirty) @file_put_contents($f, json_encode($cache, JSON_UNESCAPED_UNICODE), LOCK_EX);
+    return ['history' => $out, 'asked' => $asked];
 }
 
 /* ===== ПРОГНОЗ ОПЛАТЫ «как в Alfa» =====

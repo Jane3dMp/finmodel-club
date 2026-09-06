@@ -1923,7 +1923,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-09-06-04";
+const APP_VER="2026-09-06-05";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -10408,6 +10408,10 @@ function _alfaRosterPrint(){
    их часто ставят прямо на занятии, — и такой ребёнок почти наверняка пробник.
    Вкладка видна администраторам, а не только владельцу: утром и вечером с ней работает админ. */
 let _trDate=null, _trData=null, _trBusy=false, _trErr=null;
+/* История посещений: customerId -> {subjects:{id:кол-во}, total}. Нужна, чтобы отсеять
+   постоянных детей без абонемента — по сумме они неотличимы от пробников. */
+let _trHist=null, _trHistBusy=false, _trShowAll=false;
+function trToggleAll(){ _trShowAll=!_trShowAll; renderTrials(); }
 function _trToday(){ const d=new Date(),z=n=>String(n).padStart(2,'0');
   return d.getFullYear()+'-'+z(d.getMonth()+1)+'-'+z(d.getDate()); }
 function trSetDate(v){ if(v){ _trDate=v; _trData=null; _trErr=null; } renderTrials(); }
@@ -10416,9 +10420,38 @@ async function trLoad(force){
   const d=_trDate||_trToday();
   if(!force && _trData && _trData.date===d) return;
   _trBusy=true; _trErr=null; renderTrials();
+  _trHist=null;
   try{ _trData=await _pubCall("trialsDay",{date:d}); }
   catch(e){ _trErr=e; _trData=null; }
   finally{ _trBusy=false; renderTrials(); }
+  if(_trData) trLoadHistory();
+}
+/* Историю тянем ПОСЛЕ дня и пачками по 25: кандидатов за день бывает под сотню, и один
+   большой запрос упёрся бы в таймаут шлюза. Пока история грузится, список уже виден. */
+async function trLoadHistory(){
+  if(_trHistBusy||!_trData) return;
+  const ids=[];
+  (_trData.lessons||[]).forEach(L=>(L.kids||[]).forEach(k=>{ if(k.customerId) ids.push(k.customerId); }));
+  const uniq=[...new Set(ids)];
+  if(!uniq.length) return;
+  _trHistBusy=true; _trHist=_trHist||{}; renderTrials();
+  try{
+    for(let i=0;i<uniq.length;i+=25){
+      const j=await _pubCall("kidsHistory",{ids:uniq.slice(i,i+25), date:_trData.date});
+      Object.assign(_trHist, j.history||{});
+      renderTrials();
+    }
+  }catch(e){ _trHist=null; }
+  finally{ _trHistBusy=false; renderTrials(); }
+}
+/* Пробник — тот, кто на ЭТОТ курс раньше не ходил. Ребёнок, который год занимался
+   каллиграфией и впервые пришёл на 3D, пробник этого курса. */
+function _trIsNew(kid, subjectId){
+  if(!_trHist) return null;                       // история ещё не пришла — не судим
+  const h=_trHist[String(kid.customerId)]||_trHist[kid.customerId];
+  if(!h) return null;
+  const n=(h.subjects||{})[String(subjectId)]||0;
+  return n===0;
 }
 const TR_STATE={
   waiting:  {t:"ждём",                      c:"var(--muted)",  ic:"○"},
@@ -10432,48 +10465,65 @@ function renderTrials(){
   const bar=`<div class="hd-actions" style="margin-bottom:10px">
     <input type="date" class="cell" style="width:auto" value="${esc(d)}" onchange="trSetDate(this.value)">
     <button class="btn sm" onclick="trLoad(true)"${_trBusy?" disabled":""}>${_trBusy?"Читаю Alfa…":"🔄 Обновить из Alfa"}</button>
-    <span style="font-size:12px;color:var(--muted)">Пробным считается ребёнок, у которого списывается ${
-      _trData&&_trData.prices?esc(_trData.prices.map(x=>x===0?"0":String(x)).join(" или ")):"0 или 15"} — обычная цена занятия другая.</span>
+    <span style="font-size:12px;color:var(--muted)">Пробным считается ребёнок со списанием ${
+      _trData&&_trData.prices?esc(_trData.prices.map(x=>x===0?"0":String(x)).join(" или ")):"0 или 15"}, который на этот курс раньше не ходил.</span>
   </div>`;
   if(_trErr){ el.innerHTML=bar+_pubErrHtml(_trErr,"пробные за день"); return; }
   if(_trBusy&&!_trData){ el.innerHTML=bar+`<div class="callout">⏳ Читаю занятия дня из Alfa…</div>`; return; }
   if(!_trData){ el.innerHTML=bar+`<div class="callout">Нажмите «Обновить из Alfa», чтобы посмотреть пробных за ${esc(d)}.</div>`; return; }
-  const c=_trData.counts||{};
   const les=_trData.lessons||[];
   if(!les.length){
     el.innerHTML=bar+`<div class="callout">За ${esc(_trData.date)} пробных не нашлось. Просмотрено занятий: ${_trData.lessonsScanned||0}.
       <br><span style="font-size:12px;color:var(--muted)">Ищем детей со списанием ${esc((_trData.prices||[0,15]).join(" или "))}. Если у вас пробные оформляются другой суммой — скажите, поправлю.</span></div>`;
     return;
   }
-  const tile=(k,n)=>`<div style="flex:1;min-width:120px;border:1px solid var(--line);border-radius:9px;padding:8px 12px;background:#fff">
-    <div style="font-size:22px;font-weight:700;color:${TR_STATE[k].c}">${n||0}</div>
-    <div style="font-size:12px;color:var(--muted)">${TR_STATE[k].t}</div></div>`;
-  const total=(c.waiting||0)+(c.came||0)+(c.came_free||0)+(c.missed||0);
-  const tiles=`<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
-    <div style="flex:1;min-width:120px;border:1px solid var(--line);border-radius:9px;padding:8px 12px;background:var(--sand-l)">
-      <div style="font-size:22px;font-weight:700">${total}</div>
-      <div style="font-size:12px;color:var(--muted)">всего пробных за день</div></div>
-    ${c.waiting?tile("waiting",c.waiting):""}${tile("came",c.came)}${c.came_free?tile("came_free",c.came_free):""}${tile("missed",c.missed)}</div>`;
-  const warn=c.came_free?`<div class="callout" style="border-color:#C9922E;font-size:13px;margin-bottom:10px">
-    <b>Пришли, но абонемент не проставлен: ${c.came_free}.</b> Занятие состоялось, а деньги не списались — это прямая потеря. Проставьте шаблон в Alfa, и сумма встанет сама.</div>`:"";
-  const rows=les.map(L=>{
-    const kids=L.kids.map(k=>{
+  /* Отсеиваем тех, кто на этот курс уже ходил: у постоянного ребёнка без абонемента списывается
+     0 ровно так же, как у пробника, и по одной сумме их не различить. Пока история не пришла,
+     не судим — показываем всех и честно пишем, что счёт предварительный. */
+  let hidden=0;
+  const counts={waiting:0,came:0,came_free:0,missed:0};
+  const blocks=[];
+  les.forEach(L=>{
+    const rows=[];
+    (L.kids||[]).forEach(k=>{
+      const isNew=_trIsNew(k, L.subjectId);
+      if(isNew===false && !_trShowAll){ hidden++; return; }
+      if(isNew!==false) counts[k.state]=(counts[k.state]||0)+1;
       const s=TR_STATE[k.state]||TR_STATE.waiting;
-      return `<div style="display:flex;gap:8px;align-items:baseline;padding:2px 0">
+      rows.push(`<div style="display:flex;gap:8px;align-items:baseline;padding:2px 0${isNew===false?';opacity:.55':''}">
         <span style="color:${s.c};font-weight:700;width:14px;text-align:center">${s.ic}</span>
-        <span style="flex:1">${esc(k.name)}</span>
+        <span style="flex:1">${esc(k.name)}${isNew===false?' <span style="font-size:11px;color:var(--muted)">— уже ходил на этот курс</span>':''}</span>
         <span style="color:${s.c};font-size:12px">${esc(s.t)}</span>
-        <span style="color:var(--muted);font-size:12px;width:52px;text-align:right">${k.sum?_gm(k.sum):"—"}</span></div>`;
-    }).join("");
-    return `<div style="border:1px solid var(--line);border-radius:9px;padding:10px 12px;margin-bottom:8px;background:#fff">
+        <span style="color:var(--muted);font-size:12px;width:52px;text-align:right">${k.sum?_gm(k.sum):"—"}</span></div>`);
+    });
+    if(!rows.length) return;
+    blocks.push(`<div style="border:1px solid var(--line);border-radius:9px;padding:10px 12px;margin-bottom:8px;background:#fff">
       <div style="display:flex;gap:10px;align-items:baseline;margin-bottom:6px;flex-wrap:wrap">
         <b style="font-size:14px">${esc(L.from||"")}${L.to?"–"+esc(L.to):""}</b>
         <span>${esc(L.subject||"занятие")}</span>
         <span style="color:var(--muted);font-size:12px">${esc(L.teacher||"")}</span>
         <span style="margin-left:auto;font-size:12px;color:var(--muted)">${L.done?"проведено":"ещё не проведено"} · в группе ${L.seats}</span>
-      </div>${kids}</div>`;
-  }).join("");
-  el.innerHTML=bar+tiles+warn+rows;
+      </div>${rows.join("")}</div>`);
+  });
+  const total=counts.waiting+counts.came+counts.came_free+counts.missed;
+  const tile=(k,n)=>`<div style="flex:1;min-width:120px;border:1px solid var(--line);border-radius:9px;padding:8px 12px;background:#fff">
+    <div style="font-size:22px;font-weight:700;color:${TR_STATE[k].c}">${n||0}</div>
+    <div style="font-size:12px;color:var(--muted)">${TR_STATE[k].t}</div></div>`;
+  const tiles=`<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+    <div style="flex:1;min-width:120px;border:1px solid var(--line);border-radius:9px;padding:8px 12px;background:var(--sand-l)">
+      <div style="font-size:22px;font-weight:700">${total}</div>
+      <div style="font-size:12px;color:var(--muted)">пробных за день</div></div>
+    ${counts.waiting?tile("waiting",counts.waiting):""}${tile("came",counts.came)}${counts.came_free?tile("came_free",counts.came_free):""}${tile("missed",counts.missed)}</div>`;
+  const histNote=_trHistBusy
+    ? `<div class="callout" style="font-size:12px;margin-bottom:10px">⏳ Проверяю по каждому ребёнку, ходил ли он на этот курс раньше. Пока проверка идёт, в списке есть и постоянные дети — счёт предварительный.</div>`
+    : (_trHist===null
+        ? `<div class="callout" style="border-color:var(--terra);font-size:12px;margin-bottom:10px">История посещений не загрузилась, поэтому постоянные дети без абонемента не отсеяны — в списке они выглядят как пробники. Нажмите «Обновить из Alfa» ещё раз.</div>`
+        : (hidden?`<div style="font-size:12px;color:var(--muted);margin-bottom:10px">Скрыто ${hidden} — эти дети на данный курс уже ходили, у них просто нет абонемента.
+            <button class="btn ghost sm" style="margin-left:6px" onclick="trToggleAll()">${_trShowAll?"скрыть их":"показать всех"}</button></div>`
+          :(_trShowAll?`<div style="font-size:12px;color:var(--muted);margin-bottom:10px"><button class="btn ghost sm" onclick="trToggleAll()">скрыть тех, кто уже ходил</button></div>`:"")));
+  const warn=counts.came_free?`<div class="callout" style="border-color:#C9922E;font-size:13px;margin-bottom:10px">
+    <b>Пришли, но абонемент не проставлен: ${counts.came_free}.</b> Занятие состоялось, а деньги не списались — это прямая потеря. Проставьте шаблон в Alfa, и сумма встанет сама.</div>`:"";
+  el.innerHTML=bar+tiles+histNote+warn+(blocks.join("")||`<div class="callout">За ${esc(_trData.date)} настоящих пробных не нашлось — все кандидаты оказались детьми, которые на эти курсы уже ходили.</div>`);
 }
 
 /* ==================== ДАШБОРД РУКОВОДИТЕЛЯ / АДМИНИСТРАТОРА (только владельцу) ====================
