@@ -13,6 +13,8 @@
 const fs = require('fs');
 const path = require('path');
 const NL = String.fromCharCode(10);
+const BS = String.fromCharCode(92);
+const Q = String.fromCharCode(39);
 const src = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
 
 function grab(name) {
@@ -49,10 +51,13 @@ function render(data, opts) {
     _trFunnelHtml: () => (o.funnel || ''),
     _pubErrHtml: (e) => '<div class="callout">ошибка: ' + esc(String((e && e.message) || e)) + '</div>',
     document: { getElementById: (id) => (id === 'trialsBody' ? { set innerHTML(v) { out = v; } } : null) },
+    // экранирование для inline-обработчика; здесь не проверяется, нужен только вызов
+    _jsStr: (x) => String(x).split(BS).join(BS + BS).split(Q).join(BS + Q),
+    BS, Q,
     Date, String, Math, Number, Object, Set,
   };
   new Function(...Object.keys(scope),
-    stateSrc + grab('_trToday') + grab('_trIsNew') + grab('_trNewSet') + grab('renderTrials') + '; renderTrials();'
+    stateSrc + grab('_trToday') + grab('_trIsNew') + grab('_trNewSet') + grab('_trKidName') + grab('_trKidLink') + grab('renderTrials') + '; renderTrials();'
   )(...Object.values(scope));
   return out;
 }

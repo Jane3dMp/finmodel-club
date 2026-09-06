@@ -1923,7 +1923,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-09-06-10";
+const APP_VER="2026-09-06-11";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -10573,7 +10573,7 @@ function _trListHtml(title, rows, color, hint){
       ${hint?`<span style="color:var(--muted);font-size:12px"> · ${esc(hint)}</span>`:""}</summary>
     <div style="padding:6px 0 4px 4px">${rows.map(r=>`
       <div style="padding:4px 0;border-bottom:1px solid var(--line)">
-        <div style="font-weight:600;font-size:13px">${esc(_trKidName(r.id))}</div>
+        <div style="font-weight:600;font-size:13px">${_trKidLink(r.id)}</div>
         ${r.les.length?r.les.map(x=>{
           const s=LES[x.st]||["",""];
           return `<div style="display:flex;gap:8px;font-size:12px;color:var(--muted);padding:1px 0">
@@ -10584,6 +10584,26 @@ function _trListHtml(title, rows, color, hint){
             <span style="width:44px;text-align:right">${x.sum?String(x.sum):""}</span></div>`;
         }).join(""):`<div style="font-size:12px;color:var(--muted)">занятий в расписании нет</div>`}
       </div>`).join("")}</div></details>`;
+}
+/* Имя ребёнка — ссылка на его карточку в модели: куда ещё ходит, телефон, абонементы.
+   Ищем ребёнка в модели ПО alfaId (это точное совпадение), и только если не нашли — отдаём
+   одно имя. Карточка с найденным объектом показывает наши поля (ЭВ, телефон, группы),
+   а не только то, что вернёт Alfa. */
+function trOpenKid(id, name){
+  const sid=String(id||""); let kid=null;
+  try{
+    (S.grid||[]).some(l=>kidsOf(l).some(k=>{ if(sid&&String(k.alfaId||"")===sid){ kid=k; return true; } return false; }));
+    if(!kid && Array.isArray(S.waitlist)) kid=S.waitlist.find(w=>w&&sid&&String(w.alfaId||"")===sid)||null;
+    if(!kid && name) (S.grid||[]).some(l=>kidsOf(l).some(k=>{ if(_nameKey(k.n)===_nameKey(name)){ kid=k; return true; } return false; }));
+  }catch(e){}
+  const nm=(kid&&kid.n)||name||("id "+sid);
+  _kidCardRef={name:nm, alfaId:(sid?sid:null)};
+  openKidCard(sid||null, nm, kid||{n:nm, alfaId:(sid||null), evzz:""});
+}
+function _trKidLink(id, name){
+  const nm=name||_trKidName(id);
+  return `<a href="#" title="Открыть карточку ребёнка" onclick="trOpenKid('${_jsStr(String(id))}','${_jsStr(nm)}');return false"
+    style="color:var(--blue);text-decoration:none;border-bottom:1px dotted var(--blue)">${esc(nm)}</a>`;
 }
 function _trKidName(id){
   const s=String(id);
@@ -10634,7 +10654,7 @@ function _trFunnelHtml(){
       <div style="font-weight:700;font-size:13px;margin-bottom:4px">${esc(_trDayLabel(d))}</div>
       ${byDay[d].sort((a,b)=>String(a.les.from).localeCompare(String(b.les.from))).map(a=>`<div style="display:flex;gap:8px;align-items:baseline;padding:1px 0">
         <span style="width:44px;color:var(--muted);font-size:12px">${esc(a.les.from||"")}</span>
-        <span style="flex:1">${esc(_trKidName(a.id))}</span>
+        <span style="flex:1">${_trKidLink(a.id)}</span>
         <span style="font-size:12px;color:var(--muted)">${esc(_trRefs.subjects[a.les.subjectId]||"")}</span>
       </div>`).join("")}</div>`).join("")}</div>`
     : `<div style="font-size:12px;color:var(--muted);margin-top:4px">Впереди занятий у детей набора не запланировано.</div>`;
@@ -10707,7 +10727,7 @@ function renderTrials(){
       const s=TR_STATE[k.state]||TR_STATE.waiting;
       rows.push(`<div style="display:flex;gap:8px;align-items:baseline;padding:2px 0">
         <span style="color:${s.c};font-weight:700;width:14px;text-align:center">${s.ic}</span>
-        <span style="flex:1">${esc(k.name)}</span>
+        <span style="flex:1">${_trKidLink(k.customerId, k.name)}</span>
         <span style="color:${s.c};font-size:12px">${esc(s.t)}</span>
         <span style="color:var(--muted);font-size:12px;width:52px;text-align:right">${k.sum?_gm(k.sum):"—"}</span></div>`);
     });

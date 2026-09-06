@@ -9,6 +9,8 @@
 const fs = require('fs');
 const path = require('path');
 const NL = String.fromCharCode(10);
+const BS = String.fromCharCode(92);
+const Q = String.fromCharCode(39);
 const src = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
 
 function grab(name) {
@@ -34,10 +36,13 @@ function build(kids, newIds, opts) {
     _trToday: () => TODAY,
     _goalsKidLists: () => ({ newKids: (newIds || []).map(id => ({ alfaId: id, name: 'Ребёнок ' + id })) }),
     trLoadFunnel: () => {},
+    // экранирование для inline-обработчика; здесь не проверяется, нужен только вызов
+    _jsStr: (x) => String(x).split(BS).join(BS + BS).split(Q).join(BS + Q),
+    BS, Q,
     Date, String, Number, Object, Set, Math,
   };
   return new Function(...Object.keys(scope),
-    grab('_trNewSet') + grab('_trLesState') + grab('_trFunnel') + grab('_trKidName') + grab('_trListHtml')
+    grab('_trNewSet') + grab('_trLesState') + grab('_trFunnel') + grab('_trKidName') + grab('_trKidLink') + grab('_trListHtml')
     + grab('_trDayLabel') + grab('_trFunnelHtml')
     + '; return {f:_trFunnel(), html:_trFunnelHtml(), st:_trLesState};'
   )(...Object.values(scope));
@@ -120,6 +125,17 @@ t('видно исход каждого занятия', r.html.includes('при
 t('сумма списания показана', r.html.includes('>15<'));
 t('у ребёнка без занятий так и написано', r.html.includes('занятий в расписании нет'));
 t('пустая корзина раскрывашку не рисует', !r.html.includes('>0</span>'));
+
+
+console.log('--- 10. имена — ссылки на карточку ребёнка ---');
+// Жанна: «хочу, чтобы эти дети были активными ссылками, чтобы сразу открывалась карточка
+// в финмодели: куда он ходит ещё, данные»
+r = build({ 30: [les('2026-09-20', false)], 31: [les('2026-09-01', true, 15, true)] }, [30, 31]);
+t('в прогнозе имя кликабельно', r.html.includes('trOpenKid('));
+t('передаётся id ребёнка', r.html.includes('trOpenKid(') && r.html.includes('30'));
+t('переход по ссылке не перезагружает страницу', r.html.includes('return false'));
+t('есть подсказка при наведении', r.html.includes('Открыть карточку ребёнка'));
+t('в раскрывашках имя тоже ссылка', r.html.split('trOpenKid(').length - 1 >= 2);
 
 if (bad) { console.log(NL + 'провалено проверок: ' + bad); process.exit(1); }
 console.log(NL + 'всё сошлось');
