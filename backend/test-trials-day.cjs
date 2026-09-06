@@ -45,6 +45,8 @@ function render(data, opts) {
     _trMode: o.mode || 'new',
     _goalsKidLists: o.newKids === null ? undefined : () => ({ newKids: o.newKids || [] }),
     trSetMode: () => {}, trShiftDay: () => {}, trSetDate: () => {}, trLoad: () => {},
+    // общая воронка живёт своей жизнью и проверяется в test-trials-funnel.cjs
+    _trFunnelHtml: () => (o.funnel || ''),
     _pubErrHtml: (e) => '<div class="callout">ошибка: ' + esc(String((e && e.message) || e)) + '</div>',
     document: { getElementById: (id) => (id === 'trialsBody' ? { set innerHTML(v) { out = v; } } : null) },
     Date, String, Math, Number, Object, Set,

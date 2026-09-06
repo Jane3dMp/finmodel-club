@@ -1923,7 +1923,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-09-06-06";
+const APP_VER="2026-09-06-07";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -10481,6 +10481,137 @@ function _trNewSet(){
     return s;
   }catch(e){ return null; }
 }
+/* ===== ОБЩАЯ ВОРОНКА И ПРОГНОЗ ПО НОВОМУ НАБОРУ =====
+   Жанна: «сделай прогноз, чтобы админ знал, кто новый придёт и когда, и ждал его. И статистику
+   сверху: вписанные, дошедшие, не дошедшие и кого ещё ждём — общую и по дням».
+   Считаем по детям: один запрос на ребёнка отдаёт все его занятия периода сразу. Обход по дням
+   стоил бы сотни запросов, а этот — семь пачек на весь набор. */
+let _trFun=null, _trFunBusy=false, _trFunProg="", _trRefs={subjects:{},teachers:{}};
+function _trYearStart(){
+  const d=new Date(), y=d.getFullYear(), m=d.getMonth()+1;
+  return (m>=9?y:y-1)+"-09-01";     // учебный год начинается 1 сентября
+}
+function _trHorizon(){
+  const d=new Date(); d.setDate(d.getDate()+30);
+  const z=x=>String(x).padStart(2,'0');
+  return d.getFullYear()+'-'+z(d.getMonth()+1)+'-'+z(d.getDate());
+}
+async function trLoadFunnel(force){
+  if(_trFunBusy) return;
+  const set=_trNewSet();
+  if(!set||!set.size){ _trFun=null; renderTrials(); return; }
+  if(!force && _trFun) return;
+  const ids=[...set].map(Number).filter(Boolean);
+  _trFunBusy=true; _trFunProg="0/"+ids.length; _trFun={kids:{},from:_trYearStart(),to:_trHorizon()};
+  renderTrials();
+  try{
+    for(let i=0;i<ids.length;i+=15){
+      const j=await _pubCall("kidsLessons",{ids:ids.slice(i,i+15), from:_trFun.from, to:_trFun.to, refs:(i===0)});
+      Object.assign(_trFun.kids, j.kids||{});
+      if(j.subjects) _trRefs.subjects=j.subjects;
+      if(j.teachers) _trRefs.teachers=j.teachers;
+      _trFunProg=Math.min(i+15,ids.length)+"/"+ids.length;
+      renderTrials();
+    }
+  }catch(e){ _trFun=null; _trFunProg=""; toast("Не удалось собрать воронку: "+((e&&e.message)||e)); }
+  finally{ _trFunBusy=false; _trFunProg=""; renderTrials(); }
+}
+/* Судьба одного занятия ребёнка — та же логика, что и в дне: деньги главное, но у ребёнка без
+   абонемента 0 спишется и когда он пришёл, поэтому смотрим отметку. */
+function _trLesState(L, today){
+  if(!L.done) return (L.date>=today)?"ahead":"missed";   // не проведено и день прошёл — не состоялось
+  if((+L.sum||0)>0.005) return "came";
+  const a=L.attend;
+  return (a===true||a===1||a==="1")?"came_free":"missed";
+}
+/* Свод по набору: вписан (есть занятия), дошёл (был хоть раз), не дошёл (были занятия, но ни
+   на одном не был), ждём (впереди ещё есть занятия). Ребёнок считается ОДИН раз. */
+function _trFunnel(){
+  if(!_trFun) return null;
+  const today=_trToday();
+  const f={enrolled:0, came:0, cameFree:0, missedAll:0, waiting:0, noLessons:0, ahead:[]};
+  const set=_trNewSet()||new Set();
+  set.forEach(idStr=>{
+    const L=_trFun.kids[idStr]||_trFun.kids[Number(idStr)];
+    if(!L){ return; }
+    if(!L.length){ f.noLessons++; return; }
+    f.enrolled++;
+    let came=false, cameFree=false, ahead=false;
+    L.forEach(x=>{
+      const st=_trLesState(x,today);
+      if(st==="came") came=true;
+      else if(st==="came_free"){ came=true; cameFree=true; }
+      else if(st==="ahead"){ ahead=true; f.ahead.push({id:idStr, les:x}); }
+    });
+    if(came){ f.came++; if(cameFree) f.cameFree++; }
+    else if(ahead) f.waiting++;
+    else f.missedAll++;
+  });
+  f.ahead.sort((a,b)=>(a.les.date+a.les.from).localeCompare(b.les.date+b.les.from));
+  return f;
+}
+function _trKidName(id){
+  const s=String(id);
+  try{
+    if(typeof _goalsKidLists==="function"){
+      const L=_goalsKidLists();
+      const hit=(L.newKids||[]).find(o=>String(o.alfaId)===s);
+      if(hit&&hit.name) return hit.name;
+    }
+  }catch(e){}
+  const c=(S.children||{})[s];
+  return (c&&c.name)||("id "+s);
+}
+function _trFunnelHtml(){
+  const set=_trNewSet();
+  if(!set||!set.size) return "";
+  if(_trFunBusy&&!_trFun) return `<div class="callout" style="font-size:12px;margin-bottom:10px">⏳ Собираю общую картину по новому набору…</div>`;
+  if(!_trFun) return `<div class="hd-actions" style="margin-bottom:10px">
+    <button class="btn sm" onclick="trLoadFunnel(true)">📊 Собрать общую картину по набору</button>
+    <span style="font-size:12px;color:var(--muted)">Кто из ${set.size} детей набора уже дошёл, кто нет и кого ещё ждём. Читается по одному запросу на ребёнка, поэтому вручную.</span></div>`;
+  const f=_trFunnel();
+  if(!f) return "";
+  const tile=(n,lab,col,ttl)=>`<div title="${esc(ttl||"")}" style="flex:1;min-width:110px;border:1px solid var(--line);border-radius:9px;padding:8px 12px;background:#fff">
+    <div style="font-size:22px;font-weight:700${col?";color:"+col:""}">${n}</div>
+    <div style="font-size:12px;color:var(--muted)">${lab}</div></div>`;
+  const prog=_trFunBusy?` <span style="font-size:12px;color:var(--muted)">(читаю ${esc(_trFunProg)})</span>`:"";
+  const head=`<div style="display:flex;align-items:baseline;gap:8px;margin:4px 0 6px">
+    <b style="font-size:14px">Новый набор целиком</b>
+    <span style="font-size:12px;color:var(--muted)">с ${esc(_trFun.from)} по ${esc(_trFun.to)}${prog}</span>
+    <button class="btn ghost sm" style="margin-left:auto" onclick="trLoadFunnel(true)"${_trFunBusy?" disabled":""}>обновить</button></div>`;
+  const tiles=`<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">
+    ${tile(f.enrolled,"вписаны на занятия","","Детей набора, у которых есть хотя бы одно занятие в периоде")}
+    ${tile(f.came,"дошли","var(--green)","Были хотя бы на одном занятии")}
+    ${tile(f.missedAll,"не дошли ни разу","var(--red)","Занятия были, но ребёнок не пришёл ни на одно, и впереди ничего не запланировано")}
+    ${tile(f.waiting,"ждём","var(--terra)","Ещё не были, но занятия впереди есть")}
+    ${f.noLessons?tile(f.noLessons,"без занятий","var(--muted)","Ребёнок в наборе есть, а в расписании Alfa занятий у него нет"):""}
+  </div>`;
+  const warn=f.cameFree?`<div class="callout" style="border-color:#C9922E;font-size:12px;margin-bottom:8px">
+    У ${f.cameFree} из дошедших есть занятия, где отметка стоит, а списания нет — абонемент не проставили.</div>`:"";
+  /* Прогноз: кого и когда ждать. Именно то, ради чего Жанна просила — «чтобы админ знал, кто
+     новый придёт и когда, и ждал его». */
+  const byDay={};
+  f.ahead.forEach(a=>{ (byDay[a.les.date]=byDay[a.les.date]||[]).push(a); });
+  const days=Object.keys(byDay).sort().slice(0,14);
+  const fc=days.length?`<div style="margin-top:6px"><b style="font-size:14px">Кого ждём дальше</b>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:6px">Дети набора, у которых занятие ещё впереди. Ближайшие ${days.length} дн.</div>
+    ${days.map(d=>`<div style="border:1px solid var(--line);border-radius:9px;padding:8px 12px;margin-bottom:6px;background:#fff">
+      <div style="font-weight:700;font-size:13px;margin-bottom:4px">${esc(_trDayLabel(d))}</div>
+      ${byDay[d].sort((a,b)=>String(a.les.from).localeCompare(String(b.les.from))).map(a=>`<div style="display:flex;gap:8px;align-items:baseline;padding:1px 0">
+        <span style="width:44px;color:var(--muted);font-size:12px">${esc(a.les.from||"")}</span>
+        <span style="flex:1">${esc(_trKidName(a.id))}</span>
+        <span style="font-size:12px;color:var(--muted)">${esc(_trRefs.subjects[a.les.subjectId]||"")}</span>
+      </div>`).join("")}</div>`).join("")}</div>`
+    : `<div style="font-size:12px;color:var(--muted);margin-top:4px">Впереди занятий у детей набора не запланировано.</div>`;
+  return head+tiles+warn+fc;
+}
+function _trDayLabel(d){
+  const dn=["вс","пн","вт","ср","чт","пт","сб"];
+  const x=new Date(d+"T12:00:00");
+  const today=_trToday();
+  const pre=(d===today)?"сегодня, ":"";
+  return pre+d.slice(8)+"."+d.slice(5,7)+" "+(dn[x.getDay()]||"");
+}
 function renderTrials(){
   const el=document.getElementById("trialsBody"); if(!el) return;
   const d=_trDate||_trToday();
@@ -10561,7 +10692,9 @@ function renderTrials(){
         : (hidden?`<div style="font-size:12px;color:var(--muted);margin-bottom:10px">Скрыто ${hidden} — ${_trMode==="new"?"эти дети не из нового набора":"эти дети на данный курс уже ходили"}.</div>`:""));
   const warn=counts.came_free?`<div class="callout" style="border-color:#C9922E;font-size:13px;margin-bottom:10px">
     <b>Пришли, но абонемент не проставлен: ${counts.came_free}.</b> Занятие состоялось, а деньги не списались — это прямая потеря. Проставьте шаблон в Alfa, и сумма встанет сама.</div>`:"";
-  el.innerHTML=bar+tiles+note+warn+(blocks.join("")||`<div class="callout">За ${esc(_trData.date)} никого не нашлось${_trMode==="new"?" из нового набора":""}. Попробуйте другой режим выше.</div>`);
+  const fun=(_trMode==="new")?_trFunnelHtml():"";
+  const dayHead=`<div style="font-size:13px;font-weight:700;margin:10px 0 6px">За ${esc(_trData.date)}</div>`;
+  el.innerHTML=bar+fun+(fun?dayHead:"")+tiles+note+warn+(blocks.join("")||`<div class="callout">За ${esc(_trData.date)} никого не нашлось${_trMode==="new"?" из нового набора":""}. Попробуйте другой режим выше.</div>`);
 }
 
 /* ==================== ДАШБОРД РУКОВОДИТЕЛЯ / АДМИНИСТРАТОРА (только владельцу) ====================

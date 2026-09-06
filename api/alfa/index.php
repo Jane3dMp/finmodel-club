@@ -1596,6 +1596,23 @@ switch ($action) {
         json_out(['ok' => true] + $r + ['store' => alfa_realization_store_read()]);
         break;
 
+    // --- ЗАНЯТИЯ ДЕТЕЙ ЗА ПЕРИОД: прогноз «кого ждём» и общая воронка ---
+    //     Пачками: на весь новый набор это ~150 запросов, одним куском они не пройдут.
+    //     Справочники отдаём тем же ответом — иначе клиенту пришлось бы за ними ходить отдельно.
+    case 'kidsLessons':
+        @set_time_limit(180);
+        $branches = alfa_realization_branches();
+        $ids = array_slice((array)($in['ids'] ?? []), 0, 15);
+        $kfrom = alfa_iso((string)($in['from'] ?? date('Y-m-01')));
+        $kto   = alfa_iso((string)($in['to']   ?? date('Y-m-d', strtotime('+30 day'))));
+        $res = alfa_kids_lessons($ids, $kfrom, $kto, $branches);
+        if (!empty($in['refs'])) {
+            $res['subjects'] = alfa_simple_ref('subject', $branches);
+            $res['teachers'] = alfa_simple_ref('teacher', $branches);
+        }
+        json_out(['ok' => true] + $res);
+        break;
+
     // --- ИСТОРИЯ ДЕТЕЙ: ходил ли ребёнок на этот курс раньше ---
     //     Отдельным действием и пачками: кандидатов за день бывает под сотню, и запрос на
     //     каждого внутри trialsDay гарантированно упёрся бы в таймаут шлюза.

@@ -895,6 +895,80 @@ function alfa_trials_day(string $date, ?array $branches = null): array {
             'prices' => alfa_trial_prices(), 'lessonsScanned' => $scanned, 'branches' => $branches];
 }
 
+/* ===== ЗАНЯТИЯ КОНКРЕТНЫХ ДЕТЕЙ ЗА ПЕРИОД =====
+   Жанна: «сделай прогноз, чтобы админ знал, кто новый придёт и когда, и ждал его. И статистику
+   сверху: вписанные, дошедшие, не дошедшие и кого ещё ждём».
+
+   Считаем ПО ДЕТЯМ, а не по дням. Один запрос на ребёнка отдаёт сразу все его занятия периода —
+   и прошедшие, и будущие. Обход по дням стоил бы сотни запросов (в дне под тридцать занятий,
+   у проведённых участники добираются отдельно), а по детям это ~150 запросов на весь набор,
+   и клиент шлёт их пачками. Прошедшие занятия не меняются, поэтому кэш живёт долго. */
+function alfa_kidles_cache_path(): string {
+    return alfa_store_dir() . '/kidles_' . substr(hash('sha256', __DIR__ . '|kidles1'), 0, 20) . '.json';
+}
+/* Для каждого ребёнка: занятия периода с датой, предметом, суммой и отметкой присутствия.
+   Возвращаем только то, что нужно экрану, — иначе кэш распухнет. */
+function alfa_kids_lessons(array $ids, string $from, string $to, ?array $branches = null): array {
+    $ids = array_values(array_unique(array_map('intval', array_filter($ids))));
+    if (!$ids) return ['kids' => [], 'asked' => 0];
+    $branches = $branches ?: alfa_realization_branches();
+    $from = alfa_iso($from); $to = alfa_iso($to);
+    $today = date('Y-m-d');
+    $f = alfa_kidles_cache_path();
+    $cache = [];
+    if (is_file($f)) { $j = json_decode((string)@file_get_contents($f), true); if (is_array($j)) $cache = $j; }
+    $host = 'https://' . alfa_host(); $token = alfa_token();
+    $out = []; $asked = 0; $dirty = false;
+    foreach ($ids as $id) {
+        $k = (string)$id;
+        $c = $cache[$k] ?? null;
+        /* Кэш годен, если окно совпадает и он свежий. Держим час: будущие занятия переносят и
+           отменяют, а прошедшие всё равно уже не изменятся. */
+        if (is_array($c) && ($c['from'] ?? '') === $from && ($c['to'] ?? '') === $to
+            && (int)($c['ts'] ?? 0) > time() - 3600) {
+            $out[$id] = (array)($c['lessons'] ?? []);
+            continue;
+        }
+        $rows = [];
+        foreach ($branches as $bid) {
+            $r = alfa_http('POST', "$host/v2api/" . (int)$bid . "/lesson/index",
+                ['customer_id' => $id, 'date_from' => $from, 'date_to' => $to, 'page' => 0, 'count' => 200],
+                $token, true, 15);
+            $asked++;
+            if (isset($r['__err'])) continue;
+            foreach (($r['items'] ?? []) as $ls) {
+                if (!is_array($ls)) continue;
+                $d = substr((string)($ls['date'] ?? ''), 0, 10);
+                if ($d < $from || $d > $to) continue;
+                $st = (int)($ls['status'] ?? 0);
+                if ($st !== 1 && $st !== 2 && $st !== 3) continue;
+                /* Строка именно этого ребёнка среди участников: сумма и отметка нужны его. */
+                $sum = null; $att = null;
+                foreach ((array)($ls['details'] ?? []) as $dt) {
+                    if (!is_array($dt) || (int)($dt['customer_id'] ?? 0) !== $id) continue;
+                    $sum = round((float)($dt['commission'] ?? 0), 2);
+                    $att = $dt['is_attend'] ?? null;
+                    break;
+                }
+                $rows[] = ['date' => $d, 'subjectId' => (int)($ls['subject_id'] ?? 0),
+                           'from' => substr((string)($ls['time_from'] ?? ''), 11, 5),
+                           'to' => substr((string)($ls['time_to'] ?? ''), 11, 5),
+                           'teacherIds' => array_values(array_map('intval', (array)($ls['teacher_ids'] ?? []))),
+                           'done' => ($st === 3), 'sum' => $sum, 'attend' => $att];
+            }
+        }
+        usort($rows, function ($a, $b) {
+            $c1 = strcmp($a['date'], $b['date']);
+            return $c1 !== 0 ? $c1 : strcmp((string)$a['from'], (string)$b['from']);
+        });
+        $out[$id] = $rows;
+        $cache[$k] = ['ts' => time(), 'from' => $from, 'to' => $to, 'lessons' => $rows];
+        $dirty = true;
+    }
+    if ($dirty) @file_put_contents($f, json_encode($cache, JSON_UNESCAPED_UNICODE), LOCK_EX);
+    return ['kids' => $out, 'asked' => $asked, 'from' => $from, 'to' => $to, 'today' => $today];
+}
+
 /* Снимок дня по пробным. Жанна: «нужна переключашка между днями, не нужно каждый раз
    анализировать прошлый период. Один снимок сделан — в память. Мы же не можем изменить прошлое».
    Так и делаем: ПРОШЕДШИЙ день отдаём из хранилища не трогая Alfa, а сегодняшний и будущие
