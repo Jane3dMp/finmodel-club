@@ -1923,7 +1923,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-09-06-23";
+const APP_VER="2026-09-06-24";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -2814,7 +2814,7 @@ function fbStart(){
   });
 }
 /* ---- вкладки по ролям ---- */
-const TAB_DEFS=[["dash","Дашборд"],["report","Отчёт по набору"],["courses","Курсы и маржа"],["real","Реальный оборот"],["planner","Планировщик загрузки"],["goals","Набор"],["grid","Расписание (сетка)"],["groups","Группы"],["compos","Состав групп"],["clients","Клиенты"],["price","Прайс"],["cards","О курсах"],["may","Майский"],["staff","Педсостав и ФОТ"],["fixed","Постоянные расходы"],["tax","Налоги РБ и ФОТ"],["break","Точка безубыточности"],["scenario","Сценарии"],["settings","Параметры"],["ruk","Дашборд Руководителя"],["adm","Дашборд Администратора"]];
+const TAB_DEFS=[["dash","Дашборд"],["report","Отчёт по набору"],["courses","Курсы и маржа"],["real","Реальный оборот"],["planner","Планировщик загрузки"],["goals","Набор"],["grid","Расписание (сетка)"],["groups","Группы"],["compos","Состав групп"],["clients","Клиенты"],["price","Прайс"],["cards","О курсах"],["may","Майский"],["staff","Педсостав и ФОТ"],["fixed","Постоянные расходы"],["tax","Налоги РБ и ФОТ"],["break","Точка безубыточности"],["scenario","Сценарии"],["settings","Параметры"],["trials","Пробные"],["ruk","Дашборд Руководителя"],["adm","Дашборд Администратора"]];
 const MANAGER_DEFAULT_TABS=["grid","groups","clients","may","goals"];
 const ALWAYS_TABS={clients:1,price:1,goals:1,cards:1};   // видны всем ролям, даже если не отмечены в доступах
 /* «Пробные» — админская, а не владельческая: контроль пробных это ежедневная работа админа
@@ -2826,10 +2826,11 @@ const OWNER_EMAILS=["smalprince@gmail.com","proznanie.mogilev@gmail.com"];
 let _fbIsOwner=false;
 function _defaultTabsMap(){ const m={}; MANAGER_DEFAULT_TABS.forEach(function(k){ m[k]=true; }); return m; }
 /* ---- режимы навигации: «Работа» (ежедневное) и «Финмодель» (финансы) ---- */
-const TAB_MODES={grid:"work",groups:"work",compos:"work",clients:"work",price:"work",cards:"work",may:"work",goals:"work",dash:"fin",report:"fin",courses:"fin",real:"fin",planner:"fin",staff:"fin",fixed:"fin",tax:"fin","break":"fin",scenario:"fin",settings:"fin",ruk:"ruk",adm:"adm"};
+const TAB_MODES={grid:"work",groups:"work",compos:"work",clients:"work",price:"work",cards:"work",may:"work",goals:"work",dash:"fin",report:"fin",courses:"fin",real:"fin",planner:"fin",staff:"fin",fixed:"fin",tax:"fin","break":"fin",scenario:"fin",settings:"fin",trials:"work",ruk:"ruk",adm:"adm"};
 // вкладки, видимые в ОБОИХ режимах: «О курсах» заполняет Жанна из «Финмодели»,
 // а менеджеры читают в «Работе» — без этого админу приходилось переключать режим
-const TAB_BOTH_MODES={cards:1};
+// «Пробные» нужны и админу в «Работе», и Жанне из «Финмодели» — как «О курсах»
+const TAB_BOTH_MODES={cards:1,trials:1};
 // Дашборды владельца — это отдельные режимы навигации (как «Работа»/«Финмодель»), рядом с ними
 const NAV_MODES=["work","fin","ruk","adm"];
 // В этих режимах всего одна панель = сам дашборд; ленту вкладок прячем (режим и есть выбор)
