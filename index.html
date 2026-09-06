@@ -1936,7 +1936,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-09-07-02";
+const APP_VER="2026-09-07-03";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -11018,7 +11018,7 @@ function _trMgrStats(){
   const pick=nm=>{
     const k=nm||"менеджер не определён";
     return by[k]||(by[k]={name:k, unknown:!nm, kids:0, enrolled:0, came:0, missed:0,
-                          waiting:0, noLes:0, back:0, paid:0, paidCame:0, sum:0, pay:0, arch:0,
+                          waiting:0, noLes:0, paid:0, paidCame:0, sum:0, pay:0, arch:0,
                           kids2:[]});     // поимённо: «дай списком раскрывашкой детей у каждого менеджера»
   };
   const add=(rows,bucket)=>rows.forEach(r=>{
@@ -11035,8 +11035,11 @@ function _trMgrStats(){
     (r.les||[]).forEach(x=>{ if(x.done) m.sum+=(+x.sum||0); });
     m.pay+=_trPaySum(r.id);            // настоящие деньги: платежи клиента в кассу за сезон
   });
+  /* Возвращенцев (ходили до 1 сентября) в рейтинге нет вовсе: он про НОВЫЙ набор, а они не
+     новые клиенты. Их деньги тоже не приписываем менеджеру — абонемент у них с прошлого года,
+     менеджер этого набора к нему отношения не имеет. Так же с ними поступает и воронка выше. */
   add(fn.lists.came,"came"); add(fn.lists.missedAll,"missed"); add(fn.lists.waiting,"waiting");
-  add(fn.lists.noLessons,"noLes"); add(fn.lists.returning,"back");
+  add(fn.lists.noLessons,"noLes");
   const rows=Object.keys(by).map(k=>by[k]);
   rows.forEach(m=>{
     const base=m.came+m.missed;                 // ждущих в доходимость не берём: их черёд не настал
@@ -11055,7 +11058,7 @@ function _trMgrStats(){
 function _trMgrUnknownHtml(){
   const fn=_trFunnel(); if(!fn||!_trMgr) return "";
   const rows=[];
-  ["came","missedAll","waiting","noLessons","returning"].forEach(k=>{
+  ["came","missedAll","waiting","noLessons"].forEach(k=>{   // возвращенцев в рейтинге нет — и здесь тоже
     (fn.lists[k]||[]).forEach(r=>{ if(!_trMgrOf(r.id)) rows.push(r.id); });
   });
   if(!rows.length) return "";
@@ -11079,9 +11082,8 @@ function _trMgrUnknownHtml(){
    этом сезоне / абонемент есть, но оплачен раньше / только пробный / без абонемента).
    Именно поэтому «Купили» бывает больше «Дошли»: оплатить можно, ещё не придя на занятие. */
 const _TR_BUCK={came:["дошёл","var(--green)"], missed:["не дошёл","var(--red)"],
-                waiting:["ждём","var(--terra)"], noLes:["без занятий","var(--muted)"],
-                back:["ходил раньше","var(--muted)"]};
-const _TR_BORD=["came","missed","waiting","noLes","back"];
+                waiting:["ждём","var(--terra)"], noLes:["без занятий","var(--muted)"]};
+const _TR_BORD=["came","missed","waiting","noLes"];
 function _trMoneyStage(id){
   const pay=_trPaySum(id);
   if(pay>0) return ["оплатил "+_gm(pay)+" р","var(--green)"];
@@ -11118,7 +11120,7 @@ function _trMgrTableHtml(){
   const rows=_trMgrStats();
   if(!rows||!rows.length) return "";
   const pc=v=>v==null?`<span style="color:var(--muted)">—</span>`:`<b style="color:${v>=70?"var(--green)":(v>=40?"#C9922E":"var(--red)")}">${Math.round(v)}%</b>`;
-  const T={kids:0,enrolled:0,came:0,missed:0,waiting:0,noLes:0,back:0,paid:0,paidCame:0,sum:0,pay:0,arch:0};
+  const T={kids:0,enrolled:0,came:0,missed:0,waiting:0,noLes:0,paid:0,paidCame:0,sum:0,pay:0,arch:0};
   rows.forEach(m=>Object.keys(T).forEach(k=>T[k]+=m[k]));
   const tr=m=>`<tr${m.unknown?" style=\"color:var(--muted)\"":""}>
     <td style="text-align:left">${m.unknown?"":"<b>"}${esc(m.name)}${m.unknown?"":"</b>"}</td>
@@ -11130,7 +11132,6 @@ function _trMgrTableHtml(){
     <td class="num">${_gm(m.sum)}</td>
     <td class="num"><b style="color:var(--green)">${m.pay?_gm(m.pay):""}</b></td>
     <td class="num" style="color:var(--muted)">${m.noLes||""}</td>
-    <td class="num" style="color:var(--muted)">${m.back||""}</td>
     <td class="num" style="color:var(--muted)">${m.arch||""}</td></tr>`;
   const pd=_trPayDays();
   const payNote=(!pd.withCust)
@@ -11141,7 +11142,7 @@ function _trMgrTableHtml(){
   const tarNote=(!_trTar||!Object.keys(_trTar).length)
     ? `<div class="hint" style="margin:6px 0">Абонементы ещё не загружены — колонки «купили» и «конверсия» пока пустые.</div>` : "";
   return `<details style="margin:10px 0" open><summary style="cursor:pointer;font-weight:600">🏅 Рейтинг менеджеров (${rows.length})</summary>
-    <div class="hint" style="margin:6px 0">Считается по тем же корзинам, что и цифры выше, только по этому набору. Менеджер — ответственный по сделке amoCRM, связь по телефону. <b>Доходимость</b> = дошли ÷ (дошли + не дошли), ждущие не в счёт. <b>Конверсия</b> = купили абонемент ИЗ ДОШЕДШИХ ÷ дошли. Колонка «Купили» шире: в неё входят и те, кто абонемент уже оплатил, а на занятие ещё не пришёл. <b>Списано</b> — сумма списаний по проведённым занятиям, а не деньги в кассе.</div>
+    <div class="hint" style="margin:6px 0">Считается по тем же корзинам, что и цифры выше, только по этому набору. Кто занимался в клубе до 1 сентября, в рейтинг не входит: это не новые клиенты, и их абонементы к работе менеджера по набору отношения не имеют. Менеджер — ответственный по сделке amoCRM, связь по телефону. <b>Доходимость</b> = дошли ÷ (дошли + не дошли), ждущие не в счёт. <b>Конверсия</b> = купили абонемент ИЗ ДОШЕДШИХ ÷ дошли. Колонка «Купили» шире: в неё входят и те, кто абонемент уже оплатил, а на занятие ещё не пришёл. <b>Списано</b> — сумма списаний по проведённым занятиям, а не деньги в кассе.</div>
     ${tarNote}${payNote}
     <div class="tscroll"><table><thead><tr>
       <th style="text-align:left">Менеджер</th><th class="num">Детей</th><th class="num" title="Есть хотя бы одно занятие в расписании">Вписаны</th>
@@ -11150,7 +11151,6 @@ function _trMgrTableHtml(){
       <th class="num" title="Сумма списаний по проведённым занятиям этих детей">Списано</th>
       <th class="num" title="Платежи этих клиентов в кассу Alfa за сезон — настоящие деньги">Оплачено</th>
       <th class="num" title="Ребёнок в наборе есть, а занятий в расписании нет">Без занятий</th>
-      <th class="num" title="Занимались до 1 сентября — не новые клиенты">Раньше</th>
       <th class="num" title="Ребёнок уже в архиве Alfa">В архиве</th>
     </tr></thead><tbody>${rows.map(tr).join("")}
       <tr style="border-top:2px solid var(--line)"><td style="text-align:left"><b>Итого</b></td>
@@ -11163,7 +11163,7 @@ function _trMgrTableHtml(){
       <td class="num">${pc(T.came?(100*T.paidCame/T.came):null)}</td>
       <td class="num"><b>${_gm(T.sum)}</b></td>
       <td class="num"><b style="color:var(--green)">${_gm(T.pay)}</b></td>
-      <td class="num">${T.noLes||""}</td><td class="num">${T.back||""}</td><td class="num">${T.arch||""}</td></tr>
+      <td class="num">${T.noLes||""}</td><td class="num">${T.arch||""}</td></tr>
     </tbody></table></div>${_trMgrKidsHtml(rows)}${_trMgrUnknownHtml()}</details>`;
 }
 function _trFunnelHtml(){
