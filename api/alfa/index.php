@@ -1729,6 +1729,43 @@ switch ($action) {
                  + ['branchNames' => alfa_branch_names()]);
         break;
 
+    // --- СПИСКИ НА ОБЗВОН: роспись от модели (кто новый, кто прошлогодний, телефоны) ---
+    //     Сервер эту разбивку сам знать не может: она живёт в Google-таблице модели.
+    //     Модель кладёт её сюда при открытии раздела, воскресный cron берёт последнюю.
+    case 'obzvonRoster':
+        json_out(['ok' => true] + alfa_obzvon_roster_set(
+            (array)($in['new'] ?? []), (array)($in['old'] ?? [])));
+        break;
+
+    // --- СПИСКИ НА ОБЗВОН: собрать кусок прогона (занятия + абонементы + карточки) ---
+    //     Та же функция, что крутит cron_obzvon.php в вс 21:00, — просто цикл крутит браузер.
+    //     Недособранный снимок предыдущий не заменяет: см. alfa_obzvon_build().
+    case 'obzvonBuild':
+        @set_time_limit(180);
+        $r = alfa_obzvon_build((int)($in['offset'] ?? 0), (int)($in['limit'] ?? 15),
+                               !empty($in['force']), alfa_realization_branches());
+        if (empty($r['ok'])) json_out($r, 400);
+        json_out($r);
+        break;
+
+    // --- СПИСКИ НА ОБЗВОН: прочитать готовый снимок ---
+    //     Снимок на весь клуб тяжёлый, но резать его нечем: раздел без него не рисуется, а
+    //     разбор на корзины делает модель — сервер не знает, кто попадёт в списки.
+    case 'obzvonStore':
+        $d = alfa_obzvon_read();
+        $snap = $d['snap'] ?? [];
+        $meta = ['builtAt' => (string)($snap['builtAt'] ?? ''), 'ranBy' => (string)($snap['ranBy'] ?? ''),
+                 'season' => (string)($snap['season'] ?? ''), 'today' => (string)($snap['today'] ?? ''),
+                 'kids' => count((array)($snap['kids'] ?? [])),
+                 'roster' => ['setAt' => (string)(($d['roster']['setAt'] ?? '')),
+                              'new' => count((array)($d['roster']['new'] ?? [])),
+                              'old' => count((array)($d['roster']['old'] ?? []))],
+                 'wip' => !empty($d['wip']) ? ['startedAt' => (string)($d['wip']['startedAt'] ?? ''),
+                                               'done' => count((array)($d['wip']['kids'] ?? [])),
+                                               'total' => count((array)($d['wip']['ids'] ?? []))] : null];
+        json_out(['ok' => true] + $meta + ['snap' => $snap]);
+        break;
+
     default:
         json_out(['ok' => false, 'error' => 'Неизвестное действие: ' . $action], 400);
 }

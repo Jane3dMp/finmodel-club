@@ -92,6 +92,10 @@ tbody tr:hover td{background:#EEEDEA}
 /* Таблица расходов: на широком экране она расползалась во всю панель, и глаз не связывал
    статью с её цифрой. Держим её узкой и по центру, числовые колонки — фиксированной ширины. */
 .exp{max-width:720px;margin:0 auto}
+/* «Прогноз по всем»: панель дашборда занимает почти весь экран, а таблица недель узкая —
+   без этой обёртки она липла к левому краю, а подсказка над ней тянулась через весь монитор
+   и читалась строкой в 200 знаков. Держим раздел одной колонкой по центру. */
+.progwrap{max-width:900px;margin:0 auto}
 .exp table{table-layout:fixed;width:100%}
 .exp th.num,.exp td.num{width:104px}
 .exp td:first-child,.exp th:first-child{word-break:break-word}
@@ -1932,7 +1936,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-09-06-34";
+const APP_VER="2026-09-06-35";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -13612,7 +13616,7 @@ function _progHtml(){
   const tGrow=(tLy>0&&tFactCmp>0)?(100*tFactCmp/tLy-100):null;
   const lyNeed=_progLyMissing();
   const haveAny=weeks.some(w=>_progWeekAlfa(w)!=null);
-  return `<div class="callout" style="margin-bottom:10px;font-size:12px">Недели учебного года (пн–вс). <b>Прогноз Alfa</b> — сумма списаний по запланированным занятиям (сверено с отчётом «Прогноз оплаты»: совпадает), фиксируется 🔒 в воскресенье 22:00. Замок держит цифру от случайного нажатия: под ним её не изменит ни «Зафиксировать неделю», ни правка руками. Воскресный cron — исключение, он пересобирает прогноз в любом случае. Нажмите 🔒, чтобы снять замок и поправить прогноз руками, и 🔓 — чтобы запереть обратно. <b>Доход (факт)</b> — реализация за дни недели: каждый день в 22:00 cron забирает доход из Alfa и он суммируется в свою неделю.<br><b>Год назад</b> — та же неделя прошлого учебного года: сдвиг ровно на 52 недели, чтобы понедельник сравнивался с понедельником, а не с воскресеньем. Прошлогодних дней в хранилище нет — нажмите «Подтянуть прошлый год». <b>Рост</b> считается только по закончившимся неделям, где есть обе цифры.</div>
+  return `<div class="progwrap"><div class="callout" style="margin-bottom:10px;font-size:12px">Недели учебного года (пн–вс). <b>Прогноз Alfa</b> — сумма списаний по запланированным занятиям (сверено с отчётом «Прогноз оплаты»: совпадает), фиксируется 🔒 в воскресенье 22:00. Замок держит цифру от случайного нажатия: под ним её не изменит ни «Зафиксировать неделю», ни правка руками. Воскресный cron — исключение, он пересобирает прогноз в любом случае. Нажмите 🔒, чтобы снять замок и поправить прогноз руками, и 🔓 — чтобы запереть обратно. <b>Доход (факт)</b> — реализация за дни недели: каждый день в 22:00 cron забирает доход из Alfa и он суммируется в свою неделю.<br><b>Год назад</b> — та же неделя прошлого учебного года: сдвиг ровно на 52 недели, чтобы понедельник сравнивался с понедельником, а не с воскресеньем. Прошлогодних дней в хранилище нет — нажмите «Подтянуть прошлый год». <b>Рост</b> считается только по закончившимся неделям, где есть обе цифры.</div>
   <div class="hd-actions" style="margin-bottom:10px">
     <button class="btn sm" id="progPullBtn" onclick="progPull()">🔄 Обновить факт из Alfa</button>
     <button class="btn ghost sm" id="fcWeekBtn" onclick="progForecastWeek()" title="Посчитать прогноз текущей недели сейчас (обычно это делает cron)">🧮 Посчитать прогноз недели</button>
@@ -13622,7 +13626,7 @@ function _progHtml(){
       lyNeed.length?("📆 Подтянуть прошлый год ("+lyNeed.length+" "+_kassaDayWord(lyNeed.length)+")"):"📆 Прошлый год подтянут"}</button>
     <span id="progPullProg" style="font-size:12px;color:var(--muted)">${haveAny?'':'Пока пусто — нажмите «Обновить факт».'}</span>
   </div>
-  <div class="tscroll" style="max-width:760px"><table><thead><tr>
+  <div class="tscroll"><table><thead><tr>
     <th style="text-align:left">Месяц</th><th style="text-align:left">Неделя</th><th style="text-align:right">Прогноз Alfa</th><th style="text-align:right">Доход (факт)</th><th style="text-align:right">%</th><th style="text-align:right" title="Та же неделя прошлого учебного года — сдвиг ровно на 52 недели, чтобы понедельник сравнивался с понедельником">Год назад</th><th style="text-align:right" title="Рост дохода к той же неделе прошлого года">Рост</th>
   </tr></thead><tbody>${rows}
     <tr style="border-top:2px solid var(--line)"><td colspan="2"><b>Итого за год</b></td>
@@ -13631,7 +13635,7 @@ function _progHtml(){
       <td style="text-align:right">${tPct!=null?('<b>'+tPct.toFixed(0)+'%</b>'):'—'}</td>
       <td style="text-align:right;color:var(--muted)">${tLy?('<b title="'+esc("Сопоставимых недель: "+tCmpWeeks+" · в этом году за них "+_gm(tFactCmp))+'">'+_gm(tLy)+'</b>'):'—'}</td>
       <td style="text-align:right">${tGrow!=null?('<b style="color:'+(tGrow>=0?'var(--green)':'var(--red)')+'" title="'+esc("По "+tCmpWeeks+" закончившимся неделям, где есть обе цифры")+'">'+(tGrow>=0?'+':'')+tGrow.toFixed(0)+'%</b>'):'<span style="color:var(--muted)">—</span>'}</td></tr>
-  </tbody></table></div>`;
+  </tbody></table></div></div>`;
 }
 function progPlan(key,v){ const G=_rukProg(); const n=parseFloat(v)||0; if(n) G.plans[key]=n; else delete G.plans[key]; _progSave(); renderRuk(); }
 /* Запланированные занятия недели (status=1) — по документации lesson/index по умолчанию

@@ -2830,8 +2830,17 @@ function alfa_obzvon_build(int $offset, int $limit, bool $force = false, ?array 
            Педагогов не берём: в обоих списках их нет, а снимок и так тяжёлый. */
         if (empty($wip['subjects'])) $wip['subjects'] = alfa_simple_ref('subject', $branches);
     }
-    $done = min($total, $offset + count($slice));
-    $complete = ($done >= $total);
+    /* Готовность считаем не по счётчику «сколько кусков прошло», а по тому, чьи занятия реально
+       лежат в черновике. Разница не теоретическая: если Жанна нажмёт «пересобрать сейчас», пока
+       идёт воскресный cron, оба пишут один файл целиком — чей-то кусок затрётся. По счётчику
+       прогон объявил бы себя законченным, и снимок вышел бы дырявым, а по факту наличия дыра
+       сама себя показывает и следующий кусок идёт латать её, а не дальше по списку. */
+    $done = 0; $firstMissing = -1;
+    foreach ($ids as $i => $id) {
+        if (isset($wip['kids'][(string)$id])) { $done++; continue; }
+        if ($firstMissing < 0) $firstMissing = $i;
+    }
+    $complete = ($firstMissing < 0);
     if ($complete) {
         $wip['builtAt'] = date('c');
         $wip['ranBy'] = !empty($GLOBALS['ALFA_OBZVON_CRON']) ? 'cron' : 'вручную';
@@ -2843,7 +2852,7 @@ function alfa_obzvon_build(int $offset, int $limit, bool $force = false, ?array 
     }
     alfa_obzvon_write($d);
     return ['ok' => true, 'done' => $done, 'total' => $total, 'complete' => $complete,
-            'nextOffset' => $complete ? 0 : $done,
+            'nextOffset' => $complete ? 0 : max($firstMissing, 0),
             'builtAt' => $complete ? $d['snap']['builtAt'] : ''];
 }
 /* Весь прогон целиком — для cron, где ограничения по времени сняты. */
