@@ -1936,7 +1936,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-09-06-36";
+const APP_VER="2026-09-06-37";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -13444,7 +13444,7 @@ function _salesHtml(){
   /* ---- месячный блок ---- */
   if(rep.month){
     const m=rep.month, from=m.ym+"-01", to=_salesMonthEnd(m.ym);
-    const tops=_salesTops(from,to), C=_salesCfg();
+    const tops=_salesTops(from,to);
     const mSug=+(m.suggest||0), dActM=(+rep.active||0)-(+m.activePrev||0);
     const monthText=_salesMonthText(rep,tops);
     const srcNote=`дней фактом: ${(m.src||{}).fact||0}, по расписанию Alfa: ${(m.src||{}).planned||0}, из недельного прогноза: ${(m.src||{}).profile||0}`;
@@ -13462,30 +13462,13 @@ function _salesHtml(){
       <tr><td>Комментарий</td><td colspan="2"><textarea class="cell" rows="2" style="width:100%;min-width:280px"
         placeholder="Например: сейчас самое сложное — удержаться" onchange="salesSet('${_jsStr(W)}','monthNote',this.value)">${esc(man.monthNote||"")}</textarea></td></tr>
     </tbody></table>`;
-    const topTab=(list,unit)=>list.length?`<table><thead><tr><th>#</th><th style="text-align:left">Педагог</th>
-        <th style="text-align:right">Уроков</th><th style="text-align:right">Выручка</th><th style="text-align:right">ЗП</th>
-        <th style="text-align:right">${C.metric==="revenue"?"Выручка":"Прибыль"}${unit==="lesson"?" за урок":" за месяц"}</th></tr></thead><tbody>`+
-      list.map((r,i)=>`<tr><td style="text-align:center;color:var(--muted)">${i+1}</td><td><b>${esc(r.name)}</b></td>
-        <td style="text-align:right">${r.lessons}</td><td style="text-align:right">${_gm(r.revenue)}</td>
-        <td style="text-align:right">${r.zp?_gm(r.zp):'<span style="color:var(--muted)">—</span>'}</td>
-        <td style="text-align:right"><b style="color:var(--green)">${_gm(unit==="lesson"?r.perLesson:r.val)}</b></td></tr>`).join("")+
-      `</tbody></table>`:`<div class="callout">За месяц нет посчитанных занятий. Откройте «🏆 Рейтинг педагогов» и нажмите «Посчитать период из Alfa».</div>`;
+    /* Рейтинг педагогов с этой страницы убран (решение Жанны 06.09.2026): он и так живёт
+       отдельной вкладкой «🏆 Рейтинг педагогов», а здесь занимал пол-экрана и в летние месяцы
+       показывал одно случайное занятие. Имена по-прежнему уходят в ТЕКСТ сообщения по итогам
+       месяца — за это отвечает _salesMonthText(rep, tops), поэтому tops выше считается. */
     h+=msg("salesMsgMonth","Сообщение по итогам месяца ("+esc(_salesMonName(m.ym))+")",monthText,"month")+
       `<h3 style="margin:16px 0 6px">Откуда цифры месяца</h3>`+mtab+
-      `<h3 style="margin:16px 0 6px">Рейтинг педагогов за ${esc(_salesMonName(m.ym))}</h3>
-       <div class="hd-actions" style="margin-bottom:8px">
-         <label style="font-size:13px">считать по
-           <select class="cell" style="width:auto" onchange="salesCfgSet('metric',this.value)">
-             <option value="profit"${C.metric==="profit"?" selected":""}>прибыли (выручка − ЗП)</option>
-             <option value="revenue"${C.metric==="revenue"?" selected":""}>выручке</option>
-           </select></label>
-         <label style="font-size:13px">в списке <input class="cell" type="number" min="1" max="30" style="width:64px" value="${C.top}" onchange="salesCfgSet('top',this.value)"> педагогов</label>
-         <label style="font-size:13px" title="Чтобы разовая подмена не попала в топ «за одно занятие»">от <input class="cell" type="number" min="0" max="50" style="width:60px" value="${C.minLessons}" onchange="salesCfgSet('minLessons',this.value)"> уроков за месяц</label>
-       </div>
-       <div style="font-size:12px;color:var(--muted);margin-bottom:6px">Выручка — сумма списаний Alfa за проведённые занятия. ЗП — ${S._wageMode==="fix"?"по фикс-ставкам педагогов (педагог + длительность занятия)":"по справочнику ставок: курс × число пришедших детей"}. В сообщение уходят только имена, в том же порядке.</div>
-       ${tops.noRate?`<div class="callout" style="border-color:var(--terra);font-size:12px;margin-bottom:8px">У ${tops.noRate} занятий из ${tops.lessons} не нашлась ставка (${S._wageMode==="fix"?"педагог не сопоставлен с Alfa или у него не заданы фикс-ставки":"курс не сопоставлен с предметом Alfa или его нет в справочнике ставок"}) — по ним ЗП считается нулевой, и прибыль завышена. Сопоставление: «Публикация групп → ${S._wageMode==="fix"?"педагоги":"предметы"}».</div>`:''}
-       <h4 style="margin:10px 0 4px">Максимальная прибыль за одно занятие</h4>${topTab(tops.perLesson,"lesson")}
-       <h4 style="margin:14px 0 4px">Максимальная прибыль за месяц</h4>${topTab(tops.perMonth,"month")}`;
+      `<div style="font-size:12px;color:var(--muted);margin-top:10px">Рейтинг педагогов за ${esc(_salesMonName(m.ym))} — во вкладке «🏆 Рейтинг педагогов»: там его настраивают и копируют. В текст сообщения выше имена уже подставлены.</div>`;
   }
   h+=_salesCronHtml();
   return h;

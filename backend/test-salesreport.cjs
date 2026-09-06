@@ -222,9 +222,14 @@ const hFull = render({ _salesStore: { reports: { '2025-10-06': rep, '2025-10-27'
                                       settings: { lastRun: '2025-11-02T22:00:11+03:00' } }, _salesWeek: '2025-10-27' });
 check('выбранная неделя — с месячным блоком', hFull.indexOf('Сообщение по итогам месяца') > 0);
 check('в тексте сообщения — оборот месяца', hFull.indexOf('Оборот месяца: 96.568.') > 0);
-check('рейтинг педагогов отрисовался', hFull.indexOf('Козырев Влад') > 0);
+// таблицы рейтинга на этой странице больше нет — он живёт отдельной вкладкой. Но имена
+// по-прежнему уходят в ТЕКСТ сообщения: именно его копируют в чат отдела продаж
+check('таблиц рейтинга на странице нет', hFull.indexOf('Максимальная прибыль за месяц') < 0);
+check('и настроек рейтинга тоже', hFull.indexOf("salesCfgSet('metric'") < 0);
+check('но имена педагогов остались в сообщении', hFull.indexOf('Козырев Влад') > 0);
+check('сказано, где рейтинг искать', hFull.indexOf('во вкладке «🏆 Рейтинг педагогов»') > 0);
 check('поле «идём на» с подсказкой', hFull.indexOf("salesSet('2025-10-27','nextGoal',this.value)") > 0);
-check('переключатель прибыль/выручка на месте', hFull.indexOf("salesCfgSet('metric',this.value)") > 0);
+
 check('нет undefined в разметке', hFull.indexOf('undefined') < 0, hFull.slice(Math.max(0, hFull.indexOf('undefined') - 120), hFull.indexOf('undefined') + 80));
 check('нет NaN в разметке', hFull.indexOf('NaN') < 0, hFull.slice(Math.max(0, hFull.indexOf('NaN') - 120), hFull.indexOf('NaN') + 80));
 check('теги закрыты (баланс <div>)', (hFull.match(/<div/g) || []).length === (hFull.match(/<\/div>/g) || []).length,
