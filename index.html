@@ -1936,7 +1936,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-09-06-35";
+const APP_VER="2026-09-06-36";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -12029,6 +12029,9 @@ function _todayIso(){ const d=new Date(),z=n=>String(n).padStart(2,'0'); return 
 const _RU_MON=["январь","февраль","март","апрель","май","июнь","июль","август","сентябрь","октябрь","ноябрь","декабрь"];
 let _realStore=null, _realBranches=null, _realBranchNames=null, _realBusy=false;
 let _realMonth=(function(){ const d=new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0'); })();
+/* Правки задним числом: кто-то изменил в Alfa уже прошедший день. Сервер сравнивает каждый
+   пересчитанный день с прежним значением и складывает расхождения сюда. */
+let _realChanges=[];
 let _weekPlans=null;
 /* Один и тот же запрос не должен уходить дважды. Разделы «Реализация», «Прогноз по всем»,
    «Рейтинг» и «Отчёт для отдела продаж» каждый зовут это при открытии, и переключение вкладок
@@ -12040,7 +12043,7 @@ async function _realLoadStore(force){
   if(_realLoading) return _realLoading;
   _realLoading=(async()=>{
     const j=await _pubCall("realizationStore",{});
-    _realStore=j.store||{}; _weekPlans=j.weekPlans||{};
+    _realStore=j.store||{}; _weekPlans=j.weekPlans||{}; _realChanges=j.changes||[];
     _realBranches=j.branches||[]; _realBranchNames=j.branchNames||{};
     return true;
   })();
@@ -12070,6 +12073,37 @@ function _realSnapNote(mon){
     w.expectFrozen!=null?(", дней зафиксировано: "+w.expectFrozen):""}.${
     stale?" ⚠️ Снимку больше недели — похоже, воскресный cron не отрабатывает.":""}`;
 }
+/* Правки по конкретному дню. Их может быть несколько подряд (доход, приход, расход) —
+   показываем по одной последней на каждый вид: промежуточные состояния только шумят. */
+function _realChgFor(iso){
+  const out={};
+  (_realChanges||[]).forEach(c=>{ if(c&&c.d===iso) out[c.f]=c; });
+  return Object.keys(out).map(k=>out[k]);
+}
+function _realChgLabel(x){ return {fact:"доход дня",payIn:"приход кассы",payOut:"расход кассы"}[x]||x; }
+function _realChgBadge(iso){
+  const L=_realChgFor(iso); if(!L.length) return "";
+  const t=L.map(c=>_realChgLabel(c.f)+": было "+_gm(c.was)+", стало "+_gm(c.now)
+    +" (замечено "+_tsDMYHM(c.at)+")").join(String.fromCharCode(10));
+  return ` <span style="cursor:help;color:var(--terra-d)" title="${esc(t)}">✎</span>`;
+}
+/* Список правок под таблицей. Само по себе исправление — не ошибка: посещаемость правят,
+   платёж переносят. Важно другое: цифра, которую вы уже отправили в отдел продаж, изменилась,
+   а раньше об этом никто не узнавал. */
+function _realChgHtml(){
+  const L=(_realChanges||[]).slice().reverse().slice(0,40);
+  if(!L.length) return `<div style="font-size:12px;color:var(--muted);margin-top:10px">Правок задним числом не замечено. Модель сравнивает каждый пересчитанный день с прежним значением: по будням — за семь дней назад, по воскресеньям — за тридцать.</div>`;
+  const rows=L.map(c=>{ const d=(+c.now||0)-(+c.was||0);
+    return `<tr><td>${esc(_kassaDMY(c.d))}</td><td>${esc(_realChgLabel(c.f))}</td>
+      <td class="num" style="color:var(--muted)">${_gm(c.was)}</td>
+      <td class="num"><b>${_gm(c.now)}</b></td>
+      <td class="num"><b style="color:${d>=0?"var(--green)":"var(--red)"}">${d>=0?"+":"−"}${_gm(Math.abs(d))}</b></td>
+      <td style="color:var(--muted)">${esc(_tsDMYHM(c.at))}</td></tr>`; }).join("");
+  return `<details style="margin-top:12px" open><summary style="cursor:pointer;font-weight:600">✎ Правки задним числом (${L.length})</summary>
+    <div class="hint" style="margin:6px 0">Кто-то изменил в Alfa уже прошедший день: посещаемость, платёж или его сумму. Модель заметила это при пересчёте и запомнила прежнее значение. Само по себе это не ошибка — но цифра, которую вы уже отправляли, стала другой.</div>
+    <div class="tscroll" style="max-width:720px"><table><thead><tr><th>День</th><th>Что</th><th class="num">Было</th><th class="num">Стало</th><th class="num">Разница</th><th>Замечено</th></tr></thead>
+    <tbody>${rows}</tbody></table></div></details>`;
+}
 function _realHtml(){
   const [Y,M]=_realMonth.split('-').map(Number);
   const dim=new Date(Y,M,0).getDate();
@@ -12098,7 +12132,7 @@ function _realHtml(){
     // у клуба и по занятиям, и по ожиданию совсем другие
     const wd=new Date(Y,M-1,d).getDay(), wknd=(wd===0||wd===6);
     rows+=`<tr${wknd?' class="wknd"':''}${future?' style="opacity:.6"':''}>
-      <td style="text-align:center"${wknd?' title="'+(wd===6?'суббота':'воскресенье')+'"':''}>${d}</td>
+      <td style="text-align:center"${wknd?' title="'+(wd===6?'суббота':'воскресенье')+'"':''}>${d}${_realChgBadge(key)}</td>
       <td style="text-align:right">${(r&&r.lessons)?('<b>'+_gm(r.present)+'</b>'):'<span style="color:var(--muted)">—</span>'}</td>
       <td style="text-align:right">${(r&&r.lessons)?_gm(r.all):''}</td>
       <td style="text-align:right;color:var(--terra-d)">${exp?(frozen
@@ -12154,6 +12188,7 @@ function _realHtml(){
   </tr></thead><tbody>${rows}
     <tr style="border-top:2px solid var(--line)"><td><b>${esc(monLabel)}</b></td><td style="text-align:right"><b style="color:var(--green)">${_gm(tp)}</b></td><td style="text-align:right"><b>${_gm(ta)}</b></td><td style="text-align:right"><b style="color:var(--terra-d)">${tex?_gm(tex):_gm(tpl)}</b></td><td style="text-align:right">${texPct!=null?('<b title="По прошедшим дням: факт '+_gm(texFact)+' из ожидавшихся '+_gm(texDone)+'">'+texPct.toFixed(0)+'%</b>'):''}</td><td style="text-align:right"><b title="Доход месяца: среднее «без пропусков» и «с пропусками»">${_gm((tp+ta)/2)}</b></td><td style="text-align:center"><b>${tl}</b></td></tr>
   </tbody></table></div>
+  ${_realChgHtml()}
   <div style="font-size:12px;color:var(--muted);margin-top:6px">Дней с проведёнными занятиями: ${days}. «Обновить месяц» пересчитывает <b>весь</b> месяц; зафиксированное «ожидается 🔒» он не трогает. Цифра без замка — неделю ещё не фиксировали, она живая и будет меняться; 🧩 — ожидание восстановлено по расписанию задним числом, потому что неделю не успели зафиксировать вовремя.${tex?'':' <b>За этот месяц ожидание не зафиксировано</b> — сравнивать не с чем: нажмите «🔒 Зафиксировать ожидание» на предстоящую неделю или дождитесь cron в воскресенье.'}</div>
   <details style="margin-top:14px"><summary style="cursor:pointer;font-weight:600">🔍 Проверить один день (разведка по филиалам)</summary>
     <div style="padding:8px 0">

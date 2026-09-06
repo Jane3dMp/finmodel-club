@@ -1566,6 +1566,9 @@ switch ($action) {
     case 'realizationStore':
         json_out(['ok' => true, 'store' => alfa_realization_store_read(),
                   'weekPlans' => alfa_weekplan_read(),
+                  // журнал правок задним числом — отдаём вместе с хранилищем: отдельный запрос
+                  // ради двух десятков строк не нужен
+                  'changes' => alfa_changelog_read(),
                   'branches' => alfa_realization_branches(), 'branchNames' => alfa_branch_names()]);
         break;
 

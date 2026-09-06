@@ -594,6 +594,40 @@ function alfa_active_attended(string $mon, ?array $att = null): array {
     }
     return ['count' => count($ids), 'src' => 'attend', 'days' => $days, 'week' => $mon];
 }
+/* ===== ЖУРНАЛ ПРАВОК ЗАДНИМ ЧИСЛОМ =====
+   Вопрос Жанны: «если кто-то в Alfa задним числом что-то поправит — мы узнаем?». Раньше — нет:
+   ночной пересчёт молча перезаписывал дневную строку, и «было 1 658, стало 1 590» не оставалось
+   нигде. Теперь перед записью сравниваем с прежним значением, и расхождение попадает в журнал.
+
+   ⚠️ Пишем ТОЛЬКО когда день уже был проведён (в старой строке есть занятия): иначе в журнал
+   посыпались бы обычные переходы «занятий ещё не было → прошли», а это не правка задним
+   числом, а нормальный ход времени. */
+function alfa_changelog_path(): string {
+    $salt = substr(hash('sha256', __DIR__ . '|changelog1'), 0, 24);
+    return alfa_store_dir() . '/changelog_' . $salt . '.json';
+}
+function alfa_changelog_read(): array {
+    $f = alfa_changelog_path();
+    if (!is_file($f)) return [];
+    $j = json_decode((string)@file_get_contents($f), true);
+    return is_array($j) ? $j : [];
+}
+function alfa_changelog_write(array $d): void {
+    if (count($d) > 400) $d = array_slice($d, -400);      // журнал справочный, вечно копить незачем
+    $f = alfa_changelog_path();
+    $tmp = $f . '.' . getmypid() . '.tmp';
+    $json = json_encode($d, JSON_UNESCAPED_UNICODE);
+    if (@file_put_contents($tmp, $json, LOCK_EX) !== false) { @chmod($tmp, 0660); @rename($tmp, $f); }
+    else @file_put_contents($f, $json, LOCK_EX);
+}
+/* Записать расхождение. $what — что именно поехало: доход дня, приход или расход кассы. */
+function alfa_changelog_add(string $date, string $what, float $was, float $now, array $extra = []): void {
+    if (abs($now - $was) < 0.01) return;
+    $log = alfa_changelog_read();
+    $log[] = ['d' => $date, 'f' => $what, 'was' => round($was, 2),
+              'now' => round($now, 2), 'at' => date('c')] + $extra;
+    alfa_changelog_write($log);
+}
 /* Посчитать реализацию за день по выбранным филиалам и записать в хранилище. */
 function alfa_realization_upsert(string $date, ?array $branches = null): array {
     $r = alfa_realization_day($date, $branches);
@@ -607,6 +641,15 @@ function alfa_realization_upsert(string $date, ?array $branches = null): array {
         foreach (['trialDone', 'trialMissed', 'trialNoCid'] as $k) if (isset($r[$k])) $row[$k] = (int)$r[$k];
     }
     if (!empty($r['trialOk'])) foreach (['trialMissedIds', 'trialDoneIds'] as $k) if (!empty($r[$k])) $row[$k] = $r[$k];
+    /* Поехал ли факт задним числом. Сравниваем ту самую цифру, которой мерят доход везде:
+       среднее «без пропусков» и «с пропусками». Только для дней, которые уже были проведены. */
+    $prevRow = alfa_realization_store_read()[$r['date']] ?? null;
+    if (is_array($prevRow) && (int)($prevRow['lessons'] ?? 0) > 0) {
+        $wasFact = ((float)($prevRow['present'] ?? 0) + (float)($prevRow['all'] ?? 0)) / 2;
+        $nowFact = ((float)$row['present'] + (float)$row['all']) / 2;
+        alfa_changelog_add($r['date'], 'fact', $wasFact, $nowFact,
+            ['wasLes' => (int)($prevRow['lessons'] ?? 0), 'nowLes' => (int)$row['lessons']]);
+    }
     /* Кто пришёл — в свой файл. День без проведённых занятий пишем пустым списком: это
        законный ответ «никто», и он должен отличаться от «день не читали». */
     $att = alfa_attend_read();
@@ -2308,6 +2351,14 @@ function alfa_payments_upsert(string $date, ?array $branches = null, ?array $pre
         else        { $byIn[$name]  = round(($byIn[$name]  ?? 0) + $v, 2); $inc += $v; }
     }
     $st = alfa_pay_store_read();
+    /* Касса задним числом: платёж могли исправить, перенести на другой день или удалить.
+       Сравниваем и приход, и расход — исчезнувший расход так же важен, как исчезнувший приход. */
+    $prevPay = $st[$r['date']] ?? null;
+    if (is_array($prevPay) && isset($prevPay['income'])) {
+        alfa_changelog_add($r['date'], 'payIn', (float)$prevPay['income'], $inc,
+            ['wasN' => (int)($prevPay['count'] ?? 0), 'nowN' => count($r['rows'])]);
+        alfa_changelog_add($r['date'], 'payOut', (float)($prevPay['expense'] ?? 0), $out);
+    }
     $st[$r['date']] = ['income' => round($inc, 2), 'expense' => round($out, 2),
                        'count' => count($r['rows']), 'byIn' => $byIn, 'byOut' => $byOut,
                        'byItem' => $byItem, 'ts' => date('c')];

@@ -65,8 +65,21 @@ const ctx = {
   _realBranchLabel: () => 'Пожарный, 19',
   location: { origin: 'https://app.proznanie.club' },
   _weekPlans: { [NEXT_MON]: { ts, expectFrozen: 7 } },
+  _realChanges: [],
 };
-const API = new Function('ctx', 'with (ctx) { ' + m[0] + ';' + snapSrc + ' return {_realHtml, _realSnapNote}; }')(ctx);
+// журнал правок задним числом рисуется той же функцией — берём НАСТОЯЩИЕ помощники.
+// _realChgLabel и _kassaDMY однострочные, остальные многострочные: пробуем оба вида и берём
+// тот, что короче, иначе однострочный якорь утащил бы за собой следующую функцию целиком.
+const chgSrc = ['_realChgFor', '_realChgLabel', '_realChgBadge', '_realChgHtml', '_kassaDMY'].map(n => {
+  const one = html.match(new RegExp('\\nfunction ' + n + '\\(.*\\}$', 'm'));
+  const many = html.match(new RegExp('\\nfunction ' + n + '\\([^)]*\\)\\s*\\{[\\s\\S]*?\\n\\}', 'm'));
+  const a = one ? one[0] : null, b = many ? many[0] : null;
+  const got = (a && (!b || a.length < b.length)) ? a : b;
+  if (!got) { console.log('не найдено в index.html: ' + n); process.exit(1); }
+  return got;
+}).join(String.fromCharCode(10));
+const API = new Function('ctx', 'with (ctx) { ' + m[0] + ';' + snapSrc + ';' + chgSrc +
+  ' return {_realHtml, _realSnapNote, _realChgHtml}; }')(ctx);
 const h = API._realHtml();
 
 /* --- разбор строк таблицы без DOM: колонки по порядку --- */
@@ -159,6 +172,43 @@ check('видно, сколько дней зафиксировано', h.includ
 check('свежий снимок не помечается тревогой', !API._realSnapNote(NEXT_MON).includes('не отрабатывает'));
 check('снимка нет — сказано прямо и с подсказкой',
     API._realSnapNote('2099-01-04').includes('ещё не было') && API._realSnapNote('2099-01-04').includes('не заведена'));
+
+/* ================= правки задним числом =================
+   Само исправление — не ошибка: посещаемость правят, платёж переносят. Важно, что цифра,
+   которую уже отправили в отдел продаж, стала другой, а раньше об этом никто не узнавал. */
+{
+  // _gm разделяет тысячи НЕразрывным пробелом: без приведения поиск по строке не находит ничего
+  const NBSP = String.fromCharCode(160);
+  const plain = x => String(x).split(NBSP).join(String.fromCharCode(32));
+  check('без правок — так и написано', API._realChgHtml().indexOf('Правок задним числом не замечено') > 0);
+
+  ctx._realChanges = [
+    { d: '2026-09-03', f: 'fact', was: 1658, now: 1590, at: '2026-09-06T22:00:10+03:00', wasLes: 12, nowLes: 12 },
+    { d: '2026-09-04', f: 'payIn', was: 4052, now: 4300, at: '2026-09-06T22:00:12+03:00' },
+    // по одному дню и виду показываем ПОСЛЕДНЮЮ правку: промежуточные состояния только шумят
+    { d: '2026-09-03', f: 'fact', was: 1590, now: 1602, at: '2026-09-07T22:00:09+03:00', wasLes: 12, nowLes: 12 },
+  ];
+  const hc = API._realChgHtml();
+  check('заголовок с числом правок', hc.indexOf('Правки задним числом (3)') > 0, hc.slice(0, 160));
+  check('видно, что было', plain(hc).indexOf('1 658') > 0, hc);
+  check('и что стало', plain(hc).indexOf('1 602') > 0, hc);
+  check('касса тоже попала', hc.indexOf('приход кассы') > 0, hc);
+  check('время замечено местное', hc.indexOf('06.09 22:00') > 0, hc);
+  check('свежие правки сверху', hc.indexOf('07.09 22:00') < hc.indexOf('06.09 22:00'), hc);
+
+  const h2 = API._realHtml();
+  const body2 = h2.slice(h2.indexOf('<tbody>'), h2.indexOf('</tbody>'));
+  const trs2 = body2.split('<tr').slice(1);
+  check('3-е число помечено значком', trs2[2].indexOf('✎') > 0, trs2[2]);
+  check('4-е тоже', trs2[3].indexOf('✎') > 0, trs2[3]);
+  check('а нетронутое 5-е — нет', trs2[4].indexOf('✎') < 0, trs2[4]);
+  check('в подсказке дня — последнее значение, а не промежуточное',
+        plain(trs2[2]).indexOf('стало 1 602') > 0, trs2[2]);
+  check('и оба вида правок по разным дням не смешались',
+        trs2[3].indexOf('приход кассы') > 0 && trs2[2].indexOf('приход кассы') < 0, trs2[3]);
+  ctx._realChanges = [];
+}
+
 
 console.log(bad ? '\n❌ провалено проверок: ' + bad : '\n✅ всё сошлось');
 process.exit(bad ? 1 : 0);
