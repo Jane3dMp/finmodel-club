@@ -141,6 +141,89 @@ delete ctx.S.children['201'];
   check('ошибка amo видна целиком', API.peek().err.indexOf('401') > 0, API.peek().err);
   check('и карта не затёрлась пустой', API._trMgrHtml(201) === '' || true);
 
+  /* ================= рейтинг менеджеров =================
+     Считается по ТЕМ ЖЕ корзинам, что и воронка. Если пересчитывать заново, рейтинг и цифры
+     над ним однажды разойдутся, и верить перестанут обоим. */
+  {
+    const html2 = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+    let s2 = '';
+    for (const n of ['_trMgrStats', '_trMgrTableHtml']) {
+      const m = html2.match(new RegExp('\\nfunction ' + n + '\\([^)]*\\)\\s*\\{[\\s\\S]*?\\n\\}', 'm'));
+      if (!m) { console.log('не найдено в index.html: ' + n); process.exit(1); }
+      s2 += m[0] + '\n';
+    }
+    // корзины воронки подменяем: здесь проверяется сведение, а не сама воронка
+    const kid = (id, done, sum) => ({ id: String(id), les: [{ done: done, sum: sum }] });
+    const FN = {
+      lists: {
+        came:      [kid(201, true, 15), kid(202, true, 45), kid(206, true, 45)],
+        missedAll: [kid(204, false, 0), kid(208, false, 0)],
+        waiting:   [kid(207, false, 0)],
+        noLessons: [kid(203, false, 0)],
+        returning: [kid(205, true, 90)],
+      },
+    };
+    const paid = { '202': true, '206': true };
+    const arch = { '208': true };
+    const mgrOf = { '201': 'Ольга', '202': 'Ольга', '203': 'Ольга', '204': 'Ольга',
+                    '205': 'Мария', '206': 'Мария', '207': 'Мария' };   // у 208 менеджера нет
+    const ctx2 = {
+      _trMgr: {}, _trTar: { '202': {} },
+      _trFunnel: () => FN,
+      _trMgrOf: id => mgrOf[String(id)] || '',
+      _trHasPaid: id => !!paid[String(id)],
+      _trArchived: id => !!arch[String(id)],
+      _gm: n => Math.round(+n || 0).toLocaleString('ru-RU'),
+      esc: x => String(x),
+    };
+    const A2 = new Function('ctx', 'with (ctx) { ' + s2 + ' return {_trMgrStats,_trMgrTableHtml}; }')(ctx2);
+
+    const st = A2._trMgrStats();
+    eq('менеджеров в рейтинге', st.length, 3);            // Ольга, Мария и «не определён»
+    eq('первым — у кого больше дошедших', st[0].name, 'Ольга');
+    check('«не определён» всегда внизу', st[st.length - 1].unknown === true, JSON.stringify(st.map(x => x.name)));
+
+    const o = st.find(x => x.name === 'Ольга');
+    eq('детей у Ольги', o.kids, 4);                       // 201,202,203,204
+    eq('вписаны (есть занятия)', o.enrolled, 3);          // без 203 «без занятий»
+    eq('дошли', o.came, 2);
+    eq('не дошли', o.missed, 1);
+    eq('доходимость = дошли ÷ (дошли + не дошли)', Math.round(o.reach), 67);
+    eq('купили абонемент', o.paid, 1);
+    eq('конверсия = купили ÷ дошли', Math.round(o.conv), 50);
+    eq('списано по проведённым занятиям', o.sum, 60);     // 15 + 45
+    eq('без занятий', o.noLes, 1);
+
+    const m = st.find(x => x.name === 'Мария');
+    eq('возвращенец учтён отдельно', m.back, 1);
+    eq('но его деньги видны', m.sum, 90 + 45);
+    eq('ждущие в доходимость не идут', m.reach, 100);     // дошёл 1, не дошёл 0
+
+    const u = st[st.length - 1];
+    eq('у «не определён» свой ребёнок', u.kids, 1);
+    eq('и он в архиве', u.arch, 1);
+
+    const h2 = A2._trMgrTableHtml();
+    check('таблица нарисована', h2.indexOf('Рейтинг менеджеров (3)') > 0, h2.slice(0, 200));
+    check('есть итоговая строка', h2.indexOf('Итого') > 0);
+    check('итог по дошедшим', h2.indexOf('>3<') > 0, 'дошли всего 3');
+    check('объяснено, что «списано» — не касса', h2.indexOf('не деньги в кассе') > 0);
+    check('объяснено правило доходимости', h2.indexOf('ждущие не в счёт') > 0);
+
+    // абонементы не загружены — колонку нельзя молча показывать нулями
+    ctx2._trTar = {};
+    check('про незагруженные абонементы сказано',
+          A2._trMgrTableHtml().indexOf('Абонементы ещё не загружены') > 0);
+    ctx2._trTar = { '202': {} };
+
+    // менеджеры не подтянуты — рейтинга нет вовсе
+    ctx2._trMgr = null;
+    eq('без карты менеджеров рейтинга нет', A2._trMgrStats(), null);
+    eq('и таблица пустая', A2._trMgrTableHtml(), '');
+    ctx2._trMgr = {};
+  }
+
+
   console.log(bad ? ('\n❌ провалов: ' + bad) : '\n✅ всё сошлось');
   process.exit(bad ? 1 : 0);
 })();

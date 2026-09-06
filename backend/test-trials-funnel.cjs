@@ -34,7 +34,7 @@ function build(kids, newIds, opts) {
     _trFunBusy: !!o.busy,
     // менеджеры из amo подтягиваются отдельной кнопкой; здесь их нет — воронка должна рисоваться и так
     _trMgr: o.mgr || null, _trMgrBusy: false, _trMgrErr: '', _trMgrStat: null,
-    _trMgrHtml: () => '', _trMgrOf: () => '',
+    _trMgrHtml: () => '', _trMgrOf: () => '', _trMgrTableHtml: () => '',
     _trFunProg: o.prog || '',
     _trRefs: { subjects: { 7: 'Арт-студия', 9: 'Пескография' }, teachers: {} },
     _trCards: o.cards || {},

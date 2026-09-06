@@ -1936,7 +1936,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-09-06-39";
+const APP_VER="2026-09-06-40";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -10913,6 +10913,87 @@ function trPrintMissedWeek(){
   w.document.close();
   setTimeout(()=>{ try{ w.focus(); w.print(); }catch(e){} }, 300);
 }
+/* ===== РЕЙТИНГ МЕНЕДЖЕРОВ =====
+   Считаем по ТЕМ ЖЕ корзинам, что и воронка (_trFunnel), а не пересчитываем заново: иначе
+   рейтинг и цифры над ним начали бы расходиться, и верить перестали бы обоим.
+   Всё, что можно достать из этих данных: сколько детей за менеджером, сколько вписано,
+   дошло, не дошло, ждём, доходимость, сколько купили абонемент, конверсия из дошедших
+   в оплату, сколько списано по проведённым занятиям, без занятий, возвращенцы, в архиве. */
+function _trMgrStats(){
+  const fn=_trFunnel(); if(!fn||!_trMgr) return null;
+  const by={};
+  const pick=nm=>{
+    const k=nm||"менеджер не определён";
+    return by[k]||(by[k]={name:k, unknown:!nm, kids:0, enrolled:0, came:0, missed:0,
+                          waiting:0, noLes:0, back:0, paid:0, sum:0, arch:0});
+  };
+  const add=(rows,bucket)=>rows.forEach(r=>{
+    const m=pick(_trMgrOf(r.id));
+    m.kids++; m[bucket]++;
+    if(bucket==="came"||bucket==="missed"||bucket==="waiting") m.enrolled++;
+    if(_trHasPaid(r.id)) m.paid++;
+    if(_trArchived(r.id)) m.arch++;
+    /* Списание по проведённому занятию — единственные настоящие деньги в этих данных.
+       Это НЕ оплата в кассу: абонемент могли купить раньше, а списывается он по занятиям. */
+    (r.les||[]).forEach(x=>{ if(x.done) m.sum+=(+x.sum||0); });
+  });
+  add(fn.lists.came,"came"); add(fn.lists.missedAll,"missed"); add(fn.lists.waiting,"waiting");
+  add(fn.lists.noLessons,"noLes"); add(fn.lists.returning,"back");
+  const rows=Object.keys(by).map(k=>by[k]);
+  rows.forEach(m=>{
+    const base=m.came+m.missed;                 // ждущих в доходимость не берём: их черёд не настал
+    m.reach=base?(100*m.came/base):null;
+    m.conv=m.came?(100*m.paid/m.came):null;     // купить абонемент может только тот, кто дошёл
+  });
+  rows.sort((a,b)=>{
+    if(a.unknown!==b.unknown) return a.unknown?1:-1;   // «не определён» всегда внизу
+    return (b.came-a.came)||(b.kids-a.kids)||a.name.localeCompare(b.name,"ru");
+  });
+  return rows;
+}
+function _trMgrTableHtml(){
+  const rows=_trMgrStats();
+  if(!rows||!rows.length) return "";
+  const pc=v=>v==null?`<span style="color:var(--muted)">—</span>`:`<b style="color:${v>=70?"var(--green)":(v>=40?"#C9922E":"var(--red)")}">${Math.round(v)}%</b>`;
+  const T={kids:0,enrolled:0,came:0,missed:0,waiting:0,noLes:0,back:0,paid:0,sum:0,arch:0};
+  rows.forEach(m=>Object.keys(T).forEach(k=>T[k]+=m[k]));
+  const tr=m=>`<tr${m.unknown?" style=\"color:var(--muted)\"":""}>
+    <td style="text-align:left">${m.unknown?"":"<b>"}${esc(m.name)}${m.unknown?"":"</b>"}</td>
+    <td class="num">${m.kids}</td><td class="num">${m.enrolled}</td>
+    <td class="num" style="color:var(--green)">${m.came}</td>
+    <td class="num" style="color:var(--red)">${m.missed}</td>
+    <td class="num">${m.waiting}</td><td class="num">${pc(m.reach)}</td>
+    <td class="num">${m.paid}</td><td class="num">${pc(m.conv)}</td>
+    <td class="num">${_gm(m.sum)}</td>
+    <td class="num" style="color:var(--muted)">${m.noLes||""}</td>
+    <td class="num" style="color:var(--muted)">${m.back||""}</td>
+    <td class="num" style="color:var(--muted)">${m.arch||""}</td></tr>`;
+  const tarNote=(!_trTar||!Object.keys(_trTar).length)
+    ? `<div class="hint" style="margin:6px 0">Абонементы ещё не загружены — колонки «купили» и «конверсия» пока пустые.</div>` : "";
+  return `<details style="margin:10px 0" open><summary style="cursor:pointer;font-weight:600">🏅 Рейтинг менеджеров (${rows.length})</summary>
+    <div class="hint" style="margin:6px 0">Считается по тем же корзинам, что и цифры выше, только по этому набору. Менеджер — ответственный по сделке amoCRM, связь по телефону. <b>Доходимость</b> = дошли ÷ (дошли + не дошли), ждущие не в счёт. <b>Конверсия</b> = купили абонемент ÷ дошли. <b>Списано</b> — сумма списаний по проведённым занятиям, а не деньги в кассе.</div>
+    ${tarNote}
+    <div class="tscroll"><table><thead><tr>
+      <th style="text-align:left">Менеджер</th><th class="num">Детей</th><th class="num" title="Есть хотя бы одно занятие в расписании">Вписаны</th>
+      <th class="num">Дошли</th><th class="num">Не дошли</th><th class="num">Ждём</th><th class="num">Доходимость</th>
+      <th class="num" title="Есть действующий платный абонемент или остаток на балансе">Купили</th><th class="num">Конверсия</th>
+      <th class="num" title="Сумма списаний по проведённым занятиям этих детей">Списано</th>
+      <th class="num" title="Ребёнок в наборе есть, а занятий в расписании нет">Без занятий</th>
+      <th class="num" title="Занимались до 1 сентября — не новые клиенты">Раньше</th>
+      <th class="num" title="Ребёнок уже в архиве Alfa">В архиве</th>
+    </tr></thead><tbody>${rows.map(tr).join("")}
+      <tr style="border-top:2px solid var(--line)"><td style="text-align:left"><b>Итого</b></td>
+      <td class="num"><b>${T.kids}</b></td><td class="num"><b>${T.enrolled}</b></td>
+      <td class="num"><b style="color:var(--green)">${T.came}</b></td>
+      <td class="num"><b style="color:var(--red)">${T.missed}</b></td>
+      <td class="num"><b>${T.waiting}</b></td>
+      <td class="num">${pc((T.came+T.missed)?(100*T.came/(T.came+T.missed)):null)}</td>
+      <td class="num"><b>${T.paid}</b></td>
+      <td class="num">${pc(T.came?(100*T.paid/T.came):null)}</td>
+      <td class="num"><b>${_gm(T.sum)}</b></td>
+      <td class="num">${T.noLes||""}</td><td class="num">${T.back||""}</td><td class="num">${T.arch||""}</td></tr>
+    </tbody></table></div></details>`;
+}
 function _trFunnelHtml(){
   const set=_trNewSet();
   if(!set||!set.size) return "";
@@ -10948,6 +11029,7 @@ function _trFunnelHtml(){
     ${f.noLessons?tile(f.noLessons,"без занятий","var(--muted)","Ребёнок в наборе есть, а в расписании Alfa занятий у него нет"):""}
     ${f.returning?tile(f.returning,"ходили раньше","var(--muted)","Занимались в клубе до 1 сентября — это не новые клиенты, в остальные цифры они не входят"):""}
   </div>`;
+  const mgrTab=_trMgrTableHtml();
   const warn=f.cameFree?`<div class="callout" style="border-color:#C9922E;font-size:12px;margin-bottom:8px">
     У ${f.cameFree} из дошедших есть занятия, где отметка стоит, а списания нет — абонемент не проставили.</div>`:"";
   /* Прогноз: кого и когда ждать. Именно то, ради чего Жанна просила — «чтобы админ знал, кто
@@ -10998,7 +11080,7 @@ function _trFunnelHtml(){
     ${_trListHtml("Без занятий",f.lists.noLessons,"var(--muted)",
         "в наборе есть, в расписании Alfa занятий нет"+(function(){var a=f.lists.noLessons.filter(x=>_trArchived(x.id)).length;return a?(" · из них в архиве "+a):"";})())}
   </div>`;
-  return head+tiles+warn+lists+fc;
+  return head+tiles+warn+mgrTab+lists+fc;
 }
 function _trDayLabel(d){
   const dn=["вс","пн","вт","ср","чт","пт","сб"];
