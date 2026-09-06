@@ -1932,7 +1932,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-09-06-33";
+const APP_VER="2026-09-06-34";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -11381,7 +11381,7 @@ function _obzvonHtml(){
     +blk("Не дошли из новых","Записан на занятия, они прошли — не был ни на одном. В печати: телефон, куда был записан, абонемент, баланс, ЭВ 26/27.",
          a,"new","печать списка менеджера","obzPrintNew","var(--red)")
     +blk("Прошлогодние: не пришли на курс","Все остальные дети клуба, по курсам: где занятия прошли, а ребёнка не было ни разу. В печати: телефон, курс, куда всё-таки ходит, абонемент, баланс, ЭВ 26/27.",
-         b,"печать списка админов","obzPrintOld","#C9922E");
+         b,"old","печать списка админов","obzPrintOld","#C9922E");
 }
 /* ---- РАСХОДЫ ЕЖЕДНЕВНО ----
    Расходы приходят из Alfa (тип «Расход») со статьёй; их собирает cron в 22:00.
@@ -13510,6 +13510,33 @@ function _progWeekAlfa(w){
   const fact=(p+a)/2;
   return {fact:fact, plan:fact+pl, planned:pl};
 }
+/* ===== ТОТ ЖЕ ПЕРИОД ПРОШЛОГО УЧЕБНОГО ГОДА =====
+   Сдвиг ровно на 52 недели (364 дня), а НЕ на календарный год: у клуба выходной день даёт
+   втрое больше будня, и сравнивать надо понедельник с понедельником — иначе разница покажет
+   сдвиг календаря, а не работу. Неделе 31.08.2026 соответствует 01–07.09.2025.
+   days — по скольким из семи дней есть данные: прошлогодних дней в хранилище обычно нет,
+   и неполную неделю нельзя молча выдавать за целую. */
+function _progLyMon(w){ const d=new Date(w.mon); d.setDate(d.getDate()-364); return d; }
+function _progLyFact(w){
+  const mon=_progLyMon(w); let p=0,a=0,days=0;
+  for(let i=0;i<7;i++){ const d=new Date(mon); d.setDate(d.getDate()+i);
+    const r=(_realStore||{})[_dIso(d)]; if(!r) continue;
+    days++; p+=(+r.present||0); a+=(+r.all||0); }
+  const sun=new Date(mon); sun.setDate(sun.getDate()+6);
+  return {fact:(p+a)/2, days:days, from:_dIso(mon), to:_dIso(sun)};
+}
+/* Каких прошлогодних дней не хватает. Только для недель, которые в этом году уже начались:
+   сравнивать будущую неделю не с чем, а тянуть ради неё год назад — впустую жечь Alfa. */
+function _progLyMissing(){
+  const today=_todayIso(), need=[];
+  _progWeeks().forEach(w=>{
+    if(w.key>today) return;
+    const mon=_progLyMon(w);
+    for(let i=0;i<7;i++){ const d=new Date(mon); d.setDate(d.getDate()+i);
+      const k=_dIso(d); if(!(_realStore||{})[k]) need.push(k); }
+  });
+  return need;
+}
 /* ===== ЗАМОК НЕДЕЛЬНОГО ПРОГНОЗА =====
    Один случайный клик по «Зафиксировать неделю» затёр цифру закончившейся недели, и взять её
    было больше неоткуда. Теперь запертую неделю не меняет ничто — ни кнопка, ни воскресный cron,
@@ -13540,6 +13567,9 @@ function _progPlanCell(key, snap){
 function _progHtml(){
   const G=_rukProg(), weeks=_progWeeks(), today=_todayIso();
   let tPlan=0,tFact=0, rows="";
+  // итог «к прошлому году» складываем ТОЛЬКО по сопоставимым неделям: закончившимся, где есть
+  // обе цифры. Иначе сумма этого года считалась бы по одному набору недель, а прошлого — по другому
+  let tLy=0, tFactCmp=0, tCmpWeeks=0;
   let lastMon="";
   weeks.forEach((w,i)=>{
     const A=_progWeekAlfa(w);
@@ -13556,30 +13586,51 @@ function _progHtml(){
     const z=n=>String(n).padStart(2,'0');
     const range=z(w.mon.getDate())+'.'+z(w.mon.getMonth()+1)+'–'+z(w.sun.getDate())+'.'+z(w.sun.getMonth()+1);
     const future=w.key>today;
+    /* Прошлый год и рост к нему. Рост считаем только когда есть обе цифры: «−100%» на неделе,
+       которая ещё идёт или ещё не наступила, — это не падение, а отсутствие данных. */
+    const LY=_progLyFact(w), lyVal=LY.days?LY.fact:null, lyPart=(LY.days>0&&LY.days<7);
+    const running=(!future && _dIso(w.sun)>=today);
+    const gr=(lyVal>0&&fact>0)?(100*fact/lyVal-100):null;
+    const grNote=(lyPart?"прошлый год посчитан по "+LY.days+" из 7 дней — сравнение неполное. ":"")
+      +(running?"неделя ещё идёт: часть дней впереди. ":"")+"К "+LY.from+" – "+LY.to;
+    if(!lyPart && !running && lyVal>0 && fact>0){ tLy+=lyVal; tFactCmp+=fact; tCmpWeeks++; }
     rows+=`<tr${future?' style="opacity:.5"':''}>
       <td style="color:var(--muted)">${showMon?esc(monName):''}</td>
       <td style="white-space:nowrap">${range}</td>
       <td style="text-align:right;white-space:nowrap">${_progPlanCell(w.key,snap)}</td>
       <td style="text-align:right">${fact!=null?('<b>'+_gm(fact)+'</b>'):'<span style="color:var(--muted)">—</span>'}</td>
       <td style="text-align:right">${pct!=null?('<b style="color:'+(pct>=100?'var(--green)':(pct>=85?'#C9922E':'var(--red)'))+'">'+pct.toFixed(0)+'%</b>'):'<span style="color:var(--muted)">—</span>'}</td>
+      <td style="text-align:right;color:var(--muted)">${lyVal!=null
+        ? '<span title="'+esc(LY.from+" – "+LY.to+(lyPart?(" · есть только "+LY.days+" из 7 дней"):""))+'">'+_gm(lyVal)+(lyPart?' ⚠️':'')+'</span>'
+        : '—'}</td>
+      <td style="text-align:right">${gr!=null
+        ? '<b style="color:'+((lyPart||running)?'var(--muted)':(gr>=0?'var(--green)':'var(--red)'))+'" title="'+esc(grNote)+'">'+(gr>=0?'+':'')+gr.toFixed(0)+'%</b>'
+        : '<span style="color:var(--muted)">—</span>'}</td>
     </tr>`;
   });
   const tPct=(tPlan>0&&tFact>0)?(100*tFact/tPlan):null;
+  const tGrow=(tLy>0&&tFactCmp>0)?(100*tFactCmp/tLy-100):null;
+  const lyNeed=_progLyMissing();
   const haveAny=weeks.some(w=>_progWeekAlfa(w)!=null);
-  return `<div class="callout" style="margin-bottom:10px;font-size:12px">Недели учебного года (пн–вс). <b>Прогноз Alfa</b> — сумма списаний по запланированным занятиям (сверено с отчётом «Прогноз оплаты»: совпадает), фиксируется 🔒 в воскресенье 22:00. Замок держит цифру от случайного нажатия: под ним её не изменит ни «Зафиксировать неделю», ни правка руками. Воскресный cron — исключение, он пересобирает прогноз в любом случае. Нажмите 🔒, чтобы снять замок и поправить прогноз руками, и 🔓 — чтобы запереть обратно. <b>Доход (факт)</b> — реализация за дни недели: каждый день в 22:00 cron забирает доход из Alfa и он суммируется в свою неделю.</div>
+  return `<div class="callout" style="margin-bottom:10px;font-size:12px">Недели учебного года (пн–вс). <b>Прогноз Alfa</b> — сумма списаний по запланированным занятиям (сверено с отчётом «Прогноз оплаты»: совпадает), фиксируется 🔒 в воскресенье 22:00. Замок держит цифру от случайного нажатия: под ним её не изменит ни «Зафиксировать неделю», ни правка руками. Воскресный cron — исключение, он пересобирает прогноз в любом случае. Нажмите 🔒, чтобы снять замок и поправить прогноз руками, и 🔓 — чтобы запереть обратно. <b>Доход (факт)</b> — реализация за дни недели: каждый день в 22:00 cron забирает доход из Alfa и он суммируется в свою неделю.<br><b>Год назад</b> — та же неделя прошлого учебного года: сдвиг ровно на 52 недели, чтобы понедельник сравнивался с понедельником, а не с воскресеньем. Прошлогодних дней в хранилище нет — нажмите «Подтянуть прошлый год». <b>Рост</b> считается только по закончившимся неделям, где есть обе цифры.</div>
   <div class="hd-actions" style="margin-bottom:10px">
     <button class="btn sm" id="progPullBtn" onclick="progPull()">🔄 Обновить факт из Alfa</button>
     <button class="btn ghost sm" id="fcWeekBtn" onclick="progForecastWeek()" title="Посчитать прогноз текущей недели сейчас (обычно это делает cron)">🧮 Посчитать прогноз недели</button>
     <button class="btn ghost sm" id="progSnapBtn" onclick="progSnapshot()" title="Зафиксировать прогноз на текущую неделю (обычно это делает cron в вс 22:00)">🔒 Зафиксировать неделю</button>
+    <button class="btn ghost sm" id="progLyBtn" onclick="progPullLastYear()"${lyNeed.length?"":" disabled"}
+      title="Читает из Alfa те же недели прошлого учебного года — только для недель, которые в этом году уже начались">${
+      lyNeed.length?("📆 Подтянуть прошлый год ("+lyNeed.length+" "+_kassaDayWord(lyNeed.length)+")"):"📆 Прошлый год подтянут"}</button>
     <span id="progPullProg" style="font-size:12px;color:var(--muted)">${haveAny?'':'Пока пусто — нажмите «Обновить факт».'}</span>
   </div>
   <div class="tscroll" style="max-width:760px"><table><thead><tr>
-    <th style="text-align:left">Месяц</th><th style="text-align:left">Неделя</th><th style="text-align:right">Прогноз Alfa</th><th style="text-align:right">Доход (факт)</th><th style="text-align:right">%</th>
+    <th style="text-align:left">Месяц</th><th style="text-align:left">Неделя</th><th style="text-align:right">Прогноз Alfa</th><th style="text-align:right">Доход (факт)</th><th style="text-align:right">%</th><th style="text-align:right" title="Та же неделя прошлого учебного года — сдвиг ровно на 52 недели, чтобы понедельник сравнивался с понедельником">Год назад</th><th style="text-align:right" title="Рост дохода к той же неделе прошлого года">Рост</th>
   </tr></thead><tbody>${rows}
     <tr style="border-top:2px solid var(--line)"><td colspan="2"><b>Итого за год</b></td>
       <td style="text-align:right"><b>${_gm(tPlan)}</b></td>
       <td style="text-align:right"><b style="color:var(--green)">${_gm(tFact)}</b></td>
-      <td style="text-align:right">${tPct!=null?('<b>'+tPct.toFixed(0)+'%</b>'):'—'}</td></tr>
+      <td style="text-align:right">${tPct!=null?('<b>'+tPct.toFixed(0)+'%</b>'):'—'}</td>
+      <td style="text-align:right;color:var(--muted)">${tLy?('<b title="'+esc("Сопоставимых недель: "+tCmpWeeks+" · в этом году за них "+_gm(tFactCmp))+'">'+_gm(tLy)+'</b>'):'—'}</td>
+      <td style="text-align:right">${tGrow!=null?('<b style="color:'+(tGrow>=0?'var(--green)':'var(--red)')+'" title="'+esc("По "+tCmpWeeks+" закончившимся неделям, где есть обе цифры")+'">'+(tGrow>=0?'+':'')+tGrow.toFixed(0)+'%</b>'):'<span style="color:var(--muted)">—</span>'}</td></tr>
   </tbody></table></div>`;
 }
 function progPlan(key,v){ const G=_rukProg(); const n=parseFloat(v)||0; if(n) G.plans[key]=n; else delete G.plans[key]; _progSave(); renderRuk(); }
@@ -13681,6 +13732,27 @@ async function progSnapshot(week){
       : ("Зафиксировано ✓ ("+_gm(j.plan)+")");
     const b=document.getElementById("rukBody"); if(b) b.innerHTML=_progHtml();
   }catch(e){ const b=document.getElementById("rukBody"); if(b){ const d=document.createElement('div'); d.innerHTML=_pubErrHtml(e,"фиксация прогноза"); b.insertBefore(d.firstChild,b.firstChild); } }
+  finally{ _realBusy=false; if(btn) btn.disabled=false; }
+}
+/* Прошлогодние дни в дневном хранилище не заводятся сами: cron считает только свежие. Тянем
+   их по требованию и только за недели, которые в этом году уже начались, — иначе один клик
+   означал бы 364 обхода Alfa. Дальше цифры лежат в хранилище и повторно не запрашиваются. */
+async function progPullLastYear(){
+  if(_realBusy) return;
+  const btn=document.getElementById("progLyBtn"), prog=document.getElementById("progPullProg");
+  const dates=_progLyMissing();
+  if(!dates.length){ toast("Прошлый год уже подтянут"); return; }
+  _realBusy=true; if(btn) btn.disabled=true;
+  try{
+    _realStore=_realStore||{};
+    for(let i=0;i<dates.length;i+=5){
+      if(prog) prog.textContent="Читаю прошлый год из Alfa… "+Math.min(i+5,dates.length)+"/"+dates.length;
+      const j=await _pubCall("realizationPull",{dates:dates.slice(i,i+5)});
+      Object.assign(_realStore, j.updated||{});
+    }
+    if(prog) prog.textContent="Готово ✓";
+    const b=document.getElementById("rukBody"); if(b) b.innerHTML=_progHtml();
+  }catch(e){ if(prog) prog.textContent=""; const b=document.getElementById("rukBody"); if(b){ const d=document.createElement("div"); d.innerHTML=_pubErrHtml(e,"прошлый год"); b.insertBefore(d.firstChild,b.firstChild); } }
   finally{ _realBusy=false; if(btn) btn.disabled=false; }
 }
 /* посчитать окно вокруг сегодня: 7 дней назад (факт) + 35 вперёд (прогноз по расписанию) */
