@@ -1923,7 +1923,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-09-06-12";
+const APP_VER="2026-09-06-13";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -10540,7 +10540,7 @@ function _trLesState(L, today){
 function _trFunnel(){
   if(!_trFun) return null;
   const today=_trToday();
-  const f={enrolled:0, came:0, cameFree:0, missedAll:0, waiting:0, noLessons:0, ahead:[],
+  const f={enrolled:0, came:0, cameFree:0, missedAll:0, missedButAhead:0, waiting:0, noLessons:0, ahead:[],
            lists:{came:[], missedAll:[], waiting:[], noLessons:[]}};
   const set=_trNewSet()||new Set();
   set.forEach(idStr=>{
@@ -10548,18 +10548,24 @@ function _trFunnel(){
     if(!L) return;
     if(!L.length){ f.noLessons++; f.lists.noLessons.push({id:idStr, les:[]}); return; }
     f.enrolled++;
-    let came=false, cameFree=false, ahead=false;
+    let came=false, cameFree=false, ahead=false, past=false;
     const marked=L.map(x=>{
       const st=_trLesState(x,today);
-      if(st==="came") came=true;
-      else if(st==="came_free"){ came=true; cameFree=true; }
+      if(st==="came"){ came=true; past=true; }
+      else if(st==="came_free"){ came=true; cameFree=true; past=true; }
+      else if(st==="missed") past=true;                 // занятие прошло, ребёнка не было
       else if(st==="ahead"){ ahead=true; f.ahead.push({id:idStr, les:x}); }
       return Object.assign({}, x, {st});
     });
-    const row={id:idStr, les:marked};
+    const row={id:idStr, les:marked, ahead:ahead};
+    /* ⚠️ Корзина определяется ПРОШЕДШИМИ занятиями, а не будущими. Раньше «не дошёл ни разу»
+       требовал, чтобы впереди тоже ничего не осталось, — а у детей регулярные занятия до мая,
+       поэтому условие не выполнялось почти никогда и цифра всегда была нулём. Главное же:
+       ребёнок, пропустивший вчерашнее занятие, но записанный на следующую неделю, попадал в
+       «ждём» — то есть именно тот, кому надо звонить, прятался в спокойной корзине. */
     if(came){ f.came++; if(cameFree) f.cameFree++; f.lists.came.push(row); }
-    else if(ahead){ f.waiting++; f.lists.waiting.push(row); }
-    else { f.missedAll++; f.lists.missedAll.push(row); }
+    else if(past){ f.missedAll++; if(ahead) f.missedButAhead++; f.lists.missedAll.push(row); }
+    else { f.waiting++; f.lists.waiting.push(row); }
   });
   f.ahead.sort((a,b)=>(a.les.date+a.les.from).localeCompare(b.les.date+b.les.from));
   Object.keys(f.lists).forEach(k=>f.lists[k].sort((a,b)=>_trKidName(a.id).localeCompare(_trKidName(b.id),"ru")));
@@ -10655,8 +10661,8 @@ function _trFunnelHtml(){
   const tiles=`<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">
     ${tile(f.enrolled,"вписаны на занятия","","Детей набора, у которых есть хотя бы одно занятие в периоде")}
     ${tile(f.came,"дошли","var(--green)","Были хотя бы на одном занятии")}
-    ${tile(f.missedAll,"не дошли ни разу","var(--red)","Занятия были, но ребёнок не пришёл ни на одно, и впереди ничего не запланировано")}
-    ${tile(f.waiting,"ждём","var(--terra)","Ещё не были, но занятия впереди есть")}
+    ${tile(f.missedAll,"не дошли","var(--red)","Занятия уже прошли, а ребёнок не был ни на одном. Именно этим нужен звонок")}
+    ${tile(f.waiting,"ждём","var(--terra)","Прошедших занятий ещё не было — первое только впереди")}
     ${f.noLessons?tile(f.noLessons,"без занятий","var(--muted)","Ребёнок в наборе есть, а в расписании Alfa занятий у него нет"):""}
   </div>`;
   const warn=f.cameFree?`<div class="callout" style="border-color:#C9922E;font-size:12px;margin-bottom:8px">
@@ -10681,8 +10687,8 @@ function _trFunnelHtml(){
      глазами, а не верить счётчику. */
   const lists=`<div style="margin:6px 0 10px">
     ${_trListHtml("Дошли",f.lists.came,"var(--green)","были хотя бы на одном занятии")}
-    ${_trListHtml("Не дошли ни разу",f.lists.missedAll,"var(--red)","занятия были, впереди ничего не осталось")}
-    ${_trListHtml("Ждём",f.lists.waiting,"var(--terra)","ещё не были, но занятия впереди есть")}
+    ${_trListHtml("Не дошли",f.lists.missedAll,"var(--red)","занятия прошли, ребёнка не было ни на одном"+(f.missedButAhead?(" · у "+f.missedButAhead+" есть занятия впереди"):""))}
+    ${_trListHtml("Ждём",f.lists.waiting,"var(--terra)","прошедших занятий ещё не было, первое впереди")}
     ${_trListHtml("Без занятий",f.lists.noLessons,"var(--muted)",
         "в наборе есть, в расписании Alfa занятий нет"+(function(){var a=f.lists.noLessons.filter(x=>_trArchived(x.id)).length;return a?(" · из них в архиве "+a):"";})())}
   </div>`;
