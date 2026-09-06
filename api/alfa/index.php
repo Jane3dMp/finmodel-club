@@ -1579,6 +1579,19 @@ switch ($action) {
         json_out(['ok' => true] + $snap + ['weekPlans' => alfa_weekplan_read(), 'store' => alfa_realization_store_read()]);
         break;
 
+    // --- НЕДЕЛЬНЫЙ ПРОГНОЗ: снять/поставить замок и поправить цифру руками ---
+    //     Под замком не проходит ничто: ни эта правка, ни пересчёт, ни cron. Снятие замка —
+    //     отдельное действие, оно и защищает от случайного нажатия «Зафиксировать неделю».
+    case 'weekPlanSet':
+        $wk = (string)($in['week'] ?? '');
+        if ($wk === '') json_out(['ok' => false, 'error' => 'не указана неделя'], 400);
+        $plan = (array_key_exists('plan', $in) && $in['plan'] !== null && $in['plan'] !== '')
+                ? (float)$in['plan'] : null;
+        $lock = array_key_exists('locked', $in) ? (bool)$in['locked'] : null;
+        $r = alfa_weekplan_set($wk, $plan, $lock, (string)($user['email'] ?? ''));
+        json_out($r + ['weekPlans' => alfa_weekplan_read()], empty($r['ok']) ? 409 : 200);
+        break;
+
     // --- ЗАМОРОЗИТЬ «ОЖИДАЛОСЬ» НА НЕДЕЛЮ (обычно делает cron в вс 22:00) ---
     //     Раз записанное значение не трогается: с ним потом сравнивается реализация.
     //     force:true — перезаписать (например, расписание переделали до начала недели).

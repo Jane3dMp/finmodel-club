@@ -1923,7 +1923,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-09-06-28";
+const APP_VER="2026-09-06-29";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -13083,6 +13083,33 @@ function _progWeekAlfa(w){
   const fact=(p+a)/2;
   return {fact:fact, plan:fact+pl, planned:pl};
 }
+/* ===== ЗАМОК НЕДЕЛЬНОГО ПРОГНОЗА =====
+   Один случайный клик по «Зафиксировать неделю» затёр цифру закончившейся недели, и взять её
+   было больше неоткуда. Теперь запертую неделю не меняет ничто — ни кнопка, ни воскресный cron,
+   ни ручная правка; сначала надо снять замок. У старых записей поля locked нет: начавшаяся
+   неделя считается запертой, будущая — нет (её cron ещё уточняет по свежему расписанию). */
+function _progLocked(key, w){
+  if(!w) return false;
+  if(w.locked!==undefined) return !!w.locked;
+  return key<=_todayIso();
+}
+function _progLockBtn(key,on,title){
+  return `<button title="${esc(title)}" onclick="progLock('${key}',${on?"true":"false"})"
+    style="background:none;border:0;cursor:pointer;font-size:13px;padding:0 0 0 4px;line-height:1">${on?"🔓":"🔒"}</button>`;
+}
+function _progPlanCell(key, snap){
+  if(!snap) return `<span style="color:var(--muted)">—</span>`;
+  const v=+snap.plan||0, man=(snap.src==="manual");
+  if(_progLocked(key,snap)){
+    const t="Зафиксирован "+_tsDMYHM(snap.ts)+(man?" · поправлено руками"+(snap.by?(" ("+snap.by+")"):""):"")
+           +". Нажмите замок, чтобы поправить.";
+    return `<span style="color:var(--terra-d)" title="${esc(t)}">${_gm(v)}</span>`+_progLockBtn(key,false,"Снять замок и поправить руками");
+  }
+  return `<input class="cell" type="number" step="0.01" style="width:96px;text-align:right"
+    value="${v||""}" placeholder="—" title="Замок снят — можно поправить прогноз руками"
+    onchange="progSetPlan('${key}',this.value)">`
+    +_progLockBtn(key,true,"Запереть: цифру больше не изменит ни пересчёт, ни cron");
+}
 function _progHtml(){
   const G=_rukProg(), weeks=_progWeeks(), today=_todayIso();
   let tPlan=0,tFact=0, rows="";
@@ -13105,14 +13132,14 @@ function _progHtml(){
     rows+=`<tr${future?' style="opacity:.5"':''}>
       <td style="color:var(--muted)">${showMon?esc(monName):''}</td>
       <td style="white-space:nowrap">${range}</td>
-      <td style="text-align:right">${auto!=null?('<span style="color:var(--terra-d)" title="Из Alfa, зафиксирован '+esc(String(snap.ts||'').slice(0,16).replace("T"," "))+'">'+_gm(auto)+' 🔒</span>'):'<span style="color:var(--muted)">—</span>'}</td>
+      <td style="text-align:right;white-space:nowrap">${_progPlanCell(w.key,snap)}</td>
       <td style="text-align:right">${fact!=null?('<b>'+_gm(fact)+'</b>'):'<span style="color:var(--muted)">—</span>'}</td>
       <td style="text-align:right">${pct!=null?('<b style="color:'+(pct>=100?'var(--green)':(pct>=85?'#C9922E':'var(--red)'))+'">'+pct.toFixed(0)+'%</b>'):'<span style="color:var(--muted)">—</span>'}</td>
     </tr>`;
   });
   const tPct=(tPlan>0&&tFact>0)?(100*tFact/tPlan):null;
   const haveAny=weeks.some(w=>_progWeekAlfa(w)!=null);
-  return `<div class="callout" style="margin-bottom:10px;font-size:12px">Недели учебного года (пн–вс). <b>Прогноз Alfa</b> — сумма списаний по запланированным занятиям (сверено с отчётом «Прогноз оплаты»: совпадает), фиксируется 🔒 в воскресенье 22:00. <b>Доход (факт)</b> — реализация за дни недели: каждый день в 22:00 cron забирает доход из Alfa и он суммируется в свою неделю.</div>
+  return `<div class="callout" style="margin-bottom:10px;font-size:12px">Недели учебного года (пн–вс). <b>Прогноз Alfa</b> — сумма списаний по запланированным занятиям (сверено с отчётом «Прогноз оплаты»: совпадает), фиксируется 🔒 в воскресенье 22:00. Замок держит цифру: под ним её не изменит ни «Зафиксировать неделю», ни cron. Нажмите 🔒, чтобы снять его и поправить прогноз руками, и 🔓 — чтобы запереть обратно. <b>Доход (факт)</b> — реализация за дни недели: каждый день в 22:00 cron забирает доход из Alfa и он суммируется в свою неделю.</div>
   <div class="hd-actions" style="margin-bottom:10px">
     <button class="btn sm" id="progPullBtn" onclick="progPull()">🔄 Обновить факт из Alfa</button>
     <button class="btn ghost sm" id="fcWeekBtn" onclick="progForecastWeek()" title="Посчитать прогноз текущей недели сейчас (обычно это делает cron)">🧮 Посчитать прогноз недели</button>
@@ -13193,6 +13220,26 @@ async function progForecastWeek(week){
   finally{ _realBusy=false; if(btn) btn.disabled=false; }
 }
 /* зафиксировать прогноз на текущую (или указанную) неделю вручную */
+/* Замок снимается и ставится отдельным действием — в этом вся защита. */
+async function progLock(key,on){
+  const prog=document.getElementById("progPullProg");
+  try{
+    const j=await _pubCall("weekPlanSet",{week:key, locked:!!on});
+    _weekPlans=j.weekPlans||_weekPlans;
+    const b=document.getElementById("rukBody"); if(b) b.innerHTML=_progHtml();
+    toast(on?"Неделя заперта 🔒":"Замок снят — можно править");
+  }catch(e){ if(prog) prog.innerHTML=_pubErrHtml(e,"замок недели"); }
+}
+async function progSetPlan(key,val){
+  const n=parseFloat(String(val).replace(",",".")); 
+  const prog=document.getElementById("progPullProg");
+  try{
+    const j=await _pubCall("weekPlanSet",{week:key, plan:isNaN(n)?0:n});
+    _weekPlans=j.weekPlans||_weekPlans;
+    const b=document.getElementById("rukBody"); if(b) b.innerHTML=_progHtml();
+    toast("Прогноз недели: "+_gm(j.plan));
+  }catch(e){ if(prog) prog.innerHTML=_pubErrHtml(e,"правка прогноза недели"); }
+}
 async function progSnapshot(week){
   if(_realBusy) return;
   const btn=document.getElementById("progSnapBtn"), prog=document.getElementById("progPullProg");
@@ -13200,7 +13247,11 @@ async function progSnapshot(week){
   try{
     const j=await _pubCall("weekPlanSnapshot",{week:week||_todayIso()});
     _weekPlans=j.weekPlans||_weekPlans; _realStore=j.store||_realStore;
-    if(prog) prog.textContent="Зафиксировано ✓ ("+_gm(j.plan)+")";
+    /* Под замком снимок не трогает цифру. Промолчать нельзя: «Зафиксировано ✓» после нажатия
+       читалось бы как «пересчитал», и расхождение с Alfa выглядело бы поломкой модели. */
+    if(prog) prog.textContent=j.locked
+      ? ("Неделя заперта 🔒 — прогноз оставлен прежним ("+_gm(j.plan)+"). Снимите замок, если нужно пересчитать.")
+      : ("Зафиксировано ✓ ("+_gm(j.plan)+")");
     const b=document.getElementById("rukBody"); if(b) b.innerHTML=_progHtml();
   }catch(e){ const b=document.getElementById("rukBody"); if(b){ const d=document.createElement('div'); d.innerHTML=_pubErrHtml(e,"фиксация прогноза"); b.insertBefore(d.firstChild,b.firstChild); } }
   finally{ _realBusy=false; if(btn) btn.disabled=false; }

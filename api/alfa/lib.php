@@ -1734,6 +1734,43 @@ function alfa_weekplan_write(array $d): void {
     if (@file_put_contents($tmp, $json, LOCK_EX) !== false) { @chmod($tmp, 0660); @rename($tmp, $f); }
     else @file_put_contents($f, $json, LOCK_EX);
 }
+/* ===== ЗАМОК НЕДЕЛЬНОГО ПРОГНОЗА =====
+   Жанна нечаянно нажала «Зафиксировать неделю» на уже закончившейся неделе — снимок затёр
+   прежнюю цифру, и восстановить её было неоткуда. Теперь запертую неделю не меняет НИЧТО:
+   ни кнопка, ни воскресный cron, ни ручная правка. Снять замок можно только отдельным
+   действием — это и есть защита от случайного клика.
+
+   У записей, сделанных до этой правки, поля locked нет. Для них правило по смыслу: неделя,
+   которая уже НАЧАЛАСЬ, заперта (её прогноз — то, с чем сравнивают факт, и он неизменен),
+   а будущая — нет: её воскресный cron ещё уточняет по свежему расписанию. */
+function alfa_weekplan_locked(string $mon, $w): bool {
+    if (!is_array($w)) return false;
+    if (array_key_exists('locked', $w)) return (bool)$w['locked'];
+    return $mon <= date('Y-m-d');
+}
+/* Снять/поставить замок и поправить цифру руками. Правка проходит только по снятому замку. */
+function alfa_weekplan_set(string $week, $plan, $locked, string $by = ''): array {
+    $mon = alfa_monday_of($week);
+    $store = alfa_weekplan_read();
+    $old = $store[$mon] ?? null;
+    if ($plan !== null && alfa_weekplan_locked($mon, $old)) {
+        return ['ok' => false, 'week' => $mon, 'locked' => true,
+                'error' => 'Неделя заперта на замок — сначала снимите его'];
+    }
+    $rec = is_array($old) ? $old : ['plan' => 0.0, 'lessons' => 0, 'groups' => 0];
+    if ($plan !== null) {
+        $rec['plan'] = round((float)$plan, 2);
+        $rec['src'] = 'manual';
+        $rec['ts'] = date('c');
+        if ($by !== '') $rec['by'] = $by;
+    }
+    if ($locked !== null) $rec['locked'] = (bool)$locked;
+    $store[$mon] = $rec;
+    ksort($store);
+    alfa_weekplan_write($store);
+    return ['ok' => true, 'week' => $mon, 'plan' => (float)($rec['plan'] ?? 0),
+            'src' => (string)($rec['src'] ?? ''), 'locked' => alfa_weekplan_locked($mon, $rec)];
+}
 /* Понедельник недели, в которую попадает дата (ISO). */
 function alfa_monday_of(string $iso): string {
     $ts = strtotime(alfa_iso($iso));
@@ -1777,14 +1814,25 @@ function alfa_weekplan_snapshot(string $mondayIso, ?array $branches = null): arr
     $fresh = $mon > date('Y-m-d');
     $exp = alfa_expect_freeze($mon, $branches, $fresh);
     $store = alfa_weekplan_read();
-    $store[$mon] = ['plan' => $fc['forecast'], 'lessons' => $fc['lessons'], 'groups' => ($fc['groups'] ?? 0),
-                    'alreadyDone' => round($donePart, 2), 'src' => 'alfa', 'ts' => date('c'),
-                    'expect' => $exp['total'], 'expectFrozen' => $exp['frozen']];
+    $old = $store[$mon] ?? null;
+    $locked = alfa_weekplan_locked($mon, $old);
+    $rec = ['plan' => $fc['forecast'], 'lessons' => $fc['lessons'], 'groups' => ($fc['groups'] ?? 0),
+            'alreadyDone' => round($donePart, 2), 'src' => 'alfa', 'ts' => date('c'),
+            'expect' => $exp['total'], 'expectFrozen' => $exp['frozen']];
+    /* Замок ставится руками и переживает пересчёт. Само «ожидалось» и уже проведённое обновляем
+       и под замком: они от цифры прогноза не зависят, а нужны «Реализации». */
+    if (is_array($old) && array_key_exists('locked', $old)) $rec['locked'] = $old['locked'];
+    if ($locked && is_array($old)) {
+        foreach (['plan', 'lessons', 'groups', 'src', 'ts', 'by'] as $k) {
+            if (array_key_exists($k, $old)) $rec[$k] = $old[$k];
+        }
+    }
+    $store[$mon] = $rec;
     ksort($store);
     alfa_weekplan_write($store);
-    return ['week' => $mon, 'plan' => $fc['forecast'], 'lessons' => $fc['lessons'],
-            'groups' => ($fc['groups'] ?? 0), 'alreadyDone' => round($donePart, 2), 'days' => $days,
-            'expect' => $exp];
+    return ['week' => $mon, 'plan' => (float)$rec['plan'], 'lessons' => (int)$rec['lessons'],
+            'groups' => ($rec['groups'] ?? 0), 'alreadyDone' => round($donePart, 2), 'days' => $days,
+            'locked' => $locked, 'fresh' => $fc['forecast'], 'expect' => $exp];
 }
 
 /* Форма полей периода по РЕАЛЬНОЙ записи: у части сущностей Alfa строковая дата лежит в
