@@ -29,7 +29,7 @@ function build(kids, newIds, opts) {
   const scope = {
     esc,
     S: { children: {} },
-    _trFun: { kids, from: '2026-09-01', to: '2026-10-10' },
+    _trFun: { kids, before: (o.before || {}), from: '2026-09-01', to: '2026-10-10' },
     _trFunBusy: !!o.busy,
     _trFunProg: o.prog || '',
     _trRefs: { subjects: { 7: 'Арт-студия', 9: 'Пескография' }, teachers: {} },
@@ -43,7 +43,7 @@ function build(kids, newIds, opts) {
     Date, String, Number, Object, Set, Math,
   };
   return new Function(...Object.keys(scope),
-    grab('_trNewSet') + grab('_trLesState') + grab('_trFunnel') + grab('_trKidName') + grab('_trArchived') + grab('_trArchBadge') + grab('_trKidLink') + grab('_trListHtml')
+    grab('_trPrevSeasonStart') + grab('_trNewSet') + grab('_trLesState') + grab('_trFunnel') + grab('_trKidName') + grab('_trArchived') + grab('_trArchBadge') + grab('_trKidLink') + grab('_trListHtml')
     + grab('_trDayLabel') + grab('_trFunnelHtml')
     + '; return {f:_trFunnel(), html:_trFunnelHtml(), st:_trLesState};'
   )(...Object.values(scope));
@@ -186,6 +186,28 @@ t('в заголовке дня видно количество', r.html.include
 
 r = build({ 52: [les('2026-09-13', false)] }, [52]);
 t('без повторов подписи про них нет', !r.html.includes('Повторы того же ребёнка'));
+
+
+console.log('--- 13. ходившие в клубе раньше — не новые клиенты ---');
+// Жанна: «тут вот есть дети, которые ходили в клуб в прошлом году». Классификация модели их
+// не ловит: она опирается на prevAttend, который заполняется отключённым pullOldRoster.
+// Берём факт из Alfa — занятия ДО 1 сентября.
+r = build({ 60: [les('2026-09-01', true, 15, true)], 61: [les('2026-09-01', true, 15, true)] }, [60, 61],
+  { before: { 61: { n: 34, last: '2026-05-28' } } });
+t('возвращенец посчитан отдельно', r.f.returning === 1);
+t('и в «дошли» не попал', r.f.came === 1);
+t('и во «вписаны» тоже', r.f.enrolled === 1);
+t('плитка «ходили раньше» есть', r.html.includes('ходили раньше'));
+t('список возвращенцев есть', r.html.includes('Ходили в клубе раньше'));
+t('сказано, что в остальные цифры не входят', r.html.includes('в остальные цифры не входят'));
+
+r = build({ 62: [les('2026-09-20', false)] }, [62], { before: { 62: { n: 12, last: '2026-04-01' } } });
+t('возвращенца нет в прогнозе', !r.html.includes('Кого ждём дальше') || r.html.indexOf('Ребёнок 62') > r.html.indexOf('Ходили в клубе раньше'));
+t('и он не в «ждём»', r.f.waiting === 0);
+
+r = build({ 63: [les('2026-09-01', true, 15, true)] }, [63], { before: { 63: { n: 0, last: '' } } });
+t('нулевая история не делает возвращенцем', r.f.returning === 0 && r.f.came === 1);
+t('без возвращенцев плитки нет', !r.html.includes('ходили раньше'));
 
 if (bad) { console.log(NL + 'провалено проверок: ' + bad); process.exit(1); }
 console.log(NL + 'всё сошлось');

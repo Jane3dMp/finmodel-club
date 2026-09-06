@@ -1605,7 +1605,8 @@ switch ($action) {
         $ids = array_slice((array)($in['ids'] ?? []), 0, 15);
         $kfrom = alfa_iso((string)($in['from'] ?? date('Y-m-01')));
         $kto   = alfa_iso((string)($in['to']   ?? date('Y-m-d', strtotime('+30 day'))));
-        $res = alfa_kids_lessons($ids, $kfrom, $kto, $branches, !empty($in['force']));
+        $season = alfa_iso((string)($in['season'] ?? $kfrom));
+        $res = alfa_kids_lessons($ids, $kfrom, $kto, $branches, !empty($in['force']), $season);
         if (!empty($in['refs'])) {
             $res['subjects'] = alfa_simple_ref('subject', $branches);
             $res['teachers'] = alfa_simple_ref('teacher', $branches);

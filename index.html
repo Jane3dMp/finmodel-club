@@ -1923,7 +1923,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-09-06-15";
+const APP_VER="2026-09-06-16";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -10502,18 +10502,30 @@ function _trHorizon(){
   const z=x=>String(x).padStart(2,'0');
   return d.getFullYear()+'-'+z(d.getMonth()+1)+'-'+z(d.getDate());
 }
+/* Окно запроса начинается на год раньше учебного года: по занятиям ДО 1 сентября видно, что
+   ребёнок ходил в клуб в прошлом году, а значит он не новый клиент. Классификация «новый/
+   старый» в самой модели для этого не годится — она опирается на prevAttend, который
+   заполняется отключённым pullOldRoster (см. HANDOFF), то есть всегда пуст. Живые посещения
+   из Alfa — факт, а не догадка. */
+function _trPrevSeasonStart(){
+  const y=_trYearStart();
+  return (parseInt(y.slice(0,4),10)-1)+y.slice(4);
+}
 async function trLoadFunnel(force){
   if(_trFunBusy) return;
   const set=_trNewSet();
   if(!set||!set.size){ _trFun=null; renderTrials(); return; }
   if(!force && _trFun) return;
   const ids=[...set].map(Number).filter(Boolean);
-  _trFunBusy=true; _trFunProg="0/"+ids.length; _trCards={}; _trFun={kids:{},from:_trYearStart(),to:_trHorizon()};
+  _trFunBusy=true; _trFunProg="0/"+ids.length; _trCards={};
+  _trFun={kids:{},before:{},from:_trYearStart(),to:_trHorizon()};
   renderTrials();
   try{
     for(let i=0;i<ids.length;i+=15){
-      const j=await _pubCall("kidsLessons",{ids:ids.slice(i,i+15), from:_trFun.from, to:_trFun.to, refs:(i===0), force:!!force});
+      const j=await _pubCall("kidsLessons",{ids:ids.slice(i,i+15), from:_trPrevSeasonStart(), to:_trFun.to,
+        season:_trFun.from, refs:(i===0), force:!!force});
       Object.assign(_trFun.kids, j.kids||{});
+      Object.assign(_trFun.before, j.before||{});
       if(j.cards) Object.assign(_trCards, j.cards);
       if(j.subjects) _trRefs.subjects=j.subjects;
       if(j.teachers) _trRefs.teachers=j.teachers;
@@ -10540,12 +10552,17 @@ function _trLesState(L, today){
 function _trFunnel(){
   if(!_trFun) return null;
   const today=_trToday();
-  const f={enrolled:0, came:0, cameFree:0, missedAll:0, missedButAhead:0, waiting:0, noLessons:0, ahead:[],
-           lists:{came:[], missedAll:[], waiting:[], noLessons:[]}};
+  const f={enrolled:0, came:0, cameFree:0, missedAll:0, missedButAhead:0, waiting:0, noLessons:0, returning:0, ahead:[],
+           lists:{came:[], missedAll:[], waiting:[], noLessons:[], returning:[]}};
   const set=_trNewSet()||new Set();
+  f.returning=0; f.lists.returning=[];
   set.forEach(idStr=>{
     const L=_trFun.kids[idStr]||_trFun.kids[Number(idStr)];
     if(!L) return;
+    /* Ходил в клубе до начала учебного года — значит не новый клиент, сколько бы модель ни
+       говорила обратное. Считаем отдельно и в основные корзины не пускаем. */
+    const pv=_trFun.before[idStr]||_trFun.before[Number(idStr)];
+    if(pv&&pv.n>0){ f.returning++; f.lists.returning.push({id:idStr, les:[], prev:pv}); return; }
     if(!L.length){ f.noLessons++; f.lists.noLessons.push({id:idStr, les:[]}); return; }
     f.enrolled++;
     let came=false, cameFree=false, ahead=false, past=false;
@@ -10664,6 +10681,7 @@ function _trFunnelHtml(){
     ${tile(f.missedAll,"не дошли","var(--red)","Занятия уже прошли, а ребёнок не был ни на одном. Именно этим нужен звонок")}
     ${tile(f.waiting,"ждём","var(--terra)","Прошедших занятий ещё не было — первое только впереди")}
     ${f.noLessons?tile(f.noLessons,"без занятий","var(--muted)","Ребёнок в наборе есть, а в расписании Alfa занятий у него нет"):""}
+    ${f.returning?tile(f.returning,"ходили раньше","var(--muted)","Занимались в клубе до 1 сентября — это не новые клиенты, в остальные цифры они не входят"):""}
   </div>`;
   const warn=f.cameFree?`<div class="callout" style="border-color:#C9922E;font-size:12px;margin-bottom:8px">
     У ${f.cameFree} из дошедших есть занятия, где отметка стоит, а списания нет — абонемент не проставили.</div>`:"";
@@ -10705,6 +10723,7 @@ function _trFunnelHtml(){
     ${_trListHtml("Дошли",f.lists.came,"var(--green)","были хотя бы на одном занятии")}
     ${_trListHtml("Не дошли",f.lists.missedAll,"var(--red)","занятия прошли, ребёнка не было ни на одном"+(f.missedButAhead?(" · у "+f.missedButAhead+" есть занятия впереди"):""))}
     ${_trListHtml("Ждём",f.lists.waiting,"var(--terra)","прошедших занятий ещё не было, первое впереди")}
+    ${_trListHtml("Ходили в клубе раньше",f.lists.returning,"var(--muted)","занимались до 1 сентября — в остальные цифры не входят")}
     ${_trListHtml("Без занятий",f.lists.noLessons,"var(--muted)",
         "в наборе есть, в расписании Alfa занятий нет"+(function(){var a=f.lists.noLessons.filter(x=>_trArchived(x.id)).length;return a?(" · из них в архиве "+a):"";})())}
   </div>`;

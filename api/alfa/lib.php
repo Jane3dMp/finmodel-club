@@ -932,32 +932,38 @@ function alfa_trials_day(string $date, ?array $branches = null): array {
 /* v2 в соли: записи прежней версии содержали только проведённые занятия. Без смены соли они
    пролежали бы час и показывали старую картину уже после исправления. */
 function alfa_kidles_cache_path(): string {
-    return alfa_store_dir() . '/kidles_' . substr(hash('sha256', __DIR__ . '|kidles2'), 0, 20) . '.json';
+    return alfa_store_dir() . '/kidles_' . substr(hash('sha256', __DIR__ . '|kidles3'), 0, 20) . '.json';
 }
 /* Для каждого ребёнка: занятия периода с датой, предметом, суммой и отметкой присутствия.
    Возвращаем только то, что нужно экрану, — иначе кэш распухнет. */
-function alfa_kids_lessons(array $ids, string $from, string $to, ?array $branches = null, bool $force = false): array {
+/* $seasonFrom — начало учебного года. Занятия РАНЬШЕ этой даты в список не попадают: они
+   нужны только чтобы понять, ходил ли ребёнок в клуб в прошлом году. Возвращаем по ним
+   лишь счётчик — иначе ответ распух бы на возвращенцах с сотней занятий за два года.
+   Отдельного запроса ради этого не делаем: окно у запроса и так одно. */
+function alfa_kids_lessons(array $ids, string $from, string $to, ?array $branches = null, bool $force = false, string $seasonFrom = ''): array {
     $ids = array_values(array_unique(array_map('intval', array_filter($ids))));
     if (!$ids) return ['kids' => [], 'asked' => 0];
     $branches = $branches ?: alfa_realization_branches();
     $from = alfa_iso($from); $to = alfa_iso($to);
+    $seasonFrom = $seasonFrom !== '' ? alfa_iso($seasonFrom) : $from;
     $today = date('Y-m-d');
     $f = alfa_kidles_cache_path();
     $cache = [];
     if (is_file($f)) { $j = json_decode((string)@file_get_contents($f), true); if (is_array($j)) $cache = $j; }
     $host = 'https://' . alfa_host(); $token = alfa_token();
-    $out = []; $asked = 0; $dirty = false;
+    $out = []; $before = []; $asked = 0; $dirty = false;
     foreach ($ids as $id) {
         $k = (string)$id;
         $c = $cache[$k] ?? null;
         /* Кэш годен, если окно совпадает и он свежий. Держим час: будущие занятия переносят и
            отменяют, а прошедшие всё равно уже не изменятся. */
         if (!$force && is_array($c) && ($c['from'] ?? '') === $from && ($c['to'] ?? '') === $to
-            && (int)($c['ts'] ?? 0) > time() - 3600) {
+            && ($c['season'] ?? '') === $seasonFrom && (int)($c['ts'] ?? 0) > time() - 3600) {
             $out[$id] = (array)($c['lessons'] ?? []);
+            $before[$id] = (array)($c['before'] ?? ['n' => 0, 'last' => '']);
             continue;
         }
-        $rows = []; $seenLes = [];
+        $rows = []; $seenLes = []; $prevN = 0; $prevLast = '';
         foreach ($branches as $bid) {
         /* ⚠️ ДВА запроса, а не один: lesson/index по умолчанию отдаёт ТОЛЬКО проведённые
            (status=3), и будущие занятия в ответ не попадают вовсе. Из-за этого ребёнок, у
@@ -986,6 +992,10 @@ function alfa_kids_lessons(array $ids, string $from, string $to, ?array $branche
                 $lid = (int)($ls['id'] ?? 0);
                 if ($lid && isset($seenLes[$lid])) continue;      // одно занятие в оба ответа не попадёт дважды
                 if ($lid) $seenLes[$lid] = 1;
+                if ($d < $seasonFrom) {                            // прошлый год — только считаем
+                    if ($st === 3) { $prevN++; if ($d > $prevLast) $prevLast = $d; }
+                    continue;
+                }
                 $rows[] = ['date' => $d, 'subjectId' => (int)($ls['subject_id'] ?? 0),
                            'from' => substr((string)($ls['time_from'] ?? ''), 11, 5),
                            'to' => substr((string)($ls['time_to'] ?? ''), 11, 5),
@@ -999,11 +1009,13 @@ function alfa_kids_lessons(array $ids, string $from, string $to, ?array $branche
             return $c1 !== 0 ? $c1 : strcmp((string)$a['from'], (string)$b['from']);
         });
         $out[$id] = $rows;
-        $cache[$k] = ['ts' => time(), 'from' => $from, 'to' => $to, 'lessons' => $rows];
+        $before[$id] = ['n' => $prevN, 'last' => $prevLast];
+        $cache[$k] = ['ts' => time(), 'from' => $from, 'to' => $to, 'season' => $seasonFrom,
+                      'lessons' => $rows, 'before' => $before[$id]];
         $dirty = true;
     }
     if ($dirty) @file_put_contents($f, json_encode($cache, JSON_UNESCAPED_UNICODE), LOCK_EX);
-    return ['kids' => $out, 'asked' => $asked, 'from' => $from, 'to' => $to, 'today' => $today,
+    return ['kids' => $out, 'before' => $before, 'asked' => $asked, 'from' => $from, 'to' => $to, 'today' => $today,
             'cards' => alfa_customer_cards($ids, $branches)];
 }
 
