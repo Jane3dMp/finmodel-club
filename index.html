@@ -1932,7 +1932,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-09-06-31";
+const APP_VER="2026-09-06-32";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -12860,10 +12860,41 @@ function _salesTops(from,to){
   };
 }
 /* --- ТЕКСТ СООБЩЕНИЯ --- */
+/* ===== ТОТ ЖЕ ПЕРИОД ГОД НАЗАД =====
+   Жанна пишет в отдел продаж строку «Сентябрь 2025 этот же период — 12 017»: без неё оборот
+   недели не с чем сравнить, кроме собственного обещания.
+   Сдвигаем ровно на 52 недели (364 дня), а НЕ на календарный год: у клуба выходной день даёт
+   втрое больше будня, и сравнивать надо понедельник с понедельником — иначе разница покажет
+   сдвиг календаря, а не работу отдела. Для недели с 31.08.2026 это 01–07.09.2025. */
+function _salesLastYearDates(W){
+  const out=[], d=new Date(W+"T12:00:00"); d.setDate(d.getDate()-364);
+  for(let i=0;i<7;i++){ const x=new Date(d); x.setDate(x.getDate()+i); out.push(_dIso(x)); }
+  return out;
+}
+function _salesLastYearLabel(W){
+  const d=new Date(_salesLastYearDates(W)[0]+"T12:00:00"), m=_RU_MON[d.getMonth()]||"";
+  return (m?m[0].toUpperCase()+m.slice(1):"")+" "+d.getFullYear();
+}
+/* Факт прошлогодней недели из дневного хранилища. known — сколько из семи дней в нём есть:
+   хранилище копят с этого учебного года, и прошлогодних дней там обычно нет вовсе. */
+function _salesLastYearFact(W){
+  const dates=_salesLastYearDates(W); let sum=0, known=0, withLes=0;
+  dates.forEach(k=>{ const r=(_realStore||{})[k]; if(!r) return;
+    known++; if(+r.lessons) withLes++;
+    sum+=((+r.present||0)+(+r.all||0))/2; });
+  return {dates:dates, from:dates[0], to:dates[6], sum:sum, known:known, withLes:withLes};
+}
 function _salesWeekText(rep){
   const man=rep.man||{}, L=[];
   L.push("Оборот недели: "+_salesNum(rep.fact)+".");
-  if(+rep.goal) L.push("Шли на "+_salesNum(rep.goal)+".");
+  if(+rep.goal){
+    L.push("Шли на "+_salesNum(rep.goal)+".");
+    /* Доходимость — сколько из обещанного действительно дошло до кассы. Округляем ВНИЗ:
+       16 885 из 22 000 — это 76,7%, и в отчёт отделу продаж честнее отдать 76, а не 77. */
+    L.push("Доходимость "+Math.floor(100*(+rep.fact||0)/(+rep.goal))+"%.");
+  }
+  const ly=+(man.lastYear||0);
+  if(ly){ L.push(""); L.push(_salesLastYearLabel(rep.week)+" этот же период - "+_salesNum(ly)+"."); }
   const nf=+(man.nextForecast||((rep.next&&rep.next.forecast)||0));
   const ng=+(man.nextGoal||((rep.next&&rep.next.suggest)||0));
   if(nf||ng){ L.push("");
@@ -12918,13 +12949,38 @@ async function salesBuild(week){
 async function salesSet(week,field,val){
   const R=_salesReports(), rep=R[week]; if(!rep) return;
   if(!rep.man) rep.man={};
-  const num=(field==="nextGoal"||field==="monthNextGoal"||field==="nextForecast"||field==="monthForecast");
+  const num=(field==="nextGoal"||field==="monthNextGoal"||field==="nextForecast"||field==="monthForecast"||field==="lastYear");
   const v=num?(parseFloat(String(val).replace(",","."))||0):String(val||"").trim();
   if(num){ if(v>0) rep.man[field]=v; else delete rep.man[field]; }
   else   { if(v)   rep.man[field]=v; else delete rep.man[field]; }
   _salesRefresh();
   try{ await _pubCall("salesReportSet",{week:week,man:rep.man}); }
   catch(e){ toast("Не сохранилось на сервере: "+((e&&e.message)||e)); }
+}
+/* Прошлогодних дней в дневном хранилище обычно нет: его начали копить в этом учебном году.
+   Тянем ровно семь нужных дней тем же действием, что и обычный пересчёт реализации. */
+async function salesPullLastYear(week){
+  if(_salesBusy) return;
+  const prog=document.getElementById("salesProg");
+  const dates=_salesLastYearDates(week);
+  _salesBusy=true;
+  try{
+    _realStore=_realStore||{};
+    for(let i=0;i<dates.length;i+=4){
+      if(prog) prog.textContent="Считаю прошлый год из Alfa… "+Math.min(i+4,dates.length)+"/"+dates.length;
+      const j=await _pubCall("realizationPull",{dates:dates.slice(i,i+4)});
+      Object.assign(_realStore, j.updated||{});
+    }
+    if(prog) prog.textContent="";
+    const ly=_salesLastYearFact(week);
+    _salesBusy=false;
+    /* Ноль занятий за ту неделю — не повод писать в отчёт ноль: скорее всего год назад клуб
+       ещё не работал в Alfa, и «12 017 против 0» ввело бы отдел продаж в заблуждение. */
+    if(!ly.withLes){ toast("За ту неделю в Alfa занятий нет — сравнивать не с чем"); _salesRefresh(); return; }
+    await salesSet(week,"lastYear",ly.sum);
+    toast(_salesLastYearLabel(week)+": "+_gm(ly.sum));
+  }catch(e){ if(prog) prog.innerHTML=_pubErrHtml(e,"прошлый год"); }
+  finally{ _salesBusy=false; }
 }
 function salesCopy(which){
   const rep=_salesCur(); if(!rep) return;
@@ -12958,6 +13014,17 @@ function _salesHtml(){
   const ratio=Math.round(100*(+rep.ratio||0.9));
   const sug=+((rep.next&&rep.next.suggest)||0);
   const dAct=(+rep.active||0)-(+rep.activePrev||0);
+  /* Прошлогодняя неделя: из хранилища, если её туда уже подтянули, иначе — кнопка. Цифру
+     после подтягивания фиксируем в отчёте (man.lastYear), чтобы она не менялась задним
+     числом от пересчётов: сообщение уже ушло в отдел продаж. */
+  const LY=_salesLastYearFact(W);
+  const lyDelta=(+man.lastYear||LY.sum)>0 ? Math.round(100*(+rep.fact||0)/(+man.lastYear||LY.sum))-100 : null;
+  const lyNote=(LY.known>=7)
+    ? ("из Alfa за "+esc(_salesDate(LY.from))+"–"+esc(_salesDate(LY.to))+": <b>"+_gm(LY.sum)+"</b>"
+       +(lyDelta!=null?(" · сейчас <b style=\"color:"+(lyDelta>=0?"var(--green)":"var(--red)")+"\">"+(lyDelta>=0?"+":"")+lyDelta+"%</b>"):""))
+    : ((LY.known?("в хранилище только "+LY.known+" из 7 дней"):"тех дней в хранилище нет")
+       +" — <button class=\"btn ghost sm\" style=\"margin-left:4px\" onclick=\"salesPullLastYear('"+_jsStr(W)+"')\">подтянуть "
+       +esc(_salesDate(LY.from))+"–"+esc(_salesDate(LY.to))+" из Alfa</button>");
   const weekText=_salesWeekText(rep);
 
   const numRow=(lab,val,note)=>`<tr><td>${lab}</td><td style="text-align:right;white-space:nowrap"><b>${val}</b></td><td style="font-size:12px;color:var(--muted)">${note||""}</td></tr>`;
@@ -12966,6 +13033,12 @@ function _salesHtml(){
              '<span style="color:var(--green)">'+_gm(rep.fact)+'</span>',
              "среднее дохода с пропусками и без пополам · дней с занятиями: "+(rep.daysWithLessons||0))}
     ${numRow("Шли на", (+rep.goal)?_gm(rep.goal):'<span style="color:var(--muted)">—</span>', goalSrc)}
+    ${numRow("Доходимость", (+rep.goal)?(Math.floor(100*(+rep.fact||0)/(+rep.goal))+"%"):'<span style="color:var(--muted)">—</span>',
+             (+rep.goal)?("оборот недели ÷ «шли на»"):"без цели считать не от чего")}
+    <tr><td>${esc(_salesLastYearLabel(W))} — этот же период</td>
+      <td style="text-align:right"><input class="cell" type="number" step="1" style="width:110px;text-align:right"
+        value="${man.lastYear||''}" placeholder="${LY.known?_gm(LY.sum):'—'}" onchange="salesSet('${_jsStr(W)}','lastYear',this.value)"></td>
+      <td style="font-size:12px;color:var(--muted)">${lyNote}</td></tr>
     ${numRow("Прогноз на след. неделю "+esc(_salesDate((rep.next||{}).week||W)),
              '<span style="color:var(--terra-d)">'+_gm((rep.next||{}).forecast||0)+'</span>', nfSrc)}
     <tr><td>Идём на</td>

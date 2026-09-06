@@ -17,6 +17,7 @@ const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
 const NAMES = ['_salesNum', '_salesCfg', '_ratAgg', '_ratSubjToCourse', '_ratModelTeacher',
                'fixRateByName', '_ratWage', '_ratTeacherName',
                '_salesTops', '_salesWeekText', '_salesMonthText',
+               '_salesLastYearDates', '_salesLastYearLabel', '_salesLastYearFact',
                '_salesReports', '_salesCur', '_salesDate', '_salesMonName', '_salesHtml', '_salesCronHtml'];
 const ONE_LINERS = ['_salesMonthEnd', '_salesMonday'];   // тело в одну строку — своя регулярка
 let src = '';
@@ -67,7 +68,8 @@ const ctx = {
   location: { origin: 'https://app.proznanie.club' },
 };
 const API = new Function('ctx', 'with (ctx) { ' + src +
-  ' return {_salesNum,_salesTops,_salesWeekText,_salesMonthText,_salesMonthEnd,_salesCfg,_salesHtml}; }')(ctx);
+  ' return {_salesNum,_salesTops,_salesWeekText,_salesMonthText,_salesMonthEnd,_salesCfg,_salesHtml,' +
+  '_salesLastYearDates,_salesLastYearLabel,_salesLastYearFact}; }')(ctx);
 
 /* ================= формат чисел (как в чате: 22.578) ================= */
 eq('число с разделителем тысяч', API._salesNum(22578), '22.578');
@@ -129,11 +131,47 @@ const rep = {
   active: 624, activePrev: 639, man: {},
 };
 eq('недельное сообщение', API._salesWeekText(rep),
-   'Оборот недели: 22.578.\nШли на 22.500.\n\nПрогноз на след неделю: 23.749.\nИдем на 21.300.\n\nАктивных клиентов: 624 (-15).');
+   'Оборот недели: 22.578.\nШли на 22.500.\nДоходимость 100%.\n\nПрогноз на след неделю: 23.749.\nИдем на 21.300.\n\nАктивных клиентов: 624 (-15).');
 
 rep.man = { nextGoal: 22000, note: 'Отсев после первого абонемента' };
 eq('своя цель перебивает предложенную и комментарий в конце', API._salesWeekText(rep),
-   'Оборот недели: 22.578.\nШли на 22.500.\n\nПрогноз на след неделю: 23.749.\nИдем на 22.000.\n\nАктивных клиентов: 624 (-15).\n\nОтсев после первого абонемента');
+   'Оборот недели: 22.578.\nШли на 22.500.\nДоходимость 100%.\n\nПрогноз на след неделю: 23.749.\nИдем на 22.000.\n\nАктивных клиентов: 624 (-15).\n\nОтсев после первого абонемента');
+
+/* --- доходимость: сколько из обещанного дошло до кассы --- */
+// её Жанна пишет в отдел продаж руками: 16 885 из 22 000 — это 76%, и цифра важнее оборота
+rep.man = {};
+rep.fact = 16885; rep.goal = 22000;
+check('доходимость посчитана от «шли на»', API._salesWeekText(rep).indexOf('Доходимость 76%.') > 0,
+      API._salesWeekText(rep));
+
+/* --- тот же период год назад --- */
+// сдвиг ровно на 52 недели: у клуба выходной даёт втрое больше будня, и понедельник надо
+// сравнивать с понедельником, иначе разница покажет сдвиг календаря
+eq('прошлогодняя неделя начинается с понедельника', API._salesLastYearDates('2026-08-31')[0], '2025-09-01');
+eq('и кончается воскресеньем', API._salesLastYearDates('2026-08-31')[6], '2025-09-07');
+eq('дней ровно семь', API._salesLastYearDates('2026-08-31').length, 7);
+eq('подпись — месяц и год прошлого периода', API._salesLastYearLabel('2026-08-31'), 'Сентябрь 2025');
+check('день недели сохраняется', new Date('2026-08-31T12:00:00').getDay() === new Date('2025-09-01T12:00:00').getDay());
+
+ctx._realStore = {};
+['2025-09-01','2025-09-02','2025-09-03','2025-09-04','2025-09-05','2025-09-06','2025-09-07']
+  .forEach((k, i) => { ctx._realStore[k] = { present: 1700 + i, all: 1734 + i, lessons: 12 }; });
+const LY = API._salesLastYearFact('2026-08-31');
+eq('все семь дней нашлись', LY.known, 7);
+eq('и все с занятиями', LY.withLes, 7);
+eq('факт — то же среднее с пропусками и без', LY.sum, 7 * 1717 + 21);
+
+// неполная неделя видна: по четырём дням сравнивать с целой нельзя
+delete ctx._realStore['2025-09-06']; delete ctx._realStore['2025-09-07'];
+eq('видно, что дней не хватает', API._salesLastYearFact('2026-08-31').known, 5);
+
+// в сообщение идёт ЗАФИКСИРОВАННАЯ цифра, а не живой пересчёт: сообщение уже ушло в чат
+rep.week = '2026-08-31'; rep.man = { lastYear: 12017 };
+check('прошлый год попал в сообщение', API._salesWeekText(rep).indexOf('Сентябрь 2025 этот же период - 12.017.') > 0,
+      API._salesWeekText(rep));
+rep.man = {};
+check('без цифры строки нет', API._salesWeekText(rep).indexOf('этот же период') < 0, API._salesWeekText(rep));
+ctx._realStore = store; rep.week = '2025-10-06'; rep.fact = 22578.4; rep.goal = 22500;   // вернуть стенд рейтингов
 
 const first = { week: '2025-09-01', to: '2025-09-07', fact: 18000, goal: 0,
                 next: { forecast: 20000, suggest: 18000 }, active: 0, activePrev: 0, man: {} };
