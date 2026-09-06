@@ -19,7 +19,7 @@ function eq(name, got, want, eps) {
 
 const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
 const NAMES = ['_fmlRates', '_fmlData', '_fmlCourses', '_fmlLesson', '_fmlMinFill', '_formulaHtml', '_fmlKid',
-               '_rashodKindDefault', '_rashodFact', '_rashodFactAvg'];
+               '_rashodKindDefault', '_rashodFact', '_rashodFactAvg', '_ymClosed', '_fmlFixWhy', '_kassaDayWord'];
 const ONE_LINERS = ['rashodKind'];
 const CONSTS = ['RASHOD_VAR_HINTS'];
 let src = '';
@@ -63,12 +63,16 @@ const ctx = {
   document: { getElementById: () => null },
   // расходы: снимок Alfa по дням и ручной ввод по месяцам (однострочные в index.html)
   _paySnap: null,
+  // «сегодня» задаётся тестом: от него зависит, закончился ли месяц, а значит — можно ли
+  // брать постоянные расходы из факта
+  _todayIso: () => TODAY,
   _rashodManual: () => ctx.S.rashodManual || (ctx.S.rashodManual = {}),
   _gm: n => Math.round(+n || 0).toLocaleString('ru-RU'),
 };
+let TODAY = '2026-11-15';                 // по умолчанию учебные месяцы теста уже закрыты
 const API = new Function('ctx', 'with (ctx) { ' + src +
   ' return {_fmlRates,_fmlData,_fmlCourses,_fmlLesson,_fmlMinFill,_formulaHtml,_fmlKid,' +
-  '_rashodKindDefault,rashodKind,_rashodFact,_rashodFactAvg}; }')(ctx);
+  '_rashodKindDefault,rashodKind,_rashodFact,_rashodFactAvg,_ymClosed,_fmlFixWhy}; }')(ctx);
 
 /* ================= ставки ================= */
 const R = API._fmlRates();
@@ -234,6 +238,132 @@ ctx.S.rashodManual = { '2026-09': { 'ЗП педагогов': 12000 } };
 check('показано расхождение по переменным', hF.indexOf('Расхождение') > 0);
 check('переменные факта не прибавлены к прибыли', hF.indexOf('иначе одно и то же посчиталось бы дважды') > 0);
 ctx._fmlMonth = ''; ctx._paySnap = null; ctx.S.rashodManual = {};
+
+/* ================= факт за НЕЗАКОНЧЕННЫЙ месяц в расчёт не берём =================
+   6 сентября в расходах клуба лежали две операции на 113 р: «Бытовые» 78 и «Вложения» 35.
+   Аренду, коммуналку, кредит и зарплаты платят в конце месяца. Если принять этот обрубок за
+   расходы месяца, «Порог нуля» обещает выход в ноль с ОДНОГО ребёнка — при 637 детях в клубе
+   это читается как «клуб окупается сам собой». */
+const E1 = Object.assign({}, E, { ym: '2026-09', mN: 1, months: [MONTHS[0]], all: MONTHS, mo: n => n });
+TODAY = '2026-09-06';
+ctx._paySnap = {
+  '2026-09-01': { byItem: { 'Бытовые расходы': 78 } },
+  '2026-09-04': { byItem: { 'Вложения в клуб': 35 } },
+  '2026-09-05': { byItem: { 'Аренда': 0 } },        // день без сумм — не «день с расходами»
+};
+ctx.S.rashodManual = {};
+const Fsep = API._rashodFact('2026-09');
+eq('обрубок сложился', Fsep.fix, 113);
+eq('дней с расходами — только те, где есть суммы', Fsep.days, 2);
+eq('месяц ещё идёт', Fsep.closed, false);
+eq('решение: месяц не закончился', API._fmlFixWhy(Fsep, 4500), 'open');
+eq('закрытый месяц закрыт', API._ymClosed('2026-08'), true);
+eq('будущий месяц не закрыт', API._ymClosed('2026-12'), false);
+
+const Dsep = API._fmlData('2026-09');
+eq('источник — модель, а не обрубок', Dsep.fixSrc, 'model');
+eq('постоянные из модели', Dsep.month.fix, 4500);
+eq('обрубок сохранён — есть что показать в плашке', Dsep.Fraw.fix, 113);
+eq('порог нуля считается от модели', Math.ceil(Dsep.kidsBE), 49);
+check('а по обрубку порог был бы бессмысленным (1–2 ребёнка)',
+      Math.ceil(113 / Dsep.kid.contrib) <= 2, String(Math.ceil(113 / Dsep.kid.contrib)));
+
+ctx._fmlMonth = '2026-09';
+ctx._expenseData = () => E1;
+const hOpen = API._formulaHtml();
+check('сказано, что взята модель', hOpen.indexOf('взяты <b>из модели</b>') > 0);
+check('названо, за сколько дней внесён факт', hOpen.indexOf('за 2 дня') > 0);
+check('и сама сумма обрубка', hOpen.indexOf('113') > 0);
+check('объяснено, почему его нельзя брать', hOpen.indexOf('в конце месяца') > 0);
+check('зелёная плашка «ваш факт» не показывается', hOpen.indexOf('ваш факт по статьям') < 0);
+ctx._expenseData = () => E;
+
+/* --- месяц закрыт, но внесены не все статьи: тот же обрубок, просто задним числом --- */
+TODAY = '2026-11-15';
+eq('решение: факт подозрительно мал', API._fmlFixWhy(API._rashodFact('2026-09'), 4500), 'low');
+eq('и снова считаем по модели', API._fmlData('2026-09').month.fix, 4500);
+ctx._fmlMonth = '2026-09';
+check('сказано, что статей не хватает', API._formulaHtml().indexOf('внесены не все статьи') > 0);
+
+/* --- месяц закрыт и внесён целиком: вот теперь факт --- */
+ctx._paySnap = { '2026-09-03': { byItem: { 'Аренда': 3000, 'Коммунальные платежи': 700 } },
+                 '2026-09-17': { byItem: { 'Аренда': 1000, 'Сервисы': 200 } } };
+const Ffull = API._rashodFact('2026-09');
+eq('полный факт', Ffull.fix, 4900);
+eq('решение: берём факт', API._fmlFixWhy(Ffull, 4500), '');
+eq('постоянные месяца = факт', API._fmlData('2026-09').month.fix, 4900);
+check('и плашка снова зелёная', API._formulaHtml().indexOf('ваш факт по статьям') > 0);
+
+/* --- средний месяц: идущий месяц не тянет среднее вниз --- */
+TODAY = '2026-10-15';                       // сентябрь закрыт, октябрь идёт
+ctx._paySnap = { '2026-09-03': { byItem: { 'Аренда': 5000 } },
+                 '2026-10-02': { byItem: { 'Бытовые расходы': 113 } } };
+const FA2 = API._rashodFactAvg(MONTHS);
+eq('усреднён только закрытый месяц', FA2.months, 1);
+eq('среднее не утянуто обрубком', FA2.fix, 5000);
+eq('пропущенный месяц назван', (FA2.skipped || []).join(','), '2026-10');
+
+/* --- закрытых месяцев с фактом нет вовсе --- */
+TODAY = '2026-09-06';
+const FA3 = API._rashodFactAvg(MONTHS);
+eq('усреднять нечего', FA3.months, 0);
+eq('и это видно по флагу', FA3.closed, false);
+ctx._fmlMonth = '';
+eq('средний месяц считается по модели', API._fmlData('').month.fix, 4500);
+check('в среднем месяце объяснено, что закрытых нет',
+      API._formulaHtml().indexOf('закрытых месяцев с фактом пока нет') > 0);
+
+TODAY = '2026-11-15'; ctx._paySnap = null; ctx.S.rashodManual = {}; ctx._fmlMonth = '';
+
+
+/* ================= таблица «Расходы ежедневно» =================
+   Жанна смотрит на неё и видит «постоянные 113». Прямо здесь и должен стоять ответ, почему
+   «Формула 26/27» считает по другим цифрам, — иначе разница выглядит как ошибка модели. */
+{
+  const many = n => {
+    const m2 = html.match(new RegExp('\\nfunction ' + n + '\\([^)]*\\)\\s*\\{[\\s\\S]*?\\n\\}', 'm'));
+    if (!m2) { console.log('не найдено в index.html: ' + n); process.exit(1); }
+    return m2[0] + '\n';
+  };
+  const one = n => {
+    const m2 = html.match(new RegExp('\\nfunction ' + n + '\\(.*\\}$', 'm'));
+    if (!m2) { console.log('не найдено в index.html: ' + n); process.exit(1); }
+    return m2[0] + '\n';
+  };
+  const konst = n => {
+    const m2 = html.match(new RegExp('\\nconst ' + n + '=.*\\n', 'm'));
+    if (!m2) { console.log('не найдено в index.html: ' + n); process.exit(1); }
+    return m2[0];
+  };
+  const rsrc = konst('RASHOD_ITEMS_DEFAULT') + konst('RASHOD_VAR_HINTS')
+    + one('_rashodItems') + one('_jsStr') + one('rashodKind')
+    + many('_rashodKindDefault') + many('_ymClosed') + many('_rashodHtml');
+  const rctx = {
+    S: { rashodItems: [], rashodManual: {} },
+    _rashodMonth: '2026-09',
+    _paySnap: { '2026-09-01': { expense: 78, byItem: { 'Бытовые расходы': 78 } },
+                '2026-09-04': { expense: 35, byItem: { 'Вложения в клуб': 35 } } },
+    _rashodManual: () => rctx.S.rashodManual,
+    _RU_MON: ['январь','февраль','март','апрель','май','июнь','июль','август','сентябрь','октябрь','ноябрь','декабрь'],
+    esc: x => String(x), _gm: n => String(Math.round(+n || 0)),
+    _todayIso: () => TODAY,
+  };
+  const rApi = new Function('ctx', 'with (ctx) { ' + rsrc + ' return {_rashodHtml}; }')(rctx);
+
+  TODAY = '2026-09-06';
+  const hr = rApi._rashodHtml();
+  check('таблица расходов рисуется', hr.indexOf('Бытовые расходы') > 0);
+  check('идущий месяц назван', hr.indexOf('сентябрь 2026 ещё идёт') > 0,
+        hr.slice(Math.max(0, hr.indexOf('ещё идёт') - 60), hr.indexOf('ещё идёт') + 60));
+  check('сказано, что Формула считает по модели', hr.indexOf('по модели') > 0);
+  check('и названа сумма, которую она НЕ берёт', hr.indexOf('113') > 0);
+
+  TODAY = '2026-11-15';
+  const hr2 = rApi._rashodHtml();
+  check('у закрытого месяца предупреждения нет', hr2.indexOf('ещё идёт') < 0);
+  check('но сама таблица на месте', hr2.indexOf('Бытовые расходы') > 0);
+}
+
 
 console.log(bad ? '\n❌ провалено проверок: ' + bad : '\n✅ всё сошлось');
 process.exit(bad ? 1 : 0);

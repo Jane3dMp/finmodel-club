@@ -1923,7 +1923,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-09-06-25";
+const APP_VER="2026-09-06-26";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -11084,6 +11084,14 @@ function rashodKindSet(item,v){
   persistLocal(); if(typeof fbSchedulePush==="function") fbSchedulePush();
   const b=document.getElementById("admBody"); if(b) b.innerHTML=_rashodHtml();
 }
+/* Закончился ли месяц. Аренду, коммуналку и зарплаты платят в конце, поэтому факт за идущий
+   месяц — всегда обрубок: 6 сентября в нём лежали две бытовые операции на 113 р. */
+function _ymClosed(ym){
+  const p=String(ym||"").split("-"), Y=+p[0], M=+p[1];
+  if(!Y||!M) return false;
+  const z=n=>String(n).padStart(2,"0");
+  return (Y+"-"+z(M)+"-"+z(new Date(Y,M,0).getDate())) < _todayIso();
+}
 /* Факт расходов клуба за месяц: Alfa + ручной ввод, разложенный на постоянные и переменные.
    null — если за месяц не введено ничего (тогда «Формула» считает по модели). */
 function _rashodFact(ym){
@@ -11091,8 +11099,11 @@ function _rashodFact(ym){
   if(!Y||!M) return null;
   const dim=new Date(Y,M,0).getDate(), pref=Y+'-'+String(M).padStart(2,'0')+'-';
   const snap=_paySnap||{}, byItem={};
+  let days=0;                       // сколько дней месяца вообще попало в расходы
   for(let d=1;d<=dim;d++){
     const sn=snap[pref+String(d).padStart(2,'0')]; if(!sn) continue;
+    const has=Object.keys(sn.byItem||{}).some(it=>+sn.byItem[it]);
+    if(has) days++;
     Object.keys(sn.byItem||{}).forEach(it=>{ byItem[it]=(byItem[it]||0)+(+sn.byItem[it]||0); });
   }
   const man=(_rashodManual()[ym])||{};
@@ -11106,15 +11117,22 @@ function _rashodFact(ym){
     else { fix+=v; items.fix.push({n:it,v:v}); }
   });
   items.fix.sort((a,b)=>b.v-a.v); items.var.sort((a,b)=>b.v-a.v);
-  return {ym:ym, months:1, fix:fix, vr:vr, total:fix+vr, items:items};
+  return {ym:ym, months:1, fix:fix, vr:vr, total:fix+vr, items:items,
+          days:days, closed:_ymClosed(ym)};
 }
-/* Средний месяц по тем месяцам, где факт уже введён. */
+/* Средний месяц по тем месяцам, где факт уже введён. Идущий месяц не усредняем: его факт
+   ещё не месяц, и он утянул бы среднее вниз — а по среднему считается порог нуля. */
 function _rashodFactAvg(months){
-  const got=(months||[]).map(m=>_rashodFact(m.ym)).filter(Boolean);
-  if(!got.length) return null;
+  const all=(months||[]).map(m=>_rashodFact(m.ym)).filter(Boolean);
+  if(!all.length) return null;
+  const got=all.filter(x=>x.closed), skipped=all.filter(x=>!x.closed);
+  const days=x=>x.reduce((a,y)=>a+(y.days||0),0);
+  if(!got.length) return {ym:"", months:0, fix:0, vr:0, total:0, items:null, list:[],
+                          skipped:skipped.map(x=>x.ym), closed:false, days:days(skipped)};
   const n=got.length, s=f=>got.reduce((a,x)=>a+f(x),0)/n;
   return {ym:"", months:n, fix:s(x=>x.fix), vr:s(x=>x.vr), total:s(x=>x.total),
-          items:null, list:got.map(x=>x.ym)};
+          items:null, list:got.map(x=>x.ym), skipped:skipped.map(x=>x.ym),
+          closed:true, days:days(got)};
 }
 let _rashodMonth=(function(){ const d=new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0'); })();
 function rashodSetMonth(v){ if(v) _rashodMonth=v; const b=document.getElementById("admBody"); if(b) b.innerHTML=_rashodHtml(); }
@@ -11185,6 +11203,9 @@ function _rashodHtml(){
   </tbody></table></div>
   ${dayRows?`<details style="margin-top:12px"><summary style="cursor:pointer;font-weight:600">По дням (из Alfa)</summary>
     <div class="tscroll" style="max-width:320px;margin-top:8px"><table><thead><tr><th style="text-align:left">День</th><th style="text-align:right">Расход</th></tr></thead><tbody>${dayRows}</tbody></table></div></details>`:''}
+  ${_ymClosed(_rashodMonth)?"":`<div style="font-size:12px;color:var(--terra-d);margin-top:8px">
+    ${esc(monLabel)} ещё идёт: аренду, коммуналку и зарплаты платят в конце месяца, поэтому «Дашборд руководителя → 🧮 Формула 26/27»
+    пока считает постоянные по модели, а не по этим ${_gm(tFix)} р. Факт подставится сам, когда месяц закроется.</div>`}
   <div style="font-size:12px;color:var(--muted);margin-top:8px">Расход конкретного дня со списком операций — в разделе «💵 Кассы».</div>`;
 }
 
@@ -12541,6 +12562,17 @@ function _fmlRates(){
   return {usn:+t.usn||0, acq:+t.acquiring||0, pct:pct, con:(+t.fszn||0)+(+t.belgosstrah||0)};
 }
 /* Свод по единицам за выбранный период (месяц или средний месяц учебного года). */
+/* Брать ли постоянные расходы из факта. Факт — правда только за ЗАКОНЧЕННЫЙ месяц и только
+   когда в него внесли крупные статьи. Иначе «Порог нуля» получает обрубок: 6 сентября это
+   были 113 р (две бытовые операции), и раздел обещал выход в ноль с ОДНОГО ребёнка при 637
+   детях в клубе. Модель — осознанный план Жанны, она никогда не бывает огрызком, поэтому
+   в сомнительных случаях считаем по ней и говорим почему. */
+function _fmlFixWhy(F, modelFixMo){
+  if(!F) return "none";                                   // факта нет вовсе
+  if(!F.closed) return "open";                            // месяц ещё идёт
+  if(modelFixMo>0 && F.fix<modelFixMo*0.5) return "low";  // внесены не все статьи
+  return "";
+}
 function _fmlData(ym){
   const E=_expenseData(ym);
   if(!E.mN) return null;
@@ -12557,12 +12589,16 @@ function _fmlData(ym){
      бухгалтер отдаёт список по статьям в конце месяца, и это правда, а S.fixed — модель.
      Переменные оставляем модельными: они нужны предельные («что изменится от +1 ребёнка»),
      а факт по ним показываем рядом как сверку — задваивать нельзя. */
-  const F=(ym?_rashodFact(ym):_rashodFactAvg(E.months));
-  const revM=E.mo(E.revY), varM=E.mo(E.zavY), fixM=F?F.fix:E.mo(E.fixY);
+  const Fraw=(ym?_rashodFact(ym):_rashodFactAvg(E.months));
+  const modelFixMo=E.mo(E.fixY);
+  const fixWhy=_fmlFixWhy(Fraw, modelFixMo);
+  const F=fixWhy?null:Fraw;
+  const revM=E.mo(E.revY), varM=E.mo(E.zavY), fixM=F?F.fix:modelFixMo;
   // все три единицы делим от МЕСЯЧНЫХ сумм: только так доля постоянных берётся из факта
   // (по периоду в целом фактических расходов может не быть — их вводят помесячно)
   const lesM=les/E.mN;
-  const D={ E:E, mN:E.mN, F:F, fixSrc:F?"fact":"model", groups:groups, kids:kids, lessons:les, lessonsM:lesM,
+  const D={ E:E, mN:E.mN, F:F, Fraw:Fraw, fixWhy:fixWhy, fixModel:modelFixMo,
+    fixSrc:F?"fact":"model", groups:groups, kids:kids, lessons:les, lessonsM:lesM,
     month:u(revM,varM,fixM),
     lesson: lesM   ? u(revM/lesM,   varM/lesM,   fixM/lesM)   : null,
     group:  groups ? u(revM/groups, varM/groups, fixM/groups) : null,
@@ -12628,6 +12664,19 @@ function _formulaHtml(){
       Расхождение: <b style="color:${big?'var(--terra-d)':'var(--muted)'}">${dv>=0?"+":"−"}${money(Math.abs(dv))}</b>${
         big?(dv>0?" — по факту платите заметно больше, чем считает модель: проверьте ставки и типы статей.":" — по факту заметно меньше: возможно, часть статей ещё не внесена."):"."}`:
       `Переменных статей («растёт с загрузкой») в факте нет — ЗП и налоги считает модель: <b>${money(D.month.vr)}</b>.`}
+    </div>`;
+  } else if(D.fixWhy==="open"||D.fixWhy==="low"){
+    /* Факт есть, но он ещё не месяц. Молча подставить его нельзя: порог нуля превращается
+       в «нужен 1 ребёнок», и это читается как «клуб окупается сам собой». */
+    const RW=D.Fraw, lab=one?_expMonLabel(E.ym):"";
+    srcPlate=`<div class="callout" style="border-color:var(--terra);font-size:12px;margin-bottom:10px">
+      Постоянные расходы взяты <b>из модели</b> — <b>${money(D.month.fix)}</b> в месяц. Факт по статьям сейчас брать нельзя:
+      ${D.fixWhy==="open"
+        ? (one ? `${esc(lab)} ещё не закончился — внесено ${RW.days?("за "+RW.days+" "+_kassaDayWord(RW.days)):"пока ничего"}, всего <b>${money(RW.fix)}</b> постоянных.`
+               : `закрытых месяцев с фактом пока нет${RW.skipped&&RW.skipped.length?(" (идёт "+esc(RW.skipped.map(_expMonLabel).join(", "))+")"):""} — внесено <b>${money(RW.fix)}</b> постоянных.`)
+          + ` Аренду, коммуналку и зарплаты платят в конце месяца, и по такому обрубку порог нуля показал бы, что клуб окупается с одного ребёнка.`
+        : `за ${esc(lab||"учебный год")} в факте <b>${money(RW.fix)}</b> постоянных — меньше половины модельных. Похоже, внесены не все статьи.`}
+      Допишите их в «Дашборд администратора → 💸 Расходы ежедневно» — формула подставит факт сама, как только месяц закроется.
     </div>`;
   } else {
     srcPlate=`<div class="callout" style="font-size:12px;margin-bottom:10px">
