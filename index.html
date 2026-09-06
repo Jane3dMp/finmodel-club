@@ -1923,7 +1923,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-09-06-07";
+const APP_VER="2026-09-06-08";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -10414,7 +10414,10 @@ let _trHist=null, _trHistBusy=false, _trShowAll=false;
 function trToggleAll(){ _trShowAll=!_trShowAll; renderTrials(); }
 function _trToday(){ const d=new Date(),z=n=>String(n).padStart(2,'0');
   return d.getFullYear()+'-'+z(d.getMonth()+1)+'-'+z(d.getDate()); }
-function trSetDate(v){ if(v){ _trDate=v; _trData=null; _trErr=null; } renderTrials(); }
+/* Смена дня СРАЗУ подгружает день. Раньше здесь только перерисовывалось, и на каждый
+   переход приходилось жать «Пересчитать» — хотя прошедший день лежит в памяти на сервере и
+   достаётся мгновенно, вообще не тревожа Alfa. */
+function trSetDate(v){ if(v){ _trDate=v; _trData=null; _trErr=null; } renderTrials(); trLoad(); }
 async function trLoad(force){
   if(_trBusy) return;
   const d=_trDate||_trToday();
@@ -10526,29 +10529,61 @@ function _trLesState(L, today){
 }
 /* Свод по набору: вписан (есть занятия), дошёл (был хоть раз), не дошёл (были занятия, но ни
    на одном не был), ждём (впереди ещё есть занятия). Ребёнок считается ОДИН раз. */
+/* Свод по набору: вписан (есть занятия), дошёл (был хоть раз), не дошёл (были занятия, но ни
+   на одном не был), ждём (впереди ещё есть занятия). Ребёнок считается ОДИН раз.
+   Заодно собираем поимённые списки: Жанна просила «дай список тех и куда шли, чтобы я могла
+   понять, верно ли ты собираешь данные». Проверяемость важнее краткости. */
 function _trFunnel(){
   if(!_trFun) return null;
   const today=_trToday();
-  const f={enrolled:0, came:0, cameFree:0, missedAll:0, waiting:0, noLessons:0, ahead:[]};
+  const f={enrolled:0, came:0, cameFree:0, missedAll:0, waiting:0, noLessons:0, ahead:[],
+           lists:{came:[], missedAll:[], waiting:[], noLessons:[]}};
   const set=_trNewSet()||new Set();
   set.forEach(idStr=>{
     const L=_trFun.kids[idStr]||_trFun.kids[Number(idStr)];
-    if(!L){ return; }
-    if(!L.length){ f.noLessons++; return; }
+    if(!L) return;
+    if(!L.length){ f.noLessons++; f.lists.noLessons.push({id:idStr, les:[]}); return; }
     f.enrolled++;
     let came=false, cameFree=false, ahead=false;
-    L.forEach(x=>{
+    const marked=L.map(x=>{
       const st=_trLesState(x,today);
       if(st==="came") came=true;
       else if(st==="came_free"){ came=true; cameFree=true; }
       else if(st==="ahead"){ ahead=true; f.ahead.push({id:idStr, les:x}); }
+      return Object.assign({}, x, {st});
     });
-    if(came){ f.came++; if(cameFree) f.cameFree++; }
-    else if(ahead) f.waiting++;
-    else f.missedAll++;
+    const row={id:idStr, les:marked};
+    if(came){ f.came++; if(cameFree) f.cameFree++; f.lists.came.push(row); }
+    else if(ahead){ f.waiting++; f.lists.waiting.push(row); }
+    else { f.missedAll++; f.lists.missedAll.push(row); }
   });
   f.ahead.sort((a,b)=>(a.les.date+a.les.from).localeCompare(b.les.date+b.les.from));
+  Object.keys(f.lists).forEach(k=>f.lists[k].sort((a,b)=>_trKidName(a.id).localeCompare(_trKidName(b.id),"ru")));
   return f;
+}
+/* Раскрывашка со списком: имя ребёнка и КУДА он шёл — дата, время, курс, что вышло.
+   Без этого цифру нельзя проверить, а проверить её надо: правило «пробный по сумме» неточное
+   по своей природе, и глазами видно то, чего не видно в счётчике. */
+function _trListHtml(title, rows, color, hint){
+  if(!rows||!rows.length) return "";
+  const LES={came:["пришёл","var(--green)"], came_free:["пришёл, без списания","#C9922E"],
+             missed:["не пришёл","var(--red)"], ahead:["впереди","var(--terra)"]};
+  return `<details style="margin-bottom:6px"><summary style="cursor:pointer;font-size:13px">
+      <b style="color:${color}">${esc(title)}</b> <span style="color:var(--muted)">— ${rows.length}</span>
+      ${hint?`<span style="color:var(--muted);font-size:12px"> · ${esc(hint)}</span>`:""}</summary>
+    <div style="padding:6px 0 4px 4px">${rows.map(r=>`
+      <div style="padding:4px 0;border-bottom:1px solid var(--line)">
+        <div style="font-weight:600;font-size:13px">${esc(_trKidName(r.id))}</div>
+        ${r.les.length?r.les.map(x=>{
+          const s=LES[x.st]||["",""];
+          return `<div style="display:flex;gap:8px;font-size:12px;color:var(--muted);padding:1px 0">
+            <span style="width:96px">${esc(_trDayLabel(x.date))}</span>
+            <span style="width:44px">${esc(x.from||"")}</span>
+            <span style="flex:1">${esc(_trRefs.subjects[x.subjectId]||("предмет "+x.subjectId))}</span>
+            <span style="color:${s[1]}">${esc(s[0])}</span>
+            <span style="width:44px;text-align:right">${x.sum?String(x.sum):""}</span></div>`;
+        }).join(""):`<div style="font-size:12px;color:var(--muted)">занятий в расписании нет</div>`}
+      </div>`).join("")}</div></details>`;
 }
 function _trKidName(id){
   const s=String(id);
@@ -10603,7 +10638,16 @@ function _trFunnelHtml(){
         <span style="font-size:12px;color:var(--muted)">${esc(_trRefs.subjects[a.les.subjectId]||"")}</span>
       </div>`).join("")}</div>`).join("")}</div>`
     : `<div style="font-size:12px;color:var(--muted);margin-top:4px">Впереди занятий у детей набора не запланировано.</div>`;
-  return head+tiles+warn+fc;
+  /* Списки под цифрами: Жанна просила «дай список тех и куда шли, чтобы понять, верно ли
+     собираются данные». Правило «пробный по сумме» неточное по природе, и проверять его надо
+     глазами, а не верить счётчику. */
+  const lists=`<div style="margin:6px 0 10px">
+    ${_trListHtml("Дошли",f.lists.came,"var(--green)","были хотя бы на одном занятии")}
+    ${_trListHtml("Не дошли ни разу",f.lists.missedAll,"var(--red)","занятия были, впереди ничего не осталось")}
+    ${_trListHtml("Ждём",f.lists.waiting,"var(--terra)","ещё не были, но занятия впереди есть")}
+    ${_trListHtml("Без занятий",f.lists.noLessons,"var(--muted)","в наборе есть, в расписании Alfa занятий нет")}
+  </div>`;
+  return head+tiles+warn+lists+fc;
 }
 function _trDayLabel(d){
   const dn=["вс","пн","вт","ср","чт","пт","сб"];

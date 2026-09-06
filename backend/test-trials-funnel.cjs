@@ -37,7 +37,7 @@ function build(kids, newIds, opts) {
     Date, String, Number, Object, Set, Math,
   };
   return new Function(...Object.keys(scope),
-    grab('_trNewSet') + grab('_trLesState') + grab('_trFunnel') + grab('_trKidName')
+    grab('_trNewSet') + grab('_trLesState') + grab('_trFunnel') + grab('_trKidName') + grab('_trListHtml')
     + grab('_trDayLabel') + grab('_trFunnelHtml')
     + '; return {f:_trFunnel(), html:_trFunnelHtml(), st:_trLesState};'
   )(...Object.values(scope));
@@ -99,6 +99,27 @@ t('плашка показана', r.html.includes('абонемент не пр
 console.log('--- 8. идёт чтение ---');
 r = build({ 11: [les('2026-09-12', false)] }, [11], { busy: true, prog: '15/153' });
 t('виден прогресс', r.html.includes('15/153'));
+
+
+console.log('--- 9. списки под цифрами: видно, кто и куда шёл ---');
+// Жанна: «дай список тех и куда шли, чтобы я могла понять, верно ли ты собираешь данные»
+r = build({
+  20: [les('2026-09-01', true, 15, true), les('2026-09-20', false, null, null, 9)],
+  21: [les('2026-09-01', true, 0, null)],
+  22: [les('2026-09-20', false)],
+  23: [],
+}, [20, 21, 22, 23]);
+t('раскрывашка «Дошли» есть', r.html.includes('Дошли'));
+t('раскрывашка «Не дошли ни разу» есть', r.html.includes('Не дошли ни разу'));
+t('раскрывашка «Ждём» есть', r.html.includes('Ждём'));
+t('раскрывашка «Без занятий» есть', r.html.includes('Без занятий'));
+t('имена детей в списках', r.html.includes('Ребёнок 20') && r.html.includes('Ребёнок 21'));
+t('видно, КУДА шёл — курс', r.html.includes('Арт-студия') && r.html.includes('Пескография'));
+t('видно дату занятия', r.html.includes('01.09'));
+t('видно исход каждого занятия', r.html.includes('пришёл') && r.html.includes('не пришёл'));
+t('сумма списания показана', r.html.includes('>15<'));
+t('у ребёнка без занятий так и написано', r.html.includes('занятий в расписании нет'));
+t('пустая корзина раскрывашку не рисует', !r.html.includes('>0</span>'));
 
 if (bad) { console.log(NL + 'провалено проверок: ' + bad); process.exit(1); }
 console.log(NL + 'всё сошлось');
