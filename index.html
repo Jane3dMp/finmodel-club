@@ -1923,7 +1923,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-09-06-11";
+const APP_VER="2026-09-06-12";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -10490,6 +10490,9 @@ function _trNewSet(){
    Считаем по детям: один запрос на ребёнка отдаёт все его занятия периода сразу. Обход по дням
    стоил бы сотни запросов, а этот — семь пачек на весь набор. */
 let _trFun=null, _trFunBusy=false, _trFunProg="", _trRefs={subjects:{},teachers:{}};
+/* Карточки детей (имя + «в архиве»), приходят вместе с занятиями. Архивных надо помечать:
+   ребёнок из набора без занятий и в архиве — это не потеря, а закрытый вопрос. */
+let _trCards={};
 function _trYearStart(){
   const d=new Date(), y=d.getFullYear(), m=d.getMonth()+1;
   return (m>=9?y:y-1)+"-09-01";     // учебный год начинается 1 сентября
@@ -10505,12 +10508,13 @@ async function trLoadFunnel(force){
   if(!set||!set.size){ _trFun=null; renderTrials(); return; }
   if(!force && _trFun) return;
   const ids=[...set].map(Number).filter(Boolean);
-  _trFunBusy=true; _trFunProg="0/"+ids.length; _trFun={kids:{},from:_trYearStart(),to:_trHorizon()};
+  _trFunBusy=true; _trFunProg="0/"+ids.length; _trCards={}; _trFun={kids:{},from:_trYearStart(),to:_trHorizon()};
   renderTrials();
   try{
     for(let i=0;i<ids.length;i+=15){
       const j=await _pubCall("kidsLessons",{ids:ids.slice(i,i+15), from:_trFun.from, to:_trFun.to, refs:(i===0), force:!!force});
       Object.assign(_trFun.kids, j.kids||{});
+      if(j.cards) Object.assign(_trCards, j.cards);
       if(j.subjects) _trRefs.subjects=j.subjects;
       if(j.teachers) _trRefs.teachers=j.teachers;
       _trFunProg=Math.min(i+15,ids.length)+"/"+ids.length;
@@ -10573,7 +10577,7 @@ function _trListHtml(title, rows, color, hint){
       ${hint?`<span style="color:var(--muted);font-size:12px"> · ${esc(hint)}</span>`:""}</summary>
     <div style="padding:6px 0 4px 4px">${rows.map(r=>`
       <div style="padding:4px 0;border-bottom:1px solid var(--line)">
-        <div style="font-weight:600;font-size:13px">${_trKidLink(r.id)}</div>
+        <div style="font-weight:600;font-size:13px">${_trKidLink(r.id)}${_trArchBadge(r.id)}</div>
         ${r.les.length?r.les.map(x=>{
           const s=LES[x.st]||["",""];
           return `<div style="display:flex;gap:8px;font-size:12px;color:var(--muted);padding:1px 0">
@@ -10600,6 +10604,15 @@ function trOpenKid(id, name){
   _kidCardRef={name:nm, alfaId:(sid?sid:null)};
   openKidCard(sid||null, nm, kid||{n:nm, alfaId:(sid||null), evzz:""});
 }
+function _trArchived(id){
+  const c=_trCards[String(id)]||_trCards[Number(id)];
+  return !!(c&&c.archived);
+}
+function _trArchBadge(id){
+  return _trArchived(id)
+    ? ' <span style="font-size:11px;color:var(--muted);border:1px solid var(--line);border-radius:9px;padding:0 6px" title="В Alfa карточка убрана в архив — этот ребёнок уже не ждётся">в архиве</span>'
+    : '';
+}
 function _trKidLink(id, name){
   const nm=name||_trKidName(id);
   return `<a href="#" title="Открыть карточку ребёнка" onclick="trOpenKid('${_jsStr(String(id))}','${_jsStr(nm)}');return false"
@@ -10615,7 +10628,12 @@ function _trKidName(id){
     }
   }catch(e){}
   const c=(S.children||{})[s];
-  return (c&&c.name)||("id "+s);
+  if(c&&c.name) return c.name;
+  /* Имя из карточки Alfa — запасной вариант для детей, которых в модели ещё нет. Именно такие
+     чаще всего и попадают в этот раздел, и показывать им «id 2439» бессмысленно. */
+  const card=_trCards[s]||_trCards[Number(s)];
+  if(card&&card.name) return card.name;
+  return "id "+s;
 }
 function _trFunnelHtml(){
   const set=_trNewSet();
@@ -10654,7 +10672,7 @@ function _trFunnelHtml(){
       <div style="font-weight:700;font-size:13px;margin-bottom:4px">${esc(_trDayLabel(d))}</div>
       ${byDay[d].sort((a,b)=>String(a.les.from).localeCompare(String(b.les.from))).map(a=>`<div style="display:flex;gap:8px;align-items:baseline;padding:1px 0">
         <span style="width:44px;color:var(--muted);font-size:12px">${esc(a.les.from||"")}</span>
-        <span style="flex:1">${_trKidLink(a.id)}</span>
+        <span style="flex:1">${_trKidLink(a.id)}${_trArchBadge(a.id)}</span>
         <span style="font-size:12px;color:var(--muted)">${esc(_trRefs.subjects[a.les.subjectId]||"")}</span>
       </div>`).join("")}</div>`).join("")}</div>`
     : `<div style="font-size:12px;color:var(--muted);margin-top:4px">Впереди занятий у детей набора не запланировано.</div>`;
@@ -10665,7 +10683,8 @@ function _trFunnelHtml(){
     ${_trListHtml("Дошли",f.lists.came,"var(--green)","были хотя бы на одном занятии")}
     ${_trListHtml("Не дошли ни разу",f.lists.missedAll,"var(--red)","занятия были, впереди ничего не осталось")}
     ${_trListHtml("Ждём",f.lists.waiting,"var(--terra)","ещё не были, но занятия впереди есть")}
-    ${_trListHtml("Без занятий",f.lists.noLessons,"var(--muted)","в наборе есть, в расписании Alfa занятий нет")}
+    ${_trListHtml("Без занятий",f.lists.noLessons,"var(--muted)",
+        "в наборе есть, в расписании Alfa занятий нет"+(function(){var a=f.lists.noLessons.filter(x=>_trArchived(x.id)).length;return a?(" · из них в архиве "+a):"";})())}
   </div>`;
   return head+tiles+warn+lists+fc;
 }

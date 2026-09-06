@@ -33,8 +33,9 @@ function build(kids, newIds, opts) {
     _trFunBusy: !!o.busy,
     _trFunProg: o.prog || '',
     _trRefs: { subjects: { 7: 'Арт-студия', 9: 'Пескография' }, teachers: {} },
+    _trCards: o.cards || {},
     _trToday: () => TODAY,
-    _goalsKidLists: () => ({ newKids: (newIds || []).map(id => ({ alfaId: id, name: 'Ребёнок ' + id })) }),
+    _goalsKidLists: () => ({ newKids: (newIds || []).map(id => (o.noModelNames ? { alfaId: id } : { alfaId: id, name: 'Ребёнок ' + id })) }),
     trLoadFunnel: () => {},
     // экранирование для inline-обработчика; здесь не проверяется, нужен только вызов
     _jsStr: (x) => String(x).split(BS).join(BS + BS).split(Q).join(BS + Q),
@@ -42,7 +43,7 @@ function build(kids, newIds, opts) {
     Date, String, Number, Object, Set, Math,
   };
   return new Function(...Object.keys(scope),
-    grab('_trNewSet') + grab('_trLesState') + grab('_trFunnel') + grab('_trKidName') + grab('_trKidLink') + grab('_trListHtml')
+    grab('_trNewSet') + grab('_trLesState') + grab('_trFunnel') + grab('_trKidName') + grab('_trArchived') + grab('_trArchBadge') + grab('_trKidLink') + grab('_trListHtml')
     + grab('_trDayLabel') + grab('_trFunnelHtml')
     + '; return {f:_trFunnel(), html:_trFunnelHtml(), st:_trLesState};'
   )(...Object.values(scope));
@@ -136,6 +137,24 @@ t('передаётся id ребёнка', r.html.includes('trOpenKid(') && r.h
 t('переход по ссылке не перезагружает страницу', r.html.includes('return false'));
 t('есть подсказка при наведении', r.html.includes('Открыть карточку ребёнка'));
 t('в раскрывашках имя тоже ссылка', r.html.split('trOpenKid(').length - 1 >= 2);
+
+
+console.log('--- 11. архивных помечаем отдельно ---');
+// Жанна: «дети, которые есть в „без занятий“ и которые в архиве, нужно помечать что в архиве».
+// Архив в Alfa — это removed, а не is_study=0: последнее означает лида, то есть как раз того,
+// кого мы ждём.
+r = build({ 40: [], 41: [] }, [40, 41],
+  { cards: { 40: { name: 'Дворецкий Тимофей', archived: true }, 41: { name: 'Бордовская Ульяна', archived: false } } });
+t('пометка «в архиве» есть', r.html.includes('в архиве'));
+t('и только одна', r.html.split('>в архиве<').length - 1 === 1);
+t('в подписи корзины сказано, сколько их', r.html.includes('из них в архиве 1'));
+t('оба ребёнка всё равно в списке', r.html.includes('Ребёнок 40') && r.html.includes('Ребёнок 41'));
+// ребёнка нет в модели — имя берём из карточки Alfa, а не показываем «id 43»
+r = build({ 43: [] }, [43], { cards: { 43: { name: 'Дворецкий Тимофей', archived: true } }, noModelNames: true });
+t('имя подставлено из Alfa', r.html.includes('Дворецкий Тимофей'), r.html.slice(0, 0) || 'нет имени');
+t('и он помечен архивным', r.html.includes('в архиве'));
+r = build({ 42: [] }, [42], { cards: { 42: { name: 'Кто-то', archived: false } } });
+t('без архивных подписи нет', !r.html.includes('из них в архиве'));
 
 if (bad) { console.log(NL + 'провалено проверок: ' + bad); process.exit(1); }
 console.log(NL + 'всё сошлось');

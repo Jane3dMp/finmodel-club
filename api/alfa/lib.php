@@ -754,9 +754,13 @@ function alfa_trial_state(float $commission, $isAttend, bool $lessonDone): strin
 /* Имена детей по id. В строке участника имени нет, а тянуть весь справочник клиентов ради
    десятка детей на этом хостинге нельзя — точечно и с долгим кэшем (имена не меняются). */
 function alfa_names_cache_path(): string {
-    return alfa_store_dir() . '/custnames_' . substr(hash('sha256', __DIR__ . '|names1'), 0, 20) . '.json';
+    return alfa_store_dir() . '/custnames_' . substr(hash('sha256', __DIR__ . '|names2'), 0, 20) . '.json';
 }
-function alfa_customer_names(array $ids, ?array $branches = null): array {
+/* Карточка ребёнка: имя и «в архиве ли». Архив в Alfa — это removed, а НЕ is_study=0:
+   is_study=0 означает лида (заявка заведена, ребёнок не оформлен), и путать их нельзя —
+   лид как раз тот, кого мы ждём, а архивный уже ушёл. Флаг берём тем же запросом, что и
+   имя, то есть бесплатно. */
+function alfa_customer_cards(array $ids, ?array $branches = null): array {
     $ids = array_values(array_unique(array_map('intval', array_filter($ids))));
     if (!$ids) return [];
     $f = alfa_names_cache_path();
@@ -764,7 +768,8 @@ function alfa_customer_names(array $ids, ?array $branches = null): array {
     if (is_file($f)) { $j = json_decode((string)@file_get_contents($f), true); if (is_array($j)) $cache = $j; }
     $out = []; $miss = [];
     foreach ($ids as $id) {
-        if (!empty($cache[(string)$id])) $out[$id] = (string)$cache[(string)$id];
+        $c = $cache[(string)$id] ?? null;
+        if (is_array($c) && ($c['n'] ?? '') !== '') $out[$id] = ['name' => (string)$c['n'], 'archived' => !empty($c['a'])];
         else $miss[] = $id;
     }
     if ($miss) {
@@ -780,12 +785,22 @@ function alfa_customer_names(array $ids, ?array $branches = null): array {
                 foreach (($r['items'] ?? []) as $c) if ((int)($c['id'] ?? 0) === $id) { $hit = $c; break; }
                 if (!$hit) continue;
                 $nm = trim((string)($hit['name'] ?? ''));
-                if ($nm !== '') { $out[$id] = $nm; $cache[(string)$id] = $nm; $found = true; }
+                /* Разные установки Alfa помечают архив по-разному, поэтому смотрим все
+                   известные поля разом (их список уже собран в alfa_flags). */
+                $arch = !empty($hit['removed']) || !empty($hit['is_archive']) || !empty($hit['archived']);
+                if ($nm !== '') { $out[$id] = ['name' => $nm, 'archived' => $arch];
+                                  $cache[(string)$id] = ['n' => $nm, 'a' => $arch ? 1 : 0]; $found = true; }
                 break;
             }
         }
         if ($found) @file_put_contents($f, json_encode($cache, JSON_UNESCAPED_UNICODE), LOCK_EX);
     }
+    return $out;
+}
+/* Прежняя форма — только имена. Ею пользуется список дня, где архив не нужен. */
+function alfa_customer_names(array $ids, ?array $branches = null): array {
+    $out = [];
+    foreach (alfa_customer_cards($ids, $branches) as $id => $c) $out[$id] = (string)($c['name'] ?? '');
     return $out;
 }
 /* Справочник (педагоги, предметы) с суточным кэшем — чтобы в списке были живые названия, а не
@@ -982,7 +997,8 @@ function alfa_kids_lessons(array $ids, string $from, string $to, ?array $branche
         $dirty = true;
     }
     if ($dirty) @file_put_contents($f, json_encode($cache, JSON_UNESCAPED_UNICODE), LOCK_EX);
-    return ['kids' => $out, 'asked' => $asked, 'from' => $from, 'to' => $to, 'today' => $today];
+    return ['kids' => $out, 'asked' => $asked, 'from' => $from, 'to' => $to, 'today' => $today,
+            'cards' => alfa_customer_cards($ids, $branches)];
 }
 
 /* Снимок дня по пробным. Жанна: «нужна переключашка между днями, не нужно каждый раз
