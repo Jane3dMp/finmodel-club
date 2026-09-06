@@ -1923,7 +1923,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-09-06-17";
+const APP_VER="2026-09-06-18";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -10493,6 +10493,9 @@ let _trFun=null, _trFunBusy=false, _trFunProg="", _trRefs={subjects:{},teachers:
 /* Карточки детей (имя + «в архиве»), приходят вместе с занятиями. Архивных надо помечать:
    ребёнок из набора без занятий и в архиве — это не потеря, а закрытый вопрос. */
 let _trCards={};
+/* Абонементы детей: купил ли клиент после пробного. Грузятся отдельно и после занятий —
+   один запрос на ребёнка, внутри основной загрузки они удвоили бы её стоимость. */
+let _trTar={}, _trTarBusy=false, _trTarProg="";
 function _trYearStart(){
   const d=new Date(), y=d.getFullYear(), m=d.getMonth()+1;
   return (m>=9?y:y-1)+"-09-01";     // учебный год начинается 1 сентября
@@ -10534,6 +10537,7 @@ async function trLoadFunnel(force){
     }
   }catch(e){ _trFun=null; _trFunProg=""; toast("Не удалось собрать воронку: "+((e&&e.message)||e)); }
   finally{ _trFunBusy=false; _trFunProg=""; renderTrials(); }
+  trLoadTariffs(force);
 }
 /* Судьба одного занятия ребёнка — та же логика, что и в дне: деньги главное, но у ребёнка без
    абонемента 0 спишется и когда он пришёл, поэтому смотрим отметку. */
@@ -10600,7 +10604,7 @@ function _trListHtml(title, rows, color, hint){
       ${hint?`<span style="color:var(--muted);font-size:12px"> · ${esc(hint)}</span>`:""}</summary>
     <div style="padding:6px 0 4px 4px">${rows.map(r=>`
       <div style="padding:4px 0;border-bottom:1px solid var(--line)">
-        <div style="font-weight:600;font-size:13px">${_trKidLink(r.id)}${_trArchBadge(r.id)}</div>
+        <div style="font-weight:600;font-size:13px">${_trKidLink(r.id)}${_trArchBadge(r.id)}${_trTarHtml(r.id)}</div>
         ${(function(){
           /* Прошедшие занятия показываем все — по ним и видно, что ребёнок пропустил. А из
              будущих оставляем только БЛИЖАЙШЕЕ по каждому курсу: расписание регулярное до мая,
@@ -10670,6 +10674,32 @@ function _trKidName(id){
   if(card&&card.name) return card.name;
   return "id "+s;
 }
+async function trLoadTariffs(force){
+  if(_trTarBusy) return;
+  const set=_trNewSet(); if(!set||!set.size) return;
+  const ids=[...set].map(Number).filter(Boolean);
+  _trTarBusy=true; _trTarProg="0/"+ids.length; if(force) _trTar={}; renderTrials();
+  try{
+    for(let i=0;i<ids.length;i+=15){
+      const j=await _pubCall("kidsTariffs",{ids:ids.slice(i,i+15), force:!!force});
+      Object.assign(_trTar, j.tariffs||{});
+      _trTarProg=Math.min(i+15,ids.length)+"/"+ids.length;
+      renderTrials();
+    }
+  }catch(e){ /* без абонементов раздел остаётся рабочим — просто не показываем их */ }
+  finally{ _trTarBusy=false; _trTarProg=""; renderTrials(); }
+}
+/* Короткая подпись про абонемент. Главное, что нужно Жанне, — купил или нет; остаток
+   показываем, когда Alfa его отдаёт (у новых абонементов он часто ещё нулевой). */
+function _trTarHtml(id){
+  const t=_trTar[String(id)]||_trTar[Number(id)];
+  if(!t) return _trTarBusy?'':'';
+  if(!t.tariffs||!t.tariffs.length) return ' <span style="font-size:11px;color:var(--red)">без абонемента</span>';
+  if(!t.paid) return ' <span style="font-size:11px;color:#C9922E">только пробный абонемент</span>';
+  const paid=t.tariffs.filter(x=>!x.trial);
+  const nm=paid.map(x=>esc(x.name)+((x.balance!=null&&x.balance>0)?(' · остаток '+_gm(x.balance)):'')).join(', ');
+  return ' <span style="font-size:11px;color:var(--green)">'+nm+'</span>';
+}
 function _trFunnelHtml(){
   const set=_trNewSet();
   if(!set||!set.size) return "";
@@ -10682,7 +10712,8 @@ function _trFunnelHtml(){
   const tile=(n,lab,col,ttl)=>`<div title="${esc(ttl||"")}" style="flex:1;min-width:110px;border:1px solid var(--line);border-radius:9px;padding:8px 12px;background:#fff">
     <div style="font-size:22px;font-weight:700${col?";color:"+col:""}">${n}</div>
     <div style="font-size:12px;color:var(--muted)">${lab}</div></div>`;
-  const prog=_trFunBusy?` <span style="font-size:12px;color:var(--muted)">(читаю ${esc(_trFunProg)})</span>`:"";
+  const prog=_trFunBusy?` <span style="font-size:12px;color:var(--muted)">(читаю ${esc(_trFunProg)})</span>`
+    :(_trTarBusy?` <span style="font-size:12px;color:var(--muted)">(абонементы ${esc(_trTarProg)})</span>`:"");
   const head=`<div style="display:flex;align-items:baseline;gap:8px;margin:4px 0 6px">
     <b style="font-size:14px">Новый набор целиком</b>
     <span style="font-size:12px;color:var(--muted)">с ${esc(_trFun.from)} по ${esc(_trFun.to)}${prog}</span>

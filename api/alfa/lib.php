@@ -1065,6 +1065,64 @@ function alfa_trials_day_cached(string $date, ?array $branches = null, bool $for
     return $r;
 }
 
+/* ===== АБОНЕМЕНТЫ ДЕТЕЙ =====
+   Жанна: «добавь активные актуальные балансы, чтобы я понимала, купили ли клиенты абонементы
+   или просто сходили на пробное». Пробное занятие само по себе ничего не говорит о продаже —
+   вопрос в том, появился ли у ребёнка нормальный абонемент после него.
+
+   ⚠️ Отдельным действием и пачками, как история: это запрос на каждого ребёнка, и внутри
+   загрузки занятий он удвоил бы её стоимость. Балансы меняются медленно — кэш на час. */
+function alfa_kidtar_cache_path(): string {
+    return alfa_store_dir() . '/kidtar_' . substr(hash('sha256', __DIR__ . '|kidtar1'), 0, 20) . '.json';
+}
+function alfa_kids_tariffs(array $ids, ?array $branches = null, bool $force = false): array {
+    $ids = array_values(array_unique(array_map('intval', array_filter($ids))));
+    if (!$ids) return ['tariffs' => [], 'asked' => 0];
+    $branches = $branches ?: alfa_realization_branches();
+    $today = date('Y-m-d');
+    $f = alfa_kidtar_cache_path();
+    $cache = [];
+    if (is_file($f)) { $j = json_decode((string)@file_get_contents($f), true); if (is_array($j)) $cache = $j; }
+    $out = []; $asked = 0; $dirty = false;
+    foreach ($ids as $id) {
+        $k = (string)$id;
+        $c = $cache[$k] ?? null;
+        if (!$force && is_array($c) && (int)($c['ts'] ?? 0) > time() - 3600) { $out[$id] = $c['v']; continue; }
+        $rows = []; $paid = false;
+        foreach ($branches as $bid) {
+            $r = alfa_customer_tariffs((int)$bid, $id);
+            $asked++;
+            if (empty($r['ok'])) continue;
+            $tm = &alfa_tariff_map_ref((int)$bid);
+            foreach ($r['items'] as $t) {
+                if (!is_array($t) || !empty($t['is_archive'])) continue;
+                $tid = (int)($t['tariff_id'] ?? 0);
+                if ($tid && !isset($tm[$tid])) alfa_tariff_one((int)$bid, $tid, $tm);
+                $nm = (string)($tm[$tid]['name'] ?? '');
+                $b = alfa_iso((string)($t['b_date'] ?? ''));
+                $e = alfa_iso((string)($t['e_date'] ?? ''));
+                /* Действующий = период накрывает сегодня. Прошлогодние абонементы у ребёнка,
+                   который ходит не первый год, лежат пачкой и на вопрос «купил ли сейчас» не
+                   отвечают. */
+                if ($b !== '' && $b > $today) continue;
+                if ($e !== '' && $e < $today) continue;
+                $trial = alfa_is_trial_name($nm);
+                $rows[] = ['name' => $nm !== '' ? $nm : ('тариф ' . $tid),
+                           'balance' => isset($t['balance']) && is_numeric($t['balance']) ? round((float)$t['balance'], 2) : null,
+                           'from' => $b, 'to' => $e, 'trial' => $trial];
+                if (!$trial) $paid = true;
+            }
+            break;   // абонементы приходят одни и те же по всем филиалам — хватит первого ответа
+        }
+        $v = ['tariffs' => $rows, 'paid' => $paid];
+        $out[$id] = $v;
+        $cache[$k] = ['ts' => time(), 'v' => $v];
+        $dirty = true;
+    }
+    if ($dirty) @file_put_contents($f, json_encode($cache, JSON_UNESCAPED_UNICODE), LOCK_EX);
+    return ['tariffs' => $out, 'asked' => $asked];
+}
+
 /* ===== БЫЛ ЛИ РЕБЁНОК НА ЭТОМ КУРСЕ РАНЬШЕ =====
    Жанна: «вижу тут детей, которые ходили ранее, и у них просто нет шаблона абонемента на
    продолжение курса в этом году. Они не пробники». И правда: у постоянного ребёнка без

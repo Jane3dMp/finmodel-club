@@ -28,12 +28,14 @@ function build(kids, newIds, opts) {
   const o = opts || {};
   const scope = {
     esc,
+    _gm: (n) => String(Math.round(Number(n) || 0)),
     S: { children: {} },
     _trFun: { kids, before: (o.before || {}), from: '2026-09-01', to: '2026-10-10' },
     _trFunBusy: !!o.busy,
     _trFunProg: o.prog || '',
     _trRefs: { subjects: { 7: 'Арт-студия', 9: 'Пескография' }, teachers: {} },
     _trCards: o.cards || {},
+    _trTar: o.tar || {}, _trTarBusy: !!o.tarBusy, _trTarProg: '',
     _trToday: () => TODAY,
     _goalsKidLists: () => ({ newKids: (newIds || []).map(id => (o.noModelNames ? { alfaId: id } : { alfaId: id, name: 'Ребёнок ' + id })) }),
     trLoadFunnel: () => {},
@@ -43,7 +45,7 @@ function build(kids, newIds, opts) {
     Date, String, Number, Object, Set, Math,
   };
   return new Function(...Object.keys(scope),
-    grab('_trPrevSeasonStart') + grab('_trNewSet') + grab('_trLesState') + grab('_trFunnel') + grab('_trKidName') + grab('_trArchived') + grab('_trArchBadge') + grab('_trKidLink') + grab('_trListHtml')
+    grab('_trPrevSeasonStart') + grab('_trNewSet') + grab('_trLesState') + grab('_trFunnel') + grab('_trKidName') + grab('_trArchived') + grab('_trArchBadge') + grab('_trTarHtml') + grab('_trKidLink') + grab('_trListHtml')
     + grab('_trDayLabel') + grab('_trFunnelHtml')
     + '; return {f:_trFunnel(), html:_trFunnelHtml(), st:_trLesState};'
   )(...Object.values(scope));
@@ -230,6 +232,27 @@ r = build({ 71: [les('2026-09-11', false), les('2026-09-12', false, null, null, 
 const l71 = r.html.slice(r.html.indexOf('Ребёнок 71'));
 t('по каждому курсу своё ближайшее', l71.includes('11.09') && l71.includes('12.09'));
 t('повтор первого курса убран', !l71.includes('18.09'));
+
+
+console.log('--- 15. абонементы: купил или только сходил на пробное ---');
+// Жанна: «добавь активные актуальные балансы, чтобы я понимала, купили ли клиенты абонементы
+// или просто сходили на пробное»
+r = build({ 80: [les('2026-09-01', true, 15, true)], 81: [les('2026-09-01', true, 15, true)],
+           82: [les('2026-09-01', true, 15, true)], 83: [les('2026-09-01', true, 15, true)] }, [80, 81, 82, 83],
+  { tar: {
+      80: { paid: true,  tariffs: [{ name: 'Digital Art 8 занятий', balance: 184, trial: false }] },
+      81: { paid: false, tariffs: [{ name: 'Пробное занятие', balance: 0, trial: true }] },
+      82: { paid: false, tariffs: [] },
+      83: { paid: true,  tariffs: [{ name: 'Арт-студия', balance: 0, trial: false }] },
+  } });
+t('купивший показан с названием абонемента', r.html.includes('Digital Art 8 занятий'));
+t('и с остатком', r.html.includes('остаток 184'));
+t('у кого только пробный — так и написано', r.html.includes('только пробный абонемент'));
+t('без абонемента — отдельно и красным', r.html.includes('без абонемента'));
+t('нулевой остаток не выводим', !r.html.includes('остаток 0'));
+
+r = build({ 84: [les('2026-09-01', true, 15, true)] }, [84], {});
+t('пока абонементы не загружены — ничего не выдумываем', !r.html.includes('без абонемента'));
 
 if (bad) { console.log(NL + 'провалено проверок: ' + bad); process.exit(1); }
 console.log(NL + 'всё сошлось');
