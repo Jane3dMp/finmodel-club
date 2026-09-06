@@ -1936,7 +1936,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-09-07-03";
+const APP_VER="2026-09-07-04";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -11128,7 +11128,9 @@ function _trMgrTableHtml(){
     <td class="num" style="color:var(--green)">${m.came}</td>
     <td class="num" style="color:var(--red)">${m.missed}</td>
     <td class="num">${m.waiting}</td><td class="num">${pc(m.reach)}</td>
-    <td class="num">${m.paid}</td><td class="num">${pc(m.conv)}</td>
+    <td class="num">${m.paidCame}${m.paid>m.paidCame
+      ? ` <span style="color:var(--muted);font-weight:400">· всего ${m.paid}</span>` : ""}</td>
+    <td class="num">${pc(m.conv)}</td>
     <td class="num">${_gm(m.sum)}</td>
     <td class="num"><b style="color:var(--green)">${m.pay?_gm(m.pay):""}</b></td>
     <td class="num" style="color:var(--muted)">${m.noLes||""}</td>
@@ -11142,12 +11144,12 @@ function _trMgrTableHtml(){
   const tarNote=(!_trTar||!Object.keys(_trTar).length)
     ? `<div class="hint" style="margin:6px 0">Абонементы ещё не загружены — колонки «купили» и «конверсия» пока пустые.</div>` : "";
   return `<details style="margin:10px 0" open><summary style="cursor:pointer;font-weight:600">🏅 Рейтинг менеджеров (${rows.length})</summary>
-    <div class="hint" style="margin:6px 0">Считается по тем же корзинам, что и цифры выше, только по этому набору. Кто занимался в клубе до 1 сентября, в рейтинг не входит: это не новые клиенты, и их абонементы к работе менеджера по набору отношения не имеют. Менеджер — ответственный по сделке amoCRM, связь по телефону. <b>Доходимость</b> = дошли ÷ (дошли + не дошли), ждущие не в счёт. <b>Конверсия</b> = купили абонемент ИЗ ДОШЕДШИХ ÷ дошли. Колонка «Купили» шире: в неё входят и те, кто абонемент уже оплатил, а на занятие ещё не пришёл. <b>Списано</b> — сумма списаний по проведённым занятиям, а не деньги в кассе.</div>
+    <div class="hint" style="margin:6px 0">Считается по тем же корзинам, что и цифры выше, только по этому набору. Кто занимался в клубе до 1 сентября, в рейтинг не входит: это не новые клиенты, и их абонементы к работе менеджера по набору отношения не имеют. Менеджер — ответственный по сделке amoCRM, связь по телефону. <b>Доходимость</b> = дошли ÷ (дошли + не дошли), ждущие не в счёт. <b>Конверсия</b> = купили абонемент ИЗ ДОШЕДШИХ ÷ дошли. В колонке «Купили» первое число — именно они; «всего» через точку — вместе с теми, кто абонемент оплатил, а на занятие ещё не пришёл. <b>Списано</b> — сумма списаний по проведённым занятиям, а не деньги в кассе.</div>
     ${tarNote}${payNote}
     <div class="tscroll"><table><thead><tr>
       <th style="text-align:left">Менеджер</th><th class="num">Детей</th><th class="num" title="Есть хотя бы одно занятие в расписании">Вписаны</th>
       <th class="num">Дошли</th><th class="num">Не дошли</th><th class="num">Ждём</th><th class="num">Доходимость</th>
-      <th class="num" title="Все дети менеджера с действующим платным абонементом или остатком — включая тех, кто оплатил заранее и ещё не пришёл. Поэтому это число бывает больше «Дошли»">Купили</th><th class="num">Конверсия</th>
+      <th class="num" title="Первое число — купившие ИЗ дошедших, его и делим на «Дошли». Через точку — сколько всего детей менеджера с действующим абонементом: оплатить можно и не придя на занятие, поэтому общее число бывает больше">Купили</th><th class="num">Конверсия</th>
       <th class="num" title="Сумма списаний по проведённым занятиям этих детей">Списано</th>
       <th class="num" title="Платежи этих клиентов в кассу Alfa за сезон — настоящие деньги">Оплачено</th>
       <th class="num" title="Ребёнок в наборе есть, а занятий в расписании нет">Без занятий</th>
@@ -11159,7 +11161,8 @@ function _trMgrTableHtml(){
       <td class="num"><b style="color:var(--red)">${T.missed}</b></td>
       <td class="num"><b>${T.waiting}</b></td>
       <td class="num">${pc((T.came+T.missed)?(100*T.came/(T.came+T.missed)):null)}</td>
-      <td class="num"><b>${T.paid}</b></td>
+      <td class="num"><b>${T.paidCame}</b>${T.paid>T.paidCame
+        ? ` <span style="color:var(--muted)">· всего ${T.paid}</span>` : ""}</td>
       <td class="num">${pc(T.came?(100*T.paidCame/T.came):null)}</td>
       <td class="num"><b>${_gm(T.sum)}</b></td>
       <td class="num"><b style="color:var(--green)">${_gm(T.pay)}</b></td>
