@@ -62,7 +62,8 @@ function render(data, opts) {
   return out;
 }
 
-const kid = (id, name, sum, state) => ({ customerId: id, name, sum, state, cttId: 0 });
+const kid = (id, name, sum, state, trialSum) => ({ customerId: id, name, sum, state, cttId: 0,
+  trialSum: (trialSum === undefined ? (sum === 0 || sum === 15) : trialSum) });
 const lesson = (subjectId, kids, done) => ({
   id: 1, done: !!done, from: '10:00', to: '11:30', subjectId,
   subject: '3D Blender и Unity', teacher: 'Винтилов Сергей', seats: 8, kids,
@@ -124,6 +125,29 @@ h = render(null, { err: new Error('Хостинг не пропустил зап
 t('ошибка показана', h.includes('Хостинг не пропустил'));
 h = render(null, { busy: true, newKids: NEW });
 t('видно, что идёт чтение', h.includes('Читаю занятия дня'));
+
+
+console.log('--- 7. режим набора не отсеивает по сумме ---');
+// Жанна заметила расхождение: дневной список показывал 4 ребёнка, а прогноз на тот же день —
+// 27. Дневной фильтровал по сумме списания (0 или 15) и только потом по набору, а новый
+// ребёнок с нормальным абонементом (списалось 36) — ровно тот, кого надо отслеживать.
+h = render(day([lesson(7, [
+  kid(1, 'Обычный абонемент', 36, 'came'),
+  kid(2, 'Пробная сумма', 15, 'came'),
+  kid(9, 'Не из набора', 36, 'came'),
+], true)]), { newKids: NEW });
+t('ребёнок набора с обычной суммой ПОКАЗАН', h.includes('Обычный абонемент'));
+t('ребёнок набора с пробной суммой показан', h.includes('Пробная сумма'));
+t('чужой скрыт', !h.includes('Не из набора'));
+t('в счёте оба своих', h.includes('>2</div>'));
+t('подпись объясняет, что показываются все занятия', h.includes('все их занятия за день'));
+
+h = render(day([lesson(7, [
+  kid(1, 'Обычный абонемент', 36, 'came'),
+  kid(2, 'Пробная сумма', 15, 'came'),
+], true)]), { newKids: NEW, mode: 'all' });
+t('режим «все кандидаты» по-прежнему по сумме', !h.includes('Обычный абонемент') && h.includes('Пробная сумма'));
+t('и подпись про сумму', h.includes('по сумме списания'));
 
 if (bad) { console.log(NL + 'провалено проверок: ' + bad); process.exit(1); }
 console.log(NL + 'всё сошлось');

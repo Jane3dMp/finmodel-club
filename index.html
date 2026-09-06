@@ -1923,7 +1923,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-09-06-14";
+const APP_VER="2026-09-06-15";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -10754,14 +10754,15 @@ function renderTrials(){
   les.forEach(L=>{
     const rows=[];
     (L.kids||[]).forEach(k=>{
-      let show=true, mark="";
+      /* В режиме набора сумма ни при чём: отбираем по принадлежности к набору. В остальных
+         двух режимах речь именно о пробных, поэтому там сначала фильтр по сумме. */
+      let show=true;
       if(_trMode==="new"){
         show=newSet.has(String(k.customerId));
-        if(!show) mark="не из нового набора";
       } else if(_trMode==="course"){
-        const isNew=_trIsNew(k,L.subjectId);
-        show=(isNew!==false);
-        if(!show) mark="уже ходил на этот курс";
+        show=(k.trialSum!==false) && (_trIsNew(k,L.subjectId)!==false);
+      } else {
+        show=(k.trialSum!==false);
       }
       if(!show){ hidden++; return; }
       counts[k.state]=(counts[k.state]||0)+1;
@@ -10788,7 +10789,7 @@ function renderTrials(){
   const tiles=`<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
     <div style="flex:1;min-width:120px;border:1px solid var(--line);border-radius:9px;padding:8px 12px;background:var(--sand-l)">
       <div style="font-size:22px;font-weight:700">${total}</div>
-      <div style="font-size:12px;color:var(--muted)">${_trMode==="new"?"из нового набора":"пробных за день"}</div></div>
+      <div style="font-size:12px;color:var(--muted)">${_trMode==="new"?"из нового набора · все их занятия за день":"пробных за день · по сумме списания"}</div></div>
     ${counts.waiting?tile("waiting",counts.waiting):""}${tile("came",counts.came)}${counts.came_free?tile("came_free",counts.came_free):""}${tile("missed",counts.missed)}</div>`;
   const note=(_trMode==="course"&&_trHistBusy)
     ? `<div class="callout" style="font-size:12px;margin-bottom:10px">⏳ Проверяю по каждому ребёнку, ходил ли он на этот курс раньше — счёт пока предварительный.</div>`

@@ -873,14 +873,20 @@ function alfa_trials_day(string $date, ?array $branches = null): array {
                     }
                 }
                 $kids = [];
+                /* ⚠️ Отдаём ВСЕХ участников, а не только тех, у кого «пробная» сумма. Режим
+                   «только новый набор» отбирает детей по принадлежности к набору, и сумма там
+                   ни при чём: новый ребёнок с нормальным абонементом (списалось 36) — ровно
+                   тот, кого надо отслеживать, а прежний фильтр по сумме его отбрасывал. Кто
+                   попадает под пробную сумму, помечаем флагом — по нему фильтруют остальные
+                   два режима. */
                 foreach ($det as $dt) {
                     if (!is_array($dt)) continue;
                     $c = (float)($dt['commission'] ?? 0);
-                    if (!alfa_is_trial_sum($c)) continue;
                     $cid = (int)($dt['customer_id'] ?? 0);
                     if ($cid) $ids[$cid] = 1;
                     $kids[] = ['customerId' => $cid, 'sum' => round($c, 2),
                                'cttId' => (int)($dt['ctt_id'] ?? 0),
+                               'trialSum' => alfa_is_trial_sum($c),
                                'state' => alfa_trial_state($c, $dt['is_attend'] ?? null, $done)];
                 }
                 if (!$kids) continue;
@@ -1007,7 +1013,7 @@ function alfa_kids_lessons(array $ids, string $from, string $to, ?array $branche
    всегда считаем заново — они ещё меняются в течение дня (утром «ждём», вечером «пришёл»). */
 /* v2 в соли: снимки дней, снятые прежней версией, не содержали запланированных занятий. */
 function alfa_trials_store_path(): string {
-    return alfa_store_dir() . '/trialsdays_' . substr(hash('sha256', __DIR__ . '|trialsdays2'), 0, 20) . '.json';
+    return alfa_store_dir() . '/trialsdays_' . substr(hash('sha256', __DIR__ . '|trialsdays3'), 0, 20) . '.json';
 }
 function alfa_trials_store_read(): array {
     $f = alfa_trials_store_path();
