@@ -1936,7 +1936,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-09-07-16";
+const APP_VER="2026-09-07-17";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -14583,17 +14583,27 @@ function _fillHtml(){
     </tbody></table>
     <small class="note">План — из вкладки «Планировщик загрузки»: по каждому курсу «чел/гр × групп/нед × визитов». Месяц считается как ${wks} учебных недели — та же условность, что и в «Оборот/месяц» модели (S.assume.weeksPerMonth). Факт — списания из Alfa, дети не уникальные: ребёнок, ходящий 2 раза в неделю, занимает 2 детоместа.</small></div>`;
   /* --- ЭТАЛОН: загрузка месяца-образца, наложенная на сегодняшнюю вместимость --- */
-  const baseYm=String(S.fillBase||"2026-03");
+  /* Месяц-образец. Если сохранённый пересекается с выбранным периодом, берём умолчание:
+     сравнивать период сам с собой бессмысленно, а молча показывать такую цифру — вреднее,
+     чем проигнорировать настройку. О подмене говорим вслух ниже. */
+  const BASE_DEF="2026-03";
+  const baseSaved=String(S.fillBase||BASE_DEF);
+  const _ovl=(ym)=>(ym+"-01")<=P.to && (ym+"-31")>=P.from;
+  const baseSwapped=_ovl(baseSaved) && !_ovl(BASE_DEF);
+  const baseYm=baseSwapped?BASE_DEF:baseSaved;
   const bLast=new Date(+baseYm.slice(0,4),+baseYm.slice(5,7),0);
   const bAgg=_fillAgg(baseYm+"-01",_dIso(bLast)), bRows=_fillRows(bAgg), B=_fillTotals(bRows);
   const monthsHave={}; Object.keys((_fillStore.fill)||{}).forEach(d=>{monthsHave[String(d).slice(0,7)]=1;});
   const monthList=Object.keys(monthsHave).sort().reverse();
   if(!monthsHave[baseYm]) monthList.push(baseYm);
   const expect=(B.pct!=null&&T.seats>0)?Math.round(T.seats*B.pct/100):null;
+  /* Главная цифра эталона — разница ПРОЦЕНТОВ в процентных пунктах: она сравнима между
+     неделей и месяцем, а сами списания нет — у них разные знаменатели. */
+  const dPP=(B.pct!=null&&T.pct!=null)?(T.pct-B.pct):null;
   /* ⚠️ Эталон имеет смысл, только если месяц-образец НЕ пересекается с выбранным периодом.
      Иначе сравниваем период сам с собой: те же дни стоят и в эталоне, и в «факте сейчас»,
      разница получается из одной лишь длины отрезка и ничего не значит. */
-  const baseOverlap=(baseYm+"-01")<=P.to && (baseYm+"-31")>=P.from;
+  const baseOverlap=_ovl(baseYm);
   const baseBlk=`<div class="card" style="margin-bottom:10px"><h3>Эталон загрузки</h3>
     <div class="hd-actions" style="margin-bottom:8px">
       <span style="font-size:12px;color:var(--muted)">Месяц-образец:</span>
@@ -14603,13 +14613,14 @@ function _fillHtml(){
     ${B.pct==null
       ? `<div class="callout">За ${esc(_salesMonName(baseYm))} в хранилище ничего нет. Выберите этот месяц в списке периодов выше и нажмите «Пересчитать период» — Alfa отдаёт прошлые месяцы, просто их надо один раз посчитать.</div>`
       : `${baseOverlap?`<div class="callout" style="border-color:var(--red);font-size:12px;margin-bottom:8px">
-        <b>Месяц-образец пересекается с выбранным периодом.</b> Те же дни стоят и в эталоне, и в «факте сейчас» — раздел сравнивает период сам с собой, и разница берётся из одной только длины отрезка. Выберите месяц, который считаете образцовым (например, прошлый март), а не текущий.</div>`:""}
+        <b>Месяц-образец пересекается с выбранным периодом.</b> Те же дни стоят и в эталоне, и в «сейчас» — раздел сравнивает период сам с собой. Выберите месяц, который считаете образцовым, а не текущий.</div>`:""}
+      ${baseSwapped?`<div class="hint" style="margin-bottom:8px">Сохранённый образец «${esc(_salesMonName(baseSaved))}» пересекается с выбранным периодом, поэтому показываю ${esc(_salesMonName(BASE_DEF))}. Выберите другой месяц в списке, если нужен свой.</div>`:""}
       <table><tbody>
-        <tr><td>Загрузка ${esc(_salesMonName(baseYm))}</td><td class="num"><b style="color:${_fillPctColor(B.pct)}">${B.pct.toFixed(0)}%</b> <span style="color:var(--muted)">(${_gm(B.fact)} списаний из ${_gm(B.seats)} детомест)</span></td></tr>
-        <tr><td>Детоместа сейчас (${esc(P.label.toLowerCase())})</td><td class="num">${_gm(T.seats)}</td></tr>
-        <tr><td>Если наложить ту же загрузку на сегодняшнюю вместимость</td><td class="num"><b>${expect!=null?_gm(expect):"—"}</b> списаний</td></tr>
-        <tr class="totrow"><td>Факт сейчас</td><td class="num"><b style="color:${expect!=null&&T.fact>=expect?"var(--green)":"var(--red)"}">${_gm(T.fact)}</b>${expect!=null?` <span style="color:var(--muted)">(${T.fact-expect>=0?"+":""}${_gm(T.fact-expect)})</span>`:""}</td></tr>
+        <tr><td>Загрузка ${esc(_salesMonName(baseYm))} — эталон</td><td class="num"><b style="color:${_fillPctColor(B.pct)};font-size:16px">${B.pct.toFixed(0)}%</b> <span style="color:var(--muted)">${_gm(B.fact)} из ${_gm(B.seats)} детомест</span></td></tr>
+        <tr><td>Загрузка сейчас (${esc(P.label.toLowerCase())})</td><td class="num"><b style="color:${T.pct!=null?_fillPctColor(T.pct):"var(--muted)"};font-size:16px">${T.pct!=null?(T.pct.toFixed(0)+"%"):"—"}</b> <span style="color:var(--muted)">${_gm(T.cnt)} из ${_gm(T.seats)} детомест</span></td></tr>
+        <tr class="totrow"><td><b>Разница</b></td><td class="num">${dPP!=null?`<b style="color:${dPP>=0?"var(--green)":"var(--red)"};font-size:16px">${dPP>=0?"+":"−"}${Math.abs(dPP).toFixed(0)} п.п.</b>`:'—'}</td></tr>
       </tbody></table>
+      ${expect!=null?`<small class="note">Если бы сейчас грузили так же, как в ${esc(_salesMonName(baseYm))}, списаний было бы <b>${_gm(expect)}</b> вместо ${_gm(T.cnt)} — разница ${T.cnt-expect>=0?"+":"−"}${_gm(Math.abs(T.cnt-expect))}. Проценты сравнимы между окнами разной длины, а сами списания нет: неделя и месяц дают разные детоместа.</small>`:""}
       <small class="note">⚠️ Вместимость групп берётся сегодняшняя: в ${esc(_salesMonName(baseYm))} состав групп был другим, поэтому это ориентир, а не точное сравнение. Чтобы он был честнее, впишите «План детей» тем группам, которые вели и тогда.</small>`}
   </div>`;
   const srcMark={model:'<span style="color:var(--blue)" title="Взято из «Планировщика загрузки»">◆</span>', plan:'<span title="План вписан вами" style="color:var(--green)">•</span>',
