@@ -436,7 +436,13 @@ function alfa_realization_day(string $date, ?array $branchFilter = null): array 
         $bid = (int)$L['branch'];
         if (!isset($byBranch[$bid])) $byBranch[$bid] = ['present' => 0.0, 'all' => 0.0, 'lessons' => 0];
         $gk = (string)(int)($L['group'] ?? 0);
-        if (!isset($byGroup[$gk])) $byGroup[$gk] = ['les' => 0, 'seats' => 0, 'paid' => 0, 'trial' => 0, 'att' => 0, 'rev' => 0.0];
+        /* attPaid / attFree / noAttPaid — «кто был с деньгами и без них». Считать это из
+           дневных итогов нельзя: «пришёл без списания» и «не пришёл, но списалось» в один день
+           взаимно гасятся, и разница att − paid показала бы ноль там, где на деле и то и другое.
+           Здесь в одном цикле есть и отметка о приходе, и сумма списания — значит считаем точно. */
+        if (!isset($byGroup[$gk])) $byGroup[$gk] = ['les' => 0, 'seats' => 0, 'paid' => 0, 'trial' => 0,
+                                                    'att' => 0, 'rev' => 0.0,
+                                                    'attPaid' => 0, 'attFree' => 0, 'noAttPaid' => 0];
         if ($L['done']) { $doneLessons++; $byBranch[$bid]['lessons']++; $byGroup[$gk]['les']++; } else $plannedLessons++;
         $cid = (int)($L['cids'][0] ?? 0); if (!$cid) { $noDet++; continue; }
         $ck = $bid . ':' . $cid;
@@ -482,6 +488,12 @@ function alfa_realization_day(string $date, ?array $branchFilter = null): array 
                 $nPaid++; $byGroup[$gk]['paid']++;
                 if ($tr) { $nPaidTrial++; $byGroup[$gk]['trial']++; }
                 else { $cidP = alfa_detail_customer_id($dt); if ($cidP) $kidsPaid[$cidP] = 1; }
+                /* Пробное списание деньгами не считаем: у него своя цена, и в «пришёл с местом»
+                   ему не место — иначе пробники выглядели бы как оплаченная загрузка. */
+                if ($att && !$tr) $byGroup[$gk]['attPaid']++;
+                if (!$att)        $byGroup[$gk]['noAttPaid']++;   // пропуск со списанием
+            } elseif ($att) {
+                $byGroup[$gk]['attFree']++;   // пришёл, а списания нет вовсе
             }
             if ($att) { $present += $c; $nPresent++; $byBranch[$bid]['present'] += $c;
                         /* Кто РЕАЛЬНО пришёл — для «активных клиентов» в отчёте продажам.
@@ -685,7 +697,11 @@ function alfa_fill_store_path(): string {
     $salt = substr(hash('sha256', __DIR__ . '|fill1'), 0, 24);
     return alfa_store_dir() . '/fill_' . $salt . '.json';
 }
-const ALFA_FILL_FMT = ['les', 'seats', 'paid', 'trial', 'att', 'rev'];
+/* ⚠️ Порядок полей — часть формата файла: он лежит в ключе "_fmt", и клиент читает по нему.
+   Новые поля ДОБАВЛЯТЬ ТОЛЬКО В КОНЕЦ: у дней, посчитанных раньше, массив короче, и сдвиг
+   середины молча перепутал бы детоместа с выручкой. Короткие строки клиент видит по длине
+   и честно сообщает, что счётчик есть не за все дни. */
+const ALFA_FILL_FMT = ['les', 'seats', 'paid', 'trial', 'att', 'rev', 'attPaid', 'attFree', 'noAttPaid'];
 function alfa_fill_read(): array {
     $f = alfa_fill_store_path();
     if (!is_file($f)) return [];
@@ -712,7 +728,8 @@ function alfa_fill_row(array $byGroup): array {
     $out = [];
     foreach ($byGroup as $gid => $g) {
         $out[(string)(int)$gid] = [(int)($g['les'] ?? 0), (int)($g['seats'] ?? 0), (int)($g['paid'] ?? 0),
-                                   (int)($g['trial'] ?? 0), (int)($g['att'] ?? 0), round((float)($g['rev'] ?? 0), 2)];
+                                   (int)($g['trial'] ?? 0), (int)($g['att'] ?? 0), round((float)($g['rev'] ?? 0), 2),
+                                   (int)($g['attPaid'] ?? 0), (int)($g['attFree'] ?? 0), (int)($g['noAttPaid'] ?? 0)];
     }
     return $out;
 }

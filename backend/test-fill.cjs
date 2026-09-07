@@ -19,6 +19,7 @@ function eq(name, got, want) { check(name, got === want, JSON.stringify(got) + '
 
 const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
 const MULTI = ['_fillGroupName', '_fillAcadYear', '_fillYearWeeks', '_fillPeriods', '_fillPeriodOpts', '_fillCur',
+               '_fillWho',
                '_fillAgg', '_fillCap', 'fillPlanSet',
                '_fillRows', '_fillTotals', '_fillModelPlan', '_fillHtml',
                '_salesCfg', '_salesPace', '_salesPaceLines', '_salesPaceHtml'];
@@ -71,6 +72,7 @@ const ctx = {
 const API = new Function('ctx', 'with (ctx) { ' + src +
   ' return {_fillAgg,_fillCap,_fillRows,_fillTotals,_fillModelPlan,_fillHtml,_fillPeriods,_fillCur,' +
   '_fillAcadYear,_fillAcadMonth,_fillYearWeeks,_fillPeriodOpts,_fillArch,_fillNoName,_fillGroupName,' +
+  '_fillWho,' +
   '_fillPlanMap,fillPlanSet,_salesPace,_salesPaceLines,_salesPaceHtml,_salesCfg,_salesGoals}; }')(ctx);
 
 /* ================= 1. свод по группам за неделю ================= */
@@ -269,6 +271,58 @@ ctx._fillStore.fill = FILL;
   check('у действующих пометки нет', API._fillHtml().split('>арх.<').length === 2);
   ctx._fillPeriod = 'w:2026-08-31';
   delete FILL['2025-09-02']; delete G['30'];
+}
+
+
+/* ================= КТО БЫЛ: С ДЕНЬГАМИ И БЕЗ =================
+   Из дневных итогов эту статистику вывести НЕЛЬЗЯ: «пришёл без списания» и «не пришёл, но
+   списалось» в один день взаимно гасятся, и разница att − paid показала бы ноль там, где на
+   деле есть и то и другое. Поэтому счётчики считаются у источника, а здесь проверяется, что
+   клиент их складывает и показывает. */
+{
+  const ix = { les: 0, seats: 1, paid: 2, trial: 3, att: 4, rev: 5, attPaid: 6, attFree: 7, noAttPaid: 8 };
+  const row = (les, seats, paid, trial, att, rev, ap, af, np) => [les, seats, paid, trial, att, rev, ap, af, np];
+  const keep = ctx._fillStore.fill;
+  // день, где всё сразу: 6 мест, 4 списания (одно пробное), пришли 5 — трое с абонементом,
+  // один на пробное, один вообще без списания; и один пропуск со списанием
+  ctx._fillStore.fill = { '2026-09-02': { '10': row(1, 6, 4, 1, 5, 120, 3, 1, 1) } };
+  ctx._fillPeriod = 'w:2026-08-31';
+
+  ctx._fillStore.fmt = ['les','seats','paid','trial','att','rev','attPaid','attFree','noAttPaid'];
+  const agg = API._fillAgg('2026-08-31', '2026-09-06');
+  const rows = API._fillRows(agg);
+  const W = API._fillWho(rows);
+  eq('пришли всего', W.att, 5);
+  eq('из них с оплаченным местом', W.paid, 3);
+  eq('без списания вовсе', W.free, 1);
+  eq('на пробном — остаток', W.trial, 1);            // 5 − 3 − 1
+  eq('пропуск со списанием', W.missPaid, 1);
+  // ⚠️ ровно тот случай, ради которого счётчики считаются у источника:
+  // att − (paid − trial) = 5 − 3 = 2, и по этой разнице «пришёл без денег» не отличить от пропуска
+  check('разница att и детомест не заменяет счётчики',
+        (rows[0].att - rows[0].fact) === 2 && W.free === 1, 'att=' + rows[0].att + ' fact=' + rows[0].fact);
+
+  const h = API._fillHtml();
+  check('плитка «с оплаченным местом»', h.indexOf('пришли с оплаченным местом') > 0);
+  check('плитка «без списания»', h.indexOf('пришли без списания') > 0);
+  check('плитка про пробные', h.indexOf('пришли на пробное') > 0);
+  check('плитка про пропуск со списанием', h.indexOf('пропуск со списанием') > 0);
+  check('колонка в таблице', h.indexOf('>Без списания<') > 0);
+  check('и объяснено, что это потерянные деньги',
+        h.indexOf('Денег за это занятие клуб не получил') > 0 || h.indexOf('клуб не получил') > 0, 'подпись');
+
+  // --- старые дни без счётчиков: молча занижать нельзя ---
+  ctx._fillStore.fill = { '2026-09-02': { '10': [1, 6, 4, 1, 5, 120] } };   // короткая строка
+  const agg2 = API._fillAgg('2026-08-31', '2026-09-06');
+  eq('день со старым форматом в новые не засчитан', agg2.newDays, 0);
+  eq('но занятия у него читаются', agg2.lessonDays, 1);
+  const W2 = API._fillWho(API._fillRows(agg2));
+  eq('счётчики нулевые', W2.paid + W2.free + W2.missPaid, 0);
+  check('и об этом сказано вслух', API._fillHtml().indexOf('нажмите «Пересчитать заново»') > 0,
+        API._fillHtml().slice(0, 400));
+
+  ctx._fillStore.fill = keep;
+  ctx._fillPeriod = 'w:2026-08-31';
 }
 
 
