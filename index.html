@@ -1936,7 +1936,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-09-07-04";
+const APP_VER="2026-09-07-05";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -12006,6 +12006,55 @@ function _kassaCash(){
   return {acc:acc, from:from, open:open, inc:inc, out:out, now:open+inc-out, days:days, missing:missing,
           other:other, set:set, future:future, today:(from===today)};
 }
+/* ===== НАЛИЧНЫЕ ПО ДНЯМ =====
+   Карточка «Наличные в клубе» даёт один итог, и когда он расходится с физическим пересчётом,
+   спорить о нём бесполезно: непонятно, в каком дне ушли деньги. Здесь та же арифметика, но
+   по дням — остаток на начало, приход, расход, остаток на конец. День, где расчёт разошёлся
+   с реальной кассой, виден сразу, а дальше его операции открываются в «Сверке по дню».
+
+   ⚠️ Считается ровно так же, как итог в карточке (_kassaCash): дни строго ПОСЛЕ якоря,
+   расходы по другим кассам из остатка не вычитаются, но показываются. Если посчитать здесь
+   иначе, две цифры начнут расходиться между собой — и сверять станет нечего. */
+function _kassaCashDaily(){
+  const C=_kassaCash();
+  if(!C.set||C.future) return null;
+  const snap=_paySnap||{}, today=_todayIso(), rows=[];
+  const p=C.from.split("-").map(Number); const d=new Date(p[0],p[1]-1,p[2]); d.setDate(d.getDate()+1);
+  let bal=C.open;
+  for(; _dIso(d)<=today; d.setDate(d.getDate()+1)){
+    const k=_dIso(d), sn=snap[k];
+    if(!sn){ rows.push({date:k, no:true, open:bal, inc:0, out:0, close:bal, other:0}); continue; }
+    const inc=+(sn.byIn||{})[C.acc]||0, out=+(sn.byOut||{})[C.acc]||0;
+    let other=0;
+    Object.keys(sn.byOut||{}).forEach(k2=>{ if(k2!==C.acc) other+=(+sn.byOut[k2]||0); });
+    const open=bal; bal=open+inc-out;
+    rows.push({date:k, no:false, open:open, inc:inc, out:out, close:bal, other:other, n:+sn.count||0});
+  }
+  return {acc:C.acc, from:C.from, open:C.open, rows:rows, end:bal};
+}
+function _kassaCashDailyHtml(){
+  const D=_kassaCashDaily();
+  if(!D) return "";
+  if(!D.rows.length) return `<div class="hint" style="margin-top:6px">После ${esc(_kassaDMY(D.from))} дней ещё не было — сверять нечего.</div>`;
+  const tr=r=>`<tr${r.no?" style=\"opacity:.55\"":""}>
+    <td>${esc(_kassaDMY(r.date))}</td>
+    <td class="num" style="color:var(--muted)">${_gm(r.open)}</td>
+    <td class="num" style="color:var(--green)">${r.inc?_gm(r.inc):""}</td>
+    <td class="num" style="color:var(--red)">${r.out?("−"+_gm(r.out)):""}</td>
+    <td class="num"><b>${_gm(r.close)}</b></td>
+    <td class="num" style="color:var(--terra-d)" title="Расход за этот день по ДРУГИМ кассам. Из наличных не вычитается, но если деньги на самом деле вынули из кассы — расхождение будет отсюда">${r.other?("−"+_gm(r.other)):""}</td>
+    <td style="font-size:12px;color:var(--muted)">${r.no?"снимка нет":(r.n?(r.n+" оп."):"операций нет")}</td></tr>`;
+  const noDays=D.rows.filter(r=>r.no).length;
+  return `<details style="margin:12px 0" open><summary style="cursor:pointer;font-weight:600">💵 Наличные по дням — где расходится</summary>
+    <div class="hint" style="margin:6px 0">От пересчёта <b>${_gm(D.open)}</b> на конец ${esc(_kassaDMY(D.from))}. Считается так же, как итог в карточке: только касса «${esc(D.acc)}», дни строго после пересчёта. Найдите первый день, где «остаток на конец» разошёлся с тем, что реально было в кассе, — и откройте его в «Сверке по дню».</div>
+    ${noDays?`<div class="hint" style="color:var(--terra-d);margin:6px 0">Снимка нет за ${noDays} ${_kassaDayWord(noDays)} — эти дни в сумму не вошли вовсе, и остаток после них занижен. Соберите их кнопкой «Дособрать из Alfa» выше.</div>`:""}
+    <div class="tscroll" style="max-width:760px"><table><thead><tr>
+      <th style="text-align:left">День</th><th class="num">На начало</th><th class="num">Приход</th>
+      <th class="num">Расход</th><th class="num">На конец</th>
+      <th class="num" title="Расход за день по другим кассам — из наличных не вычитается">Прочий расход</th>
+      <th style="text-align:left">Операций</th>
+    </tr></thead><tbody>${D.rows.map(tr).join("")}</tbody></table></div></details>`;
+}
 function kassaOpenSet(field,val){
   const O=_kassaOpen();
   if(field==="acc") O.acc=String(val||"");
@@ -12232,7 +12281,7 @@ async function kassaToday(force){
 }
 function _kassaHtml(){
   const D=_kassaDay;
-  const head=_kassaTopHtml()
+  const head=_kassaTopHtml()+_kassaCashDailyHtml()
   +`<h3 style="margin:6px 0">Сверка по дню</h3>
   <div class="callout" style="margin-bottom:10px;font-size:12px">Платежи, внесённые в Alfa за день (кассы). Впишите сумму «по листу» — что админ записал ручкой — и увидите расхождение. Cron в 22:00 сам снимает прошедший день — вкладка открывается уже с цифрами.</div>
   <div class="hd-actions" style="margin-bottom:10px">

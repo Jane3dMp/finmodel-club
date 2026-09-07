@@ -20,7 +20,8 @@ function eq(name, got, want) { check(name, got === want, JSON.stringify(got) + '
 const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
 const NAMES = ['_kassaMonth', '_kassaTopHtml', '_kassaDayWord',
                '_tsHM', '_tsDMYHM', '_tsAgo', '_tsFreshHtml',
-               '_kassaMerge', '_kassaNetTable', '_kassaAccNames', '_kassaCashAcc', '_kassaCash', '_kassaCashCard'];
+               '_kassaMerge', '_kassaNetTable', '_kassaAccNames', '_kassaCashAcc', '_kassaCash', '_kassaCashCard',
+               '_kassaCashDaily', '_kassaCashDailyHtml'];
 const ONE_LINERS = ['_kassaDMY', '_kassaOpen'];
 let src = '';
 function grab(name, re) {
@@ -54,6 +55,7 @@ const ctx = {
 };
 const API = new Function('ctx', 'with (ctx) { ' + src +
   ' return {_kassaMonth,_kassaTopHtml,_kassaDayWord,_kassaMerge,_kassaNetTable,_kassaCashAcc,_kassaCash,_kassaCashCard,' +
+  '_kassaCashDaily,_kassaCashDailyHtml,' +
   ' setSnap:v=>{_paySnap=v}, setDate:v=>{_kassaDate=v}}; }')(ctx);
 
 /* ================= сумма за месяц ================= */
@@ -227,6 +229,54 @@ ctx.S.kassaOpen = {};
 /* --- хранилище ещё не загружено --- */
 API.setSnap(null);
 check('пока снимки грузятся — так и написано', API._kassaTopHtml().indexOf('Читаю сохранённые снимки') > 0);
+
+/* ================= НАЛИЧНЫЕ ПО ДНЯМ =================
+   Итог в карточке разошёлся с физическим пересчётом, и по одной цифре нельзя понять, в каком
+   дне ушли деньги. Подневная таблица должна отвечать ровно на это — и обязана сходиться с самой
+   карточкой: если две цифры разъедутся между собой, сверять станет нечего. */
+ctx._paySnap = {
+  '2026-09-01': { byIn: { 'Наличные': 0, 'ЕРИП': 60 }, byOut: {}, count: 4 },
+  '2026-09-02': { byIn: { 'Наличные': 1051 }, byOut: {}, count: 9 },
+  // 03.09 снимка нет вовсе — день не читали, и это не «нулевой день»
+  '2026-09-04': { byIn: { 'Наличные': 500 }, byOut: { 'Наличные': 35, 'Оплата картой': 78 }, count: 7 },
+  '2026-09-05': { byIn: {}, byOut: {}, count: 0 },
+};
+ctx.S.kassaOpen = { acc: 'Наличные', date: '2026-09-01', sum: 234 };
+ctx._todayIso = () => '2026-09-05';
+
+const CD = API._kassaCashDaily();
+eq('первый день — следующий за пересчётом', CD.rows[0].date, '2026-09-02');
+eq('дней до сегодня включительно', CD.rows.length, 4);          // 02, 03, 04, 05
+eq('стартуем от вписанного остатка', CD.rows[0].open, 234);
+eq('остаток на конец 02.09', CD.rows[0].close, 234 + 1051);
+eq('день без снимка остаток не меняет', CD.rows[1].close, CD.rows[1].open);
+check('и помечен как непрочитанный', CD.rows[1].no === true);
+eq('04.09: приход минус расход', CD.rows[2].close, 234 + 1051 + 500 - 35);
+eq('расход по другой кассе показан отдельно', CD.rows[2].other, 78);
+check('но из наличных не вычтен', CD.rows[2].close === 1750, 'остаток = ' + CD.rows[2].close);
+eq('пустой день ничего не меняет', CD.rows[3].close, CD.rows[2].close);
+
+// ⚠️ главное: подневный итог обязан совпасть с цифрой карточки, иначе сверять нечего
+eq('итог таблицы = итог карточки', CD.end, API._kassaCash().now);
+
+const hd = API._kassaCashDailyHtml();
+check('таблица нарисована', hd.indexOf('Наличные по дням') > 0);
+check('названа касса и точка отсчёта', hd.indexOf('на конец 01.09') > 0, hd.slice(0, 400));
+check('про непрочитанный день сказано вслух', hd.indexOf('Снимка нет за 1 день') > 0,
+      hd.slice(Math.max(0, hd.indexOf('Снимка нет') - 60), hd.indexOf('Снимка нет') + 120));
+check('и что остаток после него занижен', hd.indexOf('занижен') > 0);
+check('нет NaN', hd.indexOf('NaN') < 0);
+check('баланс <div>', (hd.match(/<div/g) || []).length === (hd.match(/<\/div>/g) || []).length);
+
+// без пересчёта считать не от чего
+ctx.S.kassaOpen = {};
+eq('без якоря таблицы нет', API._kassaCashDaily(), null);
+eq('и разметки тоже', API._kassaCashDailyHtml(), '');
+// пересчёт задним числом в будущем — тоже не считаем
+ctx.S.kassaOpen = { acc: 'Наличные', date: '2026-12-31', sum: 100 };
+eq('будущий пересчёт не считаем', API._kassaCashDaily(), null);
+ctx.S.kassaOpen = {};
+
 
 console.log(bad ? '\n❌ провалено проверок: ' + bad : '\n✅ всё сошлось');
 process.exit(bad ? 1 : 0);
