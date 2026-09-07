@@ -446,8 +446,22 @@ function alfa_realization_day(string $date, ?array $branchFilter = null): array 
         if (!isset($byGroup[$gk])) $byGroup[$gk] = ['les' => 0, 'seats' => 0, 'paid' => 0, 'trial' => 0,
                                                     'att' => 0, 'rev' => 0.0,
                                                     'attPaid' => 0, 'attFree' => 0, 'noAttPaid' => 0,
-                                                    'attTrial' => 0, 'attZero' => 0];
-        if ($L['done']) { $doneLessons++; $byBranch[$bid]['lessons']++; $byGroup[$gk]['les']++; } else $plannedLessons++;
+                                                    'attTrial' => 0, 'attZero' => 0,
+                                                    'tch' => [], 'sbj' => []];
+        if ($L['done']) { $doneLessons++; $byBranch[$bid]['lessons']++; $byGroup[$gk]['les']++;
+            /* Педагог и предмет группы — ТОЛЬКО отсюда. В карточке группы Alfa предмета нет
+               вовсе (он живёт на расписании), а teacher_ids у большинства групп пуст: педагога
+               назначают занятию. Считаем, кто сколько занятий провёл, — тогда видно и замены,
+               и «кто вёл в ЭТОТ период», а не «кто числится сейчас».
+               ⚠️ Строго ДО проверки $cid ниже: занятие без участников всё равно кем-то велось,
+               и на continue педагог потерялся бы. */
+            foreach ((array)($L['teachers'] ?? []) as $tid) {
+                $tid = (int)$tid; if (!$tid) continue;
+                $byGroup[$gk]['tch'][$tid] = ($byGroup[$gk]['tch'][$tid] ?? 0) + 1;
+            }
+            $sid = (int)($L['subject'] ?? 0);
+            if ($sid) $byGroup[$gk]['sbj'][$sid] = ($byGroup[$gk]['sbj'][$sid] ?? 0) + 1;
+        } else $plannedLessons++;
         $cid = (int)($L['cids'][0] ?? 0); if (!$cid) { $noDet++; continue; }
         $ck = $bid . ':' . $cid;
         if (!isset($cache[$ck])) {
@@ -672,7 +686,7 @@ function alfa_active_attended(string $mon, ?array $att = null): array {
    что список неполный, вместо того чтобы молча показать половину клуба. */
 function alfa_group_cards(?array $branches = null): array {
     $branches = $branches ?: alfa_realization_branches();
-    $f = alfa_store_dir() . '/groups_' . substr(hash('sha256', __DIR__ . '|groups2|' . implode(',', $branches)), 0, 20) . '.json';
+    $f = alfa_store_dir() . '/groups_' . substr(hash('sha256', __DIR__ . '|groups3|' . implode(',', $branches)), 0, 20) . '.json';
     if (is_file($f)) {
         $j = json_decode((string)@file_get_contents($f), true);
         if (is_array($j) && (int)($j['ts'] ?? 0) > time() - 86400 && !empty($j['g'])) return $j;
@@ -763,7 +777,7 @@ function alfa_fill_store_path(): string {
    середины молча перепутал бы детоместа с выручкой. Короткие строки клиент видит по длине
    и честно сообщает, что счётчик есть не за все дни. */
 const ALFA_FILL_FMT = ['les', 'seats', 'paid', 'trial', 'att', 'rev', 'attPaid', 'attFree', 'noAttPaid',
-                       'attTrial', 'attZero'];
+                       'attTrial', 'attZero', 'tch', 'sbj'];
 function alfa_fill_read(): array {
     $f = alfa_fill_store_path();
     if (!is_file($f)) return [];
@@ -792,7 +806,10 @@ function alfa_fill_row(array $byGroup): array {
         $out[(string)(int)$gid] = [(int)($g['les'] ?? 0), (int)($g['seats'] ?? 0), (int)($g['paid'] ?? 0),
                                    (int)($g['trial'] ?? 0), (int)($g['att'] ?? 0), round((float)($g['rev'] ?? 0), 2),
                                    (int)($g['attPaid'] ?? 0), (int)($g['attFree'] ?? 0), (int)($g['noAttPaid'] ?? 0),
-                                   (int)($g['attTrial'] ?? 0), (int)($g['attZero'] ?? 0)];
+                                   (int)($g['attTrial'] ?? 0), (int)($g['attZero'] ?? 0),
+                                   /* карты «id → сколько занятий»: педагоги и предметы группы за день.
+                                      Объектами, а не числами — иначе замену не увидеть. */
+                                   (object)($g['tch'] ?? []), (object)($g['sbj'] ?? [])];
     }
     return $out;
 }

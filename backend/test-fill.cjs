@@ -20,11 +20,13 @@ function eq(name, got, want) { check(name, got === want, JSON.stringify(got) + '
 const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
 const MULTI = ['_fillGroupName', '_fillAcadYear', '_fillYearWeeks', '_fillPeriods', '_fillPeriodOpts', '_fillCur',
                '_fillWho', '_fillKidsCur', '_fillKidsHtml', '_fillCats', 'fillCatSet',
+               '_fillSubjName', '_fillTeach', '_fillTopId',
                '_fillPlanPerGroup',
                '_fillAgg', '_fillCap', 'fillPlanSet',
                '_fillRows', '_fillTotals', '_fillModelPlan', '_fillHtml',
                '_salesCfg', '_salesPace', '_salesPaceLines', '_salesPaceHtml'];
-const ONE = ['_fillIdx', '_fillGroups', '_fillSubjName', '_fillTeachName', '_fillPctColor',
+const ONE = ['_fillIdx', '_fillGroups', '_fillPctColor',
+             '_fillTeachName',
              '_fillAcadMonth', '_fillArch', '_fillNoName',
              '_fillRefresh', 'fillGo', 'fillSortBy', 'fillBaseSet', '_fillPlanMap',
              '_salesGoals', '_salesNum', '_salesDate', '_salesMonName', '_salesMonday'];
@@ -77,7 +79,7 @@ const ctx = {
 const API = new Function('ctx', 'with (ctx) { ' + src +
   ' return {_fillAgg,_fillCap,_fillRows,_fillTotals,_fillModelPlan,_fillHtml,_fillPeriods,_fillCur,' +
   '_fillAcadYear,_fillAcadMonth,_fillYearWeeks,_fillPeriodOpts,_fillArch,_fillNoName,_fillGroupName,' +
-  '_fillWho,_fillKidsCur,_fillKidsHtml,_fillPlanPerGroup,_fillCap,' +
+  '_fillWho,_fillKidsCur,_fillKidsHtml,_fillPlanPerGroup,_fillCap,_fillTeach,_fillSubjName,_fillTopId,' +
   '_fillPlanMap,fillPlanSet,_salesPace,_salesPaceLines,_salesPaceHtml,_salesCfg,_salesGoals}; }')(ctx);
 
 /* ================= 1. свод по группам за неделю ================= */
@@ -190,7 +192,7 @@ check('и объясняем, почему цифры нет',
 const h = API._fillHtml();
 check('таблица отрисовалась', h.indexOf('Английский №1') > 0, h.slice(0, 200));
 check('итог по клубу в вёрстке', h.indexOf('ИТОГО') > 0);
-check('план финмодели показан', h.indexOf('Купленные детоместа') > 0);
+check('план финмодели показан', h.indexOf('Детоместа: план финмодели') > 0);
 check('эталон показан', h.indexOf('Эталон загрузки') > 0);
 check('в блоке эталона названа загрузка марта', /83%/.test(h), 'нет 83%');
 check('вёрстка без «undefined»', h.indexOf('undefined') < 0, h.slice(Math.max(0, h.indexOf('undefined') - 120), h.indexOf('undefined') + 60));
@@ -486,6 +488,89 @@ ctx._fillStore.fill = FILL;
   check('источник «планировщик» помечен', h.indexOf('Планировщика загрузки') > 0, h.slice(0, 300));
   check('колонки «Мест» больше нет', h.indexOf('title="Вместимость × занятий">Мест<') < 0);
   check('а «Детомест» осталась', h.indexOf('>Детомест<') > 0);
+}
+
+
+/* ================= ТЕРМИНОЛОГИЯ: ДЕТОМЕСТО = ПЛАНОВОЕ МЕСТО =================
+   Поправка владельца 07.09.2026: детоместо — это МЕСТО для ребёнка при планировании группы
+   (вместимость × занятий), то есть ЗНАМЕНАТЕЛЬ и потолок загрузки. Не списание и не пришедший.
+   Раньше колонка «Детомест» показывала числитель — списания. Эти проверки держат смысл на месте. */
+{
+  ctx._fillPeriod = 'w:2026-08-31';
+  const agg = API._fillAgg('2026-08-31', '2026-09-06');
+  const rows = API._fillRows(agg);
+  const byId = {}; rows.forEach(r => { byId[r.gid] = r; });
+
+  // группа 10: «Чел/гр» 6 × 2 занятия = 12 плановых детомест, списаний 15
+  eq('детоместа — это план (вместимость × занятий)', byId['10'].seats, 12);
+  eq('списания — отдельная величина', byId['10'].fact, 15);
+  check('и они не равны', byId['10'].seats !== byId['10'].fact);
+
+  const h = API._fillHtml();
+  check('колонка «Детомест» подписана как план',
+        h.indexOf('Плановые места: вместимость группы × число её занятий') > 0, h.slice(0, 400));
+  check('и рядом колонка «Списаний»', h.indexOf('>Списаний<') > 0);
+  check('плитка «детоместа (план)»', h.indexOf('детоместа (план)') > 0);
+  check('плитка «списаний»', h.indexOf('>списаний<') > 0);
+  check('старой подписи «детомест по абонементу» больше нет', h.indexOf('детомест по абонементу') < 0);
+  check('и «мест было» тоже', h.indexOf('>мест было<') < 0);
+
+  /* ⚠️ ЛОВУШКА 1. Строка пряталась, когда ноль ЧИСЛИТЕЛЬ. По новой терминологии группа с
+     плановыми детоместами и нулём списаний — это пустые места, то есть потерянные деньги,
+     и она обязана быть видна. */
+  const keep = ctx._fillStore.fill;
+  ctx._fillStore.fill = { '2026-09-02': { '10': [1, 0, 0, 0, 0, 0] } };   // занятие было, списаний нет
+  const empty = API._fillRows(API._fillAgg('2026-08-31', '2026-09-06')).find(r => r.gid === '10');
+  check('группа без списаний не исчезла', !!empty, 'строка пропала');
+  eq('плановые детоместа у неё есть', empty.seats, 6);
+  eq('а списаний ноль', empty.fact, 0);
+  eq('и загрузка честный ноль', Math.round(empty.pct), 0);
+  ctx._fillStore.fill = keep;
+
+  /* ⚠️ ЛОВУШКА 2. Итог считался от fact, а строки — от cnt: галочки меняли проценты в строках,
+     но не в плитке «загрузка» и не в ИТОГО. Сумма не сходилась со своими же слагаемыми. */
+  const keepCats = ctx.S.fillCats;
+  ctx.S.fillCats = { full: 1, trial: 0, zero: 0, none: 0, miss: 0 };
+  const rows2 = API._fillRows(API._fillAgg('2026-08-31', '2026-09-06'));
+  const T2 = API._fillTotals(rows2);
+  const sumCnt = rows2.reduce((a, r) => a + (r.cnt || 0), 0);
+  eq('итог берёт тот же числитель, что и строки', T2.cnt, sumCnt);
+  eq('и процент считается от него', Math.round(T2.pct), Math.round(100 * sumCnt / T2.seats));
+  ctx.S.fillCats = keepCats;
+
+  // подпись сортировки больше не врёт: ключ seats сортирует по списаниям
+  check('подпись сортировки честная', h.indexOf('Сначала с самым большим числом списаний') > 0);
+}
+
+/* ================= ПЕДАГОГ ИЗ ЗАНЯТИЙ =================
+   В карточке группы Alfa предмета нет вовсе, а teacher_ids у большинства групп пуст — педагога
+   назначают занятию. Поэтому обе колонки берутся из занятий периода, и замены видно. */
+{
+  const keep = ctx._fillStore.fill;
+  ctx._fillStore.fmt = ['les','seats','paid','trial','att','rev','attPaid','attFree','noAttPaid','attTrial','attZero','tch','sbj'];
+  ctx._fillStore.fill = {
+    '2026-09-01': { '10': [1, 7, 7, 0, 6, 210, 6, 1, 1, 0, 0, { '5': 1 }, { '11': 1 }] },
+    '2026-09-03': { '10': [1, 8, 8, 0, 7, 240, 7, 1, 1, 0, 0, { '5': 1 }, { '11': 1 }] },
+    '2026-09-05': { '10': [1, 8, 8, 0, 7, 240, 7, 1, 1, 0, 0, { '6': 1 }, { '11': 1 }] },  // замена
+  };
+  const agg = API._fillAgg('2026-08-31', '2026-09-06');
+  const T = API._fillTeach('10', agg);
+  eq('главный педагог — кто провёл больше', T.name, 'Бурдук Наталья');   // id 5 — 2 занятия
+  eq('замена посчитана', T.more, 1);
+  eq('и видны оба', T.all.map(x => x.name + ':' + x.n).join(','), 'Бурдук Наталья:2,Козырев Влад:1');
+  eq('предмет тоже из занятий', API._fillSubjName('10', agg), 'Английский язык');
+
+  const h = API._fillHtml();
+  check('ФИО педагога в таблице', h.indexOf('Бурдук Наталья') > 0, h.slice(0, 300));
+  check('замена помечена', h.indexOf('>+1<') > 0, 'нет пометки замены');
+
+  // старые дни без карт — падаем на карточку группы, а не на пустоту.
+  // Берём группу 20: в её карточке педагог 6, и совпадение с картами исключено
+  ctx._fillStore.fill = { '2026-09-01': { '20': [1, 5, 4, 1, 4, 120] } };
+  const agg2 = API._fillAgg('2026-08-31', '2026-09-06');
+  eq('без карт берём педагога из карточки', API._fillTeach('20', agg2).name, 'Козырев Влад');
+  eq('и замен там нет', API._fillTeach('20', agg2).more, 0);
+  ctx._fillStore.fill = keep;
 }
 
 

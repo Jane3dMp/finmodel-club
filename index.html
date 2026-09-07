@@ -1936,7 +1936,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-09-07-14";
+const APP_VER="2026-09-07-15";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -14096,6 +14096,15 @@ function _progPlanCell(key, snap){
     +_progLockBtn(key,true,"Запереть: цифру больше не изменит ни пересчёт, ни cron");
 }
 /* ==================== ЗАПОЛНЯЕМОСТЬ ГРУПП (детоместа) ====================
+   ⚠️ ТЕРМИНОЛОГИЯ (поправка владельца 07.09.2026, читать до правок в разделе).
+   ДЕТОМЕСТО — это ПЛАНОВОЕ МЕСТО для ребёнка: вместимость группы × число её занятий за период.
+   Это ЗНАМЕНАТЕЛЬ загрузки и потолок при планировании. Детоместо НЕ равно списанию и НЕ равно
+   пришедшему ребёнку. Один ребёнок, ходящий три раза в неделю, занимает три детоместа.
+   Числитель — то, чем места заполнены: списания, пришедшие, выбранные галочками категории.
+   ⚠️ В коде слово seats означает СЕМЬ разных величин (позиция формата хранилища = строки
+   участников из Alfa; локальная в _fillRows = плановые места; ключ сортировки; поле рейтинга
+   педагогов; «мест занято» в финмодели и т.д.). Глобальная замена по слову seats СКЛЕИТ их
+   и молча разведёт цифры. Правьте ПОДПИСИ, а не имена переменных и не позиции формата.
    Жанна: «нужен план по заполняемости и процент его выполнения. Берём еженедельный показатель:
    сколько детей в группах сходили ПО ЦЕНЕ АБОНЕМЕНТА (разовый или регулярный) — или пропустили,
    но с абонементом, со списанием за пропуск, — и сколько должно быть».
@@ -14114,7 +14123,10 @@ let _fillStore=null, _fillErr=null, _fillBusy=false, _fillLoading=null;
 let _fillPeriod=null;                 // "w:2026-08-31" | "m:2026-03"
 let _fillSort="pct";                  // pct | seats | name
 const _FILL_FMT=["les","seats","paid","trial","att","rev","attPaid","attFree","noAttPaid",
-                 "attTrial","attZero"];
+                 "attTrial","attZero","tch","sbj"];
+/* ⚠️ Поле "seats" в ЭТОМ массиве — число строк участников из Alfa (факт), а НЕ плановое место.
+   Одноимённая переменная в _fillRows означает противоположное — плановые детоместа. Имя здесь
+   менять нельзя: это позиционный контракт с ALFA_FILL_FMT на сервере. */
 /* Что учитывать в загрузке. Категории пришедших различаются деньгами, и какая из них «наша»,
    решает Жанна: пробное за 15 — это не полноценное место, а ребёнок «за 0» место всё-таки
    занял. Умолчание повторяет прежний расчёт: полная цена + пропуски со списанием. */
@@ -14194,8 +14206,39 @@ function _fillArch(gid){ const g=_fillGroups()[String(gid)]; return !!(g&&g.arch
 /* Имени нет ни в действующих, ни в архивных: группу удалили из Alfa совсем. Тогда «Группа #N»
    — не баг вёрстки, а факт, и об этом честнее сказать прямо в подсказке. */
 function _fillNoName(gid){ const g=_fillGroups()[String(gid)]; return String(gid)!=="0" && !(g&&g.name); }
-function _fillSubjName(gid){ const g=_fillGroups()[String(gid)]||{}; return ((_fillStore&&_fillStore.subjects)||{})[String(g.subject||0)]||""; }
-function _fillTeachName(gid){ const g=_fillGroups()[String(gid)]||{}; return ((_fillStore&&_fillStore.teachers)||{})[String(g.teacher||0)]||""; }
+/* ⚠️ Предмет и педагог берутся из ЗАНЯТИЙ периода, а не из карточки группы: в карточке Alfa
+   предмета нет вовсе (он живёт на расписании), а teacher_ids у большинства групп пуст —
+   педагога назначают занятию. Карточка остаётся запасным вариантом для групп, у которых
+   занятий в периоде не было совсем. */
+function _fillTopId(map){
+  let best=0, n=-1;
+  Object.keys(map||{}).forEach(k=>{ const v=+map[k]||0; if(v>n){ n=v; best=+k||0; } });
+  return {id:best, n:Math.max(0,n), many:Object.keys(map||{}).length};
+}
+function _fillSubjName(gid,agg){
+  const a=agg&&agg.groups[String(gid)];
+  const t=_fillTopId(a&&a.sbj);
+  const ref=(_fillStore&&_fillStore.subjects)||{};
+  if(t.id&&ref[String(t.id)]) return ref[String(t.id)];
+  const g=_fillGroups()[String(gid)]||{};
+  return ref[String(g.subject||0)]||"";
+}
+/* Педагог группы за период: главный — кто провёл больше занятий. Если вели несколько,
+   отдаём и остальных: замена — это факт, который стоит видеть, а не прятать за одним ФИО. */
+function _fillTeach(gid,agg){
+  const a=agg&&agg.groups[String(gid)];
+  const ref=(_fillStore&&_fillStore.teachers)||{};
+  const map=(a&&a.tch)||{};
+  const ids=Object.keys(map).sort((x,y)=>(+map[y]||0)-(+map[x]||0));
+  if(!ids.length){
+    const g=_fillGroups()[String(gid)]||{};
+    const nm=ref[String(g.teacher||0)]||"";
+    return {name:nm, more:0, all:nm?[{name:nm,n:0}]:[]};
+  }
+  const all=ids.map(i=>({name:ref[String(i)]||("Педагог #"+i), n:+map[i]||0}));
+  return {name:all[0].name, more:all.length-1, all:all};
+}
+function _fillTeachName(gid,agg){ return _fillTeach(gid,agg).name; }
 
 /* ===== ПЕРИОДЫ ДЛЯ ЗАГРУЗКИ =====
    Раньше список был «последние 12 недель»: прошлый учебный год в него не попадал вовсе, а
@@ -14265,7 +14308,7 @@ function _fillAgg(from,to){
     Object.keys(day).forEach(k=>{
       const r=day[k]||[], les=+r[ix.les]||0, paid=+r[ix.paid]||0, trial=+r[ix.trial]||0;
       const o=g[k]||(g[k]={les:0,seats:0,paid:0,trial:0,att:0,rev:0,peak:0,attPaid:0,attFree:0,noAttPaid:0,
-                           attTrial:0,attZero:0,rowDays:0,splitDays:0});
+                           attTrial:0,attZero:0,rowDays:0,splitDays:0,tch:{},sbj:{}});
       o.rowDays++;                      // сколько дней у группы вообще есть строка
       o.les+=les; o.seats+=+r[ix.seats]||0; o.paid+=paid; o.trial+=trial;
       o.att+=+r[ix.att]||0; o.rev+=+r[ix.rev]||0;
@@ -14282,6 +14325,13 @@ function _fillAgg(from,to){
       if(r.length>ix.attZero){
         o.attTrial+=+r[ix.attTrial]||0; o.attZero+=+r[ix.attZero]||0;
         o.splitDays++; anySplit=true;
+      }
+      /* Педагоги и предметы группы за период — картами «id → сколько занятий». Складываем по
+         дням: за неделю группу могли вести двое, и главный тот, у кого занятий больше. */
+      if(r.length>ix.sbj){
+        const tm=r[ix.tch]||{}, sm=r[ix.sbj]||{};
+        Object.keys(tm).forEach(t=>{ o.tch[t]=(o.tch[t]||0)+(+tm[t]||0); });
+        Object.keys(sm).forEach(x=>{ o.sbj[x]=(o.sbj[x]||0)+(+sm[x]||0); });
       }
       /* «Пик» — лучший день группы: сколько мест она реально держала. Это запасная вместимость,
          когда план не вписан и в Alfa у группы не проставлен limit. */
@@ -14355,8 +14405,9 @@ function _fillRows(agg){
          +(CT.zero?(a.attZero||0):0)+(CT.none?Math.max(0,(a.attFree||0)-(a.attZero||0)):0)
          +(CT.miss?(a.noAttPaid||0):0))
       : fact;
+    const TCH=_fillTeach(k,agg);
     rows.push({gid:k, name:_fillGroupName(k), arch:_fillArch(k), noName:_fillNoName(k),
-               subj:_fillSubjName(k), teacher:_fillTeachName(k),
+               subj:_fillSubjName(k,agg), teacher:TCH.name, teachMore:TCH.more, teachAll:TCH.all,
                les:a.les, fact:fact, att:a.att, trial:a.trial, rev:a.rev, peak:a.peak,
                attPaid:a.attPaid||0, attFree:a.attFree||0, noAttPaid:a.noAttPaid||0,
                attTrial:a.attTrial||0, attZero:a.attZero||0,
@@ -14392,10 +14443,14 @@ function _fillWho(rows){
   return T;
 }
 function _fillTotals(rows){
-  let seats=0, fact=0, les=0, rev=0, att=0, noCap=0;
-  rows.forEach(r=>{ seats+=r.seats; fact+=r.fact; les+=r.les; rev+=r.rev; att+=r.att; if(!r.cap&&r.les) noCap++; });
-  return {seats:seats, fact:fact, les:les, rev:rev, att:att, noCap:noCap,
-          pct:(seats>0?100*fact/seats:null)};
+  let seats=0, fact=0, les=0, rev=0, att=0, noCap=0, cnt=0;
+  rows.forEach(r=>{ seats+=r.seats; fact+=r.fact; les+=r.les; rev+=r.rev; att+=r.att;
+    cnt+=r.cnt||0; if(!r.cap&&r.les) noCap++; });
+  /* ⚠️ Итог обязан считаться ТАК ЖЕ, как строки: по выбранному галочками числителю (cnt),
+     а не по fact. Иначе галочки меняли проценты в строках, а плитка «загрузка» и ИТОГО жили
+     своей жизнью — и сумма не сходилась со своими же слагаемыми. */
+  return {seats:seats, fact:fact, les:les, rev:rev, att:att, noCap:noCap, cnt:cnt,
+          pct:(seats>0?100*cnt/seats:null)};
 }
 /* План детомест из финмодели («Планировщик загрузки»): места × визиты в неделю. Именно это
    Жанна называет планом по купленным детоместам — с ним сравнивается факт Alfa. */
@@ -14440,7 +14495,7 @@ async function fillPull(all){
 function _fillPctColor(p){ return p>=90?"var(--green)":(p>=70?"#C9922E":"var(--red)"); }
 function _fillHtml(){
   const head=`<div class="callout" style="margin-bottom:10px;font-size:12px">
-    <b>Детоместо</b> — оплаченное <b>место</b> на одном занятии, а не ребёнок: один ребёнок, который ходит три раза в неделю, занимает три детоместа. Место засчитывается, если ребёнок пришёл по абонементу (регулярному или разовому) <b>или пропустил, но списание за пропуск прошло</b>. Считаем именно списание, а не присутствие: место оплачено в обоих случаях. Пробные сюда не входят — у них своя цена. Чтобы перевести места в детей, есть блок «👥 Дети за период».<br>
+    <b>Детоместо</b> — это <b>плановое место</b> для ребёнка: вместимость группы × число её занятий за период. Потолок загрузки, а не факт. Один ребёнок, который ходит три раза в неделю, занимает три детоместа. <b>Чем места заполнены</b> — отдельные колонки: «Списаний» (прошло списание по абонементу, без пробных), «Пришли», «Без списания». Загрузка = заполнено ÷ детоместа. Чтобы перевести места в детей, есть блок «👥 Дети за период».<br>
     <b>Мест было</b> = вместимость группы × число её занятий за период. Вместимость берём в таком порядке: ваш «План детей» по группе → <b>«Чел/гр» из «Планировщика загрузки»</b> по курсу этой группы → вместимость в AlfaCRM → самое полное занятие за период (подписано в строке). То есть загрузка считается от <b>плана</b>, а не от того, сколько стульев влезает: набрали сверх плана — будет больше 100%. <b>Загрузка</b> = детоместа ÷ мест.<br>
     <b style="color:var(--terra-d)">Про прошлый год.</b> Вместимость всегда берётся сегодняшняя: «План детей» — ваша текущая цифра, а у архивных групп вместимости в Alfa обычно нет, и тогда подставляется самое полное занятие той же недели. Тогда загрузка выходит близкой к 100% просто по построению — смотрите колонку «Мест» и подпись, откуда она взялась.<br>
     Факт копится сам вместе с ночным пересчётом реализации (22:00). Прошлые месяцы — кнопкой «Пересчитать период».</div>`;
@@ -14458,7 +14513,7 @@ function _fillHtml(){
     <select class="cell" style="width:auto" onchange="fillGo(this.value)" title="Недели учебного года — этого и прошлого. Летних недель в списке нет: летом группы другие, сравнивать их с учебными нечестно">${_fillPeriodOpts(P.k)}</select>
     <select class="cell" style="width:auto" title="Порядок строк" onchange="fillSortBy(this.value)">
       <option value="pct"${_fillSort==="pct"?" selected":""}>Сначала самые пустые</option>
-      <option value="seats"${_fillSort==="seats"?" selected":""}>Сначала самые большие</option>
+      <option value="seats"${_fillSort==="seats"?" selected":""}>Сначала с самым большим числом списаний</option>
       <option value="name"${_fillSort==="name"?" selected":""}>По названию</option></select>
     <button class="btn ghost sm" id="fillPullBtn" onclick="fillPull(false)" title="Посчитать в Alfa те дни периода, которых ещё нет в хранилище">🧮 Пересчитать период</button>
     <button class="btn ghost sm" onclick="fillPull(true)" title="Пересчитать ВСЕ дни периода заново — нужно один раз для дней, посчитанных до появления счётчика детомест">🔁 Пересчитать заново</button>
@@ -14498,12 +14553,12 @@ function _fillHtml(){
     <div style="display:flex;gap:14px;flex-wrap:wrap;margin-top:6px">${
       _FILL_CATS.map(c=>`<label style="cursor:pointer;white-space:nowrap" title="${esc(c[2])}">
         <input type="checkbox" ${CT[c[0]]?"checked":""} onchange="fillCatSet('${c[0]}',this.checked)"> ${esc(c[1])}</label>`).join("")}</div>
-    <div style="margin-top:6px;color:var(--muted)">В загрузке учтено <b>${_gm(W.cnt)}</b> мест из ${_gm(T.seats)}. «Детомест» рядом — это все оплаченные места без пробных, галочки его не меняют.</div>
+    <div style="margin-top:6px;color:var(--muted)">В загрузке учтено <b>${_gm(W.cnt)}</b> мест из ${_gm(T.seats)}. «Детоместа» — это плановые места (вместимость × занятий), галочки их не меняют: они меняют только числитель.</div>
   </div>`;
   const tiles=`<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
     ${tile(T.pct!=null?(T.pct.toFixed(0)+"%"):"—","загрузка",T.pct!=null?_fillPctColor(T.pct):"","Выбранные галочками места ÷ мест было")}
-    ${tile(_gm(T.fact),"детомест по абонементу","","Оплаченные места: пришли или пропустили со списанием")}
-    ${tile(_gm(T.seats),"мест было","var(--muted)","Вместимость × число занятий")}
+    ${tile(_gm(T.seats),"детоместа (план)","var(--muted)","Плановые места: вместимость группы × число её занятий за период. Потолок загрузки")}
+    ${tile(_gm(T.fact),"списаний","","Оплаченные места: пришли или пропустили со списанием. Это то, ЧЕМ заполнены детоместа")}
     ${tile(_gm(T.les),"занятий","var(--muted)","Проведённых занятий за период")}
     ${tile(_gm(T.att),"пришли","var(--muted)","Отмечены присутствовавшими. Ниже разложено, у кого из них место было оплачено, а у кого нет")}
     ${tile(_gm(T.rev),"оборот, р","var(--muted)","Сумма списаний по этим занятиям")}
@@ -14519,14 +14574,14 @@ function _fillHtml(){
   const MP=_fillModelPlan(), wks=(P.kind==="w")?1:(+((S.assume||{}).weeksPerMonth)||4);
   const planSeats=Math.round(MP.seatsWeek*wks);
   const pPct=planSeats>0?100*T.fact/planSeats:null;
-  const modelBlk=`<div class="card" style="margin-bottom:10px"><h3>Купленные детоместа: план финмодели ↔ факт Alfa</h3>
+  const modelBlk=`<div class="card" style="margin-bottom:10px"><h3>Детоместа: план финмодели ↔ чем заполнены</h3>
     <table><tbody>
       <tr><td>План «Планировщика загрузки» (места × визиты${wks>1?" × "+wks+" нед":""})</td><td class="num"><b>${_gm(planSeats)}</b></td></tr>
       <tr><td>Факт из Alfa за период (по абонементу)</td><td class="num"><b>${_gm(T.fact)}</b></td></tr>
       <tr class="totrow"><td>Выполнение плана</td><td class="num">${pPct!=null?`<b style="color:${_fillPctColor(pPct)}">${pPct.toFixed(0)}%</b>`:"—"}</td></tr>
       <tr><td style="color:var(--muted)">Разница</td><td class="num" style="color:var(--muted)">${planSeats?((T.fact-planSeats>=0?"+":"")+_gm(T.fact-planSeats)+" детомест"):"—"}</td></tr>
     </tbody></table>
-    <small class="note">План — из вкладки «Планировщик загрузки»: по каждому курсу «чел/гр × групп/нед × визитов». Месяц считается как ${wks} учебных недели — та же условность, что и в «Оборот/месяц» модели (S.assume.weeksPerMonth). Факт — оплаченные места из Alfa, дети не уникальные: ребёнок, ходящий 2 раза в неделю, — это 2 детоместа.</small></div>`;
+    <small class="note">План — из вкладки «Планировщик загрузки»: по каждому курсу «чел/гр × групп/нед × визитов». Месяц считается как ${wks} учебных недели — та же условность, что и в «Оборот/месяц» модели (S.assume.weeksPerMonth). Факт — списания из Alfa, дети не уникальные: ребёнок, ходящий 2 раза в неделю, занимает 2 детоместа.</small></div>`;
   /* --- ЭТАЛОН: загрузка месяца-образца, наложенная на сегодняшнюю вместимость --- */
   const baseYm=String(S.fillBase||"2026-03");
   const bLast=new Date(+baseYm.slice(0,4),+baseYm.slice(5,7),0);
@@ -14544,9 +14599,9 @@ function _fillHtml(){
     ${B.pct==null
       ? `<div class="callout">За ${esc(_salesMonName(baseYm))} в хранилище ничего нет. Выберите этот месяц в списке периодов выше и нажмите «Пересчитать период» — Alfa отдаёт прошлые месяцы, просто их надо один раз посчитать.</div>`
       : `<table><tbody>
-        <tr><td>Загрузка ${esc(_salesMonName(baseYm))}</td><td class="num"><b style="color:${_fillPctColor(B.pct)}">${B.pct.toFixed(0)}%</b> <span style="color:var(--muted)">(${_gm(B.fact)} из ${_gm(B.seats)} мест)</span></td></tr>
-        <tr><td>Мест сейчас (${esc(P.label.toLowerCase())})</td><td class="num">${_gm(T.seats)}</td></tr>
-        <tr><td>Если наложить ту же загрузку на сегодняшнюю вместимость</td><td class="num"><b>${expect!=null?_gm(expect):"—"}</b> детомест</td></tr>
+        <tr><td>Загрузка ${esc(_salesMonName(baseYm))}</td><td class="num"><b style="color:${_fillPctColor(B.pct)}">${B.pct.toFixed(0)}%</b> <span style="color:var(--muted)">(${_gm(B.fact)} списаний из ${_gm(B.seats)} детомест)</span></td></tr>
+        <tr><td>Детоместа сейчас (${esc(P.label.toLowerCase())})</td><td class="num">${_gm(T.seats)}</td></tr>
+        <tr><td>Если наложить ту же загрузку на сегодняшнюю вместимость</td><td class="num"><b>${expect!=null?_gm(expect):"—"}</b> списаний</td></tr>
         <tr class="totrow"><td>Факт сейчас</td><td class="num"><b style="color:${expect!=null&&T.fact>=expect?"var(--green)":"var(--red)"}">${_gm(T.fact)}</b>${expect!=null?` <span style="color:var(--muted)">(${T.fact-expect>=0?"+":""}${_gm(T.fact-expect)})</span>`:""}</td></tr>
       </tbody></table>
       <small class="note">⚠️ Вместимость групп берётся сегодняшняя: в ${esc(_salesMonName(baseYm))} состав групп был другим, поэтому это ориентир, а не точное сравнение. Чтобы он был честнее, впишите «План детей» тем группам, которые вели и тогда.</small>`}
@@ -14556,7 +14611,10 @@ function _fillHtml(){
                  peak:'<span title="Ни плана, ни вместимости в Alfa — взят лучший день группы за период" style="color:#C9922E">•</span>'};
   let tr="";
   rows.forEach(r=>{
-    if(!r.les && !r.fact && !(+_fillPlanMap()[r.gid])) return;
+    /* ⚠️ Раньше строка пряталась, когда ноль ЧИСЛИТЕЛЬ (r.fact). По новой терминологии это
+       ровно то, что надо показывать: группа с плановыми детоместами и нулём списаний — это
+       пустые места, то есть потерянные деньги. Прячем только совсем пустые строки. */
+    if(!r.les && !r.fact && !r.seats && !(+_fillPlanMap()[r.gid])) return;
     tr+=`<tr>
       <td style="text-align:left"><b>${esc(r.name)}</b>${
         /* Архивная группа — норма для прошлого года и сигнал для этого: занятия идут по группе,
@@ -14566,10 +14624,11 @@ function _fillHtml(){
       }${
         r.noName?` <span style="font-size:11px;color:var(--terra-d)" title="Такой группы в Alfa больше нет — ни среди действующих, ни в архиве. Занятия за период остались, а карточка удалена">имя не найдено</span>`:""
       }${r.trial?` <span style="font-size:11px;color:var(--muted)" title="Пробных детомест за период — в загрузку они не входят">+${r.trial} проб.</span>`:""}</td>
-      <td style="text-align:left;color:var(--muted)">${esc(r.subj||"")}</td>
-      <td style="text-align:left;color:var(--muted)">${esc(r.teacher?shortName(r.teacher):"")}</td>
+      <td style="text-align:left;color:var(--muted)" title="${esc((r.teachAll||[]).map(t=>t.name+(t.n?(' — '+t.n+' зан.'):'')).join(', '))}">${
+        esc(r.teacher||"")}${r.teachMore?`<span style="color:var(--terra-d)" title="Группу вели несколько педагогов — замены">+${r.teachMore}</span>`:""}</td>
       <td class="num">${r.les||"—"}</td>
-      <td class="num"><b>${_gm(r.fact)}</b></td>
+      <td class="num"><b>${r.seats?_gm(r.seats):"—"}</b></td>
+      <td class="num">${_gm(r.fact)}</td>
       <td class="num">${r.pct!=null?`<b style="color:${_fillPctColor(r.pct)}">${r.pct.toFixed(0)}%</b>`:'<span style="color:var(--muted)">—</span>'}</td>
       <td class="num" title="${esc(r.capWhy)}">${srcMark[r.capSrc]||""} <input class="cell" style="width:56px;text-align:center;display:inline-block" value="${r.capSrc==="plan"?r.cap:""}" placeholder="${r.cap||"—"}" title="Сколько детей ДОЛЖНО быть в этой группе. Пусто — берётся ${esc(r.capWhy)}" onchange="fillPlanSet('${_jsStr(r.gid)}',this.value)"></td>
       <td class="num" style="color:var(--muted)" title="Отмечены присутствовавшими. Ниже колонка «без списания» показывает, у скольких из них место не оплачено">${r.att||"—"}</td>
@@ -14579,15 +14638,18 @@ function _fillHtml(){
   });
   const table=`<div class="card"><h3>Группы за период: ${esc(P.label.toLowerCase())} (${esc(P.from)} – ${esc(P.to)})</h3>
     <div class="tscroll"><table><thead><tr>
-      <th style="text-align:left">Группа</th><th style="text-align:left">Курс</th><th style="text-align:left">Педагог</th>
+      <th style="text-align:left">Группа</th><th style="text-align:left">Педагог</th>
       <th class="num">Занятий</th>
-      <th class="num" title="Оплаченные места по абонементу">Детомест</th><th class="num">Загрузка</th>
+      <th class="num" title="Плановые места: вместимость группы × число её занятий за период. Это потолок, а не факт">Детомест</th>
+      <th class="num" title="Чем места заполнены: списания по абонементу без пробных">Списаний</th>
+      <th class="num">Загрузка</th>
       <th class="num" title="Сколько детей должно быть в группе. Впишите — и загрузка будет считаться от вашего плана">План детей</th>
       <th class="num" title="Пришли (отметка присутствия)">Пришли</th>
       <th class="num" title="Из пришедших — те, за кого списания не было вовсе">Без списания</th>
     </tr></thead><tbody>${tr||`<tr><td colspan="9" style="color:var(--muted)">За этот период занятий не нашлось. Нажмите «Пересчитать период».</td></tr>`}
-      <tr class="totrow"><td colspan="3"><b>ИТОГО</b></td><td class="num"><b>${_gm(T.les)}</b></td>
-        <td class="num"><b>${_gm(T.fact)}</b></td><td class="num">${T.pct!=null?`<b style="color:${_fillPctColor(T.pct)}">${T.pct.toFixed(0)}%</b>`:"—"}</td><td></td><td class="num">${_gm(T.att)}</td>
+      <tr class="totrow"><td colspan="2"><b>ИТОГО</b></td><td class="num"><b>${_gm(T.les)}</b></td>
+        <td class="num"><b>${_gm(T.seats)}</b></td>
+        <td class="num">${_gm(T.fact)}</td><td class="num">${T.pct!=null?`<b style="color:${_fillPctColor(T.pct)}">${T.pct.toFixed(0)}%</b>`:"—"}</td><td></td><td class="num">${_gm(T.att)}</td>
         <td class="num">${W.free?`<b style="color:var(--red)">${_gm(W.free)}</b>`:"—"}</td></tr>
     </tbody></table></div></div>`;
   const warnHtml=warn.length?`<div class="callout" style="border-color:var(--terra);margin-bottom:10px">${warn.join(" · ")}</div>`:"";
