@@ -18,10 +18,12 @@ function check(name, ok, detail) {
 function eq(name, got, want) { check(name, got === want, JSON.stringify(got) + ' ≠ ' + JSON.stringify(want)); }
 
 const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
-const MULTI = ['_fillGroupName', '_fillPeriods', '_fillCur', '_fillAgg', '_fillCap', 'fillPlanSet',
+const MULTI = ['_fillGroupName', '_fillAcadYear', '_fillYearWeeks', '_fillPeriods', '_fillPeriodOpts', '_fillCur',
+               '_fillAgg', '_fillCap', 'fillPlanSet',
                '_fillRows', '_fillTotals', '_fillModelPlan', '_fillHtml',
                '_salesCfg', '_salesPace', '_salesPaceLines', '_salesPaceHtml'];
 const ONE = ['_fillIdx', '_fillGroups', '_fillSubjName', '_fillTeachName', '_fillPctColor',
+             '_fillAcadMonth',
              '_fillRefresh', 'fillGo', 'fillSortBy', 'fillBaseSet', '_fillPlanMap',
              '_salesGoals', '_salesNum', '_salesDate', '_salesMonName', '_salesMonday'];
 let src = '';
@@ -52,6 +54,7 @@ const ctx = {
   _fillPeriod: 'w:2026-08-31', _fillSort: 'pct', _fillErr: null, _fillBusy: false,
   _FILL_FMT: ['les', 'seats', 'paid', 'trial', 'att', 'rev'],
   _rukSec: 'fill',
+  _rukPokaz: () => ({ curYear: '2026/27' }),
   _RU_MON: ['январь','февраль','март','апрель','май','июнь','июль','август','сентябрь','октябрь','ноябрь','декабрь'],
   _todayIso: () => '2026-09-07',
   _dIso: d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'),
@@ -67,6 +70,7 @@ const ctx = {
 };
 const API = new Function('ctx', 'with (ctx) { ' + src +
   ' return {_fillAgg,_fillCap,_fillRows,_fillTotals,_fillModelPlan,_fillHtml,_fillPeriods,_fillCur,' +
+  '_fillAcadYear,_fillAcadMonth,_fillYearWeeks,_fillPeriodOpts,' +
   '_fillPlanMap,fillPlanSet,_salesPace,_salesPaceLines,_salesPaceHtml,_salesCfg,_salesGoals}; }')(ctx);
 
 /* ================= 1. свод по группам за неделю ================= */
@@ -177,6 +181,67 @@ check('вёрстка без «undefined»', h.indexOf('undefined') < 0, h.slice
 ctx._fillStore.fill = { '2026-09-01': FILL['2026-09-01'] };
 check('о непосчитанных днях предупреждаем', /ещё не считали/.test(API._fillHtml()), 'нет предупреждения');
 ctx._fillStore.fill = FILL;
+
+/* ================= ВЫБОР ПЕРИОДА =================
+   Раньше список был «последние 12 недель»: прошлого учебного года в нём не было вовсе, зато
+   были июньские недели. Летом группы другие, и сравнивать их с учебными нечестно — Жанна
+   попросила лето убрать, а прошлый год добавить целиком. */
+{
+  const api = API._fillPeriods();
+  const wk = api.filter(p => p.kind === 'w');
+  const iso = k => k.slice(2);
+
+  // --- этот учебный год: с 1 сентября по сегодняшнюю неделю ---
+  const now = wk.filter(p => p.y === 2026);
+  eq('первая неделя года — та, что накрывает 1 сентября', iso(now[now.length - 1].k), '2026-08-31');
+  eq('последняя — текущая', iso(now[0].k), '2026-09-07');
+  eq('свежие сверху', now.length, 2);
+  check('будущих недель нет', !now.some(p => p.from > '2026-09-07'), now.map(p => p.from).join(', '));
+
+  // --- прошлый учебный год целиком ---
+  const prev = wk.filter(p => p.y === 2025);
+  eq('прошлый год начинается с недели 1 сентября 2025', iso(prev[prev.length - 1].k), '2025-09-01');
+  check('и доходит до конца мая', prev[0].from >= '2026-05-25' && prev[0].from <= '2026-05-31',
+        prev[0].from);
+  check('недель за год около сорока', prev.length >= 38 && prev.length <= 40, String(prev.length));
+
+  // --- ЛЕТА НЕТ ---
+  // ⚠️ проверяем по обоим краям недели: неделя на стыке мая и июня — учебная, июньская — нет
+  const summer = wk.filter(p => {
+    const m1 = +p.from.slice(5, 7), m2 = +p.to.slice(5, 7);
+    return (m1 >= 6 && m1 <= 8) && (m2 >= 6 && m2 <= 8);
+  });
+  eq('летних недель в списке нет', summer.length, 0);
+  check('и июньской недели тоже', !wk.some(p => p.k === 'w:2026-06-22'), 'w:2026-06-22');
+  // а неделя, которая накрывает 31 мая, остаётся — сезон ею заканчивается
+  check('неделя на стыке мая и июня осталась',
+        wk.some(p => p.from <= '2026-05-31' && p.to >= '2026-05-31'), wk.map(p => p.from).join(', '));
+
+  // --- месяцы: только учебные ---
+  eq('март в списке есть', api.some(p => p.k === 'm:2026-03'), true);
+  eq('учебный месяц проходит', API._fillAcadMonth('2026-09'), true);
+  eq('июль — нет', API._fillAcadMonth('2026-07'), false);
+  eq('август — тоже нет', API._fillAcadMonth('2026-08'), false);
+  eq('май — учебный', API._fillAcadMonth('2026-05'), true);
+
+  // --- селект разложен по группам, иначе полсотни недель не пролистать ---
+  const opts = API._fillPeriodOpts('w:2026-08-31');
+  check('группа этого года', opts.indexOf('Учебный год 2026/27') > 0, opts.slice(0, 200));
+  check('группа прошлого года', opts.indexOf('Учебный год 2025/26') > 0);
+  check('группа месяцев', opts.indexOf('Месяцы') > 0);
+  check('выбранная неделя отмечена', opts.indexOf('value="w:2026-08-31" selected') > 0,
+        opts.slice(Math.max(0, opts.indexOf('w:2026-08-31') - 60), opts.indexOf('w:2026-08-31') + 80));
+  eq('баланс <optgroup>', (opts.match(/<optgroup/g) || []).length, (opts.match(/<\/optgroup>/g) || []).length);
+
+  // --- прошлогоднюю неделю можно выбрать, и она считается ---
+  ctx._fillPeriod = 'w:2025-09-01';
+  const cur = API._fillCur();
+  eq('выбралась именно она', cur.from, '2025-09-01');
+  eq('и это неделя прошлого года', cur.y, 2025);
+  check('раздел рисуется без ошибок', API._fillHtml().indexOf('undefined') < 0);
+  ctx._fillPeriod = 'w:2026-08-31';
+}
+
 
 console.log(bad ? '\nПРОВАЛЕНО: ' + bad : '\nВсё сошлось');
 process.exit(bad ? 1 : 0);

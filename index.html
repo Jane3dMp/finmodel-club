@@ -1936,7 +1936,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-09-07-07";
+const APP_VER="2026-09-07-08";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -14131,21 +14131,52 @@ function _fillGroupName(gid){
 function _fillSubjName(gid){ const g=_fillGroups()[String(gid)]||{}; return ((_fillStore&&_fillStore.subjects)||{})[String(g.subject||0)]||""; }
 function _fillTeachName(gid){ const g=_fillGroups()[String(gid)]||{}; return ((_fillStore&&_fillStore.teachers)||{})[String(g.teacher||0)]||""; }
 
-/* Периоды: последние 12 недель + все месяцы, по которым в хранилище что-то есть.
-   Март 2026 появится в списке сразу, как только его подтянут из Alfa. */
-function _fillPeriods(){
-  const out=[], mon=_salesMonday(_todayIso());
-  for(let i=0;i<12;i++){
-    const d=new Date(mon+"T12:00:00"); d.setDate(d.getDate()-7*i);
-    const f=_dIso(d), s=new Date(d); s.setDate(s.getDate()+6);
-    out.push({k:"w:"+f, from:f, to:_dIso(s), kind:"w", label:"Неделя "+_salesDate(f)+"–"+_salesDate(_dIso(s))});
+/* ===== ПЕРИОДЫ ДЛЯ ЗАГРУЗКИ =====
+   Раньше список был «последние 12 недель»: прошлый учебный год в него не попадал вовсе, а
+   июньские и июльские недели попадали — при том что летом группы другие и сравнивать их с
+   учебными неделями бессмысленно (решение Жанны 07.09.2026: «лето не нужно»).
+   Теперь список — недели УЧЕБНОГО года: с 1 сентября по 31 мая, этот год и прошлый.
+   Неделя на стыке (та, что накрывает 1 сентября или 31 мая) в год входит: занятия в ней уже
+   учебные, и терять её нельзя — именно с неё начинается сезон. */
+function _fillAcadYear(){
+  try{ const y=parseInt(String(_rukPokaz().curYear).slice(0,4),10); if(y) return y; }catch(e){}
+  const d=new Date();
+  return d.getMonth()>=8 ? d.getFullYear() : d.getFullYear()-1;   // до сентября учебный год ещё прошлый
+}
+function _fillYearWeeks(y0, notAfter){
+  const out=[], end=new Date(y0+1,4,31);
+  const cur=new Date(y0,8,1); const wd=cur.getDay()===0?7:cur.getDay(); cur.setDate(cur.getDate()-(wd-1));
+  while(cur<=end){
+    const from=_dIso(cur), s=new Date(cur); s.setDate(s.getDate()+6);
+    if(!notAfter || from<=notAfter){
+      out.push({k:"w:"+from, from:from, to:_dIso(s), kind:"w", y:y0,
+                label:"Неделя "+_salesDate(from)+"–"+_salesDate(_dIso(s))});
+    }
+    cur.setDate(cur.getDate()+7);
   }
+  return out.reverse();          // свежие сверху
+}
+/* Учебный ли это месяц. Лето (июнь–август) из списка убрано вместе с летними неделями. */
+function _fillAcadMonth(ym){ const m=+String(ym).slice(5,7); return m>=9||m<=5; }
+function _fillPeriods(){
+  const y0=_fillAcadYear(), thisMon=_salesMonday(_todayIso());
+  const out=_fillYearWeeks(y0, thisMon).concat(_fillYearWeeks(y0-1));
   const ms={}; Object.keys((_fillStore&&_fillStore.fill)||{}).forEach(d=>{ ms[String(d).slice(0,7)]=1; });
-  Object.keys(ms).sort().reverse().forEach(ym=>{
+  Object.keys(ms).filter(_fillAcadMonth).sort().reverse().forEach(ym=>{
     const y=+ym.slice(0,4), m=+ym.slice(5,7), last=new Date(y,m,0);
     out.push({k:"m:"+ym, from:ym+"-01", to:_dIso(last), kind:"m", ym:ym, label:"Месяц: "+_salesMonName(ym)});
   });
   return out;
+}
+/* Список для селекта, разложенный по группам: иначе полсотни недель подряд не пролистать. */
+function _fillPeriodOpts(cur){
+  const y0=_fillAcadYear(), P=_fillPeriods();
+  const opt=p=>`<option value="${esc(p.k)}"${p.k===cur?" selected":""}>${esc(p.label)}</option>`;
+  const grp=(lab,list)=>list.length?(`<optgroup label="${esc(lab)}">`+list.map(opt).join("")+"</optgroup>"):"";
+  const yl=y=>y+"/"+String(y+1).slice(2);
+  return grp("Учебный год "+yl(y0), P.filter(p=>p.kind==="w"&&p.y===y0))
+    +grp("Учебный год "+yl(y0-1), P.filter(p=>p.kind==="w"&&p.y===y0-1))
+    +grp("Месяцы", P.filter(p=>p.kind==="m"));
 }
 function _fillCur(){
   const P=_fillPeriods(); if(!P.length) return null;
@@ -14279,7 +14310,7 @@ function _fillHtml(){
   if(_fillErr) return head+_pubErrHtml(_fillErr,"заполняемость")+
     `<div class="hd-actions" style="margin-top:10px"><button class="btn sm" onclick="_fillErr=null;_fillLoad(true).then(_fillRefresh).catch(e=>{_fillErr=e;_fillRefresh();})">↻ Ещё раз</button></div>`;
   if(!_fillStore) return head+`<div class="callout">⏳ Загружаю заполняемость…</div>`;
-  const P=_fillCur(), periods=_fillPeriods();
+  const P=_fillCur();
   if(!P) return head+`<div class="callout">Периодов пока нет.</div>`;
   const agg=_fillAgg(P.from,P.to), rows=_fillRows(agg), T=_fillTotals(rows);
   const gOk=(_fillStore.groupsOk!==false);
@@ -14287,8 +14318,7 @@ function _fillHtml(){
     <div style="font-size:22px;font-weight:700${col?";color:"+col:""}">${n}</div>
     <div style="font-size:12px;color:var(--muted)">${lab}</div></div>`;
   const bar=`<div class="hd-actions" style="margin-bottom:10px">
-    <select class="cell" style="width:auto" onchange="fillGo(this.value)">${
-      periods.map(p=>`<option value="${esc(p.k)}"${p.k===P.k?" selected":""}>${esc(p.label)}</option>`).join("")}</select>
+    <select class="cell" style="width:auto" onchange="fillGo(this.value)" title="Недели учебного года — этого и прошлого. Летних недель в списке нет: летом группы другие, сравнивать их с учебными нечестно">${_fillPeriodOpts(P.k)}</select>
     <select class="cell" style="width:auto" title="Порядок строк" onchange="fillSortBy(this.value)">
       <option value="pct"${_fillSort==="pct"?" selected":""}>Сначала самые пустые</option>
       <option value="seats"${_fillSort==="seats"?" selected":""}>Сначала самые большие</option>
