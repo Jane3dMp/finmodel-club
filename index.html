@@ -1936,7 +1936,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-09-07-17";
+const APP_VER="2026-09-07-18";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -5164,7 +5164,13 @@ function _lesEcoClass(course){ const c=courseFromLib(course); const e=c&&c.eco; 
 function _grpDone(l){ return !!(l&&l.course&&(S.groupsDone||{})[_grpKeyOf(l)]); }
 
 function planTotals(){
-  let revWeek=0, kidsTot=0, groups=0;
+  /* ⚠️ ДВЕ РАЗНЫЕ ВЕЛИЧИНЫ, их путали и цифры не сходились с разделом «Заполняемость».
+     kidsTot = группы × чел — посадочных мест в группах, БЕЗ учёта повторов за неделю.
+       Именно от неё считаются уникальные дети: ребёнок, ходящий дважды, — один ребёнок.
+     seatsWeek = группы × чел × визиты — ДЕТОМЕСТА за неделю: место на ОДНОМ занятии.
+       Группа из 10 человек, встречающаяся дважды, даёт 20 детомест. С этой цифрой и
+       сравнивается факт в «Заполняемости», и по ней же считается оборот (он уже × визиты). */
+  let revWeek=0, kidsTot=0, groups=0, seatsWeek=0;
   S.plan.forEach(p=>{
     const lib=courseFromLib(p.name);
     const g=+p.groups||0, cg=+p.perGroup||0;
@@ -5172,6 +5178,7 @@ function planTotals(){
     const v=lib?(+lib.visits||1):(+p.visits||1);      // визиты из библиотеки
     revWeek += cg*pr*g*v;
     kidsTot += cg*g;
+    seatsWeek += cg*g*v;
     groups += g;
   });
   const revMonth = revWeek*4;
@@ -5185,7 +5192,7 @@ function planTotals(){
   const showRate = +S.funnel.showRate||0;  // доля доходимости
   const willCome = now*showRate;
   const toRecruit = uniqNeed - willCome;
-  return {revWeek,revMonth,kidsUniq,visitsTot,groups,need,uniqNeed,now,willCome,toRecruit,coef,showRate};
+  return {revWeek,revMonth,kidsUniq,visitsTot,groups,need,seatsWeek,uniqNeed,now,willCome,toRecruit,coef,showRate};
 }
 
 function renderPlanner(){
@@ -5195,7 +5202,8 @@ function renderPlanner(){
    ${kpi("Оборот/неделя",fmt(T.revWeek)+" р","coal","группы×чел×цена×визиты")}
    ${kpi("Оборот/месяц",fmt(T.revMonth)+" р","green","×4 недели")}
    ${kpi("Групп/неделю",fmt(T.groups),"blue","всего по расписанию")}
-   ${kpi("Детей-мест/нед",fmt1(T.need),"blue","группы×чел по курсам")}
+   ${kpi("Мест в группах",fmt1(T.need),"blue","группы × чел — посадочных мест, без повторов за неделю")}
+   ${kpi("Детомест/нед",fmt1(T.seatsWeek),"blue","× визиты: место на одном занятии. С этим сравнивается загрузка")}
    ${kpi("Уникальных детей",fmt(T.uniqNeed),"coal","нужно для плана")}
    ${kpi("Нужно добрать",fmt(Math.max(0,T.toRecruit)),T.toRecruit>0?"red":"green","сверх дойдущих")}`;
 
@@ -13669,6 +13677,38 @@ function _salesActiveNote(rep){
   }
   return "учащиеся Alfa в клубных филиалах (посещаемости за ту неделю не осталось)"+was;
 }
+/* ===== СВОДКА ЗАГРУЗКИ ДЛЯ ОТДЕЛА ПРОДАЖ =====
+   Считается по тем же функциям, что и раздел «Заполняемость», за неделю отчёта — иначе
+   сообщение и раздел однажды разойдутся, и верить перестанут обоим.
+   ⚠️ Если детоместа за эту неделю ещё не посчитаны, строк НЕ будет вовсе: отправить в чат
+   «загрузка 0%» страшнее, чем не отправить ничего. */
+function _salesFillLines(rep){
+  if(typeof _fillAgg!=="function" || !_fillStore || !rep || !rep.week) return [];
+  const from=rep.week, to=rep.to||from;
+  let agg,rows,T;
+  try{ agg=_fillAgg(from,to); rows=_fillRows(agg); T=_fillTotals(rows); }catch(e){ return []; }
+  if(!T || !T.seats || T.pct==null) return [];
+  const L=["",
+    "Загрузка: "+Math.round(T.pct)+"% ("+_salesNum(T.cnt)+" из "+_salesNum(T.seats)+" детомест).",
+    "Занятий: "+_salesNum(T.les)+", списаний: "+_salesNum(T.fact)+"."];
+  const W=(typeof _fillWho==="function")?_fillWho(rows):null;
+  if(W && W.att){
+    const parts=[];
+    if(W.paid) parts.push("полная цена "+_salesNum(W.paid));
+    if(W.trial) parts.push("пробное "+_salesNum(W.trial));
+    if(W.zero) parts.push("за 0 "+_salesNum(W.zero));
+    if(W.none) parts.push("без списания "+_salesNum(W.none));
+    if(parts.length) L.push("Пришли "+_salesNum(W.att)+": "+parts.join(", ")+".");
+  }
+  /* Уникальные дети приходят отдельным запросом и только по кнопке. Если их не считали —
+     строки нет: выдумывать число детей из детомест нельзя, один ребёнок занимает несколько. */
+  const K=(typeof _fillKidsCur==="function")?_fillKidsCur():null;
+  if(K && K.kids){
+    const per=T.cnt/K.kids;
+    L.push("Уникальных детей: "+_salesNum(K.kids)+", мест на ребёнка: "+(Math.round(per*10)/10)+".");
+  }
+  return L;
+}
 function _salesWeekText(rep){
   const man=rep.man||{}, L=[];
   L.push("Оборот недели: "+_salesNum(rep.fact)+".");
@@ -13688,6 +13728,7 @@ function _salesWeekText(rep){
   if(+rep.active){ L.push("");
     const d=(+rep.active)-(+rep.activePrev||0);
     L.push("Активных клиентов: "+rep.active+((+rep.activePrev)?(" ("+(d>=0?"+":"")+d+")"):"")+"."); }
+  _salesFillLines(rep).forEach(x=>L.push(x));
   _salesPaceLines(rep).forEach(x=>L.push(x));
   if(man.note) { L.push(""); L.push(String(man.note).trim()); }
   return L.join("\n");
@@ -13971,6 +14012,12 @@ function _salesCronHtml(){
       <code style="font-size:12px;word-break:break-all">wget -qO- "${esc(location.origin)}/finmodel/api/alfa/cron_salesreport.php?key=ВАШ_КЛЮЧ"</code><br>
       <span style="color:var(--muted)">Запускать после ежедневного <code>cron_realization.php</code> (тоже 22:00) — или на 10–15 минут позже, чтобы дневная реализация успела посчитаться. Отчёт всё равно пересчитывает дни недели сам, так что порядок не критичен.<br>
       Пересобрать задним числом: добавьте <code>?week=2026-09-13</code> (любая дата внутри нужной недели).</span>
+      <div style="margin-top:10px;padding-top:8px;border-top:1px solid var(--line)">
+        И вторым заданием — <b>по воскресеньям в 20:00</b>, за два часа до отчёта:<br>
+        <b>CLI</b>: <code style="font-size:12px">php /путь-на-сервере/finmodel/api/alfa/cron_fillweek.php</code><br>
+        <b>URL</b>: <code style="font-size:12px;word-break:break-all">wget -qO- "${esc(location.origin)}/finmodel/api/alfa/cron_fillweek.php?key=ВАШ_КЛЮЧ"</code><br>
+        <span style="color:var(--muted)">Досчитывает загрузку групп за текущую неделю. Без него в отчёт попадала бы неделя без воскресенья: ночной пересчёт идёт в 22:00, то есть уже ПОСЛЕ сборки отчёта. Задание идемпотентно — повторный запуск ничего не испортит.</span>
+      </div>
     </div></details>`;
 }
 
@@ -14574,13 +14621,25 @@ function _fillHtml(){
   const MP=_fillModelPlan(), wks=(P.kind==="w")?1:(+((S.assume||{}).weeksPerMonth)||4);
   const planSeats=Math.round(MP.seatsWeek*wks);
   const pPct=planSeats>0?100*T.fact/planSeats:null;
-  const modelBlk=`<div class="card" style="margin-bottom:10px"><h3>Детоместа: план финмодели ↔ чем заполнены</h3>
+  /* ⚠️ ТРИ РАЗНЫЕ ЦИФРЫ, и две из них называются «детоместа». Жанна поймала расхождение
+     07.09.2026: в «Планировщике» 1018, в таблице раздела 736.
+       • ПЛАН — «Планировщик загрузки»: чел/гр × групп/нед × визитов. Столько мест должно
+         открываться КАЖДУЮ неделю по замыслу.
+       • ОТКРЫЛОСЬ — вместимость × ФАКТИЧЕСКИ проведённые занятия. Меньше плана ровно на те
+         занятия, которых не было: каникулы, праздники, группа ещё не стартовала.
+       • ЗАПОЛНЕНО — списания.
+     Показываем все три подряд и два процента, иначе «другая цифра» выглядит ошибкой. */
+  const openPct=(planSeats>0)?(100*T.seats/planSeats):null;
+  const modelBlk=`<div class="card" style="margin-bottom:10px"><h3>Детоместа: план ↔ открылось ↔ заполнено</h3>
     <table><tbody>
-      <tr><td>План «Планировщика загрузки» (места × визиты${wks>1?" × "+wks+" нед":""})</td><td class="num"><b>${_gm(planSeats)}</b></td></tr>
-      <tr><td>Факт из Alfa за период (по абонементу)</td><td class="num"><b>${_gm(T.fact)}</b></td></tr>
+      <tr><td>План «Планировщика загрузки» (чел/гр × групп/нед × визитов${wks>1?" × "+wks+" нед":""})</td><td class="num"><b>${_gm(planSeats)}</b></td></tr>
+      <tr><td>Открылось: вместимость × <b>проведённые</b> занятия</td><td class="num"><b>${_gm(T.seats)}</b>${
+        openPct!=null?` <span style="color:var(--muted)">(${openPct.toFixed(0)}% плана)</span>`:""}</td></tr>
+      <tr><td>Заполнено: списания из Alfa</td><td class="num"><b>${_gm(T.fact)}</b></td></tr>
       <tr class="totrow"><td>Выполнение плана</td><td class="num">${pPct!=null?`<b style="color:${_fillPctColor(pPct)}">${pPct.toFixed(0)}%</b>`:"—"}</td></tr>
-      <tr><td style="color:var(--muted)">Разница</td><td class="num" style="color:var(--muted)">${planSeats?((T.fact-planSeats>=0?"+":"")+_gm(T.fact-planSeats)+" детомест"):"—"}</td></tr>
+      <tr><td style="color:var(--muted)">Разница с планом</td><td class="num" style="color:var(--muted)">${planSeats?((T.fact-planSeats>=0?"+":"−")+_gm(Math.abs(T.fact-planSeats))+" детомест"):"—"}</td></tr>
     </tbody></table>
+    ${(planSeats>0&&T.seats>0&&planSeats>T.seats)?`<div class="hint" style="margin-top:6px">Почему в «Планировщике» ${_gm(planSeats)}, а в таблице ниже ${_gm(T.seats)}: планировщик считает, сколько мест должно открываться каждую неделю, а раздел — сколько открылось на самом деле. Разница ${_gm(planSeats-T.seats)} — это места занятий, которых не было: каникулы, праздники, ещё не запущенные группы.</div>`:""}
     <small class="note">План — из вкладки «Планировщик загрузки»: по каждому курсу «чел/гр × групп/нед × визитов». Месяц считается как ${wks} учебных недели — та же условность, что и в «Оборот/месяц» модели (S.assume.weeksPerMonth). Факт — списания из Alfa, дети не уникальные: ребёнок, ходящий 2 раза в неделю, занимает 2 детоместа.</small></div>`;
   /* --- ЭТАЛОН: загрузка месяца-образца, наложенная на сегодняшнюю вместимость --- */
   /* Месяц-образец. Если сохранённый пересекается с выбранным периодом, берём умолчание:
