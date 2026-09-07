@@ -1936,7 +1936,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-09-07-11";
+const APP_VER="2026-09-07-12";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -14121,6 +14121,49 @@ async function _fillLoad(force){
   _fillLoading=(async()=>{ _fillStore=await _pubCall("fillStore",{}); _fillErr=null; return true; })();
   try{ return await _fillLoading; } finally{ _fillLoading=null; }
 }
+/* ===== УНИКАЛЬНЫЕ ДЕТИ И «БЕЗ СПИСАНИЯ» =====
+   Детоместо — это МЕСТО на одном занятии, а не ребёнок: один ребёнок, ходящий три раза в
+   неделю, занимает три детоместа. Поэтому уникальных детей нельзя получить сложением дневных
+   счётчиков — только объединением id, и приходят они отдельным запросом за выбранный период.
+   Заодно тем же ответом — поимённый список тех, кто пришёл без списания. */
+let _fillKids=null, _fillKidsKey="", _fillKidsBusy=false, _fillKidsErr=null;
+async function fillKidsLoad(force){
+  const P=_fillCur(); if(!P) return;
+  const key=P.from+".."+P.to;
+  if(!force && _fillKidsKey===key && _fillKids) return;
+  if(_fillKidsBusy) return;
+  _fillKidsBusy=true; _fillKidsErr=null; _fillRefresh();
+  try{
+    const j=await _pubCall("fillKids",{from:P.from, to:P.to});
+    _fillKids=j; _fillKidsKey=key;
+  }catch(e){ _fillKidsErr=e; }
+  finally{ _fillKidsBusy=false; _fillRefresh(); }
+}
+/* Период сменили — прежний ответ уже не про него, и показывать его нельзя. */
+function _fillKidsCur(){
+  const P=_fillCur(); if(!P||!_fillKids) return null;
+  return (_fillKidsKey===(P.from+".."+P.to))?_fillKids:null;
+}
+function _fillKidsHtml(){
+  const K=_fillKidsCur();
+  if(_fillKidsErr) return _pubErrHtml(_fillKidsErr,"дети за период");
+  if(_fillKidsBusy) return `<div class="hint" style="margin:6px 0">Считаю уникальных детей…</div>`;
+  if(!K) return `<div class="hint" style="margin:6px 0">
+    <button class="btn ghost sm" onclick="fillKidsLoad(true)">👥 Посчитать уникальных детей и список без списания</button></div>`;
+  const free=(K.free||[]), nm=id=>((K.names||{})[String(id)]||{}).name||("id "+id);
+  const arch=id=>((K.names||{})[String(id)]||{}).archived;
+  const list=free.slice().sort((a,b)=>nm(a).localeCompare(nm(b),"ru"));
+  const li=list.map(id=>`<div style="padding:2px 0;border-bottom:1px solid var(--line);font-size:13px">
+    ${_trKidLink?_trKidLink(id):esc(nm(id))}${arch(id)?` <span style="font-size:11px;color:var(--muted)">в архиве</span>`:""}</div>`).join("");
+  return `<details style="margin:8px 0"${free.length?" open":""}><summary style="cursor:pointer;font-weight:600">
+      👥 Дети за период: ${K.kids} ${_fmlKid(K.kids)}${free.length?(" · без списания — "+free.length):""}</summary>
+    <div class="hint" style="margin:6px 0">Уникальные дети — сколько РАЗНЫХ детей занимали места за период. Детоместо — это место на одном занятии, поэтому один ребёнок обычно занимает несколько.${
+      free.length?" Ниже — те, кто пришёл, а списания за него не прошло: им либо не проставили абонемент, либо они ходят бесплатно.":" Пришедших без списания за период нет."}</div>
+    ${li}
+    <div class="hint" style="margin-top:6px">Данные по ${K.days} ${_kassaDayWord(K.days)} периода.
+      <button class="btn ghost sm" style="margin-left:4px" onclick="fillKidsLoad(true)">обновить</button></div>
+  </details>`;
+}
 function _fillRefresh(){ if(_rukSec!=="fill") return; const b=document.getElementById("rukBody"); if(b) b.innerHTML=_fillHtml(); }
 function _fillIdx(){ const f=((_fillStore&&_fillStore.fmt)||_FILL_FMT), ix={}; f.forEach((n,i)=>{ix[n]=i;}); return ix; }
 function _fillGroups(){ return (_fillStore&&_fillStore.groups)||{}; }
@@ -14333,7 +14376,7 @@ async function fillPull(all){
 function _fillPctColor(p){ return p>=90?"var(--green)":(p>=70?"#C9922E":"var(--red)"); }
 function _fillHtml(){
   const head=`<div class="callout" style="margin-bottom:10px;font-size:12px">
-    <b>Детоместо</b> — оплаченное место на одном занятии: ребёнок пришёл по абонементу (регулярному или разовому) <b>или пропустил, но списание за пропуск прошло</b>. Считаем именно списание, а не присутствие: место оплачено в обоих случаях. Пробные сюда не входят — у них своя цена.<br>
+    <b>Детоместо</b> — оплаченное <b>место</b> на одном занятии, а не ребёнок: один ребёнок, который ходит три раза в неделю, занимает три детоместа. Место засчитывается, если ребёнок пришёл по абонементу (регулярному или разовому) <b>или пропустил, но списание за пропуск прошло</b>. Считаем именно списание, а не присутствие: место оплачено в обоих случаях. Пробные сюда не входят — у них своя цена. Чтобы перевести места в детей, есть блок «👥 Дети за период».<br>
     <b>Мест было</b> = вместимость группы × число её занятий за период. Вместимость берём в таком порядке: ваш «План детей» → вместимость группы в AlfaCRM → самое полное занятие группы за период (подписано в строке). <b>Загрузка</b> = детоместа ÷ мест.<br>
     <b style="color:var(--terra-d)">Про прошлый год.</b> Вместимость всегда берётся сегодняшняя: «План детей» — ваша текущая цифра, а у архивных групп вместимости в Alfa обычно нет, и тогда подставляется самое полное занятие той же недели. Тогда загрузка выходит близкой к 100% просто по построению — смотрите колонку «Мест» и подпись, откуда она взялась.<br>
     Факт копится сам вместе с ночным пересчётом реализации (22:00). Прошлые месяцы — кнопкой «Пересчитать период».</div>`;
@@ -14386,6 +14429,13 @@ function _fillHtml(){
     ${tile(_gm(T.les),"занятий","var(--muted)","Проведённых занятий за период")}
     ${tile(_gm(T.att),"пришли","var(--muted)","Отмечены присутствовавшими. Ниже разложено, у кого из них место было оплачено, а у кого нет")}
     ${tile(_gm(T.rev),"оборот, р","var(--muted)","Сумма списаний по этим занятиям")}
+    ${(function(){ const K=_fillKidsCur(); if(!K||!K.kids) return "";
+      /* Ради этого сравнения детоместа и считаются: место ≠ ребёнок. Сколько мест приходится
+         на одного ребёнка — это и есть средняя частота посещений за период. */
+      const per=K.kids?(T.fact/K.kids):0;
+      return tile(_gm(K.kids),"уникальных детей","var(--muted)","Сколько РАЗНЫХ детей занимали оплаченные места за период")
+        +tile(per.toFixed(1),"мест на ребёнка","var(--muted)","Детоместа ÷ уникальные дети: сколько занятий в среднем у одного ребёнка за период");
+    })()}
   </div>`;
   /* --- ПЛАН ФИНМОДЕЛИ ↔ ФАКТ ALFA (купленные детоместа) --- */
   const MP=_fillModelPlan(), wks=(P.kind==="w")?1:(+((S.assume||{}).weeksPerMonth)||4);
@@ -14464,7 +14514,7 @@ function _fillHtml(){
         <td class="num">${W.free?`<b style="color:var(--red)">${_gm(W.free)}</b>`:"—"}</td></tr>
     </tbody></table></div></div>`;
   const warnHtml=warn.length?`<div class="callout" style="border-color:var(--terra);margin-bottom:10px">${warn.join(" · ")}</div>`:"";
-  return head+bar+warnHtml+tiles+whoRow+modelBlk+baseBlk+table;
+  return head+bar+warnHtml+tiles+whoRow+_fillKidsHtml()+modelBlk+baseBlk+table;
 }
 
 function _progHtml(){

@@ -19,7 +19,7 @@ function eq(name, got, want) { check(name, got === want, JSON.stringify(got) + '
 
 const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
 const MULTI = ['_fillGroupName', '_fillAcadYear', '_fillYearWeeks', '_fillPeriods', '_fillPeriodOpts', '_fillCur',
-               '_fillWho',
+               '_fillWho', '_fillKidsCur', '_fillKidsHtml',
                '_fillAgg', '_fillCap', 'fillPlanSet',
                '_fillRows', '_fillTotals', '_fillModelPlan', '_fillHtml',
                '_salesCfg', '_salesPace', '_salesPaceLines', '_salesPaceHtml'];
@@ -56,6 +56,8 @@ const ctx = {
   _FILL_FMT: ['les', 'seats', 'paid', 'trial', 'att', 'rev'],
   _rukSec: 'fill',
   _rukPokaz: () => ({ curYear: '2026/27' }),
+  _fillKids: null, _fillKidsKey: '', _fillKidsBusy: false, _fillKidsErr: null,
+  _trKidLink: id => '<a>' + id + '</a>', _fmlKid: n => 'детей',
   _RU_MON: ['январь','февраль','март','апрель','май','июнь','июль','август','сентябрь','октябрь','ноябрь','декабрь'],
   _todayIso: () => '2026-09-07',
   _dIso: d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'),
@@ -72,7 +74,7 @@ const ctx = {
 const API = new Function('ctx', 'with (ctx) { ' + src +
   ' return {_fillAgg,_fillCap,_fillRows,_fillTotals,_fillModelPlan,_fillHtml,_fillPeriods,_fillCur,' +
   '_fillAcadYear,_fillAcadMonth,_fillYearWeeks,_fillPeriodOpts,_fillArch,_fillNoName,_fillGroupName,' +
-  '_fillWho,' +
+  '_fillWho,_fillKidsCur,_fillKidsHtml,' +
   '_fillPlanMap,fillPlanSet,_salesPace,_salesPaceLines,_salesPaceHtml,_salesCfg,_salesGoals}; }')(ctx);
 
 /* ================= 1. свод по группам за неделю ================= */
@@ -323,6 +325,55 @@ ctx._fillStore.fill = FILL;
 
   ctx._fillStore.fill = keep;
   ctx._fillPeriod = 'w:2026-08-31';
+}
+
+
+/* ================= УНИКАЛЬНЫЕ ДЕТИ И СПИСОК «БЕЗ СПИСАНИЯ» =================
+   Детоместо — это МЕСТО на одном занятии, а не ребёнок: ходящий три раза в неделю занимает три
+   детоместа. Поэтому уникальных детей нельзя получить сложением дневных счётчиков — только
+   объединением id, и приходят они отдельным запросом за выбранный период. */
+{
+  ctx._fillPeriod = 'w:2026-08-31';
+  const P0 = API._fillCur();
+
+  // ответа ещё нет — предлагаем посчитать, а не показываем пустоту
+  ctx._fillKids = null; ctx._fillKidsKey = '';
+  check('без ответа — кнопка «посчитать»', API._fillKidsHtml().indexOf('Посчитать уникальных детей') > 0,
+        API._fillKidsHtml());
+  eq('и плитки уникальных нет', API._fillHtml().indexOf('>уникальных детей<') > 0, false);
+
+  // ответ пришёл: 30 детей заняли места, двое пришли без списания
+  ctx._fillKids = { from: P0.from, to: P0.to, kids: 30, days: 5,
+                    free: [501, 502],
+                    names: { '501': { name: 'Иванов Пётр' }, '502': { name: 'Сидорова Аня', archived: 1 } } };
+  ctx._fillKidsKey = P0.from + '..' + P0.to;
+
+  const h = API._fillKidsHtml();
+  check('видно, сколько уникальных', h.indexOf('Дети за период: 30') > 0, h.slice(0, 200));
+  check('и сколько без списания', h.indexOf('без списания — 2') > 0, h.slice(0, 240));
+  check('имена перечислены', h.indexOf('501') > 0 && h.indexOf('502') > 0);
+  check('архивный помечен', h.indexOf('в архиве') > 0, h);
+  check('сказано, за сколько дней данные', h.indexOf('по 5 дней') > 0 || h.indexOf('по 5 дн') > 0, h);
+  check('объяснено, что место ≠ ребёнок', h.indexOf('место на одном занятии') > 0);
+
+  // ⚠️ вот ради чего всё: перевод мест в детей
+  const full = API._fillHtml();
+  check('плитка уникальных детей появилась', full.indexOf('>уникальных детей<') > 0);
+  check('и мест на ребёнка', full.indexOf('мест на ребёнка') > 0);
+
+  // сменили период — прежний ответ уже не про него и показываться не должен
+  ctx._fillPeriod = 'w:2025-09-01';
+  eq('чужой период — ответ не подставляется', API._fillKidsCur(), null);
+  check('и снова предлагается посчитать', API._fillKidsHtml().indexOf('Посчитать уникальных детей') > 0);
+  ctx._fillPeriod = 'w:2026-08-31';
+
+  // никого без списания — список пуст, но блок не врёт «всё плохо»
+  ctx._fillKids = { from: P0.from, to: P0.to, kids: 30, days: 5, free: [], names: {} };
+  const h2 = API._fillKidsHtml();
+  check('без «без списания» так и сказано', h2.indexOf('Пришедших без списания за период нет') > 0, h2);
+  check('и в заголовке лишнего нет', h2.indexOf('без списания —') < 0, h2);
+
+  ctx._fillKids = null; ctx._fillKidsKey = '';
 }
 
 

@@ -413,6 +413,9 @@ function alfa_realization_day(string $date, ?array $branchFilter = null): array 
          kids  — сколько РАЗНЫХ детей за день оплатили хотя бы одно место.
        «Детоместа по абонементу» = paid − trial. */
     $nPaid = 0; $nPaidTrial = 0; $kidsPaid = []; $byGroup = [];
+    /* id детей, пришедших БЕЗ списания. Счётчика мало: Жанне нужен поимённый список — кому
+       не проставили абонемент. Собираем здесь же, вторым обходом Alfa это не достать. */
+    $freeKids = [];
     $sampleDetail = null; $samplePlanned = null; $cache = []; $byBranch = []; $byTeacher = []; $wageRows = [];
     /* Пробные считаем ЗДЕСЬ ЖЕ: участники занятий уже прочитаны, отдельный обход Alfa ради
        той же информации был бы чистой тратой. Список пробных детей берётся из кэша. */
@@ -494,6 +497,8 @@ function alfa_realization_day(string $date, ?array $branchFilter = null): array 
                 if (!$att)        $byGroup[$gk]['noAttPaid']++;   // пропуск со списанием
             } elseif ($att) {
                 $byGroup[$gk]['attFree']++;   // пришёл, а списания нет вовсе
+                $cidF = alfa_detail_customer_id($dt);
+                if ($cidF) $freeKids[$cidF] = (int)$L['id'];   // ребёнок → занятие, на котором это вышло
             }
             if ($att) { $present += $c; $nPresent++; $byBranch[$bid]['present'] += $c;
                         /* Кто РЕАЛЬНО пришёл — для «активных клиентов» в отчёте продажам.
@@ -555,6 +560,11 @@ function alfa_realization_day(string $date, ?array $branchFilter = null): array 
             'realizationPlanned' => round($planned, 2), 'plannedCount' => $nPlanned,
             'attendedCount' => $nPresent, 'chargedCount' => $nAll,
             'paidCount' => $nPaid, 'paidTrialCount' => $nPaidTrial, 'kidsPaid' => count($kidsPaid),
+            /* Сами id — для «уникальных детей за период» и для списка «без списания».
+               По дневным счётчикам уникальных не собрать: ребёнок, пришедший в пн и в ср,
+               посчитался бы дважды. Уникальность считается только объединением id. */
+            'paidIds' => array_map('intval', array_keys($kidsPaid)),
+            'freeIds' => array_map('intval', array_keys($freeKids)),
             'byGroup' => $byGroup,
             'lessonsProcessed' => $processed, 'lessonsNoDetails' => $noDet,
             'sampleDetail' => $sampleDetail, 'samplePlanned' => $samplePlanned,
@@ -686,6 +696,48 @@ function alfa_group_cards(?array $branches = null): array {
     return $out;
 }
 
+/* ===== ДЕТИ ЗА ДЕНЬ: КТО С МЕСТОМ, КТО БЕЗ =====
+   Дневное хранилище детомест держит только счётчики, и этого хватает для загрузки. Но два
+   вопроса по ним не решаются:
+     • «сколько УНИКАЛЬНЫХ детей за период» — ребёнок, пришедший в понедельник и в среду,
+       занимает два детоместа, и по счётчикам он посчитается дважды;
+     • «кто именно пришёл без списания» — нужен поимённый список, а не число.
+   Поэтому id лежат отдельным файлом: в дневное хранилище их класть нельзя, оно целиком
+   уходит в браузер при каждом открытии раздела. */
+function alfa_seatkids_path(): string {
+    $salt = substr(hash('sha256', __DIR__ . '|seatkids1'), 0, 24);
+    return alfa_store_dir() . '/seatkids_' . $salt . '.json';
+}
+function alfa_seatkids_read(): array {
+    $f = alfa_seatkids_path();
+    if (!is_file($f)) return [];
+    $j = json_decode((string)@file_get_contents($f), true);
+    return is_array($j) ? $j : [];
+}
+function alfa_seatkids_write(array $d): void {
+    ksort($d);
+    if (count($d) > 500) $d = array_slice($d, -500, null, true);   // как и детоместа: ~1,5 года
+    $f = alfa_seatkids_path();
+    $tmp = $f . '.' . getmypid() . '.tmp';
+    $json = json_encode($d, JSON_UNESCAPED_UNICODE);
+    if (@file_put_contents($tmp, $json, LOCK_EX) !== false) { @chmod($tmp, 0660); @rename($tmp, $f); }
+    else @file_put_contents($f, $json, LOCK_EX);
+}
+/* Уникальные дети и «без списания» за период — объединением id по дням. days показывает, по
+   скольким дням данные есть: у дней, посчитанных до появления файла, их нет, и молча отдавать
+   заниженное число нельзя. */
+function alfa_seatkids_range(string $from, string $to, ?array $st = null): array {
+    $st = $st ?? alfa_seatkids_read();
+    $paid = []; $free = []; $days = 0;
+    foreach ($st as $d => $row) {
+        if ($d < $from || $d > $to || !is_array($row)) continue;
+        $days++;
+        foreach ((array)($row['p'] ?? []) as $id) { $id = (int)$id; if ($id) $paid[$id] = 1; }
+        foreach ((array)($row['f'] ?? []) as $id) { $id = (int)$id; if ($id) $free[$id] = 1; }
+    }
+    return ['paid' => array_keys($paid), 'free' => array_keys($free), 'days' => $days];
+}
+
 /* ===== ДЕТОМЕСТА ПО ГРУППАМ (заполняемость) =====
    Лежит ОТДЕЛЬНЫМ файлом, а не в дневной строке реализации, по той же причине, что и
    посещаемость: дневное хранилище целиком уходит в браузер при каждом открытии «Прогноза», а
@@ -796,6 +848,12 @@ function alfa_realization_upsert(string $date, ?array $branches = null): array {
         alfa_changelog_add($r['date'], 'fact', $wasFact, $nowFact,
             ['wasLes' => (int)($prevRow['lessons'] ?? 0), 'nowLes' => (int)$row['lessons']]);
     }
+    /* Дети дня: кто занял оплаченное место и кто пришёл без списания. Пустые списки тоже
+       пишем — «в этот день никого без списания не было» отличается от «день не читали». */
+    $sk = alfa_seatkids_read();
+    $sk[$r['date']] = ['p' => array_values((array)($r['paidIds'] ?? [])),
+                                          'f' => array_values((array)($r['freeIds'] ?? []))];
+    alfa_seatkids_write($sk);
     /* Кто пришёл — в свой файл. День без проведённых занятий пишем пустым списком: это
        законный ответ «никто», и он должен отличаться от «день не читали». */
     $att = alfa_attend_read();

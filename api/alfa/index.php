@@ -1575,6 +1575,26 @@ switch ($action) {
     // --- ЗАПОЛНЯЕМОСТЬ: детоместа по группам + карточки групп Alfa ---
     //     Отдельным действием, а не вместе с realizationStore: разбивка по группам вчетверо
     //     тяжелее дневных сумм, и «Прогнозу по всем» она не нужна.
+    // --- ДЕТИ ЗА ПЕРИОД: уникальные и «пришли без списания» ---
+    //     Отдельным действием, а не внутри fillStore: id по дням лежат своим файлом, и тащить
+    //     их целиком в браузер при каждом открытии раздела незачем — нужен только выбранный
+    //     период. Имена резолвим тут же, чтобы клиент не ходил за ними вторым запросом.
+    case 'fillKids':
+        @set_time_limit(120);
+        $branches = alfa_realization_branches();
+        $from = alfa_iso((string)($in['from'] ?? ''));
+        $to   = alfa_iso((string)($in['to'] ?? ''));
+        if ($from === '' || $to === '') json_out(['ok' => false, 'error' => 'не указан период'], 400);
+        $rng = alfa_seatkids_range($from, $to);
+        /* Имена нужны только тем, кого показываем поимённо. Уникальных детей может быть под
+           тысячу, и карточки на всех — лишние запросы к Alfa ради числа. */
+        $names = alfa_customer_cards($rng['free'], $branches);
+        json_out(['ok' => true, 'from' => $from, 'to' => $to,
+                  'kids' => count($rng['paid']),
+                  'free' => $rng['free'], 'names' => $names,
+                  'days' => $rng['days']]);
+        break;
+
     case 'fillStore':
         @set_time_limit(120);
         $branches = alfa_realization_branches();

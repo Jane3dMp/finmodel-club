@@ -27,6 +27,10 @@ function alfa_realization_store_read(): array { global $STORE; return $STORE; }
 function alfa_realization_store_write(array $d): void { global $STORE; $STORE = $d; }
 /* Кто пришёл, upsert складывает в отдельный файл — здесь он тоже в памяти. Сам счёт активных
    проверяет backend/test-active-attended.php, тут важно лишь, что заморозка от него не зависит. */
+/* дети дня по местам — тоже в памяти (реализация пишет и этот файл) */
+$SK = [];
+function alfa_seatkids_read(): array { global $SK; return $SK; }
+function alfa_seatkids_write(array $d): void { global $SK; $SK = $d; }
 $ATT = [];
 /* хранилище детомест по группам — тоже в памяти (реализация пишет и его) */
 $FILL = [];
