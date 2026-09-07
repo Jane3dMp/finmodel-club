@@ -1936,7 +1936,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-09-08-03";
+const APP_VER="2026-09-08-04";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -14566,6 +14566,42 @@ function _fillModelPlan(){
 /* Подтянуть период из Alfa: тем же действием, что и «Обновить факт» в «Прогнозе по всем».
    Считаем только дни, которых в хранилище ещё нет: пересчёт дня — это десятки запросов к Alfa,
    и гонять их по кругу ради уже посчитанного нельзя. */
+/* Досчитать месяц-эталон прямо из его блока. Раньше для этого надо было выбрать месяц
+   периодом, нажать «Пересчитать период» и вернуться обратно — три действия и потеря
+   выбранного периода. А эталон по неполному месяцу — это первое, что подрывает доверие
+   ко всему блоку: 74% по семи дням сентября выглядят ровно как 74% по тридцати. */
+function _fillMonthMissing(ym){
+  const F=(_fillStore&&_fillStore.fill)||{}, today=_todayIso(), need=[];
+  const y=+String(ym).slice(0,4), m=+String(ym).slice(5,7);
+  if(!y||!m) return need;
+  const last=new Date(y,m,0).getDate();
+  for(let d=1;d<=last;d++){
+    const k=ym+"-"+String(d).padStart(2,"0");
+    if(k>today) break;
+    if(!F[k]) need.push(k);
+  }
+  return need;
+}
+async function fillPullMonth(ym){
+  if(_fillBusy) return;
+  const need=_fillMonthMissing(ym);
+  const prog=document.getElementById("fillProg");
+  if(!need.length){ if(prog) prog.textContent="Месяц уже посчитан целиком"; return; }
+  if(need.length>10 && !confirm("Досчитать "+need.length+" "+_kassaDayWord(need.length)
+      +" в "+_salesMonIn(ym)+"? Это несколько минут: каждый день — десятки запросов к Alfa.")) return;
+  _fillBusy=true;
+  try{
+    for(let i=0;i<need.length;i+=7){
+      if(prog) prog.textContent="Досчитываю "+_salesMonIn(ym)+"… "+Math.min(i+7,need.length)+"/"+need.length;
+      await _pubCall("realizationPull",{dates:need.slice(i,i+7)});
+    }
+    _realStore=null;
+    await _fillLoad(true);
+    if(prog) prog.textContent="Готово ✓";
+    _fillRefresh();
+  }catch(e){ if(prog) prog.innerHTML=_pubErrHtml(e,"месяц-эталон"); }
+  finally{ _fillBusy=false; }
+}
 async function fillPull(all){
   if(_fillBusy) return;
   const P=_fillCur(); if(!P) return;
@@ -14741,6 +14777,17 @@ function _fillHtml(){
         : (dPP>0 ? "Загружаем <b style=\"color:var(--green)\">лучше</b>, чем в "+esc(_salesMonIn(baseYm))+"."
                  : "Загружаем <b style=\"color:var(--red)\">хуже</b>, чем в "+esc(_salesMonName(baseYm))+". В группах пустует на "+Math.abs(dPP).toFixed(0)+" из каждых 100 мест больше, чем тогда.")
       }</div>`}
+      ${(function(){
+        const miss=_fillMonthMissing(baseYm);
+        if(!miss.length) return "";
+        /* Молчать нельзя: процент по куску месяца выглядит точно так же, как по месяцу,
+           и отличить их можно только по этой строке. */
+        return `<div class="callout" style="border-color:var(--terra);font-size:12px;margin-top:8px">
+          <b>${esc(_salesMonName(baseYm))} посчитан не весь</b> — не хватает ${miss.length} ${_kassaDayWord(miss.length)}.
+          Процент считается по тем дням, что есть, и может отличаться от месяца целиком.
+          <button class="btn ghost sm" style="margin-left:6px" onclick="fillPullMonth('${esc(baseYm)}')"${_fillBusy?" disabled":""}>досчитать ${miss.length} ${_kassaDayWord(miss.length)}</button>
+        </div>`;
+      })()}
       <small class="note">Детоместа = вместимость группы × число её занятий, сложенные по всем группам: поэтому у месяца их в несколько раз больше, чем у недели. Загрузка — заполненные места ÷ детоместа. Сравниваем проценты, а не списания: в неделе и в месяце разное число детомест, поэтому сами списания сравнивать напрямую нельзя. Вместимость взята сегодняшняя, поэтому это ориентир: в ${esc(_salesMonIn(baseYm))} состав групп был другим.</small>`}
   </div>`;
   const srcMark={model:'<span style="color:var(--blue)" title="Взято из «Планировщика загрузки»">◆</span>', plan:'<span title="План вписан вами" style="color:var(--green)">•</span>',

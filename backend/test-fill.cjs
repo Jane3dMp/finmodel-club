@@ -23,6 +23,7 @@ const MULTI = ['_fillGroupName', '_fillAcadYear', '_fillYearWeeks', '_fillPeriod
                '_salesMonIn',
                '_fillLesWord',
                '_fillDaysNote',
+               '_fillMonthMissing',
                '_fillSubjName', '_fillTeach', '_fillTopId',
                '_fillPlanPerGroup',
                '_fillAgg', '_fillCap', 'fillPlanSet',
@@ -83,7 +84,7 @@ const API = new Function('ctx', 'with (ctx) { ' + src +
   ' return {_fillAgg,_fillCap,_fillRows,_fillTotals,_fillModelPlan,_fillHtml,_fillPeriods,_fillCur,' +
   '_fillAcadYear,_fillAcadMonth,_fillYearWeeks,_fillPeriodOpts,_fillArch,_fillNoName,_fillGroupName,' +
   '_fillWho,_fillKidsCur,_fillKidsHtml,_fillPlanPerGroup,_fillCap,_fillTeach,_fillSubjName,_fillTopId,' +
-  '_salesMonIn,_fillLesWord,_fillDaysNote,' +
+  '_salesMonIn,_fillLesWord,_fillDaysNote,_fillMonthMissing,' +
   '_fillPlanMap,fillPlanSet,_salesPace,_salesPaceLines,_salesPaceHtml,_salesCfg,_salesGoals}; }')(ctx);
 
 /* ================= 1. свод по группам за неделю ================= */
@@ -664,6 +665,50 @@ ctx._fillStore.fill = FILL;
   eq('11 занятий', API._fillLesWord(11), 'занятий');
   eq('214 занятий', API._fillLesWord(214), 'занятий');
   eq('22 занятия', API._fillLesWord(22), 'занятия');
+}
+
+
+/* ================= НЕПОЛНЫЙ МЕСЯЦ-ЭТАЛОН =================
+   Живой случай 08.09.2026: эталоном стоял сентябрь 2025, а посчитано в нём было 7 дней из 30.
+   74% по неделе выглядят ровно так же, как 74% по месяцу, — отличить можно только по подписи.
+   Поэтому блок обязан сказать это вслух и дать досчитать, не уходя из выбранного периода. */
+{
+  const keepFill = ctx._fillStore.fill, keepBase = ctx.S.fillBase;
+  // в хранилище только 2 дня марта из 31
+  ctx._fillStore.fill = {
+    '2026-03-02': { '10': [1, 5, 5, 0, 5, 150] },
+    '2026-03-03': { '10': [1, 5, 5, 0, 5, 150] },
+    '2026-09-02': { '10': [1, 6, 6, 0, 6, 180] },
+  };
+  ctx.S.fillBase = '2026-03';
+  ctx._fillPeriod = 'w:2026-08-31';
+
+  const miss = API._fillMonthMissing('2026-03');
+  eq('не хватает 29 дней марта', miss.length, 29);
+  check('и это именно дни марта', miss.every(d => d.slice(0, 7) === '2026-03'), miss.slice(0, 3).join(','));
+  check('уже посчитанные не просим заново', miss.indexOf('2026-03-02') < 0);
+
+  const h = API._fillHtml();
+  check('сказано, что месяц неполный', h.indexOf('посчитан не весь') > 0, h.slice(0, 300));
+  check('названо, сколько не хватает', h.indexOf('не хватает 29') > 0);
+  check('и есть кнопка досчитать', h.indexOf("fillPullMonth('2026-03')") > 0);
+  check('оговорено, что процент по неполному месяцу',
+        h.indexOf('Процент считается по тем дням, что есть') > 0);
+
+  // ⚠️ будущие дни не просим: месяц, который ещё идёт, «неполон» законно
+  const future = API._fillMonthMissing('2026-12');
+  eq('будущий месяц не просим считать', future.length, 0);
+
+  // месяц посчитан целиком — предупреждения быть не должно
+  const full = {};
+  for (let d = 1; d <= 31; d++) full['2026-03-' + String(d).padStart(2, '0')] = { '10': [1, 5, 5, 0, 5, 150] };
+  full['2026-09-02'] = { '10': [1, 6, 6, 0, 6, 180] };
+  ctx._fillStore.fill = full;
+  eq('полный месяц ничего не просит', API._fillMonthMissing('2026-03').length, 0);
+  check('и предупреждения нет', API._fillHtml().indexOf('посчитан не весь') < 0);
+
+  ctx._fillStore.fill = keepFill; ctx.S.fillBase = keepBase;
+  ctx._fillPeriod = 'w:2026-08-31';
 }
 
 
