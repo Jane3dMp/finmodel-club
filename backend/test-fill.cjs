@@ -19,7 +19,7 @@ function eq(name, got, want) { check(name, got === want, JSON.stringify(got) + '
 
 const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
 const MULTI = ['_fillGroupName', '_fillAcadYear', '_fillYearWeeks', '_fillPeriods', '_fillPeriodOpts', '_fillCur',
-               '_fillWho', '_fillKidsCur', '_fillKidsHtml',
+               '_fillWho', '_fillKidsCur', '_fillKidsHtml', '_fillCats', 'fillCatSet',
                '_fillAgg', '_fillCap', 'fillPlanSet',
                '_fillRows', '_fillTotals', '_fillModelPlan', '_fillHtml',
                '_salesCfg', '_salesPace', '_salesPaceLines', '_salesPaceHtml'];
@@ -33,6 +33,7 @@ function grab(name, re) {
   if (!m) { console.log('не найдено в index.html: ' + name); process.exit(1); }
   src += m[0] + '\n';
 }
+for (const n of ['_FILL_CATS']) grab(n, new RegExp('\\nconst ' + n + '=[\\s\\S]*?\\n\\];', 'm'));
 for (const n of MULTI) grab(n, new RegExp('\\nfunction ' + n + '\\([^)]*\\)\\s*\\{[\\s\\S]*?\\n\\}', 'm'));
 for (const n of ONE) grab(n, new RegExp('\\nfunction ' + n + '\\(.*\\}$', 'm'));
 
@@ -305,9 +306,9 @@ ctx._fillStore.fill = FILL;
         (rows[0].att - rows[0].fact) === 2 && W.free === 1, 'att=' + rows[0].att + ' fact=' + rows[0].fact);
 
   const h = API._fillHtml();
-  check('плитка «с оплаченным местом»', h.indexOf('пришли с оплаченным местом') > 0);
-  check('плитка «без списания»', h.indexOf('пришли без списания') > 0);
-  check('плитка про пробные', h.indexOf('пришли на пробное') > 0);
+  check('плитка «полная цена»', h.indexOf('пришли · полная цена') > 0);
+  check('плитка «без списания»', h.indexOf('пришли · без списания') > 0);
+  check('плитка про пробные', h.indexOf('пришли · пробное за 15') > 0);
   check('плитка про пропуск со списанием', h.indexOf('пропуск со списанием') > 0);
   check('колонка в таблице', h.indexOf('>Без списания<') > 0);
   check('и объяснено, что это потерянные деньги',
@@ -374,6 +375,80 @@ ctx._fillStore.fill = FILL;
   check('и в заголовке лишнего нет', h2.indexOf('без списания —') < 0, h2);
 
   ctx._fillKids = null; ctx._fillKidsKey = '';
+}
+
+
+/* ================= ЧТО СЧИТАТЬ ЗАНЯТЫМ МЕСТОМ =================
+   Пришедшие раскладываются по деньгам на четыре корзины, и какие из них считать местом —
+   решает Жанна галочками. Ловушек две: разложение появилось позже самих детомест (у старых
+   дней его нет, и применять галочки к ним нельзя — загрузка обвалилась бы на ровном месте),
+   и «ноль» бывает двух сортов: списание по абонементу с нулевой ценой и вообще без абонемента. */
+{
+  const keep = ctx._fillStore.fill, keepCats = ctx.S.fillCats;
+  ctx._fillStore.fmt = ['les','seats','paid','trial','att','rev','attPaid','attFree','noAttPaid','attTrial','attZero'];
+  // 1 занятие, вместимость 10: полная цена 4, пробное 1, за 0 (по абонементу) 2,
+  // без списания 1, пропуск со списанием 3
+  //   att = 4+1+2+1 = 8 ; paid = 4+1+3 = 8 ; trial = 1 ; attFree = 2+1 = 3 ; attZero = 2
+  ctx._fillStore.fill = { '2026-09-02': { '10': [1, 11, 8, 1, 8, 300, 4, 3, 3, 1, 2] } };
+  ctx.S.fillPlan = { '10': 10 };
+  ctx._fillPeriod = 'w:2026-08-31';
+
+  const rows0 = API._fillRows(API._fillAgg('2026-08-31', '2026-09-06'));
+  const r = rows0.find(x => x.gid === '10');
+  eq('полная цена', r.attPaid, 4);
+  eq('пробное за 15', r.attTrial, 1);
+  eq('списание за 0', r.attZero, 2);
+  eq('без списания — остаток', r.attNone, 1);       // attFree 3 − attZero 2
+  eq('пропуск со списанием', r.noAttPaid, 3);
+  eq('детоместа не зависят от галочек', r.fact, 7);  // paid 8 − trial 1
+
+  // умолчание повторяет прежний расчёт: полная цена + пропуски со списанием
+  eq('по умолчанию учтено', r.cnt, 4 + 3);
+  eq('и загрузка от них', Math.round(r.pct), 70);
+
+  // ⚠️ галочки меняют ТОЛЬКО процент, детоместа остаются собой
+  ctx.S.fillCats = { full: 1, trial: 1, zero: 1, none: 1, miss: 1 };
+  const rAll = API._fillRows(API._fillAgg('2026-08-31', '2026-09-06')).find(x => x.gid === '10');
+  eq('все корзины', rAll.cnt, 4 + 1 + 2 + 1 + 3);
+  eq('детоместа те же', rAll.fact, 7);
+  eq('загрузка выросла', Math.round(rAll.pct), 110);
+
+  ctx.S.fillCats = { full: 1, trial: 0, zero: 0, none: 0, miss: 0 };
+  const rFull = API._fillRows(API._fillAgg('2026-08-31', '2026-09-06')).find(x => x.gid === '10');
+  eq('только полная цена', rFull.cnt, 4);
+  eq('и её процент', Math.round(rFull.pct), 40);
+
+  // --- галочки в разметке ---
+  ctx.S.fillCats = { full: 1, trial: 0, zero: 0, none: 0, miss: 1 };
+  const h = API._fillHtml();
+  check('блок галочек есть', h.indexOf('Что считать занятым местом') > 0);
+  check('все пять категорий', ['полная цена','пробное за 15','списание за 0','без списания','пропуск со списанием']
+        .every(t => h.indexOf(t) > 0), 'не хватает категории');
+  const onBoxes = (h.match(/checkbox" checked/g) || []).length;
+  check('отмечены ровно две категории', onBoxes === 2, 'отмечено: ' + onBoxes);
+  check('видно, сколько учтено', h.indexOf('В загрузке учтено') > 0);
+
+  /* ⚠️ ГЛАВНОЕ: у дня без разложения галочки применять нельзя — иначе загрузка обнулится.
+     Такой день считается по-старому, по детоместам. */
+  ctx._fillStore.fill = { '2026-09-02': { '10': [1, 11, 8, 1, 8, 300] } };   // старый формат
+  ctx.S.fillCats = { full: 1, trial: 0, zero: 0, none: 0, miss: 0 };
+  const rOld = API._fillRows(API._fillAgg('2026-08-31', '2026-09-06')).find(x => x.gid === '10');
+  eq('старый день считается по детоместам', rOld.cnt, rOld.fact);
+  eq('и загрузка не обнулилась', Math.round(rOld.pct), 70);
+  eq('и это видно по флагу', rOld.split, false);
+  check('и наверху сказано, что надо пересчитать',
+        API._fillHtml().indexOf('нажмите «Пересчитать заново»') > 0);
+
+  // смешанный период: часть дней с разложением, часть без — тоже откат, чтобы не занизить
+  ctx._fillStore.fill = {
+    '2026-09-02': { '10': [1, 11, 8, 1, 8, 300, 4, 3, 3, 1, 2] },
+    '2026-09-03': { '10': [1, 11, 8, 1, 8, 300] },
+  };
+  const rMix = API._fillRows(API._fillAgg('2026-08-31', '2026-09-06')).find(x => x.gid === '10');
+  eq('смешанный период — тоже по детоместам', rMix.cnt, rMix.fact);
+  eq('и флаг честный', rMix.split, false);
+
+  ctx._fillStore.fill = keep; ctx.S.fillCats = keepCats; ctx.S.fillPlan = { '20': 6 };
 }
 
 

@@ -1936,7 +1936,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-09-07-12";
+const APP_VER="2026-09-07-13";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -14113,7 +14113,24 @@ function _progPlanCell(key, snap){
 let _fillStore=null, _fillErr=null, _fillBusy=false, _fillLoading=null;
 let _fillPeriod=null;                 // "w:2026-08-31" | "m:2026-03"
 let _fillSort="pct";                  // pct | seats | name
-const _FILL_FMT=["les","seats","paid","trial","att","rev","attPaid","attFree","noAttPaid"];
+const _FILL_FMT=["les","seats","paid","trial","att","rev","attPaid","attFree","noAttPaid",
+                 "attTrial","attZero"];
+/* Что учитывать в загрузке. Категории пришедших различаются деньгами, и какая из них «наша»,
+   решает Жанна: пробное за 15 — это не полноценное место, а ребёнок «за 0» место всё-таки
+   занял. Умолчание повторяет прежний расчёт: полная цена + пропуски со списанием. */
+const _FILL_CATS=[
+  ["full","полная цена","Пришёл, списание по абонементу прошло по обычной цене"],
+  ["trial","пробное за 15","Пришёл, списалось пробное — цена у него своя"],
+  ["zero","списание за 0","Абонемент к занятию привязан, но цена нулевая: отработка, подарок, акция. Место занято"],
+  ["none","без списания","Пришёл, а абонемента к занятию не привязано вовсе — денег клуб не получил"],
+  ["miss","пропуск со списанием","Ребёнка не было, но место оплачено"],
+];
+function _fillCats(){
+  if(!S.fillCats||typeof S.fillCats!=="object") S.fillCats={full:1,trial:0,zero:0,none:0,miss:1};
+  return S.fillCats;
+}
+function fillCatSet(k,on){ const c=_fillCats(); c[k]=on?1:0;
+  persistLocal(); if(typeof fbSchedulePush==="function") fbSchedulePush(); _fillRefresh(); }
 
 async function _fillLoad(force){
   if(!force && _fillStore) return true;
@@ -14240,14 +14257,16 @@ function _fillCur(){
    с занятиями. Если days меньше длины периода, часть дней просто ещё не считали. */
 function _fillAgg(from,to){
   const F=(_fillStore&&_fillStore.fill)||{}, ix=_fillIdx(), g={};
-  let days=0, lessonDays=0, newDays=0;
+  let days=0, lessonDays=0, newDays=0, splitDays=0;
   Object.keys(F).forEach(d=>{
     if(d<from||d>to) return;
     days++;
-    const day=F[d]||{}; let any=false, anyNew=false;
+    const day=F[d]||{}; let any=false, anyNew=false, anySplit=false;
     Object.keys(day).forEach(k=>{
       const r=day[k]||[], les=+r[ix.les]||0, paid=+r[ix.paid]||0, trial=+r[ix.trial]||0;
-      const o=g[k]||(g[k]={les:0,seats:0,paid:0,trial:0,att:0,rev:0,peak:0,attPaid:0,attFree:0,noAttPaid:0});
+      const o=g[k]||(g[k]={les:0,seats:0,paid:0,trial:0,att:0,rev:0,peak:0,attPaid:0,attFree:0,noAttPaid:0,
+                           attTrial:0,attZero:0,rowDays:0,splitDays:0});
+      o.rowDays++;                      // сколько дней у группы вообще есть строка
       o.les+=les; o.seats+=+r[ix.seats]||0; o.paid+=paid; o.trial+=trial;
       o.att+=+r[ix.att]||0; o.rev+=+r[ix.rev]||0;
       /* Счётчики «с деньгами / без денег» появились позже: у дней, посчитанных до этого,
@@ -14257,6 +14276,13 @@ function _fillAgg(from,to){
         o.attPaid+=+r[ix.attPaid]||0; o.attFree+=+r[ix.attFree]||0; o.noAttPaid+=+r[ix.noAttPaid]||0;
         anyNew=true;
       }
+      /* Разложение «за 15 / за 0» появилось ещё позже: у дней между двумя правками есть attFree,
+         но нет attZero. Считать такие дни «все без списания» было бы наговором на админов,
+         поэтому раскладываем только те дни, где поля действительно есть. */
+      if(r.length>ix.attZero){
+        o.attTrial+=+r[ix.attTrial]||0; o.attZero+=+r[ix.attZero]||0;
+        o.splitDays++; anySplit=true;
+      }
       /* «Пик» — лучший день группы: сколько мест она реально держала. Это запасная вместимость,
          когда план не вписан и в Alfa у группы не проставлен limit. */
       if(les>0) o.peak=Math.max(o.peak, Math.round((paid-trial)/les));
@@ -14264,8 +14290,9 @@ function _fillAgg(from,to){
     });
     if(any) lessonDays++;
     if(anyNew) newDays++;
+    if(anySplit) splitDays++;
   });
-  return {groups:g, days:days, lessonDays:lessonDays, newDays:newDays, from:from, to:to};
+  return {groups:g, days:days, lessonDays:lessonDays, newDays:newDays, splitDays:splitDays, from:from, to:to};
 }
 function _fillPlanMap(){ if(!S.fillPlan||typeof S.fillPlan!=="object") S.fillPlan={}; return S.fillPlan; }
 /* Вместимость одной группы: цифра Жанны → limit из Alfa → пик за период. */
@@ -14297,12 +14324,28 @@ function _fillRows(agg){
     const c=_fillCap(k,agg);
     const fact=Math.max(0,a.paid-a.trial);                  // детоместа по абонементу
     const seats=a.les*c.cap;                                // мест было = вместимость × занятий
+    /* В загрузку идёт только то, что отмечено галочками. Детоместа при этом остаются собой —
+       это разные вопросы: «сколько мест оплачено» и «что мы считаем занятым местом». */
+    const CT=_fillCats();
+    /* ⚠️ Разложение по деньгам появилось позже самих детомест. Пока у группы есть хоть один
+       день без него, галочки применять НЕЛЬЗЯ: недостающие дни дали бы нули, и загрузка
+       обвалилась бы на ровном месте. В этом случае считаем как раньше — по детоместам, —
+       а наверху уже стоит предупреждение «нажмите Пересчитать заново». */
+    const split=(a.rowDays>0 && a.splitDays===a.rowDays);
+    const cnt=split
+      ? ((CT.full?(a.attPaid||0):0)+(CT.trial?(a.attTrial||0):0)
+         +(CT.zero?(a.attZero||0):0)+(CT.none?Math.max(0,(a.attFree||0)-(a.attZero||0)):0)
+         +(CT.miss?(a.noAttPaid||0):0))
+      : fact;
     rows.push({gid:k, name:_fillGroupName(k), arch:_fillArch(k), noName:_fillNoName(k),
                subj:_fillSubjName(k), teacher:_fillTeachName(k),
                les:a.les, fact:fact, att:a.att, trial:a.trial, rev:a.rev, peak:a.peak,
                attPaid:a.attPaid||0, attFree:a.attFree||0, noAttPaid:a.noAttPaid||0,
+               attTrial:a.attTrial||0, attZero:a.attZero||0,
+               /* «Без списания» — остаток: пришёл с нулём и без привязанного абонемента. */
+               attNone:Math.max(0,(a.attFree||0)-(a.attZero||0)),
                cap:c.cap, capSrc:c.src, capWhy:c.why, seats:seats,
-               pct:(seats>0?100*fact/seats:null)});
+               cnt:cnt, split:split, pct:(seats>0?100*cnt/seats:null)});
   });
   const val={pct:r=>(r.pct==null?1e6:r.pct), seats:r=>-r.fact, name:r=>r.name};
   const v=val[_fillSort]||val.pct;
@@ -14317,14 +14360,17 @@ function _fillRows(agg){
 /* Итоги «кто был». Три взаимоисключающие корзины по каждому пришедшему ребёнку плюс
    пропуски со списанием — вместе они и объясняют, почему «Пришли» не сходится с детоместами. */
 function _fillWho(rows){
-  const T={att:0, paid:0, free:0, trial:0, missPaid:0};
+  const T={att:0, paid:0, free:0, trial:0, zero:0, none:0, missPaid:0, cnt:0};
   rows.forEach(r=>{
     T.att+=r.att||0; T.paid+=r.attPaid||0; T.free+=r.attFree||0; T.missPaid+=r.noAttPaid||0;
+    T.zero+=r.attZero||0; T.none+=r.attNone||0; T.cnt+=r.cnt||0;
   });
   /* Пришедшие с ПРОБНЫМ списанием — остаток: всего пришли минус те, у кого списалось по
      абонементу, минус те, у кого не списалось ничего. Отдельного счётчика не заводим, чтобы
      не хранить в файле цифру, которая всегда выводится из трёх соседних. */
-  T.trial=Math.max(0, T.att-T.paid-T.free);
+  /* Пробные считаются явно, но у дней, посчитанных до разложения, поля нет — там выводим
+     остатком, как раньше. Иначе пробники молча исчезли бы из «пришли». */
+  T.trial=rows.reduce((a,r)=>a+(r.attTrial||0),0) || Math.max(0, T.att-T.paid-T.free);
   return T;
 }
 function _fillTotals(rows){
@@ -14416,14 +14462,28 @@ function _fillHtml(){
   /* «Кто был — с деньгами и без них». Отдельной строкой под плитками: это не про загрузку,
      а про то, почему «Пришли» не сходится с детоместами. Пробные вынесены из «с местом»
      намеренно — у них своя цена, и в оплаченную загрузку они не входят. */
+  /* Пришедшие — четырьмя корзинами по деньгам. Одна общая цифра «пришли» ничего не решает:
+     полная цена, пробное за 15, ноль по абонементу и «вообще без списания» — разные истории,
+     и в загрузку они входят по-разному (галочками выше). */
   const whoRow=W.att?`<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
-    ${tile(_gm(W.paid),"пришли с оплаченным местом","var(--green)","Ребёнок был на занятии, и за него прошло списание по абонементу")}
-    ${tile(_gm(W.free),"пришли без списания",W.free?"var(--red)":"var(--muted)","Отметка о приходе есть, а списания нет вовсе: либо абонемент не проставили, либо ребёнок ходит бесплатно. Денег за это занятие клуб не получил")}
-    ${W.trial?tile(_gm(W.trial),"пришли на пробное","var(--terra)","Списалось пробное — в оплаченную загрузку такие места не входят: у них своя цена"):""}
+    ${tile(_gm(W.paid),"пришли · полная цена","var(--green)","Списание по абонементу прошло по обычной цене")}
+    ${W.trial?tile(_gm(W.trial),"пришли · пробное за 15","var(--terra)","Списалось пробное — цена у него своя"):""}
+    ${W.zero?tile(_gm(W.zero),"пришли · списание за 0","#C9922E","Абонемент к занятию привязан, но цена нулевая: отработка, подарок, акция. Место занято, денег нет"):""}
+    ${tile(_gm(W.none),"пришли · без списания",W.none?"var(--red)":"var(--muted)","Абонемента к занятию не привязано вовсе: ребёнок был, а место нигде не числится и денег клуб не получил")}
     ${W.missPaid?tile(_gm(W.missPaid),"пропуск со списанием","var(--muted)","Ребёнка не было, но место оплачено — деньги клуб получил. Это НЕ потеря"):""}
   </div>`:"";
+  /* Галочки — какие из этих корзин считать занятым местом. Подпись показывает, что именно
+     вошло в проценты: иначе цифра меняется, а почему — непонятно. */
+  const CT=_fillCats();
+  const catBox=`<div class="callout" style="font-size:12px;margin-bottom:10px">
+    <b>Что считать занятым местом</b> — от этого зависит только процент загрузки:
+    <div style="display:flex;gap:14px;flex-wrap:wrap;margin-top:6px">${
+      _FILL_CATS.map(c=>`<label style="cursor:pointer;white-space:nowrap" title="${esc(c[2])}">
+        <input type="checkbox" ${CT[c[0]]?"checked":""} onchange="fillCatSet('${c[0]}',this.checked)"> ${esc(c[1])}</label>`).join("")}</div>
+    <div style="margin-top:6px;color:var(--muted)">В загрузке учтено <b>${_gm(W.cnt)}</b> мест из ${_gm(T.seats)}. «Детомест» рядом — это все оплаченные места без пробных, галочки его не меняют.</div>
+  </div>`;
   const tiles=`<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
-    ${tile(T.pct!=null?(T.pct.toFixed(0)+"%"):"—","загрузка",T.pct!=null?_fillPctColor(T.pct):"","Детоместа ÷ мест было")}
+    ${tile(T.pct!=null?(T.pct.toFixed(0)+"%"):"—","загрузка",T.pct!=null?_fillPctColor(T.pct):"","Выбранные галочками места ÷ мест было")}
     ${tile(_gm(T.fact),"детомест по абонементу","","Оплаченные места: пришли или пропустили со списанием")}
     ${tile(_gm(T.seats),"мест было","var(--muted)","Вместимость × число занятий")}
     ${tile(_gm(T.les),"занятий","var(--muted)","Проведённых занятий за период")}
@@ -14514,7 +14574,7 @@ function _fillHtml(){
         <td class="num">${W.free?`<b style="color:var(--red)">${_gm(W.free)}</b>`:"—"}</td></tr>
     </tbody></table></div></div>`;
   const warnHtml=warn.length?`<div class="callout" style="border-color:var(--terra);margin-bottom:10px">${warn.join(" · ")}</div>`:"";
-  return head+bar+warnHtml+tiles+whoRow+_fillKidsHtml()+modelBlk+baseBlk+table;
+  return head+bar+warnHtml+tiles+whoRow+catBox+_fillKidsHtml()+modelBlk+baseBlk+table;
 }
 
 function _progHtml(){

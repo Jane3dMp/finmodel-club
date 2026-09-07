@@ -445,7 +445,8 @@ function alfa_realization_day(string $date, ?array $branchFilter = null): array 
            Здесь в одном цикле есть и отметка о приходе, и сумма списания — значит считаем точно. */
         if (!isset($byGroup[$gk])) $byGroup[$gk] = ['les' => 0, 'seats' => 0, 'paid' => 0, 'trial' => 0,
                                                     'att' => 0, 'rev' => 0.0,
-                                                    'attPaid' => 0, 'attFree' => 0, 'noAttPaid' => 0];
+                                                    'attPaid' => 0, 'attFree' => 0, 'noAttPaid' => 0,
+                                                    'attTrial' => 0, 'attZero' => 0];
         if ($L['done']) { $doneLessons++; $byBranch[$bid]['lessons']++; $byGroup[$gk]['les']++; } else $plannedLessons++;
         $cid = (int)($L['cids'][0] ?? 0); if (!$cid) { $noDet++; continue; }
         $ck = $bid . ':' . $cid;
@@ -493,10 +494,18 @@ function alfa_realization_day(string $date, ?array $branchFilter = null): array 
                 else { $cidP = alfa_detail_customer_id($dt); if ($cidP) $kidsPaid[$cidP] = 1; }
                 /* Пробное списание деньгами не считаем: у него своя цена, и в «пришёл с местом»
                    ему не место — иначе пробники выглядели бы как оплаченная загрузка. */
-                if ($att && !$tr) $byGroup[$gk]['attPaid']++;
-                if (!$att)        $byGroup[$gk]['noAttPaid']++;   // пропуск со списанием
+                if ($att && !$tr) $byGroup[$gk]['attPaid']++;   // пришёл, полная цена
+                if ($att && $tr)  $byGroup[$gk]['attTrial']++;  // пришёл на пробное (обычно 15)
+                if (!$att)        $byGroup[$gk]['noAttPaid']++; // пропуск со списанием
             } elseif ($att) {
-                $byGroup[$gk]['attFree']++;   // пришёл, а списания нет вовсе
+                $byGroup[$gk]['attFree']++;   // пришёл, а денег за него не списалось
+                /* ⚠️ Ноль бывает двух разных сортов, и путать их нельзя:
+                   • ctt_id есть — абонемент к занятию привязан, списание прошло, но по нулевой
+                     цене (отработка, подарок, акция). Место занято и учтено;
+                   • ctt_id нет — абонемента к занятию не привязано вовсе. Это и есть «без
+                     списания»: ребёнок был, а денег клуб не получил и место нигде не числится.
+                   ctt_id в ответе Alfa есть — проверено зондом 06.09.2026. */
+                if ((int)($dt['ctt_id'] ?? 0) > 0) $byGroup[$gk]['attZero']++;
                 $cidF = alfa_detail_customer_id($dt);
                 if ($cidF) $freeKids[$cidF] = (int)$L['id'];   // ребёнок → занятие, на котором это вышло
             }
@@ -753,7 +762,8 @@ function alfa_fill_store_path(): string {
    Новые поля ДОБАВЛЯТЬ ТОЛЬКО В КОНЕЦ: у дней, посчитанных раньше, массив короче, и сдвиг
    середины молча перепутал бы детоместа с выручкой. Короткие строки клиент видит по длине
    и честно сообщает, что счётчик есть не за все дни. */
-const ALFA_FILL_FMT = ['les', 'seats', 'paid', 'trial', 'att', 'rev', 'attPaid', 'attFree', 'noAttPaid'];
+const ALFA_FILL_FMT = ['les', 'seats', 'paid', 'trial', 'att', 'rev', 'attPaid', 'attFree', 'noAttPaid',
+                       'attTrial', 'attZero'];
 function alfa_fill_read(): array {
     $f = alfa_fill_store_path();
     if (!is_file($f)) return [];
@@ -781,7 +791,8 @@ function alfa_fill_row(array $byGroup): array {
     foreach ($byGroup as $gid => $g) {
         $out[(string)(int)$gid] = [(int)($g['les'] ?? 0), (int)($g['seats'] ?? 0), (int)($g['paid'] ?? 0),
                                    (int)($g['trial'] ?? 0), (int)($g['att'] ?? 0), round((float)($g['rev'] ?? 0), 2),
-                                   (int)($g['attPaid'] ?? 0), (int)($g['attFree'] ?? 0), (int)($g['noAttPaid'] ?? 0)];
+                                   (int)($g['attPaid'] ?? 0), (int)($g['attFree'] ?? 0), (int)($g['noAttPaid'] ?? 0),
+                                   (int)($g['attTrial'] ?? 0), (int)($g['attZero'] ?? 0)];
     }
     return $out;
 }
