@@ -20,6 +20,7 @@ function eq(name, got, want) { check(name, got === want, JSON.stringify(got) + '
 const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
 const MULTI = ['_fillGroupName', '_fillAcadYear', '_fillYearWeeks', '_fillPeriods', '_fillPeriodOpts', '_fillCur',
                '_fillWho', '_fillKidsCur', '_fillKidsHtml', '_fillCats', 'fillCatSet',
+               '_fillPlanPerGroup',
                '_fillAgg', '_fillCap', 'fillPlanSet',
                '_fillRows', '_fillTotals', '_fillModelPlan', '_fillHtml',
                '_salesCfg', '_salesPace', '_salesPaceLines', '_salesPaceHtml'];
@@ -57,6 +58,7 @@ const ctx = {
   _FILL_FMT: ['les', 'seats', 'paid', 'trial', 'att', 'rev'],
   _rukSec: 'fill',
   _rukPokaz: () => ({ curYear: '2026/27' }),
+  _pubMap: () => ({ subj: { 'Английский': 11, 'Scratch': 12 } }),
   _fillKids: null, _fillKidsKey: '', _fillKidsBusy: false, _fillKidsErr: null,
   _trKidLink: id => '<a>' + id + '</a>', _fmlKid: n => 'детей',
   _RU_MON: ['январь','февраль','март','апрель','май','июнь','июль','август','сентябрь','октябрь','ноябрь','декабрь'],
@@ -75,7 +77,7 @@ const ctx = {
 const API = new Function('ctx', 'with (ctx) { ' + src +
   ' return {_fillAgg,_fillCap,_fillRows,_fillTotals,_fillModelPlan,_fillHtml,_fillPeriods,_fillCur,' +
   '_fillAcadYear,_fillAcadMonth,_fillYearWeeks,_fillPeriodOpts,_fillArch,_fillNoName,_fillGroupName,' +
-  '_fillWho,_fillKidsCur,_fillKidsHtml,' +
+  '_fillWho,_fillKidsCur,_fillKidsHtml,_fillPlanPerGroup,_fillCap,' +
   '_fillPlanMap,fillPlanSet,_salesPace,_salesPaceLines,_salesPaceHtml,_salesCfg,_salesGoals}; }')(ctx);
 
 /* ================= 1. свод по группам за неделю ================= */
@@ -90,8 +92,18 @@ eq('пик группы 10 — лучший день', agg.groups['10'].peak, 8)
 /* ================= 2. откуда берётся «сколько должно быть» ================= */
 eq('вписанный план важнее вместимости Alfa', API._fillCap('20', agg).cap, 6);
 eq('и это видно по источнику', API._fillCap('20', agg).src, 'plan');
-eq('плана нет — берём вместимость группы в Alfa', API._fillCap('10', agg).cap, 8);
+// вписанного плана нет, но курс есть в планировщике — берём «Чел/гр» оттуда
+eq('плана нет — берём «Чел/гр» из планировщика', API._fillCap('10', agg).cap, 6);
+eq('источник — планировщик', API._fillCap('10', agg).src, 'model');
+// курса нет в планировщике — тогда вместимость из Alfa
+ctx.S.plan = [];
+eq('без планировщика — вместимость Alfa', API._fillCap('10', agg).cap, 8);
 eq('источник — Alfa', API._fillCap('10', agg).src, 'alfa');
+ctx.S.plan = [{ name: 'Английский', perGroup: 6, groups: 3, visits: 2 }];
+// а вписанный руками план сильнее планировщика: это осознанная правка по конкретной группе
+ctx.S.fillPlan['10'] = 9;
+eq('ручной план важнее планировщика', API._fillCap('10', agg).cap, 9);
+delete ctx.S.fillPlan['10'];
 eq('ни плана, ни Alfa — лучший день группы', API._fillCap('0', agg).cap, 1);
 eq('источник — пик', API._fillCap('0', agg).src, 'peak');
 
@@ -101,16 +113,17 @@ rows.forEach(r => { byId[r.gid] = r; });
 eq('детоместа по абонементу = списания − пробные', byId['20'].fact, 8);
 eq('мест было = вместимость × занятий', byId['20'].seats, 12);
 eq('загрузка группы 20', Math.round(byId['20'].pct), 67);
-eq('загрузка группы 10', Math.round(byId['10'].pct), 94);
+// 15 детомест при плане 6×2 занятия = 12 мест: набрали БОЛЬШЕ плана, и это видно
+eq('загрузка группы 10 — от плана, а не от стульев', Math.round(byId['10'].pct), 125);
 eq('название группы из Alfa', byId['10'].name, 'Английский №1');
 eq('курс группы', byId['10'].subj, 'Английский язык');
 eq('индивидуальные названы отдельно', byId['0'].name, 'Индивидуальные (вне групп)');
 check('сначала самые пустые', rows[0].gid === '20', 'первым идёт ' + rows[0].gid);
 
 const T = API._fillTotals(rows);
-eq('мест по клубу', T.seats, 29);
+eq('мест по клубу', T.seats, 25);
 eq('детомест по клубу', T.fact, 24);
-eq('загрузка клуба', Math.round(T.pct), 83);
+eq('загрузка клуба', Math.round(T.pct), 96);
 eq('пришли (для сверки с пропусками)', T.att, 23);
 
 /* группа с планом, но без единого занятия за период, из таблицы не пропадает:
@@ -119,7 +132,7 @@ ctx.S.fillPlan['77'] = 8;
 const rows2 = API._fillRows(agg);
 check('группа с планом и без занятий осталась строкой', rows2.some(r => r.gid === '77'),
       'групп: ' + rows2.map(r => r.gid).join(','));
-eq('и в проценты она не лезет', API._fillTotals(rows2).seats, 29);
+eq('и в проценты она не лезет', API._fillTotals(rows2).seats, 25);
 delete ctx.S.fillPlan['77'];
 
 /* ================= 4. план детомест из финмодели ================= */
@@ -130,9 +143,9 @@ eq('детомест в неделю (× визиты)', MP.seatsWeek, 36);  // 
 /* ================= 5. эталонный месяц ================= */
 const bAgg = API._fillAgg('2026-03-01', '2026-03-31');
 const B = API._fillTotals(API._fillRows(bAgg));
-eq('март: мест было', B.seats, 8);                     // одно занятие × вместимость 8
+eq('март: мест было', B.seats, 6);                     // одно занятие × «Чел/гр» 6
 eq('март: детомест', B.fact, 5);
-eq('март: загрузка', Math.round(B.pct), 63);
+eq('март: загрузка', Math.round(B.pct), 83);
 
 /* ================= 6. ход к цели месяца ================= */
 const rep = { week: '2026-08-31', fact: 22578, pace: {
@@ -179,7 +192,7 @@ check('таблица отрисовалась', h.indexOf('Английский
 check('итог по клубу в вёрстке', h.indexOf('ИТОГО') > 0);
 check('план финмодели показан', h.indexOf('Купленные детоместа') > 0);
 check('эталон показан', h.indexOf('Эталон загрузки') > 0);
-check('в блоке эталона названа загрузка марта', /63%/.test(h), 'нет 63%');
+check('в блоке эталона названа загрузка марта', /83%/.test(h), 'нет 83%');
 check('вёрстка без «undefined»', h.indexOf('undefined') < 0, h.slice(Math.max(0, h.indexOf('undefined') - 120), h.indexOf('undefined') + 60));
 
 /* незасчитанные дни периода честно названы */
@@ -449,6 +462,30 @@ ctx._fillStore.fill = FILL;
   eq('и флаг честный', rMix.split, false);
 
   ctx._fillStore.fill = keep; ctx.S.fillCats = keepCats; ctx.S.fillPlan = { '20': 6 };
+}
+
+
+/* ================= «ЧЕЛ/ГР» ИЗ ПЛАНИРОВЩИКА =================
+   Вписывать плановую вместимость второй раз по каждой группе незачем: «Планировщик загрузки»
+   её уже знает. Курс группы находим через предмет Alfa, сопоставленный в «Публикации групп».
+   Загрузка после этого считается от ПЛАНА, а не от того, сколько стульев влезает, — и может
+   быть больше 100%, если набрали сверх плана. */
+{
+  eq('курс группы найден через предмет', API._fillPlanPerGroup('10'), 6);
+  eq('у группы без курса в планировщике — ноль', API._fillPlanPerGroup('20'), 0);
+  eq('у «вне групп» вместимости нет', API._fillPlanPerGroup('0'), 0);
+
+  // предмет не сопоставлен ни с одним курсом — молча берём 0 и падаем на следующий источник
+  const keepMap = ctx._pubMap;
+  ctx._pubMap = () => ({ subj: {} });
+  eq('без сопоставления — ноль', API._fillPlanPerGroup('10'), 0);
+  ctx._pubMap = keepMap;
+
+  // в таблице источник помечен, чтобы было видно, откуда цифра
+  const h = API._fillHtml();
+  check('источник «планировщик» помечен', h.indexOf('Планировщика загрузки') > 0, h.slice(0, 300));
+  check('колонки «Мест» больше нет', h.indexOf('title="Вместимость × занятий">Мест<') < 0);
+  check('а «Детомест» осталась', h.indexOf('>Детомест<') > 0);
 }
 
 
