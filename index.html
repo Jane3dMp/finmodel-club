@@ -1936,7 +1936,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-09-07-15";
+const APP_VER="2026-09-07-16";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -14590,6 +14590,10 @@ function _fillHtml(){
   const monthList=Object.keys(monthsHave).sort().reverse();
   if(!monthsHave[baseYm]) monthList.push(baseYm);
   const expect=(B.pct!=null&&T.seats>0)?Math.round(T.seats*B.pct/100):null;
+  /* ⚠️ Эталон имеет смысл, только если месяц-образец НЕ пересекается с выбранным периодом.
+     Иначе сравниваем период сам с собой: те же дни стоят и в эталоне, и в «факте сейчас»,
+     разница получается из одной лишь длины отрезка и ничего не значит. */
+  const baseOverlap=(baseYm+"-01")<=P.to && (baseYm+"-31")>=P.from;
   const baseBlk=`<div class="card" style="margin-bottom:10px"><h3>Эталон загрузки</h3>
     <div class="hd-actions" style="margin-bottom:8px">
       <span style="font-size:12px;color:var(--muted)">Месяц-образец:</span>
@@ -14598,7 +14602,9 @@ function _fillHtml(){
     </div>
     ${B.pct==null
       ? `<div class="callout">За ${esc(_salesMonName(baseYm))} в хранилище ничего нет. Выберите этот месяц в списке периодов выше и нажмите «Пересчитать период» — Alfa отдаёт прошлые месяцы, просто их надо один раз посчитать.</div>`
-      : `<table><tbody>
+      : `${baseOverlap?`<div class="callout" style="border-color:var(--red);font-size:12px;margin-bottom:8px">
+        <b>Месяц-образец пересекается с выбранным периодом.</b> Те же дни стоят и в эталоне, и в «факте сейчас» — раздел сравнивает период сам с собой, и разница берётся из одной только длины отрезка. Выберите месяц, который считаете образцовым (например, прошлый март), а не текущий.</div>`:""}
+      <table><tbody>
         <tr><td>Загрузка ${esc(_salesMonName(baseYm))}</td><td class="num"><b style="color:${_fillPctColor(B.pct)}">${B.pct.toFixed(0)}%</b> <span style="color:var(--muted)">(${_gm(B.fact)} списаний из ${_gm(B.seats)} детомест)</span></td></tr>
         <tr><td>Детоместа сейчас (${esc(P.label.toLowerCase())})</td><td class="num">${_gm(T.seats)}</td></tr>
         <tr><td>Если наложить ту же загрузку на сегодняшнюю вместимость</td><td class="num"><b>${expect!=null?_gm(expect):"—"}</b> списаний</td></tr>
