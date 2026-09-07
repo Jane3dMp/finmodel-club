@@ -23,7 +23,7 @@ const MULTI = ['_fillGroupName', '_fillAcadYear', '_fillYearWeeks', '_fillPeriod
                '_fillRows', '_fillTotals', '_fillModelPlan', '_fillHtml',
                '_salesCfg', '_salesPace', '_salesPaceLines', '_salesPaceHtml'];
 const ONE = ['_fillIdx', '_fillGroups', '_fillSubjName', '_fillTeachName', '_fillPctColor',
-             '_fillAcadMonth',
+             '_fillAcadMonth', '_fillArch', '_fillNoName',
              '_fillRefresh', 'fillGo', 'fillSortBy', 'fillBaseSet', '_fillPlanMap',
              '_salesGoals', '_salesNum', '_salesDate', '_salesMonName', '_salesMonday'];
 let src = '';
@@ -70,7 +70,7 @@ const ctx = {
 };
 const API = new Function('ctx', 'with (ctx) { ' + src +
   ' return {_fillAgg,_fillCap,_fillRows,_fillTotals,_fillModelPlan,_fillHtml,_fillPeriods,_fillCur,' +
-  '_fillAcadYear,_fillAcadMonth,_fillYearWeeks,_fillPeriodOpts,' +
+  '_fillAcadYear,_fillAcadMonth,_fillYearWeeks,_fillPeriodOpts,_fillArch,_fillNoName,_fillGroupName,' +
   '_fillPlanMap,fillPlanSet,_salesPace,_salesPaceLines,_salesPaceHtml,_salesCfg,_salesGoals}; }')(ctx);
 
 /* ================= 1. свод по группам за неделю ================= */
@@ -240,6 +240,35 @@ ctx._fillStore.fill = FILL;
   eq('и это неделя прошлого года', cur.y, 2025);
   check('раздел рисуется без ошибок', API._fillHtml().indexOf('undefined') < 0);
   ctx._fillPeriod = 'w:2026-08-31';
+}
+
+
+/* ================= АРХИВНЫЕ ГРУППЫ =================
+   Как только стало можно выбрать неделю прошлого учебного года, половина таблицы превратилась
+   в «Группа #248»: group/index отдаёт только действующие группы, а прошлогодние в Alfa
+   архивные. Сервер теперь добирает их вторым запросом; здесь проверяется, что клиент такие
+   строки показывает и помечает, а не выдаёт молчаливое «Группа #N». */
+{
+  const G = ctx._fillStore.groups;
+  G['30'] = { name: 'Scratch №7 (прошлый год)', subject: 12, teacher: 6, limit: 8, archive: 1 };
+  FILL['2025-09-02'] = { '30': [1, 8, 8, 0, 8, 240], '99': [1, 6, 6, 0, 6, 180] };  // 99 — карточки нет вовсе
+
+  eq('архивная группа распознана', API._fillArch('30'), true);
+  eq('действующая — нет', API._fillArch('10'), false);
+  eq('без карточки имя не найдено', API._fillNoName('99'), true);
+  eq('у архивной имя есть', API._fillNoName('30'), false);
+  eq('«вне групп» — не безымянная', API._fillNoName('0'), false);
+  eq('имя архивной берётся из справочника', API._fillGroupName('30'), 'Scratch №7 (прошлый год)');
+  eq('без карточки — номер', API._fillGroupName('99'), 'Группа #99');
+
+  ctx._fillPeriod = 'w:2025-09-01';
+  const h = API._fillHtml();
+  check('архивная группа в таблице', h.indexOf('Scratch №7 (прошлый год)') > 0);
+  check('и помечена «арх.»', h.indexOf('>арх.<') > 0, h.slice(Math.max(0, h.indexOf('Scratch №7') - 40), h.indexOf('Scratch №7') + 260));
+  check('удалённая группа названа честно', h.indexOf('имя не найдено') > 0, h.slice(Math.max(0, h.indexOf('Группа #99') - 40), h.indexOf('Группа #99') + 260));
+  check('у действующих пометки нет', API._fillHtml().split('>арх.<').length === 2);
+  ctx._fillPeriod = 'w:2026-08-31';
+  delete FILL['2025-09-02']; delete G['30'];
 }
 
 

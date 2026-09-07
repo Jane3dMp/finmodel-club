@@ -1936,7 +1936,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-09-07-08";
+const APP_VER="2026-09-07-09";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -14128,6 +14128,12 @@ function _fillGroupName(gid){
   if(String(gid)==="0") return "Индивидуальные (вне групп)";
   const g=_fillGroups()[String(gid)]; return (g&&g.name)?g.name:("Группа #"+gid);
 }
+/* Архивная группа — нормально для прошлого года, но в списке этого года это сигнал: занятия
+   идут по группе, которую уже закрыли. Показываем пометкой, а не прячем. */
+function _fillArch(gid){ const g=_fillGroups()[String(gid)]; return !!(g&&g.archive); }
+/* Имени нет ни в действующих, ни в архивных: группу удалили из Alfa совсем. Тогда «Группа #N»
+   — не баг вёрстки, а факт, и об этом честнее сказать прямо в подсказке. */
+function _fillNoName(gid){ const g=_fillGroups()[String(gid)]; return String(gid)!=="0" && !(g&&g.name); }
 function _fillSubjName(gid){ const g=_fillGroups()[String(gid)]||{}; return ((_fillStore&&_fillStore.subjects)||{})[String(g.subject||0)]||""; }
 function _fillTeachName(gid){ const g=_fillGroups()[String(gid)]||{}; return ((_fillStore&&_fillStore.teachers)||{})[String(g.teacher||0)]||""; }
 
@@ -14240,7 +14246,8 @@ function _fillRows(agg){
     const c=_fillCap(k,agg);
     const fact=Math.max(0,a.paid-a.trial);                  // детоместа по абонементу
     const seats=a.les*c.cap;                                // мест было = вместимость × занятий
-    rows.push({gid:k, name:_fillGroupName(k), subj:_fillSubjName(k), teacher:_fillTeachName(k),
+    rows.push({gid:k, name:_fillGroupName(k), arch:_fillArch(k), noName:_fillNoName(k),
+               subj:_fillSubjName(k), teacher:_fillTeachName(k),
                les:a.les, fact:fact, att:a.att, trial:a.trial, rev:a.rev, peak:a.peak,
                cap:c.cap, capSrc:c.src, capWhy:c.why, seats:seats,
                pct:(seats>0?100*fact/seats:null)});
@@ -14333,7 +14340,7 @@ function _fillHtml(){
   const gap=Math.max(0,wantDays-agg.days);
   const warn=[];
   if(gap>0) warn.push(`<b style="color:var(--terra-d)">${gap} ${_kassaDayWord(gap)} периода ещё не считали</b> — нажмите «Пересчитать период», иначе загрузка занижена`);
-  if(!gOk) warn.push(`список групп из Alfa прочитался не полностью — часть строк без названия`);
+  if(!gOk) warn.push(`список групп из Alfa прочитался не полностью — часть строк без названия. Прошлогодние группы архивные, их имена подтягиваются вторым запросом: если он не прошёл, будут «Группа #N»`);
   if(T.noCap) warn.push(`у ${T.noCap} групп нет ни плана, ни вместимости — они не попали в процент`);
   const tiles=`<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
     ${tile(T.pct!=null?(T.pct.toFixed(0)+"%"):"—","загрузка",T.pct!=null?_fillPctColor(T.pct):"","Детоместа ÷ мест было")}
@@ -14386,7 +14393,14 @@ function _fillHtml(){
   rows.forEach(r=>{
     if(!r.les && !r.fact && !(+_fillPlanMap()[r.gid])) return;
     tr+=`<tr>
-      <td style="text-align:left"><b>${esc(r.name)}</b>${r.trial?` <span style="font-size:11px;color:var(--muted)" title="Пробных детомест за период — в загрузку они не входят">+${r.trial} проб.</span>`:""}</td>
+      <td style="text-align:left"><b>${esc(r.name)}</b>${
+        /* Архивная группа — норма для прошлого года и сигнал для этого: занятия идут по группе,
+           которую уже закрыли. А «имени нет вовсе» значит, что группу из Alfa удалили целиком —
+           это не поломка вёрстки, и лучше сказать прямо, чем оставить загадочное «Группа #248». */
+        r.arch?` <span style="font-size:11px;color:var(--muted)" title="Группа в архиве Alfa">арх.</span>`:""
+      }${
+        r.noName?` <span style="font-size:11px;color:var(--terra-d)" title="Такой группы в Alfa больше нет — ни среди действующих, ни в архиве. Занятия за период остались, а карточка удалена">имя не найдено</span>`:""
+      }${r.trial?` <span style="font-size:11px;color:var(--muted)" title="Пробных детомест за период — в загрузку они не входят">+${r.trial} проб.</span>`:""}</td>
       <td style="text-align:left;color:var(--muted)">${esc(r.subj||"")}</td>
       <td style="text-align:left;color:var(--muted)">${esc(r.teacher?shortName(r.teacher):"")}</td>
       <td class="num">${r.les||"—"}</td>

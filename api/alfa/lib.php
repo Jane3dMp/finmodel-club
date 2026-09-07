@@ -641,14 +641,20 @@ function alfa_active_attended(string $mon, ?array $att = null): array {
    что список неполный, вместо того чтобы молча показать половину клуба. */
 function alfa_group_cards(?array $branches = null): array {
     $branches = $branches ?: alfa_realization_branches();
-    $f = alfa_store_dir() . '/groups_' . substr(hash('sha256', __DIR__ . '|groups1|' . implode(',', $branches)), 0, 20) . '.json';
+    $f = alfa_store_dir() . '/groups_' . substr(hash('sha256', __DIR__ . '|groups2|' . implode(',', $branches)), 0, 20) . '.json';
     if (is_file($f)) {
         $j = json_decode((string)@file_get_contents($f), true);
         if (is_array($j) && (int)($j['ts'] ?? 0) > time() - 86400 && !empty($j['g'])) return $j;
     }
     $g = []; $ok = true;
+    /* ⚠️ ДВА ПРОХОДА. group/index по умолчанию отдаёт только ДЕЙСТВУЮЩИЕ группы, а прошлогодние
+       в Alfa архивные. Пока «Заполняемость» показывала лишь последние недели, этого хватало;
+       как только стало можно выбрать неделю прошлого учебного года, половина таблицы стала
+       в «Группа #248» — имени в справочнике просто нет. Второй проход с is_archive=1 их
+       добирает. Уже увиденные id не перезаписываем: действующая карточка точнее архивной. */
     foreach ($branches as $bid) {
-        $r = alfa_index_all((int)$bid, 'group', [], 20, 15);
+      foreach ([[], ['is_archive' => 1]] as $mode) {
+        $r = alfa_index_all((int)$bid, 'group', $mode, 20, 15);
         if (empty($r['ok'])) $ok = false;
         foreach ($r['items'] as $it) {
             if (!is_array($it)) continue;
@@ -658,8 +664,10 @@ function alfa_group_cards(?array $branches = null): array {
                        'subject' => (int)(((array)($it['subject_ids'] ?? []))[0] ?? 0),
                        'teacher' => (int)(((array)($it['teacher_ids'] ?? ($it['teachers'] ?? [])))[0] ?? 0),
                        'limit' => (int)($it['limit'] ?? 0),
-                       'archive' => (int)($it['is_archive'] ?? 0)];
+                       // Alfa не всегда кладёт is_archive в ответ — тогда верим самому проходу
+                       'archive' => (int)($it['is_archive'] ?? ($mode ? 1 : 0))];
         }
+      }
     }
     $out = ['ts' => time(), 'ok' => $ok, 'g' => $g];
     if ($g && $ok) @file_put_contents($f, json_encode($out, JSON_UNESCAPED_UNICODE), LOCK_EX);
