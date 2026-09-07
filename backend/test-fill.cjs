@@ -22,6 +22,7 @@ const MULTI = ['_fillGroupName', '_fillAcadYear', '_fillYearWeeks', '_fillPeriod
                '_fillWho', '_fillKidsCur', '_fillKidsHtml', '_fillCats', 'fillCatSet',
                '_salesMonIn',
                '_fillLesWord',
+               '_fillDaysNote',
                '_fillSubjName', '_fillTeach', '_fillTopId',
                '_fillPlanPerGroup',
                '_fillAgg', '_fillCap', 'fillPlanSet',
@@ -82,7 +83,7 @@ const API = new Function('ctx', 'with (ctx) { ' + src +
   ' return {_fillAgg,_fillCap,_fillRows,_fillTotals,_fillModelPlan,_fillHtml,_fillPeriods,_fillCur,' +
   '_fillAcadYear,_fillAcadMonth,_fillYearWeeks,_fillPeriodOpts,_fillArch,_fillNoName,_fillGroupName,' +
   '_fillWho,_fillKidsCur,_fillKidsHtml,_fillPlanPerGroup,_fillCap,_fillTeach,_fillSubjName,_fillTopId,' +
-  '_salesMonIn,_fillLesWord,' +
+  '_salesMonIn,_fillLesWord,_fillDaysNote,' +
   '_fillPlanMap,fillPlanSet,_salesPace,_salesPaceLines,_salesPaceHtml,_salesCfg,_salesGoals}; }')(ctx);
 
 /* ================= 1. свод по группам за неделю ================= */
@@ -637,6 +638,32 @@ ctx._fillStore.fill = FILL;
   check('а сам эталон на месте', good.indexOf('Эталон загрузки') > 0);
 
   ctx.S.fillBase = keepBase;
+}
+
+
+/* ================= СКОЛЬКО ДНЕЙ ПОСЧИТАНО =================
+   Клуб работает БЕЗ ВЫХОДНЫХ (поправка Жанны 08.09.2026), поэтому в марте 31 учебный день,
+   а не 22. Значит «за 18 дней» под эталоном — это прямой признак недосчитанного месяца, и
+   знаменатель обязан быть виден. Будущие дни в него не идут: у текущей недели «5 из 7»
+   читалось бы как пропуск, хотя два дня просто не наступили. */
+{
+  const T0 = ctx._todayIso();
+  eq('неполный месяц виден', API._fillDaysNote('2026-03-01', '2026-03-31', 18), '18 из 31 дней');
+  eq('полный месяц лишнего не пишет', API._fillDaysNote('2026-03-01', '2026-03-31', 31), '31 дней');
+  // ⚠️ будущие дни в знаменатель не берём — иначе текущая неделя вечно «неполная»
+  eq('текущая неделя считается по сегодня',
+     API._fillDaysNote('2026-09-07', '2026-09-13', 2), '2 дней');
+  eq('а пропуск внутри прошедших дней видно',
+     API._fillDaysNote('2026-08-31', '2026-09-06', 5), '5 из 7 дней');
+  eq('один день', API._fillDaysNote('2026-09-07', '2026-09-07', 1), '1 день');
+
+  // склонение занятий — строка под процентом не должна читаться машинно
+  eq('1 занятие', API._fillLesWord(1), 'занятие');
+  eq('2 занятия', API._fillLesWord(2), 'занятия');
+  eq('5 занятий', API._fillLesWord(5), 'занятий');
+  eq('11 занятий', API._fillLesWord(11), 'занятий');
+  eq('214 занятий', API._fillLesWord(214), 'занятий');
+  eq('22 занятия', API._fillLesWord(22), 'занятия');
 }
 
 
