@@ -21,6 +21,7 @@ const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
 const MULTI = ['_fillGroupName', '_fillAcadYear', '_fillYearWeeks', '_fillPeriods', '_fillPeriodOpts', '_fillCur',
                '_fillWho', '_fillKidsCur', '_fillKidsHtml', '_fillCats', 'fillCatSet',
                '_salesMonIn',
+               '_fillLesWord',
                '_fillSubjName', '_fillTeach', '_fillTopId',
                '_fillPlanPerGroup',
                '_fillAgg', '_fillCap', 'fillPlanSet',
@@ -81,7 +82,7 @@ const API = new Function('ctx', 'with (ctx) { ' + src +
   ' return {_fillAgg,_fillCap,_fillRows,_fillTotals,_fillModelPlan,_fillHtml,_fillPeriods,_fillCur,' +
   '_fillAcadYear,_fillAcadMonth,_fillYearWeeks,_fillPeriodOpts,_fillArch,_fillNoName,_fillGroupName,' +
   '_fillWho,_fillKidsCur,_fillKidsHtml,_fillPlanPerGroup,_fillCap,_fillTeach,_fillSubjName,_fillTopId,' +
-  '_salesMonIn,' +
+  '_salesMonIn,_fillLesWord,' +
   '_fillPlanMap,fillPlanSet,_salesPace,_salesPaceLines,_salesPaceHtml,_salesCfg,_salesGoals}; }')(ctx);
 
 /* ================= 1. свод по группам за неделю ================= */

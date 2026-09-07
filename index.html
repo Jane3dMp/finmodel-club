@@ -1936,7 +1936,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-09-08-01";
+const APP_VER="2026-09-08-02";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -14429,6 +14429,14 @@ function _fillPlanMap(){ if(!S.fillPlan||typeof S.fillPlan!=="object") S.fillPla
    Курс группы узнаём через предмет Alfa: в «Публикации групп» курсы сопоставлены с предметами,
    поэтому идём предмет → курс → строка планировщика. Без сопоставления вернём 0 и просто
    провалимся на следующий источник. */
+/* «1 занятие», «2 занятия», «5 занятий» — без склонения строка под процентом читается
+   как машинная, а её задача ровно обратная: объяснить, откуда взялась величина. */
+function _fillLesWord(n){
+  n=Math.abs(+n||0); const t=n%10, h=n%100;
+  if(t===1&&h!==11) return "занятие";
+  if(t>=2&&t<=4&&(h<12||h>14)) return "занятия";
+  return "занятий";
+}
 function _fillPlanPerGroup(gid){
   const g=_fillGroups()[String(gid)]; if(!g) return 0;
   const sid=+(g.subject||0); if(!sid) return 0;
@@ -14709,8 +14717,10 @@ function _fillHtml(){
         <b>Месяц-образец пересекается с выбранным периодом.</b> Те же дни стоят и в эталоне, и в «сейчас» — раздел сравнивает период сам с собой. Выберите месяц, который считаете образцовым, а не текущий.</div>`:""}
       ${baseSwapped?`<div class="hint" style="margin-bottom:8px">Сохранённый образец «${esc(_salesMonName(baseSaved))}» пересекается с выбранным периодом, поэтому показываю ${esc(_salesMonName(BASE_DEF))}. Выберите другой месяц в списке, если нужен свой.</div>`:""}
       <table><tbody>
-        <tr><td>Тогда — ${esc(_salesMonName(baseYm))}</td><td class="num"><b style="color:${_fillPctColor(B.pct)};font-size:18px">${B.pct.toFixed(0)}%</b> <span style="color:var(--muted);font-size:12px">${_gm(B.fact)} из ${_gm(B.seats)}</span></td></tr>
-        <tr><td>Сейчас — ${esc(P.label.toLowerCase())}</td><td class="num"><b style="color:${T.pct!=null?_fillPctColor(T.pct):"var(--muted)"};font-size:18px">${T.pct!=null?(T.pct.toFixed(0)+"%"):"—"}</b> <span style="color:var(--muted);font-size:12px">${_gm(T.cnt)} из ${_gm(T.seats)}</span></td></tr>
+        <tr><td>Тогда — ${esc(_salesMonName(baseYm))}<br><span style="font-size:11px;color:var(--muted)">${_gm(B.les)} ${_fillLesWord(B.les)} за ${bAgg.lessonDays} ${_kassaDayWord(bAgg.lessonDays)}</span></td>
+          <td class="num"><b style="color:${_fillPctColor(B.pct)};font-size:18px">${B.pct.toFixed(0)}%</b><br><span style="color:var(--muted);font-size:12px">${_gm(B.fact)} из ${_gm(B.seats)} детомест</span></td></tr>
+        <tr><td>Сейчас — ${esc(P.label.toLowerCase())}<br><span style="font-size:11px;color:var(--muted)">${_gm(T.les)} ${_fillLesWord(T.les)} за ${agg.lessonDays} ${_kassaDayWord(agg.lessonDays)}</span></td>
+          <td class="num"><b style="color:${T.pct!=null?_fillPctColor(T.pct):"var(--muted)"};font-size:18px">${T.pct!=null?(T.pct.toFixed(0)+"%"):"—"}</b><br><span style="color:var(--muted);font-size:12px">${_gm(T.cnt)} из ${_gm(T.seats)} детомест</span></td></tr>
         <tr class="totrow"><td><b>Разница</b></td><td class="num">${dPP==null?'—':`<b style="color:${dPP>=0?"var(--green)":"var(--red)"};font-size:18px">${dPP>=0?"+":"−"}${Math.abs(dPP).toFixed(0)} п.п.</b>`}</td></tr>
       </tbody></table>
       ${dPP==null?"":`<div style="margin-top:8px;font-size:13px">${
@@ -14718,7 +14728,7 @@ function _fillHtml(){
         : (dPP>0 ? "Загружаем <b style=\"color:var(--green)\">лучше</b>, чем в "+esc(_salesMonIn(baseYm))+"."
                  : "Загружаем <b style=\"color:var(--red)\">хуже</b>, чем в "+esc(_salesMonName(baseYm))+". В группах пустует на "+Math.abs(dPP).toFixed(0)+" из каждых 100 мест больше, чем тогда.")
       }</div>`}
-      <small class="note">Загрузка — заполненные места ÷ детоместа. Сравниваем проценты, а не списания: в неделе и в месяце разное число детомест, поэтому сами списания сравнивать напрямую нельзя. Вместимость взята сегодняшняя, поэтому это ориентир: в ${esc(_salesMonIn(baseYm))} состав групп был другим.</small>`}
+      <small class="note">Детоместа = вместимость группы × число её занятий, сложенные по всем группам: поэтому у месяца их в несколько раз больше, чем у недели. Загрузка — заполненные места ÷ детоместа. Сравниваем проценты, а не списания: в неделе и в месяце разное число детомест, поэтому сами списания сравнивать напрямую нельзя. Вместимость взята сегодняшняя, поэтому это ориентир: в ${esc(_salesMonIn(baseYm))} состав групп был другим.</small>`}
   </div>`;
   const srcMark={model:'<span style="color:var(--blue)" title="Взято из «Планировщика загрузки»">◆</span>', plan:'<span title="План вписан вами" style="color:var(--green)">•</span>',
                  alfa:'<span title="Вместимость группы в AlfaCRM — плана нет" style="color:var(--muted)">•</span>',
