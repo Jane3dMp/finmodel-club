@@ -18,9 +18,9 @@ const NAMES = ['_salesNum', '_salesCfg', '_ratAgg', '_ratSubjToCourse', '_ratMod
                'fixRateByName', '_ratWage', '_ratTeacherName',
                '_salesTops', '_salesWeekText', '_salesMonthText',
                '_salesLastYearDates', '_salesLastYearLabel', '_salesLastYearFact',
-               '_salesActiveNote',
+               '_salesActiveNote', '_salesPace', '_salesPaceLines', '_salesPaceHtml',
                '_salesReports', '_salesCur', '_salesDate', '_salesMonName', '_salesHtml', '_salesCronHtml'];
-const ONE_LINERS = ['_salesMonthEnd', '_salesMonday'];   // тело в одну строку — своя регулярка
+const ONE_LINERS = ['_salesMonthEnd', '_salesMonday', '_salesGoals'];   // тело в одну строку — своя регулярка
 let src = '';
 function grab(name, re) {
   const m = html.match(re);
@@ -64,6 +64,7 @@ const ctx = {
   _jsStr: s => String(s == null ? '' : s),
   _gm: n => String(Math.round(+n || 0)),
   _pubErrHtml: e => '<div class="callout">Не получилось: ' + ((e && e.message) || e) + '</div>',
+  _kassaDayWord: n => (n === 1 ? 'день' : 'дней'),
   _salesStore: null, _salesWeek: null, _salesErr: null,
   _todayIso: () => '2025-11-05',
   location: { origin: 'https://app.proznanie.club' },
@@ -137,6 +138,21 @@ eq('недельное сообщение', API._salesWeekText(rep),
 rep.man = { nextGoal: 22000, note: 'Отсев после первого абонемента' };
 eq('своя цель перебивает предложенную и комментарий в конце', API._salesWeekText(rep),
    'Оборот недели: 22.578.\nШли на 22.500.\nДоходимость 100%.\n\nПрогноз на след неделю: 23.749.\nИдем на 22.000.\n\nАктивных клиентов: 624 (-15).\n\nОтсев после первого абонемента');
+
+/* --- ход к цели месяца (150/180) дописывается в то же сообщение --- */
+// Цель месячная, а отчёт недельный, поэтому прогноз месяца лежит в каждом отчёте (rep.pace).
+rep.man = {};
+rep.pace = { ym: '2025-10', fact: 60000, forecast: 120000, studyDays: 26,
+             nextYm: '2025-11', nextForecast: 130000,
+             seats: 1800, kids: 200, seatDays: 26, lessonDays: 26 };
+const withPace = API._salesWeekText(rep);
+check('в сообщении названы цель и прогноз месяца', withPace.indexOf('Цель месяца 150.000. Прогноз октябрь: 120.000 (80%).') > 0, withPace);
+// 60 000 ÷ 1 800 мест = 33,33 р за детоместо; 1 800 ÷ 200 детей = 9 занятий в месяц → 300 р с ребёнка
+check('и сколько детей добрать', /До цели 30\.000 — это ~100 новых детей/.test(withPace), withPace);
+check('строки цели идут после активных клиентов',
+      withPace.indexOf('Активных клиентов') < withPace.indexOf('Цель месяца'), withPace);
+delete rep.pace;
+check('без прогноза месяца сообщение прежнее', API._salesWeekText(rep).indexOf('Цель месяца') < 0, API._salesWeekText(rep));
 
 /* --- доходимость: сколько из обещанного дошло до кассы --- */
 // её Жанна пишет в отдел продаж руками: 16 885 из 22 000 — это 76%, и цифра важнее оборота

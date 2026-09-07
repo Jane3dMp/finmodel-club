@@ -1572,6 +1572,23 @@ switch ($action) {
                   'branches' => alfa_realization_branches(), 'branchNames' => alfa_branch_names()]);
         break;
 
+    // --- ЗАПОЛНЯЕМОСТЬ: детоместа по группам + карточки групп Alfa ---
+    //     Отдельным действием, а не вместе с realizationStore: разбивка по группам вчетверо
+    //     тяжелее дневных сумм, и «Прогнозу по всем» она не нужна.
+    case 'fillStore':
+        @set_time_limit(120);
+        $branches = alfa_realization_branches();
+        $cards = alfa_group_cards($branches);
+        $fill = alfa_fill_read();
+        $fmt = $fill['_fmt'] ?? ALFA_FILL_FMT; unset($fill['_fmt']);
+        json_out(['ok' => true, 'fill' => $fill, 'fmt' => $fmt,
+                  'groups' => $cards['g'] ?? [], 'groupsOk' => !empty($cards['ok']),
+                  'groupsTs' => (int)($cards['ts'] ?? 0),
+                  'subjects' => alfa_simple_ref('subject', $branches),
+                  'teachers' => alfa_simple_ref('teacher', $branches),
+                  'branches' => $branches, 'branchNames' => alfa_branch_names()]);
+        break;
+
     // --- ЗАФИКСИРОВАТЬ ПРОГНОЗ НА НЕДЕЛЮ (снимок; обычно делает cron в вс 23:00) ---
     case 'weekPlanSnapshot':
         @set_time_limit(180);

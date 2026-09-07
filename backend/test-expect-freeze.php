@@ -28,6 +28,11 @@ function alfa_realization_store_write(array $d): void { global $STORE; $STORE = 
 /* Кто пришёл, upsert складывает в отдельный файл — здесь он тоже в памяти. Сам счёт активных
    проверяет backend/test-active-attended.php, тут важно лишь, что заморозка от него не зависит. */
 $ATT = [];
+/* хранилище детомест по группам — тоже в памяти (реализация пишет и его) */
+$FILL = [];
+function alfa_fill_read(): array { global $FILL; return $FILL; }
+function alfa_fill_write(array $d): void { global $FILL; $FILL = $d; }
+function alfa_fill_row(array $g): array { return $g; }
 function alfa_attend_read(): array { global $ATT; return $ATT; }
 function alfa_attend_write(array $d): void { global $ATT; $ATT = $d; }
 function alfa_iso(string $d): string { return substr($d, 0, 10); }

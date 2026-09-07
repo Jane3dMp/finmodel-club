@@ -20,7 +20,7 @@ function alfa_iso(string $d): string { return substr($d, 0, 10); }
 
 $lib = file_get_contents(__DIR__ . '/../api/alfa/lib.php');
 $src = '';
-foreach (['alfa_is_trial_name', 'alfa_detail_customer_id', 'alfa_trial_count_details'] as $fn) {
+foreach (['alfa_is_trial_name', 'alfa_detail_customer_id', 'alfa_trial_active', 'alfa_trial_count_details'] as $fn) {
     if (!preg_match('/\nfunction ' . $fn . '\(.*?\n\}/s', $lib, $m)) { echo "не найдено в lib.php: $fn\n"; exit(1); }
     $src .= $m[0] . "\n";
 }

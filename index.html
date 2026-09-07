@@ -11355,7 +11355,7 @@ function renderTrials(){
 /* ==================== ДАШБОРД РУКОВОДИТЕЛЯ / АДМИНИСТРАТОРА (только владельцу) ====================
    Две вкладки-сводки. Строим по разделам. Первый готовый раздел — «Важные ссылки»
    (редактируемый список, синхронизируется как остальные данные модели). */
-const RUK_SECTIONS=[["links","🔗 Важные ссылки"],["sales","📣 Отчёт для отдела продаж"],["pokaz","📊 Все показатели"],["god","📅 Годовые итоги"],["prognoz","🔮 Прогноз по всем"],["formula","🧮 Формула 26/27"],["rating","🏆 Рейтинг педагогов"],["mgr","🏅 Рейтинг менеджеров"]];
+const RUK_SECTIONS=[["links","🔗 Важные ссылки"],["sales","📣 Отчёт для отдела продаж"],["pokaz","📊 Все показатели"],["god","📅 Годовые итоги"],["prognoz","🔮 Прогноз по всем"],["fill","📦 Заполняемость групп"],["formula","🧮 Формула 26/27"],["rating","🏆 Рейтинг педагогов"],["mgr","🏅 Рейтинг менеджеров"]];
 let _rukSec=(function(){ try{ return localStorage.getItem("rukSec")||"links"; }catch(e){ return "links"; } })();
 function rukGo(s){ _rukSec=s; try{ localStorage.setItem("rukSec",s); }catch(e){} renderRuk(); }
 function renderRuk(){
@@ -11382,6 +11382,10 @@ function renderRuk(){
     if(!_salesStore){ _salesLoad().then(_salesRefresh).catch(e=>{ _salesErr=e; _salesRefresh(); }); }
     if(!_realStore){ _realLoadStore().then(_salesRefresh).catch(()=>{}); }
     if(!_pubRefs){ _pubEnsureLoaded(false).then(_salesRefresh).catch(()=>{}); }
+    return; }
+  if(_rukSec==="fill"){ body.innerHTML=_fillHtml();
+    // разбивка по группам живёт в своём файле — просим её только здесь
+    if(!_fillStore){ _fillLoad().then(_fillRefresh).catch(e=>{ _fillErr=e; _fillRefresh(); }); }
     return; }
   if(_rukSec==="pokaz"){ body.innerHTML=_pokazHtml();
     // реализацию из Alfa подгружаем один раз и перерисовываем — чтобы строка «из Alfa» ожила
@@ -13587,6 +13591,8 @@ function _salesCfg(){
   if(!c.metric) c.metric="profit";            // по прибыли (выручка − ЗП) или по выручке
   if(!c.top) c.top=10;                        // сколько педагогов в каждом рейтинге
   if(c.minLessons==null) c.minLessons=4;      // порог для рейтинга «за одно занятие»
+  if(c.goal1==null) c.goal1=150000;           // цели по обороту месяца, к которым идём
+  if(c.goal2==null) c.goal2=180000;
   return c;
 }
 function salesCfgSet(k,v){ const c=_salesCfg();
@@ -13682,6 +13688,7 @@ function _salesWeekText(rep){
   if(+rep.active){ L.push("");
     const d=(+rep.active)-(+rep.activePrev||0);
     L.push("Активных клиентов: "+rep.active+((+rep.activePrev)?(" ("+(d>=0?"+":"")+d+")"):"")+"."); }
+  _salesPaceLines(rep).forEach(x=>L.push(x));
   if(man.note) { L.push(""); L.push(String(man.note).trim()); }
   return L.join("\n");
 }
@@ -13707,6 +13714,89 @@ function _salesMonthText(rep,tops){
     tops.perMonth.forEach(r=>L.push(" "+r.name)); }
   return L.join("\n");
 }
+/* ===== ХОД К ЦЕЛИ МЕСЯЦА (150 / 180 т.р.) =====
+   Жанна: «мы идём к обороту 150 и 180 тысяч. Нужен прогноз на месяц, сколько до него
+   доработать и сколько новых детей привлечь — с учётом усреднённого показателя за занятие».
+
+   Цель — МЕСЯЧНАЯ, а отчёт недельный, поэтому прогноз месяца сервер кладёт в КАЖДЫЙ отчёт
+   (rep.pace) теми же функциями, что считают месячный блок: одна цифра на всё.
+   Активная цель — ближайшая, которую прогноз ещё не побил: пока не взяли 150, к 180 идти рано.
+
+   Сколько детей добрать = нехватка ÷ вклад одного ребёнка за ПОЛНЫЙ месяц, а вклад считается
+   как «средний чек за детоместо × сколько занятий у ребёнка в месяце». Частоту посещений
+   растягиваем с прошедших учебных дней на все учебные дни месяца (studyDays ÷ seatDays):
+   иначе 7 сентября вклад ребёнка равнялся бы одной неделе, и добирать пришлось бы втрое
+   больше детей, чем на самом деле. */
+function _salesGoals(){ const C=_salesCfg(); return [+C.goal1||0,+C.goal2||0].filter(x=>x>0).sort((a,b)=>a-b); }
+function _salesPace(rep){
+  const p=(rep&&rep.pace)||null; if(!p) return null;
+  const goals=_salesGoals(); if(!goals.length) return null;
+  const fc=+p.forecast||0, fact=+p.fact||0;
+  const seats=+p.seats||0, kids=+p.kids||0;
+  const seatDays=+p.seatDays||0, lessonDays=+p.lessonDays||0, studyDays=+p.studyDays||0;
+  const goal=goals.find(g=>fc<g)||goals[goals.length-1];
+  const gap=Math.max(0,goal-fc);
+  /* Средний чек и частота считаются только когда счётчики детомест есть по ВСЕМ дням месяца
+     с занятиями. Полмесяца со счётчиками дали бы средний чек по одной половине и число детей
+     по обеим — из такой смеси «сколько детей добрать» получилось бы выдуманным. */
+  const full=(seatDays>0 && seatDays===lessonDays && seats>0 && kids>0);
+  const perSeat=full?fact/seats:0;                       // средний чек за одно детоместо
+  const seatsPerKid=full?(seats/kids)*(studyDays>0&&seatDays>0?studyDays/seatDays:1):0;
+  const perKid=perSeat*seatsPerKid;                      // доход с одного ребёнка за полный месяц
+  return {ym:p.ym, fact:fact, forecast:fc, goal:goal, goals:goals,
+          pct:goal>0?100*fc/goal:null, gap:gap,
+          seats:seats, kids:kids, seatDays:seatDays, lessonDays:lessonDays, studyDays:studyDays,
+          full:full, perSeat:perSeat, seatsPerKid:seatsPerKid, perKid:perKid,
+          needKids:(full&&perKid>0)?Math.ceil(gap/perKid):null,
+          nextYm:p.nextYm, nextForecast:+p.nextForecast||0};
+}
+/* Строки для сообщения в чат отдела продаж. Коротко: цель, прогноз, процент, сколько добрать. */
+function _salesPaceLines(rep){
+  const P=_salesPace(rep); if(!P||!P.goal) return [];
+  const L=[""];
+  L.push("Цель месяца "+_salesNum(P.goal)+". Прогноз "+_salesMonName(P.ym).replace(/ \d{4}$/,"")+": "
+        +_salesNum(P.forecast)+" ("+Math.floor(P.pct)+"%).");
+  if(P.gap<=0) L.push("Цель перекрыта на "+_salesNum(P.forecast-P.goal)+".");
+  else if(P.needKids) L.push("До цели "+_salesNum(P.gap)+" — это ~"+P.needKids+" новых детей на курсы (в среднем "
+        +Math.round(P.perKid)+" р с ребёнка в месяц).");
+  else L.push("До цели "+_salesNum(P.gap)+".");
+  return L;
+}
+function _salesPaceHtml(rep){
+  const P=_salesPace(rep);
+  if(!P) return `<div class="callout" style="margin:14px 0">Прогноз месяца появится после пересборки отчёта: нажмите «🔄 Пересобрать эту неделю».</div>`;
+  const C=_salesCfg();
+  const goalRow=(g)=>{
+    const pct=g>0?100*P.forecast/g:0, gap=Math.max(0,g-P.forecast);
+    const need=(P.full&&P.perKid>0)?Math.ceil(gap/P.perKid):null;
+    return `<tr${g===P.goal?' style="font-weight:600"':''}>
+      <td>${_gm(g)}${g===P.goal?' <span style="font-size:11px;color:var(--muted)">← идём сюда</span>':''}</td>
+      <td class="num"><b style="color:${pct>=100?'var(--green)':(pct>=85?'#C9922E':'var(--red)')}">${pct.toFixed(0)}%</b></td>
+      <td class="num">${gap>0?_gm(gap):'<span style="color:var(--green)">взято</span>'}</td>
+      <td class="num">${gap>0?(need!=null?("~"+need):'<span style="color:var(--muted)">—</span>'):''}</td></tr>`;
+  };
+  const cover=P.full?"":`<div class="callout" style="border-color:var(--terra);margin-top:8px;font-size:12px">
+    Сколько детей добрать пока не считаем: детоместа посчитаны по ${P.seatDays} ${_kassaDayWord(P.seatDays)} из ${P.lessonDays} учебных в этом месяце.
+    Счётчик появился недавно, старые дни его не имеют. Пересчитать: <b>Дашборд руководителя → 📦 Заполняемость групп</b> → выбрать месяц → «🔁 Пересчитать заново». Дальше это делает ночной cron.</div>`;
+  return `<div class="card" style="margin:14px 0"><h3>🎯 Идём к цели месяца</h3>
+    <table style="max-width:760px"><tbody>
+      <tr><td>Оборот ${esc(_salesMonName(P.ym))} — факт на сегодня</td><td class="num" colspan="3"><b style="color:var(--green)">${_gm(P.fact)}</b></td></tr>
+      <tr><td>Прогноз ${esc(_salesMonName(P.ym))} целиком</td><td class="num" colspan="3"><b style="color:var(--terra-d)">${_gm(P.forecast)}</b>
+        <span style="font-size:12px;color:var(--muted)">· прошедшие дни фактом, будущие — по расписанию Alfa</span></td></tr>
+      <tr><td>Прогноз ${esc(_salesMonName(P.nextYm))}</td><td class="num" colspan="3">${_gm(P.nextForecast)}</td></tr>
+      <tr style="border-top:1px solid var(--line)"><td style="color:var(--muted)">Цель</td><td class="num" style="color:var(--muted)">выполнение</td>
+        <td class="num" style="color:var(--muted)">не хватает</td><td class="num" style="color:var(--muted)">детей добрать</td></tr>
+      ${P.goals.map(goalRow).join("")}
+      <tr><td colspan="4" style="padding-top:8px">
+        <span style="font-size:12px;color:var(--muted)">Цели:</span>
+        <input class="cell" type="number" step="1000" style="width:100px;text-align:right" value="${C.goal1||''}" onchange="salesCfgSet('goal1',this.value)">
+        <input class="cell" type="number" step="1000" style="width:100px;text-align:right" value="${C.goal2||''}" onchange="salesCfgSet('goal2',this.value)">
+      </td></tr>
+    </tbody></table>
+    ${P.full?`<small class="note">Вклад одного ребёнка = средний чек за детоместо <b>${P.perSeat.toFixed(2)} р</b> × <b>${P.seatsPerKid.toFixed(1)}</b> занятий в месяц ≈ <b>${_gm(P.perKid)} р</b>. Считано по ${P.kids} детям и ${_gm(P.seats)} оплаченным местам этого месяца (учебных дней в месяце: ${P.studyDays}).</small>`:""}
+    ${cover}</div>`;
+}
+
 /* --- ДЕЙСТВИЯ --- */
 async function salesBuild(week){
   if(_salesBusy) return;
@@ -13837,6 +13927,7 @@ function _salesHtml(){
     <pre id="${id}" style="white-space:pre-wrap;font-size:13px;line-height:1.5;background:var(--paper);border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin:0;max-width:760px">${esc(text)}</pre>`;
 
   let h=head+bar+msg("salesMsgWeek","Сообщение за неделю",weekText,"week")+
+    _salesPaceHtml(rep)+
     `<h3 style="margin:16px 0 6px">Откуда цифры</h3>`+wtab;
 
   /* ---- месячный блок ---- */
@@ -13995,6 +14086,293 @@ function _progPlanCell(key, snap){
     onchange="progSetPlan('${key}',this.value)">`
     +_progLockBtn(key,true,"Запереть: цифру больше не изменит ни пересчёт, ни cron");
 }
+/* ==================== ЗАПОЛНЯЕМОСТЬ ГРУПП (детоместа) ====================
+   Жанна: «нужен план по заполняемости и процент его выполнения. Берём еженедельный показатель:
+   сколько детей в группах сходили ПО ЦЕНЕ АБОНЕМЕНТА (разовый или регулярный) — или пропустили,
+   но с абонементом, со списанием за пропуск, — и сколько должно быть».
+
+   Ключевое решение: считаем СПИСАНИЕ, а не присутствие. Место оплачено независимо от того,
+   пришёл ребёнок или прогулял, — именно оно приносит оборот. Пробное место в эту цифру не
+   входит: у него своя цена, к абонементу оно не относится.
+
+   Факт даёт Alfa: разбивка по группам копится в своём файле (действие fillStore) и растёт
+   вместе с ночным пересчётом реализации. Прошлые месяцы (март как эталон) подтягиваются
+   кнопкой — тем же действием, что и «Обновить факт из Alfa».
+   План (сколько ДОЛЖНО быть) берём по порядку: цифра Жанны → вместимость группы в Alfa →
+   лучший день группы за период. Источник подписан в строке, чтобы «загрузка 120%» не выглядела
+   ошибкой расчёта там, где план просто не вписан. */
+let _fillStore=null, _fillErr=null, _fillBusy=false, _fillLoading=null;
+let _fillPeriod=null;                 // "w:2026-08-31" | "m:2026-03"
+let _fillSort="pct";                  // pct | seats | name
+const _FILL_FMT=["les","seats","paid","trial","att","rev"];
+
+async function _fillLoad(force){
+  if(!force && _fillStore) return true;
+  if(_fillLoading) return _fillLoading;
+  _fillLoading=(async()=>{ _fillStore=await _pubCall("fillStore",{}); _fillErr=null; return true; })();
+  try{ return await _fillLoading; } finally{ _fillLoading=null; }
+}
+function _fillRefresh(){ if(_rukSec!=="fill") return; const b=document.getElementById("rukBody"); if(b) b.innerHTML=_fillHtml(); }
+function _fillIdx(){ const f=((_fillStore&&_fillStore.fmt)||_FILL_FMT), ix={}; f.forEach((n,i)=>{ix[n]=i;}); return ix; }
+function _fillGroups(){ return (_fillStore&&_fillStore.groups)||{}; }
+function _fillGroupName(gid){
+  if(String(gid)==="0") return "Индивидуальные (вне групп)";
+  const g=_fillGroups()[String(gid)]; return (g&&g.name)?g.name:("Группа #"+gid);
+}
+function _fillSubjName(gid){ const g=_fillGroups()[String(gid)]||{}; return ((_fillStore&&_fillStore.subjects)||{})[String(g.subject||0)]||""; }
+function _fillTeachName(gid){ const g=_fillGroups()[String(gid)]||{}; return ((_fillStore&&_fillStore.teachers)||{})[String(g.teacher||0)]||""; }
+
+/* Периоды: последние 12 недель + все месяцы, по которым в хранилище что-то есть.
+   Март 2026 появится в списке сразу, как только его подтянут из Alfa. */
+function _fillPeriods(){
+  const out=[], mon=_salesMonday(_todayIso());
+  for(let i=0;i<12;i++){
+    const d=new Date(mon+"T12:00:00"); d.setDate(d.getDate()-7*i);
+    const f=_dIso(d), s=new Date(d); s.setDate(s.getDate()+6);
+    out.push({k:"w:"+f, from:f, to:_dIso(s), kind:"w", label:"Неделя "+_salesDate(f)+"–"+_salesDate(_dIso(s))});
+  }
+  const ms={}; Object.keys((_fillStore&&_fillStore.fill)||{}).forEach(d=>{ ms[String(d).slice(0,7)]=1; });
+  Object.keys(ms).sort().reverse().forEach(ym=>{
+    const y=+ym.slice(0,4), m=+ym.slice(5,7), last=new Date(y,m,0);
+    out.push({k:"m:"+ym, from:ym+"-01", to:_dIso(last), kind:"m", ym:ym, label:"Месяц: "+_salesMonName(ym)});
+  });
+  return out;
+}
+function _fillCur(){
+  const P=_fillPeriods(); if(!P.length) return null;
+  const hit=P.find(p=>p.k===_fillPeriod); if(hit) return hit;
+  /* По умолчанию — последняя неделя, где в хранилище есть занятия: пустая текущая неделя
+     (утро понедельника) выглядела бы как «загрузка 0%» и пугала бы зря. */
+  const F=(_fillStore&&_fillStore.fill)||{};
+  const wk=P.filter(p=>p.kind==="w").find(p=>Object.keys(F).some(d=>d>=p.from&&d<=p.to&&Object.keys(F[d]||{}).length));
+  return wk||P[0];
+}
+/* Свод по группам за период. days — дней периода, найденных в хранилище; lessonDays — из них
+   с занятиями. Если days меньше длины периода, часть дней просто ещё не считали. */
+function _fillAgg(from,to){
+  const F=(_fillStore&&_fillStore.fill)||{}, ix=_fillIdx(), g={};
+  let days=0, lessonDays=0;
+  Object.keys(F).forEach(d=>{
+    if(d<from||d>to) return;
+    days++;
+    const day=F[d]||{}; let any=false;
+    Object.keys(day).forEach(k=>{
+      const r=day[k]||[], les=+r[ix.les]||0, paid=+r[ix.paid]||0, trial=+r[ix.trial]||0;
+      const o=g[k]||(g[k]={les:0,seats:0,paid:0,trial:0,att:0,rev:0,peak:0});
+      o.les+=les; o.seats+=+r[ix.seats]||0; o.paid+=paid; o.trial+=trial;
+      o.att+=+r[ix.att]||0; o.rev+=+r[ix.rev]||0;
+      /* «Пик» — лучший день группы: сколько мест она реально держала. Это запасная вместимость,
+         когда план не вписан и в Alfa у группы не проставлен limit. */
+      if(les>0) o.peak=Math.max(o.peak, Math.round((paid-trial)/les));
+      if(les) any=true;
+    });
+    if(any) lessonDays++;
+  });
+  return {groups:g, days:days, lessonDays:lessonDays, from:from, to:to};
+}
+function _fillPlanMap(){ if(!S.fillPlan||typeof S.fillPlan!=="object") S.fillPlan={}; return S.fillPlan; }
+/* Вместимость одной группы: цифра Жанны → limit из Alfa → пик за период. */
+function _fillCap(gid,agg){
+  const p=+(_fillPlanMap()[String(gid)]||0);
+  if(p>0) return {cap:p, src:"plan", why:"план вписан вручную"};
+  const l=+((_fillGroups()[String(gid)]||{}).limit||0);
+  if(l>0) return {cap:l, src:"alfa", why:"вместимость группы в AlfaCRM (план не вписан)"};
+  const pk=+(((agg&&agg.groups[String(gid)])||{}).peak||0);
+  if(pk>0) return {cap:pk, src:"peak", why:"ни плана, ни вместимости в Alfa — взят лучший день группы за период"};
+  return {cap:0, src:"", why:"сравнивать не с чем: ни плана, ни вместимости в Alfa"};
+}
+function fillPlanSet(gid,v){
+  const m=_fillPlanMap(), n=Math.max(0,parseInt(String(v).replace(/[^0-9]/g,""),10)||0);
+  if(n) m[String(gid)]=n; else delete m[String(gid)];
+  persistLocal(); if(typeof fbSchedulePush==="function") fbSchedulePush();
+  _fillRefresh();
+}
+function fillGo(k){ _fillPeriod=k||null; _fillRefresh(); }
+function fillSortBy(c){ _fillSort=c; _fillRefresh(); }
+function fillBaseSet(v){ S.fillBase=String(v||""); persistLocal(); if(typeof fbSchedulePush==="function") fbSchedulePush(); _fillRefresh(); }
+/* Строки свода по группам — из них собираются и таблица, и итоги. */
+function _fillRows(agg){
+  const rows=[], ids={};
+  Object.keys(agg.groups).forEach(k=>{ids[k]=1;});
+  Object.keys(_fillPlanMap()).forEach(k=>{ids[k]=1;});      // группа с планом, но без занятий — тоже строка
+  Object.keys(ids).forEach(k=>{
+    const a=agg.groups[k]||{les:0,seats:0,paid:0,trial:0,att:0,rev:0,peak:0};
+    const c=_fillCap(k,agg);
+    const fact=Math.max(0,a.paid-a.trial);                  // детоместа по абонементу
+    const seats=a.les*c.cap;                                // мест было = вместимость × занятий
+    rows.push({gid:k, name:_fillGroupName(k), subj:_fillSubjName(k), teacher:_fillTeachName(k),
+               les:a.les, fact:fact, att:a.att, trial:a.trial, rev:a.rev, peak:a.peak,
+               cap:c.cap, capSrc:c.src, capWhy:c.why, seats:seats,
+               pct:(seats>0?100*fact/seats:null)});
+  });
+  const val={pct:r=>(r.pct==null?1e6:r.pct), seats:r=>-r.fact, name:r=>r.name};
+  const v=val[_fillSort]||val.pct;
+  rows.sort((a,b)=>{
+    const x=v(a), y=v(b);
+    if(typeof x==="string") return x.localeCompare(y,"ru");
+    return (x-y)||String(a.name).localeCompare(String(b.name),"ru");
+  });
+  return rows;
+}
+/* Итог по клубу за период: мест было, занято, процент. */
+function _fillTotals(rows){
+  let seats=0, fact=0, les=0, rev=0, att=0, noCap=0;
+  rows.forEach(r=>{ seats+=r.seats; fact+=r.fact; les+=r.les; rev+=r.rev; att+=r.att; if(!r.cap&&r.les) noCap++; });
+  return {seats:seats, fact:fact, les:les, rev:rev, att:att, noCap:noCap,
+          pct:(seats>0?100*fact/seats:null)};
+}
+/* План детомест из финмодели («Планировщик загрузки»): места × визиты в неделю. Именно это
+   Жанна называет планом по купленным детоместам — с ним сравнивается факт Alfa. */
+function _fillModelPlan(){
+  let slots=0, seatsWeek=0, groups=0;
+  (S.plan||[]).forEach(p=>{
+    const lib=(typeof courseFromLib==="function")?courseFromLib(p.name):null;
+    const g=+p.groups||0, cg=+p.perGroup||0, v=lib?(+lib.visits||1):(+p.visits||1);
+    slots+=cg*g; seatsWeek+=cg*g*v; groups+=g;
+  });
+  return {slots:slots, seatsWeek:seatsWeek, groups:groups};
+}
+
+/* Подтянуть период из Alfa: тем же действием, что и «Обновить факт» в «Прогнозе по всем».
+   Считаем только дни, которых в хранилище ещё нет: пересчёт дня — это десятки запросов к Alfa,
+   и гонять их по кругу ради уже посчитанного нельзя. */
+async function fillPull(all){
+  if(_fillBusy) return;
+  const P=_fillCur(); if(!P) return;
+  const F=(_fillStore&&_fillStore.fill)||{}, today=_todayIso(), need=[];
+  for(let d=new Date(P.from+"T12:00:00"); _dIso(d)<=P.to; d.setDate(d.getDate()+1)){
+    const k=_dIso(d); if(k>today) break;
+    if(all||!F[k]) need.push(k);
+  }
+  const prog=document.getElementById("fillProg");
+  if(!need.length){ if(prog) prog.textContent="Все дни периода уже посчитаны"; return; }
+  if(need.length>10 && !confirm("Пересчитать в Alfa "+need.length+" "+_kassaDayWord(need.length)+"? Это несколько минут: каждый день — десятки запросов.")) return;
+  _fillBusy=true;
+  const btn=document.getElementById("fillPullBtn"); if(btn) btn.disabled=true;
+  try{
+    for(let i=0;i<need.length;i+=7){
+      if(prog) prog.textContent="Считаю из Alfa… "+Math.min(i+7,need.length)+"/"+need.length+" "+_kassaDayWord(need.length);
+      await _pubCall("realizationPull",{dates:need.slice(i,i+7)});
+    }
+    _realStore=null;                       // дневные суммы тоже пересчитались — пусть перечитаются
+    await _fillLoad(true);
+    if(prog) prog.textContent="Готово ✓";
+    _fillRefresh();
+  }catch(e){ if(prog) prog.innerHTML=_pubErrHtml(e,"заполняемость"); }
+  finally{ _fillBusy=false; if(btn) btn.disabled=false; }
+}
+function _fillPctColor(p){ return p>=90?"var(--green)":(p>=70?"#C9922E":"var(--red)"); }
+function _fillHtml(){
+  const head=`<div class="callout" style="margin-bottom:10px;font-size:12px">
+    <b>Детоместо</b> — оплаченное место на одном занятии: ребёнок пришёл по абонементу (регулярному или разовому) <b>или пропустил, но списание за пропуск прошло</b>. Считаем именно списание, а не присутствие: место оплачено в обоих случаях. Пробные сюда не входят — у них своя цена.<br>
+    <b>Мест было</b> = вместимость группы × число её занятий за период. Вместимость берём в таком порядке: ваш «План детей» → вместимость группы в AlfaCRM → лучший день группы за период (подписано в строке). <b>Загрузка</b> = детоместа ÷ мест.<br>
+    Факт копится сам вместе с ночным пересчётом реализации (22:00). Прошлые месяцы — кнопкой «Пересчитать период».</div>`;
+  if(_fillErr) return head+_pubErrHtml(_fillErr,"заполняемость")+
+    `<div class="hd-actions" style="margin-top:10px"><button class="btn sm" onclick="_fillErr=null;_fillLoad(true).then(_fillRefresh).catch(e=>{_fillErr=e;_fillRefresh();})">↻ Ещё раз</button></div>`;
+  if(!_fillStore) return head+`<div class="callout">⏳ Загружаю заполняемость…</div>`;
+  const P=_fillCur(), periods=_fillPeriods();
+  if(!P) return head+`<div class="callout">Периодов пока нет.</div>`;
+  const agg=_fillAgg(P.from,P.to), rows=_fillRows(agg), T=_fillTotals(rows);
+  const gOk=(_fillStore.groupsOk!==false);
+  const tile=(n,lab,col,ttl)=>`<div title="${esc(ttl||"")}" style="flex:1;min-width:130px;border:1px solid var(--line);border-radius:9px;padding:8px 12px;background:#fff">
+    <div style="font-size:22px;font-weight:700${col?";color:"+col:""}">${n}</div>
+    <div style="font-size:12px;color:var(--muted)">${lab}</div></div>`;
+  const bar=`<div class="hd-actions" style="margin-bottom:10px">
+    <select class="cell" style="width:auto" onchange="fillGo(this.value)">${
+      periods.map(p=>`<option value="${esc(p.k)}"${p.k===P.k?" selected":""}>${esc(p.label)}</option>`).join("")}</select>
+    <select class="cell" style="width:auto" title="Порядок строк" onchange="fillSortBy(this.value)">
+      <option value="pct"${_fillSort==="pct"?" selected":""}>Сначала самые пустые</option>
+      <option value="seats"${_fillSort==="seats"?" selected":""}>Сначала самые большие</option>
+      <option value="name"${_fillSort==="name"?" selected":""}>По названию</option></select>
+    <button class="btn ghost sm" id="fillPullBtn" onclick="fillPull(false)" title="Посчитать в Alfa те дни периода, которых ещё нет в хранилище">🧮 Пересчитать период</button>
+    <button class="btn ghost sm" onclick="fillPull(true)" title="Пересчитать ВСЕ дни периода заново — нужно один раз для дней, посчитанных до появления счётчика детомест">🔁 Пересчитать заново</button>
+    <span id="fillProg" style="font-size:12px;color:var(--muted)"></span>
+  </div>`;
+  const dayCnt=Math.round((new Date(P.to)-new Date(P.from))/86400000)+1;
+  const today=_todayIso();
+  const wantDays=Math.min(dayCnt, Math.round((new Date(today<P.to?today:P.to)-new Date(P.from))/86400000)+1);
+  const gap=Math.max(0,wantDays-agg.days);
+  const warn=[];
+  if(gap>0) warn.push(`<b style="color:var(--terra-d)">${gap} ${_kassaDayWord(gap)} периода ещё не считали</b> — нажмите «Пересчитать период», иначе загрузка занижена`);
+  if(!gOk) warn.push(`список групп из Alfa прочитался не полностью — часть строк без названия`);
+  if(T.noCap) warn.push(`у ${T.noCap} групп нет ни плана, ни вместимости — они не попали в процент`);
+  const tiles=`<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+    ${tile(T.pct!=null?(T.pct.toFixed(0)+"%"):"—","загрузка",T.pct!=null?_fillPctColor(T.pct):"","Детоместа ÷ мест было")}
+    ${tile(_gm(T.fact),"детомест по абонементу","","Оплаченные места: пришли или пропустили со списанием")}
+    ${tile(_gm(T.seats),"мест было","var(--muted)","Вместимость × число занятий")}
+    ${tile(_gm(T.les),"занятий","var(--muted)","Проведённых занятий за период")}
+    ${tile(_gm(T.att),"пришли","var(--muted)","Отмечены присутствовавшими — для сверки: разница с детоместами это пропуски со списанием")}
+    ${tile(_gm(T.rev),"оборот, р","var(--muted)","Сумма списаний по этим занятиям")}
+  </div>`;
+  /* --- ПЛАН ФИНМОДЕЛИ ↔ ФАКТ ALFA (купленные детоместа) --- */
+  const MP=_fillModelPlan(), wks=(P.kind==="w")?1:(+((S.assume||{}).weeksPerMonth)||4);
+  const planSeats=Math.round(MP.seatsWeek*wks);
+  const pPct=planSeats>0?100*T.fact/planSeats:null;
+  const modelBlk=`<div class="card" style="margin-bottom:10px"><h3>Купленные детоместа: план финмодели ↔ факт Alfa</h3>
+    <table><tbody>
+      <tr><td>План «Планировщика загрузки» (места × визиты${wks>1?" × "+wks+" нед":""})</td><td class="num"><b>${_gm(planSeats)}</b></td></tr>
+      <tr><td>Факт из Alfa за период (по абонементу)</td><td class="num"><b>${_gm(T.fact)}</b></td></tr>
+      <tr class="totrow"><td>Выполнение плана</td><td class="num">${pPct!=null?`<b style="color:${_fillPctColor(pPct)}">${pPct.toFixed(0)}%</b>`:"—"}</td></tr>
+      <tr><td style="color:var(--muted)">Разница</td><td class="num" style="color:var(--muted)">${planSeats?((T.fact-planSeats>=0?"+":"")+_gm(T.fact-planSeats)+" детомест"):"—"}</td></tr>
+    </tbody></table>
+    <small class="note">План — из вкладки «Планировщик загрузки»: по каждому курсу «чел/гр × групп/нед × визитов». Месяц считается как ${wks} учебных недели — та же условность, что и в «Оборот/месяц» модели (S.assume.weeksPerMonth). Факт — оплаченные места из Alfa, дети не уникальные: ребёнок, ходящий 2 раза в неделю, — это 2 детоместа.</small></div>`;
+  /* --- ЭТАЛОН: загрузка месяца-образца, наложенная на сегодняшнюю вместимость --- */
+  const baseYm=String(S.fillBase||"2026-03");
+  const bLast=new Date(+baseYm.slice(0,4),+baseYm.slice(5,7),0);
+  const bAgg=_fillAgg(baseYm+"-01",_dIso(bLast)), bRows=_fillRows(bAgg), B=_fillTotals(bRows);
+  const monthsHave={}; Object.keys((_fillStore.fill)||{}).forEach(d=>{monthsHave[String(d).slice(0,7)]=1;});
+  const monthList=Object.keys(monthsHave).sort().reverse();
+  if(!monthsHave[baseYm]) monthList.push(baseYm);
+  const expect=(B.pct!=null&&T.seats>0)?Math.round(T.seats*B.pct/100):null;
+  const baseBlk=`<div class="card" style="margin-bottom:10px"><h3>Эталон загрузки</h3>
+    <div class="hd-actions" style="margin-bottom:8px">
+      <span style="font-size:12px;color:var(--muted)">Месяц-образец:</span>
+      <select class="cell" style="width:auto" onchange="fillBaseSet(this.value)">${
+        monthList.map(m=>`<option value="${esc(m)}"${m===baseYm?" selected":""}>${esc(_salesMonName(m))}</option>`).join("")}</select>
+    </div>
+    ${B.pct==null
+      ? `<div class="callout">За ${esc(_salesMonName(baseYm))} в хранилище ничего нет. Выберите этот месяц в списке периодов выше и нажмите «Пересчитать период» — Alfa отдаёт прошлые месяцы, просто их надо один раз посчитать.</div>`
+      : `<table><tbody>
+        <tr><td>Загрузка ${esc(_salesMonName(baseYm))}</td><td class="num"><b style="color:${_fillPctColor(B.pct)}">${B.pct.toFixed(0)}%</b> <span style="color:var(--muted)">(${_gm(B.fact)} из ${_gm(B.seats)} мест)</span></td></tr>
+        <tr><td>Мест сейчас (${esc(P.label.toLowerCase())})</td><td class="num">${_gm(T.seats)}</td></tr>
+        <tr><td>Если наложить ту же загрузку на сегодняшнюю вместимость</td><td class="num"><b>${expect!=null?_gm(expect):"—"}</b> детомест</td></tr>
+        <tr class="totrow"><td>Факт сейчас</td><td class="num"><b style="color:${expect!=null&&T.fact>=expect?"var(--green)":"var(--red)"}">${_gm(T.fact)}</b>${expect!=null?` <span style="color:var(--muted)">(${T.fact-expect>=0?"+":""}${_gm(T.fact-expect)})</span>`:""}</td></tr>
+      </tbody></table>
+      <small class="note">⚠️ Вместимость групп берётся сегодняшняя: в ${esc(_salesMonName(baseYm))} состав групп был другим, поэтому это ориентир, а не точное сравнение. Чтобы он был честнее, впишите «План детей» тем группам, которые вели и тогда.</small>`}
+  </div>`;
+  const srcMark={plan:'<span title="План вписан вами" style="color:var(--green)">•</span>',
+                 alfa:'<span title="Вместимость группы в AlfaCRM — плана нет" style="color:var(--muted)">•</span>',
+                 peak:'<span title="Ни плана, ни вместимости в Alfa — взят лучший день группы за период" style="color:#C9922E">•</span>'};
+  let tr="";
+  rows.forEach(r=>{
+    if(!r.les && !r.fact && !(+_fillPlanMap()[r.gid])) return;
+    tr+=`<tr>
+      <td style="text-align:left"><b>${esc(r.name)}</b>${r.trial?` <span style="font-size:11px;color:var(--muted)" title="Пробных детомест за период — в загрузку они не входят">+${r.trial} проб.</span>`:""}</td>
+      <td style="text-align:left;color:var(--muted)">${esc(r.subj||"")}</td>
+      <td style="text-align:left;color:var(--muted)">${esc(r.teacher?shortName(r.teacher):"")}</td>
+      <td class="num">${r.les||"—"}</td>
+      <td class="num">${r.seats?_gm(r.seats):"—"}</td>
+      <td class="num"><b>${_gm(r.fact)}</b></td>
+      <td class="num">${r.pct!=null?`<b style="color:${_fillPctColor(r.pct)}">${r.pct.toFixed(0)}%</b>`:'<span style="color:var(--muted)">—</span>'}</td>
+      <td class="num" title="${esc(r.capWhy)}">${srcMark[r.capSrc]||""} <input class="cell" style="width:56px;text-align:center;display:inline-block" value="${r.capSrc==="plan"?r.cap:""}" placeholder="${r.cap||"—"}" title="Сколько детей ДОЛЖНО быть в этой группе. Пусто — берётся ${esc(r.capWhy)}" onchange="fillPlanSet('${_jsStr(r.gid)}',this.value)"></td>
+      <td class="num" style="color:var(--muted)" title="Отмечены присутствовавшими. Разница с детоместами — пропуски со списанием">${r.att||"—"}</td>
+    </tr>`;
+  });
+  const table=`<div class="card"><h3>Группы за период: ${esc(P.label.toLowerCase())} (${esc(P.from)} – ${esc(P.to)})</h3>
+    <div class="tscroll"><table><thead><tr>
+      <th style="text-align:left">Группа</th><th style="text-align:left">Курс</th><th style="text-align:left">Педагог</th>
+      <th class="num">Занятий</th><th class="num" title="Вместимость × занятий">Мест</th>
+      <th class="num" title="Оплаченные места по абонементу">Детомест</th><th class="num">Загрузка</th>
+      <th class="num" title="Сколько детей должно быть в группе. Впишите — и загрузка будет считаться от вашего плана">План детей</th>
+      <th class="num" title="Пришли (отметка присутствия)">Пришли</th>
+    </tr></thead><tbody>${tr||`<tr><td colspan="9" style="color:var(--muted)">За этот период занятий не нашлось. Нажмите «Пересчитать период».</td></tr>`}
+      <tr class="totrow"><td colspan="3"><b>ИТОГО</b></td><td class="num"><b>${_gm(T.les)}</b></td><td class="num"><b>${_gm(T.seats)}</b></td>
+        <td class="num"><b>${_gm(T.fact)}</b></td><td class="num">${T.pct!=null?`<b style="color:${_fillPctColor(T.pct)}">${T.pct.toFixed(0)}%</b>`:"—"}</td><td></td><td class="num">${_gm(T.att)}</td></tr>
+    </tbody></table></div></div>`;
+  const warnHtml=warn.length?`<div class="callout" style="border-color:var(--terra);margin-bottom:10px">${warn.join(" · ")}</div>`:"";
+  return head+bar+warnHtml+tiles+modelBlk+baseBlk+table;
+}
+
 function _progHtml(){
   const G=_rukProg(), weeks=_progWeeks(), today=_todayIso();
   let tPlan=0,tFact=0, rows="";

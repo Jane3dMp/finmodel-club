@@ -386,9 +386,15 @@ function alfa_realization_day(string $date, ?array $branchFilter = null): array 
                 $mins = 0;
                 $tf = strtotime((string)($ls['time_from'] ?? '')); $tt = strtotime((string)($ls['time_to'] ?? ''));
                 if ($tf && $tt && $tt > $tf) $mins = (int)round(($tt - $tf) / 60);
+                /* Группа занятия. Alfa кладёт её то массивом group_ids, то одиночным group_id
+                   (в истории ребёнка читаем оба) — берём первый непустой. Индивидуальное
+                   занятие остаётся с нулём: это законная корзина «без группы», а не потеря. */
+                $gids = (array)($ls['group_ids'] ?? []);
+                if (isset($ls['group_id'])) $gids[] = $ls['group_id'];
+                $gid = 0; foreach ($gids as $g) { if (!is_scalar($g)) continue; $g = (int)$g; if ($g) { $gid = $g; break; } }
                 $les[] = ['branch' => (int)$bid, 'id' => (int)($ls['id'] ?? 0), 'done' => ($st === 3),
                           'teachers' => array_values(array_map('intval', (array)($ls['teacher_ids'] ?? []))),
-                          'minutes' => $mins, 'subject' => (int)($ls['subject_id'] ?? 0),
+                          'minutes' => $mins, 'subject' => (int)($ls['subject_id'] ?? 0), 'group' => $gid,
                           'cids' => array_values(array_map('intval', (array)($ls['customer_ids'] ?? [])))];
             }
             if (count($items) < $PER) break;
@@ -397,6 +403,16 @@ function alfa_realization_day(string $date, ?array $branchFilter = null): array 
     }
     $present = 0.0; $all = 0.0; $nPresent = 0; $nAll = 0; $processed = 0; $noDet = 0;
     $planned = 0.0; $nPlanned = 0; $plannedLessons = 0; $doneLessons = 0;
+    /* ===== ДЕТОМЕСТА (заполняемость) =====
+       Жанна: «сколько детей в группах сходили ПО ЦЕНЕ АБОНЕМЕНТА — или пропустили, но с
+       абонементом, со списанием за пропуск». То есть считать надо не присутствие, а СПИСАНИЕ:
+       место оплачено независимо от того, пришёл ребёнок или прогулял.
+         seats — все строки участников проведённых занятий;
+         paid  — из них со списанием > 0 (детоместо оплачено);
+         trial — из них пробные (у пробного своя цена, к абонементу он не относится);
+         kids  — сколько РАЗНЫХ детей за день оплатили хотя бы одно место.
+       «Детоместа по абонементу» = paid − trial. */
+    $nPaid = 0; $nPaidTrial = 0; $kidsPaid = []; $byGroup = [];
     $sampleDetail = null; $samplePlanned = null; $cache = []; $byBranch = []; $byTeacher = []; $wageRows = [];
     /* Пробные считаем ЗДЕСЬ ЖЕ: участники занятий уже прочитаны, отдельный обход Alfa ради
        той же информации был бы чистой тратой. Список пробных детей берётся из кэша. */
@@ -407,11 +423,21 @@ function alfa_realization_day(string $date, ?array $branchFilter = null): array 
     $trialOk = !empty($trials['ok']) && ($trials['filterHonored'] !== false);
     $trialSet = $trialOk ? ($trials['customers'] ?? []) : [];
     $trialDone = 0; $trialMissed = 0; $trialMissedIds = []; $trialDoneIds = []; $trialNoCid = 0;
+    /* Пробное детоместо — не абонемент. Список пробных детей уже прочитан выше, поэтому
+       проверка бесплатная; правило действия абонемента на дату — то же, что в
+       alfa_trial_count_details (иначе прошлогоднее пробное считалось бы снова). */
+    $isTrialDetail = function (array $dt) use (&$trialSet, $date): bool {
+        if (!$trialSet) return false;
+        $cid = alfa_detail_customer_id($dt); if (!$cid) return false;
+        return alfa_trial_active($trialSet[$cid] ?? null, $date);
+    };
     $attIds = [];                       // id детей, отмеченных пришедшими в этот день
     foreach ($les as $L) {
         $bid = (int)$L['branch'];
         if (!isset($byBranch[$bid])) $byBranch[$bid] = ['present' => 0.0, 'all' => 0.0, 'lessons' => 0];
-        if ($L['done']) { $doneLessons++; $byBranch[$bid]['lessons']++; } else $plannedLessons++;
+        $gk = (string)(int)($L['group'] ?? 0);
+        if (!isset($byGroup[$gk])) $byGroup[$gk] = ['les' => 0, 'seats' => 0, 'paid' => 0, 'trial' => 0, 'att' => 0, 'rev' => 0.0];
+        if ($L['done']) { $doneLessons++; $byBranch[$bid]['lessons']++; $byGroup[$gk]['les']++; } else $plannedLessons++;
         $cid = (int)($L['cids'][0] ?? 0); if (!$cid) { $noDet++; continue; }
         $ck = $bid . ':' . $cid;
         if (!isset($cache[$ck])) {
@@ -448,6 +474,15 @@ function alfa_realization_day(string $date, ?array $branchFilter = null): array 
             }
             $att = !empty($dt['is_attend']);
             $all += $c; $nAll++; $byBranch[$bid]['all'] += $c;
+            /* Детоместа — тем же проходом: ради этих же строк второй обход Alfa был бы тратой. */
+            $tr = $isTrialDetail($dt);
+            $byGroup[$gk]['seats']++; $byGroup[$gk]['rev'] += $c;
+            if ($att) $byGroup[$gk]['att']++;
+            if ($c > 0.005) {
+                $nPaid++; $byGroup[$gk]['paid']++;
+                if ($tr) { $nPaidTrial++; $byGroup[$gk]['trial']++; }
+                else { $cidP = alfa_detail_customer_id($dt); if ($cidP) $kidsPaid[$cidP] = 1; }
+            }
             if ($att) { $present += $c; $nPresent++; $byBranch[$bid]['present'] += $c;
                         /* Кто РЕАЛЬНО пришёл — для «активных клиентов» в отчёте продажам.
                            Участники занятия уже прочитаны, отдельный обход Alfa ради тех же
@@ -495,6 +530,9 @@ function alfa_realization_day(string $date, ?array $branchFilter = null): array 
         if (isset($plannedLessonsCnt)) $plannedLessons = (int)$plannedLessonsCnt;
     }
     foreach ($byBranch as &$b) { $b['present'] = round($b['present'], 2); $b['all'] = round($b['all'], 2); } unset($b);
+    /* Группы без единого проведённого занятия в этот день (только запланированные) в разбивку
+       не идут: строка «0 из 0» не значит ничего, а место в хранилище занимает. */
+    foreach ($byGroup as $k => $g) { if (!$g['les'] && !$g['seats']) unset($byGroup[$k]); else $byGroup[$k]['rev'] = round($g['rev'], 2); }
     foreach ($byTeacher as &$t) { unset($t['_les']); $t['revenue'] = round($t['revenue'], 2); } unset($t);
     foreach ($wageRows as $tid0 => $rows0) { if (isset($byTeacher[$tid0])) $byTeacher[$tid0]['rows'] = $rows0; }
     return ['date' => $date, 'lessons' => $doneLessons, 'plannedLessons' => $plannedLessons, 'byTeacher' => $byTeacher,
@@ -504,6 +542,8 @@ function alfa_realization_day(string $date, ?array $branchFilter = null): array 
             'realizationPresent' => round($present, 2), 'realizationAll' => round($all, 2),
             'realizationPlanned' => round($planned, 2), 'plannedCount' => $nPlanned,
             'attendedCount' => $nPresent, 'chargedCount' => $nAll,
+            'paidCount' => $nPaid, 'paidTrialCount' => $nPaidTrial, 'kidsPaid' => count($kidsPaid),
+            'byGroup' => $byGroup,
             'lessonsProcessed' => $processed, 'lessonsNoDetails' => $noDet,
             'sampleDetail' => $sampleDetail, 'samplePlanned' => $samplePlanned,
             'trialDone' => $trialDone, 'trialMissed' => $trialMissed,
@@ -594,6 +634,81 @@ function alfa_active_attended(string $mon, ?array $att = null): array {
     }
     return ['count' => count($ids), 'src' => 'attend', 'days' => $days, 'week' => $mon];
 }
+/* Карточки групп Alfa (имя, курс, педагоги, вместимость) с суточным кэшем — заполняемость
+   показывает их именами, а не идентификаторами. Обход тот же, что в действии groupsList:
+   страница ≤50 и группы лежат ПО ФИЛИАЛАМ (на этих граблях в проекте стояли дважды).
+   ⚠️ Сбой чтения филиала не превращаем в «групп нет»: возвращаем ok=false, и раздел скажет,
+   что список неполный, вместо того чтобы молча показать половину клуба. */
+function alfa_group_cards(?array $branches = null): array {
+    $branches = $branches ?: alfa_realization_branches();
+    $f = alfa_store_dir() . '/groups_' . substr(hash('sha256', __DIR__ . '|groups1|' . implode(',', $branches)), 0, 20) . '.json';
+    if (is_file($f)) {
+        $j = json_decode((string)@file_get_contents($f), true);
+        if (is_array($j) && (int)($j['ts'] ?? 0) > time() - 86400 && !empty($j['g'])) return $j;
+    }
+    $g = []; $ok = true;
+    foreach ($branches as $bid) {
+        $r = alfa_index_all((int)$bid, 'group', [], 20, 15);
+        if (empty($r['ok'])) $ok = false;
+        foreach ($r['items'] as $it) {
+            if (!is_array($it)) continue;
+            $id = (int)($it['id'] ?? 0); if (!$id || isset($g[$id])) continue;
+            $g[$id] = ['name' => trim((string)($it['name'] ?? '')),
+                       'branch' => (int)$bid,
+                       'subject' => (int)(((array)($it['subject_ids'] ?? []))[0] ?? 0),
+                       'teacher' => (int)(((array)($it['teacher_ids'] ?? ($it['teachers'] ?? [])))[0] ?? 0),
+                       'limit' => (int)($it['limit'] ?? 0),
+                       'archive' => (int)($it['is_archive'] ?? 0)];
+        }
+    }
+    $out = ['ts' => time(), 'ok' => $ok, 'g' => $g];
+    if ($g && $ok) @file_put_contents($f, json_encode($out, JSON_UNESCAPED_UNICODE), LOCK_EX);
+    return $out;
+}
+
+/* ===== ДЕТОМЕСТА ПО ГРУППАМ (заполняемость) =====
+   Лежит ОТДЕЛЬНЫМ файлом, а не в дневной строке реализации, по той же причине, что и
+   посещаемость: дневное хранилище целиком уходит в браузер при каждом открытии «Прогноза», а
+   тридцать групп на каждый день раздули бы этот ответ в разы. Раздел «Заполняемость» просит
+   свой файл сам и только когда его открывают.
+   Формат: { "ГГГГ-ММ-ДД": { "<id группы Alfa>": [les, seats, paid, trial, att, rev] } }
+   — тот же порядок лежит в ключе "_fmt", чтобы файл читался без кода. */
+function alfa_fill_store_path(): string {
+    $salt = substr(hash('sha256', __DIR__ . '|fill1'), 0, 24);
+    return alfa_store_dir() . '/fill_' . $salt . '.json';
+}
+const ALFA_FILL_FMT = ['les', 'seats', 'paid', 'trial', 'att', 'rev'];
+function alfa_fill_read(): array {
+    $f = alfa_fill_store_path();
+    if (!is_file($f)) return [];
+    $j = json_decode((string)@file_get_contents($f), true);
+    return is_array($j) ? $j : [];
+}
+function alfa_fill_write(array $d): void {
+    unset($d['_fmt']);
+    ksort($d);
+    if (count($d) > 500) $d = array_slice($d, -500, null, true);   // ~1,5 года: хватает на сравнение с прошлым мартом
+    /* ⚠️ id группы — числовой ключ, и PHP держит его как int. У дня с единственной группой «0»
+       (только индивидуальные занятия) ключи оказались бы списком, и json_encode отдал бы
+       МАССИВ вместо объекта — клиент прочитал бы чужую форму. Поэтому день пишем объектом. */
+    foreach ($d as $k => $v) if ($k !== '_fmt' && is_array($v)) $d[$k] = (object)$v;
+    $d = ['_fmt' => ALFA_FILL_FMT] + $d;
+    $f = alfa_fill_store_path();
+    $tmp = $f . '.' . getmypid() . '.tmp';
+    $json = json_encode($d, JSON_UNESCAPED_UNICODE);
+    if (@file_put_contents($tmp, $json, LOCK_EX) !== false) { @chmod($tmp, 0660); @rename($tmp, $f); }
+    else @file_put_contents($f, $json, LOCK_EX);
+}
+/* Разбивку дня — в компактный вид хранилища (порядок полей = ALFA_FILL_FMT). */
+function alfa_fill_row(array $byGroup): array {
+    $out = [];
+    foreach ($byGroup as $gid => $g) {
+        $out[(string)(int)$gid] = [(int)($g['les'] ?? 0), (int)($g['seats'] ?? 0), (int)($g['paid'] ?? 0),
+                                   (int)($g['trial'] ?? 0), (int)($g['att'] ?? 0), round((float)($g['rev'] ?? 0), 2)];
+    }
+    return $out;
+}
+
 /* ===== ЖУРНАЛ ПРАВОК ЗАДНИМ ЧИСЛОМ =====
    Вопрос Жанны: «если кто-то в Alfa задним числом что-то поправит — мы узнаем?». Раньше — нет:
    ночной пересчёт молча перезаписывал дневную строку, и «было 1 658, стало 1 590» не оставалось
@@ -640,6 +755,12 @@ function alfa_realization_upsert(string $date, ?array $branches = null): array {
     if (!empty($r['trialOk'])) {
         foreach (['trialDone', 'trialMissed', 'trialNoCid'] as $k) if (isset($r[$k])) $row[$k] = (int)$r[$k];
     }
+    /* Детоместа за день — четыре числа, они нужны везде: и «сколько мест куплено», и средний
+       чек за занятие (им считается, скольких детей добрать до цели месяца). Сама разбивка по
+       группам уходит в свой файл. */
+    foreach (['chargedCount' => 'seats', 'paidCount' => 'paid', 'paidTrialCount' => 'paidTrial', 'kidsPaid' => 'kids'] as $from => $to) {
+        if (isset($r[$from])) $row[$to] = (int)$r[$from];
+    }
     if (!empty($r['trialOk'])) foreach (['trialMissedIds', 'trialDoneIds'] as $k) if (!empty($r[$k])) $row[$k] = $r[$k];
     /* Поехал ли факт задним числом. Сравниваем ту самую цифру, которой мерят доход везде:
        среднее «без пропусков» и «с пропусками». Только для дней, которые уже были проведены. */
@@ -655,6 +776,11 @@ function alfa_realization_upsert(string $date, ?array $branches = null): array {
     $att = alfa_attend_read();
     $att[$r['date']] = array_values((array)($r['attendedIds'] ?? []));
     alfa_attend_write($att);
+    /* Детоместа по группам. Пустой день пишем пустым объектом: «читали, занятий не было» —
+       законный ответ, и он должен отличаться от «день не читали» (ключа нет вовсе). */
+    $fill = alfa_fill_read();
+    $fill[$r['date']] = alfa_fill_row((array)($r['byGroup'] ?? []));
+    alfa_fill_write($fill);
     $s = alfa_realization_store_read();
     /* ⚠️ ЗАМОРОЖЕННОЕ «ожидалось» (expect) переносим из старой строки. Иначе его затирал бы
        этот же ежедневный пересчёт: по мере проведения занятий planned падает в ноль, и к концу
@@ -792,6 +918,15 @@ function alfa_detail_customer_id(array $dt): int {
     return 0;
 }
 /* Посчитать пробные по участникам ОДНОГО проведённого занятия. Чистая функция — покрыта тестом. */
+/* Действует ли пробный абонемент на дату занятия. Без этой проверки прошлогоднее пробное
+   считалось бы снова. Правило одно на всех, кто разбирает строки участников: и на подсчёт
+   пробных за день, и на детоместа (пробное место — не «по абонементу»). */
+function alfa_trial_active(?array $t, string $date): bool {
+    if (!$t) return false;
+    if (($t['from'] ?? '') !== '' && $t['from'] > $date) return false;
+    if (($t['to'] ?? '') !== '' && $t['to'] < $date) return false;
+    return true;
+}
 function alfa_trial_count_details(array $details, array $trialByCustomer, string $date): array {
     $done = 0; $missed = 0; $missedIds = []; $doneIds = []; $noCid = 0; $seen = 0;
     foreach ($details as $dt) {
@@ -799,11 +934,7 @@ function alfa_trial_count_details(array $details, array $trialByCustomer, string
         $seen++;
         $cid = alfa_detail_customer_id($dt);
         if (!$cid) { $noCid++; continue; }
-        $t = $trialByCustomer[$cid] ?? null;
-        if (!$t) continue;
-        // абонемент должен действовать на дату занятия, иначе прошлогоднее пробное считалось бы снова
-        if ($t['from'] !== '' && $t['from'] > $date) continue;
-        if ($t['to'] !== '' && $t['to'] < $date) continue;
+        if (!alfa_trial_active($trialByCustomer[$cid] ?? null, $date)) continue;
         if ((float)($dt['commission'] ?? 0) > 0) { $done++; $doneIds[] = $cid; }
         else { $missed++; $missedIds[] = $cid; }
     }
@@ -2598,6 +2729,27 @@ function alfa_sales_month_fact(string $ym, array $store, string $today): array {
     }
     return ['sum' => round($sum, 2), 'daysWithLessons' => $have, 'days' => $days];
 }
+/* Детоместа и дети за месяц — из чего считается «сколько детей добрать до цели».
+     seats — оплаченные места по абонементу (без пробных): именно они дают оборот;
+     kids  — сколько РАЗНЫХ детей за месяц пришло хотя бы раз (тот же файл, что у активных);
+     days  — по скольким дням месяца счётчики есть вообще. Дни, посчитанные до появления
+             счётчиков, их не имеют, и средний чек по половине месяца выдавать за месячный
+             нельзя — раздел смотрит на days и молчит, пока их мало. */
+function alfa_sales_month_seats(string $ym, array $store, array $att, string $today): array {
+    $dn = (int)date('t', strtotime($ym . '-01'));
+    $seats = 0; $days = 0; $lesDays = 0; $ids = [];
+    for ($d = 1; $d <= $dn; $d++) {
+        $iso = $ym . '-' . str_pad((string)$d, 2, '0', STR_PAD_LEFT);
+        if ($iso > $today) break;
+        $r = $store[$iso] ?? null;
+        if (is_array($r) && !empty($r['lessons'])) {
+            $lesDays++;
+            if (array_key_exists('paid', $r)) { $seats += (int)$r['paid'] - (int)($r['paidTrial'] ?? 0); $days++; }
+        }
+        foreach ((array)($att[$iso] ?? []) as $id) { $id = (int)$id; if ($id) $ids[$id] = 1; }
+    }
+    return ['seats' => $seats, 'kids' => count($ids), 'days' => $days, 'lessonDays' => $lesDays];
+}
 /* Медиана «факт ÷ прогноз» по прошлым неделям — по ней предлагаем реалистичное «идём на»
    (прогноз всегда оптимистичнее факта: часть детей не приходит и списание не проходит). */
 function alfa_sales_ratio(array $reports, int $limit = 8): float {
@@ -2716,6 +2868,25 @@ function alfa_sales_build(string $runDate, ?array $branches = null, bool $deep =
         break;
     }
 
+    /* --- ХОД К ЦЕЛИ МЕСЯЦА (150/180 т.р.) ---
+       Месячный блок собирается только в отчёте, закрывающем месяц, а идти к цели надо каждую
+       неделю. Поэтому в КАЖДОМ отчёте лежит прогноз месяца, в котором заканчивается отчётная
+       неделя, и следующего. Считается теми же функциями, что и месячный блок: одна цифра на
+       всё — иначе разделы начали бы спорить между собой.
+       Сами цели (150 000 / 180 000) сюда не кладём: они живут в модели, их правят с экрана. */
+    $paceYm  = date('Y-m', strtotime($sun));
+    $paceProf = alfa_sales_weekday_profile($store, $nMon, $today, $nf);
+    $paceCur = alfa_sales_month_forecast($paceYm, $store, $paceProf, $today);
+    $paceNextYm = date('Y-m', strtotime('+1 month', strtotime($paceYm . '-15')));
+    $paceNext = alfa_sales_month_forecast($paceNextYm, $store, $paceProf, $today);
+    $paceSeats = alfa_sales_month_seats($paceYm, $store, alfa_attend_read(), $today);
+    $pace = ['ym' => $paceYm, 'fact' => alfa_sales_month_fact($paceYm, $store, $today)['sum'],
+             'forecast' => $paceCur['sum'], 'studyDays' => $paceCur['studyDays'],
+             'src' => ['fact' => $paceCur['fromFact'], 'planned' => $paceCur['fromPlanned'], 'profile' => $paceCur['fromProfile']],
+             'nextYm' => $paceNextYm, 'nextForecast' => $paceNext['sum'], 'nextStudyDays' => $paceNext['studyDays'],
+             'seats' => $paceSeats['seats'], 'kids' => $paceSeats['kids'],
+             'seatDays' => $paceSeats['days'], 'lessonDays' => $paceSeats['lessonDays']];
+
     $ratio = alfa_sales_ratio($reports);
     $suggest  = $nf > 0 ? floor($nf * $ratio / 100) * 100 : 0;
     $mSuggest = ($month && $month['forecast'] > 0) ? floor($month['forecast'] * $ratio / 1000) * 1000 : 0;
@@ -2730,7 +2901,7 @@ function alfa_sales_build(string $runDate, ?array $branches = null, bool $deep =
         'activeSrc' => (string)$act['src'] . (isset($act['err']) ? (': ' . $act['err']) : ''),
         'activeDays' => (int)($act['days'] ?? 0),
         'ratio' => round($ratio, 4),
-        'month' => $month,
+        'month' => $month, 'pace' => $pace,
         // ручные поля (что вписала Жанна) переживают пересборку
         'man' => is_array($old['man'] ?? null) ? $old['man'] : [],
         'ts' => date('c'),
