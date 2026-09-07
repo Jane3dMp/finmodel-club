@@ -1936,7 +1936,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-09-07-06";
+const APP_VER="2026-09-07-07";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -14028,24 +14028,33 @@ function _progWeekAlfa(w){
    days — по скольким из семи дней есть данные: прошлогодних дней в хранилище обычно нет,
    и неполную неделю нельзя молча выдавать за целую. */
 function _progLyMon(w){ const d=new Date(w.mon); d.setDate(d.getDate()-364); return d; }
-/* Учебных дней в неделе — дней, где занятия реально проводились. Календарные дни для
-   сравнения не годятся: в этом году учебный год начался во вторник, и в неделе 31.08–06.09
-   учились 5 дней против 6 год назад. Сравнение недели с неделей в такой паре завышает
-   прошлый год и занижает рост — Жанна поймала это на живых цифрах 07.09.2026. */
-function _progWeekDays(mon){
-  let n=0;
+/* В какие дни недели в ЭТОМ году реально шли занятия. Возвращаем СМЕЩЕНИЯ от понедельника
+   (0..6) — по ним же берётся прошлый год. Сдвиг ровно на 364 дня сохраняет день недели,
+   поэтому смещение 2 здесь и там — одна и та же среда. */
+function _progWeekOffs(mon){
+  const out=[];
   for(let i=0;i<7;i++){ const d=new Date(mon); d.setDate(d.getDate()+i);
     const r=(_realStore||{})[_dIso(d)];
-    if(r&&(+r.lessons||0)>0) n++; }
-  return n;
+    if(r&&(+r.lessons||0)>0) out.push(i); }
+  return out;
 }
+/* Прошлый год — ТОЛЬКО по тем дням недели, когда в этом году были занятия.
+   Учебный год начался во вторник: в неделе 31.08–06.09 занятия шли со среды по воскресенье,
+   а год назад работала вся неделя. Сравнивать пятидневку с шестидневкой нельзя.
+   ⚠️ Делить на число дней — тоже нельзя: суббота у клуба стоит трёх будней, и среднее по
+   разному набору дней врёт не меньше. Поэтому берём те же дни недели: среда к среде.
+   need — сколько дней сравниваем, miss — сколько из них не подтянуто из Alfa. */
 function _progLyFact(w){
-  const mon=_progLyMon(w); let p=0,a=0,days=0;
-  for(let i=0;i<7;i++){ const d=new Date(mon); d.setDate(d.getDate()+i);
-    const r=(_realStore||{})[_dIso(d)]; if(!r) continue;
-    days++; p+=(+r.present||0); a+=(+r.all||0); }
-  const sun=new Date(mon); sun.setDate(sun.getDate()+6);
-  return {fact:(p+a)/2, days:days, from:_dIso(mon), to:_dIso(sun)};
+  const mon=_progLyMon(w), offs=_progWeekOffs(w.mon);
+  let p=0,a=0,days=0,miss=0;
+  offs.forEach(i=>{ const d=new Date(mon); d.setDate(d.getDate()+i);
+    const r=(_realStore||{})[_dIso(d)];
+    if(!r){ miss++; return; }
+    days++; p+=(+r.present||0); a+=(+r.all||0); });
+  const dayAt=i=>{ const d=new Date(mon); d.setDate(d.getDate()+i); return _dIso(d); };
+  return {fact:(p+a)/2, days:days, need:offs.length, miss:miss, offs:offs,
+          from:offs.length?dayAt(offs[0]):_dIso(mon),
+          to:offs.length?dayAt(offs[offs.length-1]):_dIso(mon)};
 }
 /* Каких прошлогодних дней не хватает. Только для недель, которые в этом году уже начались:
    сравнивать будущую неделю не с чем, а тянуть ради неё год назад — впустую жечь Alfa. */
@@ -14397,38 +14406,35 @@ function _progHtml(){
     const future=w.key>today;
     /* Прошлый год и рост к нему. Рост считаем только когда есть обе цифры: «−100%» на неделе,
        которая ещё идёт или ещё не наступила, — это не падение, а отсутствие данных. */
-    const LY=_progLyFact(w), lyVal=LY.days?LY.fact:null, lyPart=(LY.days>0&&LY.days<7);
+    /* Прошлый год берётся по тем же дням недели, что отработаны в этом (см. _progLyFact),
+       поэтому сравниваем итог с итогом напрямую: делить на число дней больше не надо и
+       нельзя — набор дней и так одинаковый. */
+    const LY=_progLyFact(w), lyVal=(LY.need&&LY.days)?LY.fact:null;
+    const lyPart=(LY.miss>0);           // часть прошлогодних дней не подтянута из Alfa
     const running=(!future && _dIso(w.sun)>=today);
-    /* Недели бывают разной длины: начало учебного года, праздники, каникулы. Тогда сравнивать
-       итог с итогом нельзя — считаем на УЧЕБНЫЙ день. Молча подменять цифру тоже нельзя,
-       поэтому в такой строке стоит пометка «/дн» и в подсказке видно оба числа дней. */
-    const dNow=_progWeekDays(w.mon), dLy=_progWeekDays(_progLyMon(w));
-    const uneven=(dNow>0&&dLy>0&&dNow!==dLy);
-    const perNow=dNow?fact/dNow:null, perLy=dLy?lyVal/dLy:null;
-    const gr=uneven ? ((perLy>0&&perNow>0)?(100*perNow/perLy-100):null)
-                    : ((lyVal>0&&fact>0)?(100*fact/lyVal-100):null);
-    const grNote=(lyPart?"прошлый год посчитан по "+LY.days+" из 7 дней — сравнение неполное. ":"")
-      +(running?"неделя ещё идёт: часть дней впереди. ":"")
-      +(uneven?("недели неравные: "+dNow+" "+_kassaDayWord(dNow)+" с занятиями против "+dLy
-                +", поэтому сравниваю на учебный день — "+_gm(perNow)+" против "+_gm(perLy)+". "):"")
-      +"К "+LY.from+" – "+LY.to;
-    /* В годовой итог берём только сопоставимые недели: закончившиеся, с полным прошлым годом
-       и РАВНЫЕ по числу учебных дней. Неравную неделю в сумму пускать нельзя — она бы вернула
-       ту же ошибку, от которой мы только что ушли в строке. */
-    if(!lyPart && !running && lyVal>0 && fact>0 && !uneven){ tLy+=lyVal; tFactCmp+=fact; tCmpWeeks++; }
+    const gr=(lyVal>0&&fact>0)?(100*fact/lyVal-100):null;
+    const dn=["вс","пн","вт","ср","чт","пт","сб"];
+    const dow=i=>{ const d=new Date(w.mon); d.setDate(d.getDate()+i); return dn[d.getDay()]; };
+    const grNote=(LY.need?("сравниваю только дни, когда в этом году были занятия: "
+                  +LY.offs.map(dow).join(", ")+". Год назад это "+LY.from+" – "+LY.to+". "):"")
+      +(lyPart?("⚠️ "+LY.miss+" из "+LY.need+" прошлогодних дней не подтянуто — сравнение неполное. "):"")
+      +(running?"неделя ещё идёт: сравниваются только прошедшие дни. ":"");
+    /* В годовой итог — только закончившиеся недели с полным прошлым годом. Набор дней теперь
+       совпадает по построению, поэтому отдельная проверка на «равную длину» больше не нужна. */
+    if(!lyPart && !running && lyVal>0 && fact>0){ tLy+=lyVal; tFactCmp+=fact; tCmpWeeks++; }
     rows+=`<tr${future?' style="opacity:.5"':''}>
       <td style="color:var(--muted)">${showMon?esc(monName):''}</td>
       <td style="white-space:nowrap">${range}</td>
       <td style="text-align:right;white-space:nowrap">${_progPlanCell(w.key,snap)}</td>
       <td style="text-align:right">${fact!=null?('<b>'+_gm(fact)+'</b>'):'<span style="color:var(--muted)">—</span>'}</td>
       <td style="text-align:right">${pct!=null?('<b style="color:'+(pct>=100?'var(--green)':(pct>=85?'#C9922E':'var(--red)'))+'">'+pct.toFixed(0)+'%</b>'):'<span style="color:var(--muted)">—</span>'}</td>
-      <td class="num" style="color:var(--muted)" title="Дней с занятиями: в этой неделе и в той же неделе год назад">${
-        (dNow||dLy)?(dNow+" / "+dLy):""}</td>
+      <td class="num" style="color:var(--muted)" title="${esc(LY.need?("Сравниваем "+LY.need+" "+_kassaDayWord(LY.need)+": "+LY.offs.map(dow).join(", ")+" — те, когда в этом году шли занятия"):"")}">${
+        LY.need?(LY.need+(lyPart?" ⚠️":"")):""}</td>
       <td style="text-align:right;color:var(--muted)">${lyVal!=null
-        ? '<span title="'+esc(LY.from+" – "+LY.to+(lyPart?(" · есть только "+LY.days+" из 7 дней"):""))+'">'+_gm(lyVal)+(lyPart?' ⚠️':'')+'</span>'
+        ? '<span title="'+esc("Те же дни недели год назад: "+LY.from+" – "+LY.to+(lyPart?(" · подтянуто "+LY.days+" из "+LY.need):""))+'">'+_gm(lyVal)+(lyPart?' ⚠️':'')+'</span>'
         : '—'}</td>
       <td style="text-align:right">${gr!=null
-        ? '<b style="color:'+((lyPart||running)?'var(--muted)':(gr>=0?'var(--green)':'var(--red)'))+'" title="'+esc(grNote)+'">'+(gr>=0?'+':'')+gr.toFixed(0)+'%</b>'+(uneven?'<span style="font-size:10px;color:var(--muted)">/дн</span>':'')
+        ? '<b style="color:'+((lyPart||running)?'var(--muted)':(gr>=0?'var(--green)':'var(--red)'))+'" title="'+esc(grNote)+'">'+(gr>=0?'+':'')+gr.toFixed(0)+'%</b>'
         : '<span style="color:var(--muted)">—</span>'}</td>
     </tr>`;
   });
@@ -14436,7 +14442,7 @@ function _progHtml(){
   const tGrow=(tLy>0&&tFactCmp>0)?(100*tFactCmp/tLy-100):null;
   const lyNeed=_progLyMissing();
   const haveAny=weeks.some(w=>_progWeekAlfa(w)!=null);
-  return `<div class="progwrap"><div class="callout" style="margin-bottom:10px;font-size:12px">Недели учебного года (пн–вс). <b>Прогноз Alfa</b> — сумма списаний по запланированным занятиям (сверено с отчётом «Прогноз оплаты»: совпадает), фиксируется 🔒 в воскресенье 22:00. Замок держит цифру от случайного нажатия: под ним её не изменит ни «Зафиксировать неделю», ни правка руками. Воскресный cron — исключение, он пересобирает прогноз в любом случае. Нажмите 🔒, чтобы снять замок и поправить прогноз руками, и 🔓 — чтобы запереть обратно. <b>Доход (факт)</b> — реализация за дни недели: каждый день в 22:00 cron забирает доход из Alfa и он суммируется в свою неделю.<br><b>Год назад</b> — та же неделя прошлого учебного года: сдвиг ровно на 52 недели, чтобы понедельник сравнивался с понедельником, а не с воскресеньем. Прошлогодних дней в хранилище нет — нажмите «Подтянуть прошлый год». <b>Рост</b> считается только по закончившимся неделям, где есть обе цифры. Если учебных дней в неделях разное число (начало года, праздники, каникулы), рост считается <b>на учебный день</b> — в такой строке стоит пометка «/дн», а в годовой итог она не идёт.</div>
+  return `<div class="progwrap"><div class="callout" style="margin-bottom:10px;font-size:12px">Недели учебного года (пн–вс). <b>Прогноз Alfa</b> — сумма списаний по запланированным занятиям (сверено с отчётом «Прогноз оплаты»: совпадает), фиксируется 🔒 в воскресенье 22:00. Замок держит цифру от случайного нажатия: под ним её не изменит ни «Зафиксировать неделю», ни правка руками. Воскресный cron — исключение, он пересобирает прогноз в любом случае. Нажмите 🔒, чтобы снять замок и поправить прогноз руками, и 🔓 — чтобы запереть обратно. <b>Доход (факт)</b> — реализация за дни недели: каждый день в 22:00 cron забирает доход из Alfa и он суммируется в свою неделю.<br><b>Год назад</b> — та же неделя прошлого учебного года: сдвиг ровно на 52 недели, чтобы понедельник сравнивался с понедельником, а не с воскресеньем. Прошлогодних дней в хранилище нет — нажмите «Подтянуть прошлый год». <b>Год назад</b> берётся не всей неделей, а <b>по тем же дням недели</b>, когда в этом году шли занятия: если учились со среды по воскресенье, то и год назад считается среда–воскресенье. Делить на число дней было бы неверно — суббота у клуба стоит трёх будней. <b>Рост</b> считается только по закончившимся неделям с полным прошлым годом.</div>
   <div class="hd-actions" style="margin-bottom:10px">
     <button class="btn sm" id="progPullBtn" onclick="progPull()">🔄 Обновить факт из Alfa</button>
     <button class="btn ghost sm" id="fcWeekBtn" onclick="progForecastWeek()" title="Посчитать прогноз текущей недели сейчас (обычно это делает cron)">🧮 Посчитать прогноз недели</button>
@@ -14447,7 +14453,7 @@ function _progHtml(){
     <span id="progPullProg" style="font-size:12px;color:var(--muted)">${haveAny?'':'Пока пусто — нажмите «Обновить факт».'}</span>
   </div>
   <div class="tscroll"><table><thead><tr>
-    <th style="text-align:left">Месяц</th><th style="text-align:left">Неделя</th><th style="text-align:right">Прогноз Alfa</th><th style="text-align:right">Доход (факт)</th><th style="text-align:right">%</th><th class="num" title="Дней с занятиями: сейчас / год назад. Если они разные, рост считается на учебный день">Дней</th><th style="text-align:right" title="Та же неделя прошлого учебного года — сдвиг ровно на 52 недели, чтобы понедельник сравнивался с понедельником">Год назад</th><th style="text-align:right" title="Рост дохода к той же неделе прошлого года">Рост</th>
+    <th style="text-align:left">Месяц</th><th style="text-align:left">Неделя</th><th style="text-align:right">Прогноз Alfa</th><th style="text-align:right">Доход (факт)</th><th style="text-align:right">%</th><th class="num" title="Сколько дней сравниваем. Берутся только те дни недели, когда в этом году шли занятия, — и ровно те же дни год назад">Дней</th><th style="text-align:right" title="Та же неделя прошлого учебного года — сдвиг ровно на 52 недели, чтобы понедельник сравнивался с понедельником">Год назад</th><th style="text-align:right" title="Рост дохода к той же неделе прошлого года">Рост</th>
   </tr></thead><tbody>${rows}
     <tr style="border-top:2px solid var(--line)"><td colspan="2"><b>Итого за год</b></td>
       <td style="text-align:right"><b>${_gm(tPlan)}</b></td>
