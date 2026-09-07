@@ -1936,7 +1936,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-09-07-19";
+const APP_VER="2026-09-08-01";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -13622,6 +13622,15 @@ function _salesCur(){
   return Object.assign({},R[k],{key:k});
 }
 function _salesDate(iso){ const z=n=>String(n).padStart(2,'0'); const d=new Date(iso); return z(d.getDate())+'.'+z(d.getMonth()+1); }
+/* «в марте 2026», а не «в март 2026». Правило одно на все двенадцать: последние «ь» и «й»
+   меняем на «е» (январь → январе, май → мае), иначе просто дописываем «е» (март → марте). */
+function _salesMonIn(ym){
+  const s=_salesMonName(ym), i=s.indexOf(" ");
+  const m=i>0?s.slice(0,i):s, tail=i>0?s.slice(i):"";
+  if(!m) return s;
+  const last=m.slice(-1);
+  return ((last==="ь"||last==="й") ? m.slice(0,-1)+"е" : m+"е")+tail;
+}
 function _salesMonName(ym){ const m=parseInt(String(ym).slice(5,7),10)||1; return (_RU_MON[m-1]||"")+" "+String(ym).slice(0,4); }
 
 /* --- РЕЙТИНГ ПЕДАГОГОВ за период (из тех же дневных снимков, что и «Рейтинг педагогов») --- */
@@ -14685,9 +14694,12 @@ function _fillHtml(){
      Иначе сравниваем период сам с собой: те же дни стоят и в эталоне, и в «факте сейчас»,
      разница получается из одной лишь длины отрезка и ничего не значит. */
   const baseOverlap=_ovl(baseYm);
+  /* Вывод словами. Одни проценты не отвечают на вопрос «и что?»: −11 п.п. можно прочесть
+     и как провал, и как норму начала сентября. Поэтому под цифрами стоит фраза, лучше или
+     хуже, и на сколько мест из ста это расходится. */
   const baseBlk=`<div class="card" style="margin-bottom:10px"><h3>Эталон загрузки</h3>
     <div class="hd-actions" style="margin-bottom:8px">
-      <span style="font-size:12px;color:var(--muted)">Месяц-образец:</span>
+      <span style="font-size:12px;color:var(--muted)">Сравниваем с месяцем, который считаем нормой:</span>
       <select class="cell" style="width:auto" onchange="fillBaseSet(this.value)">${
         monthList.map(m=>`<option value="${esc(m)}"${m===baseYm?" selected":""}>${esc(_salesMonName(m))}</option>`).join("")}</select>
     </div>
@@ -14697,12 +14709,16 @@ function _fillHtml(){
         <b>Месяц-образец пересекается с выбранным периодом.</b> Те же дни стоят и в эталоне, и в «сейчас» — раздел сравнивает период сам с собой. Выберите месяц, который считаете образцовым, а не текущий.</div>`:""}
       ${baseSwapped?`<div class="hint" style="margin-bottom:8px">Сохранённый образец «${esc(_salesMonName(baseSaved))}» пересекается с выбранным периодом, поэтому показываю ${esc(_salesMonName(BASE_DEF))}. Выберите другой месяц в списке, если нужен свой.</div>`:""}
       <table><tbody>
-        <tr><td>Загрузка ${esc(_salesMonName(baseYm))} — эталон</td><td class="num"><b style="color:${_fillPctColor(B.pct)};font-size:16px">${B.pct.toFixed(0)}%</b> <span style="color:var(--muted)">${_gm(B.fact)} из ${_gm(B.seats)} детомест</span></td></tr>
-        <tr><td>Загрузка сейчас (${esc(P.label.toLowerCase())})</td><td class="num"><b style="color:${T.pct!=null?_fillPctColor(T.pct):"var(--muted)"};font-size:16px">${T.pct!=null?(T.pct.toFixed(0)+"%"):"—"}</b> <span style="color:var(--muted)">${_gm(T.cnt)} из ${_gm(T.seats)} детомест</span></td></tr>
-        <tr class="totrow"><td><b>Разница</b></td><td class="num">${dPP!=null?`<b style="color:${dPP>=0?"var(--green)":"var(--red)"};font-size:16px">${dPP>=0?"+":"−"}${Math.abs(dPP).toFixed(0)} п.п.</b>`:'—'}</td></tr>
+        <tr><td>Тогда — ${esc(_salesMonName(baseYm))}</td><td class="num"><b style="color:${_fillPctColor(B.pct)};font-size:18px">${B.pct.toFixed(0)}%</b> <span style="color:var(--muted);font-size:12px">${_gm(B.fact)} из ${_gm(B.seats)}</span></td></tr>
+        <tr><td>Сейчас — ${esc(P.label.toLowerCase())}</td><td class="num"><b style="color:${T.pct!=null?_fillPctColor(T.pct):"var(--muted)"};font-size:18px">${T.pct!=null?(T.pct.toFixed(0)+"%"):"—"}</b> <span style="color:var(--muted);font-size:12px">${_gm(T.cnt)} из ${_gm(T.seats)}</span></td></tr>
+        <tr class="totrow"><td><b>Разница</b></td><td class="num">${dPP==null?'—':`<b style="color:${dPP>=0?"var(--green)":"var(--red)"};font-size:18px">${dPP>=0?"+":"−"}${Math.abs(dPP).toFixed(0)} п.п.</b>`}</td></tr>
       </tbody></table>
-      ${expect!=null?`<small class="note">Если бы сейчас грузили так же, как в ${esc(_salesMonName(baseYm))}, списаний было бы <b>${_gm(expect)}</b> вместо ${_gm(T.cnt)} — разница ${T.cnt-expect>=0?"+":"−"}${_gm(Math.abs(T.cnt-expect))}. Проценты сравнимы между окнами разной длины, а сами списания нет: неделя и месяц дают разные детоместа.</small>`:""}
-      <small class="note">⚠️ Вместимость групп берётся сегодняшняя: в ${esc(_salesMonName(baseYm))} состав групп был другим, поэтому это ориентир, а не точное сравнение. Чтобы он был честнее, впишите «План детей» тем группам, которые вели и тогда.</small>`}
+      ${dPP==null?"":`<div style="margin-top:8px;font-size:13px">${
+        Math.abs(dPP)<3 ? "Загружаем примерно так же, как в "+esc(_salesMonIn(baseYm))+"."
+        : (dPP>0 ? "Загружаем <b style=\"color:var(--green)\">лучше</b>, чем в "+esc(_salesMonIn(baseYm))+"."
+                 : "Загружаем <b style=\"color:var(--red)\">хуже</b>, чем в "+esc(_salesMonName(baseYm))+". В группах пустует на "+Math.abs(dPP).toFixed(0)+" из каждых 100 мест больше, чем тогда.")
+      }</div>`}
+      <small class="note">Загрузка — заполненные места ÷ детоместа. Сравниваем проценты, а не списания: в неделе и в месяце разное число детомест, поэтому сами списания сравнивать напрямую нельзя. Вместимость взята сегодняшняя, поэтому это ориентир: в ${esc(_salesMonIn(baseYm))} состав групп был другим.</small>`}
   </div>`;
   const srcMark={model:'<span style="color:var(--blue)" title="Взято из «Планировщика загрузки»">◆</span>', plan:'<span title="План вписан вами" style="color:var(--green)">•</span>',
                  alfa:'<span title="Вместимость группы в AlfaCRM — плана нет" style="color:var(--muted)">•</span>',

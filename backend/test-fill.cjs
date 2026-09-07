@@ -20,6 +20,7 @@ function eq(name, got, want) { check(name, got === want, JSON.stringify(got) + '
 const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
 const MULTI = ['_fillGroupName', '_fillAcadYear', '_fillYearWeeks', '_fillPeriods', '_fillPeriodOpts', '_fillCur',
                '_fillWho', '_fillKidsCur', '_fillKidsHtml', '_fillCats', 'fillCatSet',
+               '_salesMonIn',
                '_fillSubjName', '_fillTeach', '_fillTopId',
                '_fillPlanPerGroup',
                '_fillAgg', '_fillCap', 'fillPlanSet',
@@ -80,6 +81,7 @@ const API = new Function('ctx', 'with (ctx) { ' + src +
   ' return {_fillAgg,_fillCap,_fillRows,_fillTotals,_fillModelPlan,_fillHtml,_fillPeriods,_fillCur,' +
   '_fillAcadYear,_fillAcadMonth,_fillYearWeeks,_fillPeriodOpts,_fillArch,_fillNoName,_fillGroupName,' +
   '_fillWho,_fillKidsCur,_fillKidsHtml,_fillPlanPerGroup,_fillCap,_fillTeach,_fillSubjName,_fillTopId,' +
+  '_salesMonIn,' +
   '_fillPlanMap,fillPlanSet,_salesPace,_salesPaceLines,_salesPaceHtml,_salesCfg,_salesGoals}; }')(ctx);
 
 /* ================= 1. свод по группам за неделю ================= */
@@ -593,7 +595,7 @@ ctx._fillStore.fill = FILL;
   const bad = API._fillHtml();
   check('пересекающийся образец подменён', bad.indexOf('пересекается с выбранным периодом, поэтому показываю') > 0,
         bad.slice(Math.max(0, bad.indexOf('Эталон') - 20), bad.indexOf('Эталон') + 400));
-  check('и показан март', bad.indexOf('Загрузка март 2026 — эталон') > 0);
+  check('и показан март', bad.indexOf('Тогда — март 2026') > 0, bad.slice(0, 400));
 
   // а если и умолчание пересекается (период — сам март), подменять нечем: предупреждаем
   ctx._fillPeriod = 'm:2026-03';
@@ -607,11 +609,25 @@ ctx._fillStore.fill = FILL;
   // ⚠️ главное: эталон сравнивает ПРОЦЕНТЫ, а не списания — они сравнимы между окнами разной длины
   ctx.S.fillBase = '2026-03';
   const pctBlk = API._fillHtml();
-  check('загрузка эталона процентом', pctBlk.indexOf('— эталон') > 0);
-  check('и загрузка сейчас рядом', pctBlk.indexOf('Загрузка сейчас') > 0);
+  check('загрузка эталона процентом', pctBlk.indexOf('Тогда — ') > 0);
+  check('и загрузка сейчас рядом', pctBlk.indexOf('Сейчас — ') > 0);
   check('разница в процентных пунктах', pctBlk.indexOf('п.п.') > 0, 'нет п.п.');
   check('сказано, почему проценты, а не списания',
-        pctBlk.indexOf('Проценты сравнимы между окнами разной длины') > 0, 'нет пояснения');
+        pctBlk.indexOf('Сравниваем проценты, а не списания') > 0, 'нет пояснения');
+  // ⚠️ одни проценты не отвечают на вопрос «и что?» — под цифрами должен быть вывод словами
+  check('есть вывод словами',
+        /Загружаем (лучше|хуже|примерно так же)/.test(pctBlk.replace(/<[^>]+>/g, '')),
+        'нет словесного вывода');
+  // падеж: «в марте», а не «в март» — иначе фраза читается как машинная
+  check('месяц в предложном падеже', pctBlk.indexOf('в марте 2026') > 0,
+        'падеж месяца: ' + (pctBlk.match(/в март[а-я]* 2026/g) || []).join(', '));
+  eq('январь → в январе', API._salesMonIn('2026-01'), 'январе 2026');
+  eq('март → в марте', API._salesMonIn('2026-03'), 'марте 2026');
+  eq('май → в мае', API._salesMonIn('2026-05'), 'мае 2026');
+  eq('август → в августе', API._salesMonIn('2026-08'), 'августе 2026');
+  eq('июнь → в июне', API._salesMonIn('2026-06'), 'июне 2026');
+  eq('декабрь → в декабре', API._salesMonIn('2026-12'), 'декабре 2026');
+  eq('сентябрь → в сентябре', API._salesMonIn('2026-09'), 'сентябре 2026');
 
   // непересекающийся образец — предупреждения нет
   ctx.S.fillBase = '2026-03';
