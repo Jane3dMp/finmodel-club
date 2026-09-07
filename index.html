@@ -1936,7 +1936,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-09-07-18";
+const APP_VER="2026-09-07-19";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -11390,6 +11390,10 @@ function renderRuk(){
     if(!_salesStore){ _salesLoad().then(_salesRefresh).catch(e=>{ _salesErr=e; _salesRefresh(); }); }
     if(!_realStore){ _realLoadStore().then(_salesRefresh).catch(()=>{}); }
     if(!_pubRefs){ _pubEnsureLoaded(false).then(_salesRefresh).catch(()=>{}); }
+    /* Сводка загрузки в сообщении берётся из хранилища детомест. Без этой загрузки
+       _salesFillLines молча возвращал пустой список: блок просто не появлялся, и понять
+       почему было нельзя — ошибки-то нет. */
+    if(!_fillStore){ _fillLoad().then(_salesRefresh).catch(()=>{}); }
     return; }
   if(_rukSec==="fill"){ body.innerHTML=_fillHtml();
     // разбивка по группам живёт в своём файле — просим её только здесь
@@ -13691,6 +13695,22 @@ function _salesFillLines(rep){
   const L=["",
     "Загрузка: "+Math.round(T.pct)+"% ("+_salesNum(T.cnt)+" из "+_salesNum(T.seats)+" детомест).",
     "Занятий: "+_salesNum(T.les)+", списаний: "+_salesNum(T.fact)+"."];
+  /* Эталон — в процентных пунктах, а не в списаниях: неделя и месяц дают разные детоместа,
+     и сравнивать их абсолютными числами нельзя. Месяц-образец берём тот же, что в разделе,
+     но только если он НЕ пересекается с этой неделей — иначе сравнение недели с самой собой. */
+  try{
+    const bYm=String(S.fillBase||"2026-03");
+    const ovl=(bYm+"-01")<=to && (bYm+"-31")>=from;
+    if(!ovl){
+      const bl=new Date(+bYm.slice(0,4),+bYm.slice(5,7),0);
+      const B=_fillTotals(_fillRows(_fillAgg(bYm+"-01",_dIso(bl))));
+      if(B && B.pct!=null){
+        const d=T.pct-B.pct;
+        L.push("Эталон "+_salesMonName(bYm)+": "+Math.round(B.pct)+"%, разница "
+          +(d>=0?"+":"−")+Math.abs(Math.round(d))+" п.п.");
+      }
+    }
+  }catch(e){ /* эталона нет — строки просто не будет, выдумывать проценты нельзя */ }
   const W=(typeof _fillWho==="function")?_fillWho(rows):null;
   if(W && W.att){
     const parts=[];
@@ -13701,8 +13721,10 @@ function _salesFillLines(rep){
     if(parts.length) L.push("Пришли "+_salesNum(W.att)+": "+parts.join(", ")+".");
   }
   /* Уникальные дети приходят отдельным запросом и только по кнопке. Если их не считали —
-     строки нет: выдумывать число детей из детомест нельзя, один ребёнок занимает несколько. */
-  const K=(typeof _fillKidsCur==="function")?_fillKidsCur():null;
+     строки нет: выдумывать число детей из детомест нельзя, один ребёнок занимает несколько.
+     ⚠️ Сверяем ключ с неделей ОТЧЁТА, а не берём _fillKidsCur(): тот отдаёт данные текущего
+     выбранного периода раздела, и в сообщение попали бы дети другой недели. */
+  const K=(_fillKids && _fillKidsKey===(from+".."+to))?_fillKids:null;
   if(K && K.kids){
     const per=T.cnt/K.kids;
     L.push("Уникальных детей: "+_salesNum(K.kids)+", мест на ребёнка: "+(Math.round(per*10)/10)+".");

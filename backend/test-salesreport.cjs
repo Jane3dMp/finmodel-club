@@ -16,11 +16,16 @@ function eq(name, got, want) { check(name, got === want, JSON.stringify(got) + '
 const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
 const NAMES = ['_salesNum', '_salesCfg', '_ratAgg', '_ratSubjToCourse', '_ratModelTeacher',
                'fixRateByName', '_ratWage', '_ratTeacherName',
-               '_salesTops', '_salesWeekText', '_salesMonthText',
+               '_salesTops', '_salesFillLines', '_salesWeekText', '_salesMonthText',
+               // сводка загрузки считается функциями раздела «Заполняемость» — берём настоящие
+               '_fillAgg', '_fillRows', '_fillTotals', '_fillWho', '_fillCap', '_fillCats',
+               '_fillPlanPerGroup', '_fillTopId', '_fillTeach', '_fillSubjName',
+               '_fillGroupName',
                '_salesLastYearDates', '_salesLastYearLabel', '_salesLastYearFact',
                '_salesActiveNote', '_salesPace', '_salesPaceLines', '_salesPaceHtml',
                '_salesReports', '_salesCur', '_salesDate', '_salesMonName', '_salesHtml', '_salesCronHtml'];
-const ONE_LINERS = ['_salesMonthEnd', '_salesMonday', '_salesGoals'];   // тело в одну строку — своя регулярка
+const ONE_LINERS = ['_salesMonthEnd', '_salesMonday', '_salesGoals',   // тело в одну строку
+                    '_fillIdx', '_fillGroups', '_fillPlanMap', '_fillArch', '_fillNoName', '_fillTeachName'];
 let src = '';
 function grab(name, re) {
   const m = html.match(re);
@@ -66,12 +71,16 @@ const ctx = {
   _pubErrHtml: e => '<div class="callout">Не получилось: ' + ((e && e.message) || e) + '</div>',
   _kassaDayWord: n => (n === 1 ? 'день' : 'дней'),
   _salesStore: null, _salesWeek: null, _salesErr: null,
+  _fillStore: null, _fillPeriod: null, _fillKids: null, _fillKidsKey: '',
+  _FILL_FMT: ['les','seats','paid','trial','att','rev','attPaid','attFree','noAttPaid','attTrial','attZero','tch','sbj'],
+  _fillPctColor: () => 'green', shortName: x => x, _fillSort: 'pct',
+  _rukPokaz: () => ({ curYear: '2026/27' }),
   _todayIso: () => '2025-11-05',
   location: { origin: 'https://app.proznanie.club' },
 };
 const API = new Function('ctx', 'with (ctx) { ' + src +
   ' return {_salesNum,_salesTops,_salesWeekText,_salesMonthText,_salesMonthEnd,_salesCfg,_salesHtml,' +
-  '_salesLastYearDates,_salesLastYearLabel,_salesLastYearFact,_salesActiveNote}; }')(ctx);
+  '_salesLastYearDates,_salesLastYearLabel,_salesLastYearFact,_salesActiveNote,_salesFillLines}; }')(ctx);
 
 /* ================= формат чисел (как в чате: 22.578) ================= */
 eq('число с разделителем тысяч', API._salesNum(22578), '22.578');
@@ -297,6 +306,65 @@ check('обычная неделя — недельный текст на мес
   // первая неделя нового способа: прошлого значения нет — сравнивать не с чем, и это не ошибка
   const first = note({ active: 412, activePrev: 0, activeSrc: 'attend', activeDays: 7 });
   check('без прошлой недели сравнения нет', first.indexOf('неделю назад') < 0, first);
+}
+
+
+/* ================= СВОДКА ЗАГРУЗКИ В СООБЩЕНИИ ОТДЕЛУ ПРОДАЖ =================
+   Считается теми же функциями, что и раздел «Заполняемость», за неделю отчёта. Главное правило:
+   если детоместа за эту неделю не посчитаны, строк НЕТ вовсе — отправить в чат «загрузка 0%»
+   страшнее, чем не отправить ничего. */
+{
+  const keepFill = ctx._fillStore, keepPeriod = ctx._fillPeriod, keepKids = ctx._fillKids;
+  const repW = { week: '2026-08-31', to: '2026-09-06', fact: 16885, goal: 22000,
+                 next: { week: '2026-09-07', forecast: 29219, suggest: 25000 },
+                 active: 0, activePrev: 0, man: {} };
+
+  // хранилища нет — ни одной строки про загрузку
+  ctx._fillStore = null;
+  eq('без хранилища сводки нет', API._salesFillLines(repW).length, 0);
+  check('и в сообщении её тоже нет', API._salesWeekText(repW).indexOf('Загрузка:') < 0);
+
+  // есть данные: 1 занятие, план 10 мест, 7 списаний, пришли 6 (5 полная цена, 1 без списания)
+  ctx._fillStore = {
+    fmt: ['les','seats','paid','trial','att','rev','attPaid','attFree','noAttPaid','attTrial','attZero','tch','sbj'],
+    fill: { '2026-09-02': { '10': [1, 8, 7, 0, 6, 210, 5, 1, 2, 0, 0, {}, {}] } },
+    groups: { '10': { name: 'Английский №1', subject: 11, teacher: 5, limit: 10 } },
+    groupsOk: true, subjects: {}, teachers: {},
+  };
+  ctx.S.fillPlan = { '10': 10 };
+  ctx.S.fillCats = { full: 1, trial: 0, zero: 0, none: 0, miss: 1 };
+  ctx._fillKids = null;
+
+  const lines = API._salesFillLines(repW);
+  check('строка загрузки появилась', lines.some(x => x.indexOf('Загрузка:') === 0), lines.join(' | '));
+  check('в ней детоместа', lines.join(' ').indexOf('детомест') > 0, lines.join(' | '));
+  check('есть занятия и списания', lines.some(x => x.indexOf('Занятий:') === 0), lines.join(' | '));
+  check('есть разбивка пришедших', lines.some(x => x.indexOf('Пришли ') === 0), lines.join(' | '));
+  check('и в ней названа полная цена', lines.join(' ').indexOf('полная цена') > 0);
+
+  // ⚠️ уникальных детей выдумывать нельзя: один ребёнок занимает несколько детомест
+  check('без посчитанных детей строки о них нет',
+        !lines.some(x => x.indexOf('Уникальных детей') === 0), lines.join(' | '));
+  ctx._fillKids = { from: '2026-08-31', to: '2026-09-06', kids: 5, days: 1, free: [], names: {} };
+  ctx._fillKidsKey = '2026-08-31..2026-09-06';
+  const lines2 = API._salesFillLines(repW);
+  check('а с посчитанными — появляется', lines2.some(x => x.indexOf('Уникальных детей: 5') === 0),
+        lines2.join(' | '));
+  check('и мест на ребёнка', lines2.join(' ').indexOf('мест на ребёнка') > 0);
+  // ⚠️ дети другой недели в сообщение попасть не должны
+  ctx._fillKidsKey = '2026-07-06..2026-07-12';
+  check('чужая неделя в сводку не идёт',
+        !API._salesFillLines(repW).some(x => x.indexOf('Уникальных детей') === 0),
+        API._salesFillLines(repW).join(' | '));
+  ctx._fillKidsKey = '2026-08-31..2026-09-06';
+
+  // сводка реально попала в сообщение
+  const msg = API._salesWeekText(repW);
+  check('сводка в сообщении', msg.indexOf('Загрузка:') > 0, msg);
+  check('оборот по-прежнему первой строкой', msg.indexOf('Оборот недели:') === 0, msg.slice(0, 60));
+
+  ctx._fillStore = keepFill; ctx._fillPeriod = keepPeriod; ctx._fillKids = keepKids;
+  ctx._fillKidsKey = ''; ctx.S.fillPlan = { '20': 6 };
 }
 
 
