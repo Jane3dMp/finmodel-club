@@ -28,6 +28,7 @@ const NAMES = ['_salesNum', '_salesCfg', '_ratAgg', '_ratSubjToCourse', '_ratMod
                '_salesActiveNote', '_salesPace', '_salesPaceLines', '_salesPaceHtml',
                // «свой период» в отчёте — селектор и его окно
                '_salesPeriodSel', '_salesRangeFact', '_salesRangePair', '_salesRangeText',
+               '_salesRangeHtml',   // salesPullRange — async, регуляркой не берётся и не нужен: он только в onclick
                '_fillRangeMissing', '_kassaDayWord',
                '_salesReports', '_salesCur', '_salesDate', '_salesMonName', '_salesHtml', '_salesCronHtml'];
 const ONE_LINERS = ['_salesMonthEnd', '_salesMonday', '_salesGoals',   // тело в одну строку
@@ -90,7 +91,7 @@ const ctx = {
 const API = new Function('ctx', 'with (ctx) { ' + src +
   ' return {_salesNum,_salesTops,_salesWeekText,_salesMonthText,_salesMonthEnd,_salesCfg,_salesHtml,' +
   '_salesLastYearDates,_salesLastYearLabel,_salesLastYearFact,_salesActiveNote,_salesFillLines,_salesFillLinesFor,_fillShift,_fillRangeLabel,' +
-  '_salesRangeFact,_salesRangePair,_salesRangeText,_fillRangeMissing}; }')(ctx);
+  '_salesRangeFact,_salesRangePair,_salesRangeText,_salesRangeHtml,_fillRangeMissing}; }')(ctx);
 
 /* ================= формат чисел (как в чате: 22.578) ================= */
 eq('число с разделителем тысяч', API._salesNum(22578), '22.578');
@@ -694,6 +695,84 @@ check('обычная неделя — недельный текст на мес
   ctx._todayIso = keepToday; ctx._realStore = keepReal; ctx._fillStore = keepFill;
   ctx._fillKids = keepKids; ctx._fillKidsKey = keepKey; ctx.S.fillPlan = keepFP;
   ctx.S.fillCats = keepCats;
+}
+
+
+/* ================= ЭКРАН «СВОЕГО ПЕРИОДА» СОБИРАЕТСЯ =================
+   Разбор 09.09.2026 отметил, что _salesRangeHtml не вырезал ни один из наборов: код, который
+   рисует блок и кладёт в него текст для чата, не проверялся вовсе. Здесь — минимум, который
+   ловит самое дорогое: вёрстку с undefined/NaN и молчаливое отсутствие предупреждений. */
+{
+  const keepToday = ctx._todayIso, keepRange = ctx._salesRange, keepReal = ctx._realStore,
+        keepFill = ctx._fillStore, keepWeek = ctx._salesWeek, keepStore = ctx._salesStore,
+        keepFP = ctx.S.fillPlan, keepCats = ctx.S.fillCats;
+  ctx._todayIso = () => '2026-09-09';
+  ctx._salesWeek = 'c';
+  ctx._salesStore = { reports: {} };
+  ctx.S.fillPlan = { '10': 10 };
+  ctx.S.fillCats = { full: 1, trial: 0, zero: 0, none: 0, miss: 1 };
+
+  const was = (v) => ({ present: v, all: v, planned: 0, lessons: 10 });
+  const will = (p) => ({ present: 0, all: 0, planned: p, lessons: 0 });
+  const St = {};
+  ['2026-09-07', '2026-09-08', '2026-09-09'].forEach(k => St[k] = was(1100));
+  ['2026-09-10', '2026-09-11', '2026-09-12'].forEach(k => St[k] = will(1100));
+  ['2025-09-08', '2025-09-09'].forEach(k => St[k] = was(1000));
+  ctx._realStore = St;
+  /* Детоместа только за один день окна — значит про их пропуски экран обязан предупредить
+     отдельно от пропусков реализации: это разные файлы и разные дыры. */
+  ctx._fillStore = {
+    fmt: ['les','seats','paid','trial','att','rev','attPaid','attFree','noAttPaid','attTrial','attZero','tch','sbj'],
+    fill: { '2026-09-08': { '10': [1, 10, 7, 0, 6, 210, 5, 1, 2, 0, 0, {}, {}] } },
+    groups: { '10': { name: 'Английский №1', subject: 11, teacher: 5, limit: 10 } },
+    groupsOk: true, subjects: {}, teachers: {},
+  };
+  ctx._salesRange = { from: '2026-09-07', to: '2026-09-14' };
+
+  const h = ctx._salesRangeHtmlOut = API._salesRangeHtml();
+  check('экран собрался', h.length > 500, 'длина ' + h.length);
+  // ⚠️ дешёвая, но самая полезная проверка: шаблонные строки этого раздела собираются из десятка
+  // полей, и любое переименование выводит «undefined» прямо в лицо
+  check('без undefined в вёрстке', h.indexOf('undefined') < 0,
+        h.slice(Math.max(0, h.indexOf('undefined') - 120), h.indexOf('undefined') + 60));
+  check('без NaN', h.indexOf('NaN') < 0,
+        h.slice(Math.max(0, h.indexOf('NaN') - 120), h.indexOf('NaN') + 60));
+
+  // факт и прогноз стоят разными строками, и подпись про «оборот» относится только к факту
+  check('строка факта', h.indexOf('— <b>факт</b>') > 0);
+  /* ⚠️ Проверять надо САМО ЧИСЛО, а не только наличие строки: _gm превращает undefined в «0»,
+     поэтому переименованное поле в шаблоне не даёт ни undefined, ни NaN — просто тихий нуль. */
+  const cut = (from) => { const i = h.indexOf(from); return i < 0 ? '' : h.slice(i, i + 300); };
+  check('и в ней сумма факта', cut('— <b>факт</b>').indexOf('3300') > 0, cut('— <b>факт</b>'));
+  check('строка прогноза', h.indexOf('и ожидается по расписанию (не факт)') > 0);
+  check('и в ней сумма прогноза',
+        cut('и ожидается по расписанию (не факт)').indexOf('3300') > 0,
+        cut('и ожидается по расписанию (не факт)'));
+  check('и сказано, что в оборот он не входит', h.indexOf('в оборот не входят') > 0);
+
+  // три разных предупреждения, каждое про своё
+  check('про будущие дни без данных', h.indexOf('ещё впереди') > 0);
+  check('про план в окне', h.indexOf('показаны отдельной строкой и в оборот не входят') > 0);
+  check('про пропуски детомест', h.indexOf('детоместа посчитаны не за всё окно') > 0,
+        h.slice(Math.max(0, h.indexOf('callout')), h.indexOf('callout') + 500));
+
+  // текст для чата попал в блок и не спорит сам с собой
+  check('сообщение вставлено в экран', h.indexOf('Период 07.09–14.09.2026') > 0);
+  check('оборот в нём — факт', h.indexOf('оборот 3.300') > 0);
+
+  /* Обе даты не заданы — экран обязан просить их, а не считать пустое окно. */
+  ctx._salesRange = { from: '', to: '' };
+  const empty = API._salesRangeHtml();
+  check('без дат просим их указать', empty.indexOf('Укажите обе даты периода') > 0, empty.slice(0, 300));
+  check('и ничего не считаем', empty.indexOf('Оборот периода') < 0);
+
+  /* Одна дата — тоже не окно. */
+  ctx._salesRange = { from: '2026-09-07', to: '' };
+  check('с одной датой тоже просим', API._salesRangeHtml().indexOf('Укажите обе даты периода') > 0);
+
+  ctx._todayIso = keepToday; ctx._salesRange = keepRange; ctx._realStore = keepReal;
+  ctx._fillStore = keepFill; ctx._salesWeek = keepWeek; ctx._salesStore = keepStore;
+  ctx.S.fillPlan = keepFP; ctx.S.fillCats = keepCats;
 }
 
 
