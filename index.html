@@ -2174,7 +2174,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-09-09-03";
+const APP_VER="2026-09-09-04";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -15352,7 +15352,17 @@ function _fillHtml(){
   const MP=_fillModelPlan();
   const wks=(P.kind==="w")?1:(P.kind==="c"?(Math.round(dayCnt/7*100)/100):(+((S.assume||{}).weeksPerMonth)||4));
   const planSeats=Math.round(MP.seatsWeek*wks);
-  const pPct=planSeats>0?100*T.fact/planSeats:null;
+  /* ⚠️ ПЛАН И ФАКТ ОБЯЗАНЫ СЧИТАТЬСЯ ПО ОДНИМ ДНЯМ.
+     Раньше план брался за ВСЁ окно, а факт — только за дни, которые есть в хранилище. У периода,
+     который ещё идёт (смена на 14 дней, посчитано 8), «Выполнение плана» выходило 54% красным,
+     а подсказка ниже объясняла разницу «каникулами, праздниками, ещё не запущенными группами» —
+     хотя занятия не отменяли: остальные дни просто ещё не наступили (найдено 09.09.2026).
+     Поэтому план раскладываем на дни окна и берём столько дней, сколько реально посчитано.
+     Окно посчитано целиком — planDone равен planSeats, и ничего не меняется. */
+  const factDays=Math.min(agg.days,dayCnt);
+  const planDone=(dayCnt>0)?Math.round(planSeats*factDays/dayCnt):0;
+  const planPart=(factDays<dayCnt);
+  const pPct=planDone>0?100*T.fact/planDone:null;
   /* ⚠️ ТРИ РАЗНЫЕ ЦИФРЫ, и две из них называются «детоместа». Жанна поймала расхождение
      07.09.2026: в «Планировщике» 1018, в таблице раздела 736.
        • ПЛАН — «Планировщик загрузки»: чел/гр × групп/нед × визитов. Столько мест должно
@@ -15361,17 +15371,22 @@ function _fillHtml(){
          занятия, которых не было: каникулы, праздники, группа ещё не стартовала.
        • ЗАПОЛНЕНО — списания.
      Показываем все три подряд и два процента, иначе «другая цифра» выглядит ошибкой. */
-  const openPct=(planSeats>0)?(100*T.seats/planSeats):null;
+  const openPct=(planDone>0)?(100*T.seats/planDone):null;
   const modelBlk=`<div class="card" style="margin-bottom:10px"><h3>Детоместа: план ↔ открылось ↔ заполнено</h3>
     <table><tbody>
       <tr><td>План «Планировщика загрузки» (чел/гр × групп/нед × визитов${wks>1?" × "+wks+" нед":""})</td><td class="num"><b>${_gm(planSeats)}</b></td></tr>
       <tr><td>Открылось: вместимость × <b>проведённые</b> занятия</td><td class="num"><b>${_gm(T.seats)}</b>${
         openPct!=null?` <span style="color:var(--muted)">(${openPct.toFixed(0)}% плана)</span>`:""}</td></tr>
       <tr><td>Заполнено: списания из Alfa</td><td class="num"><b>${_gm(T.fact)}</b></td></tr>
-      <tr class="totrow"><td>Выполнение плана</td><td class="num">${pPct!=null?`<b style="color:${_fillPctColor(pPct)}">${pPct.toFixed(0)}%</b>`:"—"}</td></tr>
-      <tr><td style="color:var(--muted)">Разница с планом</td><td class="num" style="color:var(--muted)">${planSeats?((T.fact-planSeats>=0?"+":"−")+_gm(Math.abs(T.fact-planSeats))+" детомест"):"—"}</td></tr>
+      ${planPart?`<tr><td style="color:var(--muted)">…из него на посчитанные ${factDays} ${_kassaDayWord(factDays)} из ${dayCnt}</td><td class="num" style="color:var(--muted)"><b>${_gm(planDone)}</b></td></tr>`:""}
+      <tr class="totrow"><td>Выполнение плана${planPart?" (за посчитанные дни)":""}</td><td class="num">${pPct!=null?`<b style="color:${_fillPctColor(pPct)}">${pPct.toFixed(0)}%</b>`:"—"}</td></tr>
+      <tr><td style="color:var(--muted)">Разница с планом${planPart?" за посчитанные дни":""}</td><td class="num" style="color:var(--muted)">${planDone?((T.fact-planDone>=0?"+":"−")+_gm(Math.abs(T.fact-planDone))+" детомест"):"—"}</td></tr>
     </tbody></table>
-    ${(planSeats>0&&T.seats>0&&planSeats>T.seats)?`<div class="hint" style="margin-top:6px">Почему в «Планировщике» ${_gm(planSeats)}, а в таблице ниже ${_gm(T.seats)}: планировщик считает, сколько мест должно открываться каждую неделю, а раздел — сколько открылось на самом деле. Разница ${_gm(planSeats-T.seats)} — это места занятий, которых не было: каникулы, праздники, ещё не запущенные группы.</div>`:""}
+    ${planPart?`<div class="callout" style="border-color:var(--terra);font-size:12px;margin-top:6px">
+      <b>Окно посчитано не целиком:</b> ${factDays} ${_kassaDayWord(factDays)} из ${dayCnt}. Поэтому план приведён к посчитанным дням —
+      иначе «выполнение» было бы ниже ровно во столько раз, во сколько окно недосчитано, и разницу
+      легко принять за отменённые занятия.</div>`:
+      ((planDone>0&&T.seats>0&&planDone>T.seats)?`<div class="hint" style="margin-top:6px">Почему в «Планировщике» ${_gm(planDone)}, а в таблице ниже ${_gm(T.seats)}: планировщик считает, сколько мест должно открываться каждую неделю, а раздел — сколько открылось на самом деле. Разница ${_gm(planDone-T.seats)} — это места занятий, которых не было: каникулы, праздники, ещё не запущенные группы.</div>`:"")}
     <small class="note">План — из вкладки «Планировщик загрузки»: по каждому курсу «чел/гр × групп/нед × визитов». ${
       P.kind==="c"?("Период в "+dayCnt+" "+_kassaDayWord(dayCnt)+" пересчитан в "+wks+" недель плана — по числу дней ÷ 7.")
       :P.kind==="m"?("Месяц считается как "+wks+" учебных недели — та же условность, что и в «Оборот/месяц» модели (S.assume.weeksPerMonth).")

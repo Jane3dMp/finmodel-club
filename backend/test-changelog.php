@@ -60,7 +60,9 @@ function alfa_realization_day(string $date, ?array $b = null): array {
 $lib = file_get_contents(__DIR__ . '/../api/alfa/lib.php');
 $src = '';
 foreach (['alfa_changelog_path', 'alfa_changelog_read', 'alfa_changelog_write',
-          'alfa_changelog_add', 'alfa_realization_upsert'] as $fn) {
+          // alfa_expect_carry — правило «что пересчёт обязан НЕ затирать»; своя проверка в
+          // backend/test-expect-carry.php, здесь она нужна, чтобы upsert собрался.
+          'alfa_changelog_add', 'alfa_expect_carry', 'alfa_realization_upsert'] as $fn) {
     if (!preg_match('/\nfunction ' . $fn . '\(.*?\n\}/s', $lib, $m)) { echo "не найдено в lib.php: $fn\n"; exit(1); }
     $src .= $m[0] . "\n";
 }

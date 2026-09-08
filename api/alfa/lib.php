@@ -896,6 +896,24 @@ function alfa_changelog_add(string $date, string $what, float $was, float $now, 
     alfa_changelog_write($log);
 }
 /* Посчитать реализацию за день по выбранным филиалам и записать в хранилище. */
+/* Что переносится из СТАРОЙ дневной строки в новую при пересчёте.
+   Замороженное «ожидалось» (expect) — единственное, что пересчёт обязан НЕ затирать: planned
+   падает в ноль по мере проведения занятий, и к концу недели сравнивать факт было бы не с чем.
+   Заполняется один раз (alfa_expect_freeze) либо восстанавливается (alfa_expect_rebuild_week).
+   ⚠️ expectSrc ПЕРЕНОСИТСЯ НАРАВНЕ С expect. Раньше переносились только expect и expectTs, и
+   🧩-реконструкция («восстановлено по регулярному расписанию») переобувалась в 🔒 «зафиксировано
+   вовремя» при первом же пересчёте дня. Само собой: ночной cron ходит 7 дней назад, по
+   воскресеньям 30 — восстановленная неделя теряла пометку в течение недели. Интерфейс тогда
+   выдавал реконструкцию за снимок, хотя точность у них разная и код это сам оговаривает
+   подсказкой. Найдено разбором 09.09.2026.
+   Ключ expect отсутствует — не переносим ничего: день не морозили, и метки без числа
+   означали бы «заморожено» там, где заморозки не было. */
+function alfa_expect_carry(?array $old, array $row): array {
+    if (!is_array($old) || !isset($old['expect'])) return $row;
+    $row['expect'] = $old['expect'];
+    foreach (['expectTs', 'expectSrc'] as $k) if (isset($old[$k])) $row[$k] = $old[$k];
+    return $row;
+}
 function alfa_realization_upsert(string $date, ?array $branches = null): array {
     $r = alfa_realization_day($date, $branches);
     $row = ['present' => $r['realizationPresent'], 'all' => $r['realizationAll'],
@@ -943,11 +961,7 @@ function alfa_realization_upsert(string $date, ?array $branches = null): array {
     /* ⚠️ ЗАМОРОЖЕННОЕ «ожидалось» (expect) переносим из старой строки. Иначе его затирал бы
        этот же ежедневный пересчёт: по мере проведения занятий planned падает в ноль, и к концу
        недели сравнивать факт становится не с чем. Заполняется один раз (alfa_expect_freeze). */
-    $old = $s[$r['date']] ?? null;
-    if (is_array($old) && isset($old['expect'])) {
-        $row['expect'] = $old['expect'];
-        if (isset($old['expectTs'])) $row['expectTs'] = $old['expectTs'];
-    }
+    $row = alfa_expect_carry($s[$r['date']] ?? null, $row);
     $s[$r['date']] = $row;
     ksort($s);
     alfa_realization_store_write($s);
