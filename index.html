@@ -995,6 +995,14 @@ h3.cmp-fl span{font-weight:400;font-size:12px;color:var(--muted)}
 .cmp-src .cell.wide{width:100%}
 .cmp-src .btn{margin-left:auto}
 .cmp-srcdate{display:flex;flex-direction:column;gap:3px;font-size:11px;color:var(--muted)}
+/* кнопки-значки «+» и «⚙» в строке смен */
+.cmp-ib{width:30px;padding:6px 0;text-align:center;font-size:14px;line-height:1}
+/* статус в выпадающих списках — те же кружки и цвета, что в остальном приложении */
+.cmp-st{min-width:132px}
+.cmp-st option{color:var(--coal);font-weight:400;background:#fff}
+/* возраст рядом с именем в списке «Не расселены» */
+.cmp-kid-a{font-style:normal;opacity:.6;margin-left:6px;font-size:11px}
+.cmp-kid.on .cmp-kid-a{opacity:.85}
 .cmp-bar{align-items:center;margin-bottom:6px}
 .cmp-bar .chip{font-size:12px;padding:5px 12px}
 .cmp-bar .btn{margin-left:auto}
@@ -1086,11 +1094,28 @@ input.cmp-tpl-n{flex:1;min-width:0;width:auto;text-align:left;font-weight:700;fo
 .cmp-day summary::before{content:'▸';color:var(--muted);font-size:12px}
 .cmp-day[open] summary::before{content:'▾'}
 .cmp-day summary span{color:var(--muted);font-size:12px}
-.cmp-blk{margin:6px 0 4px 16px}
-.cmp-blk-h{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;margin-bottom:3px}
-.cmp-it{font-size:13px;padding:3px 0;border-bottom:1px dashed var(--line)}
+/* Части дня — цветом: серая простыня не читалась, а «до обеда» и «после обеда» глаз
+   должен разделять с первого взгляда. Полоса слева + подложка заголовка. */
+.cmp-blk{margin:8px 0 6px 12px;padding:6px 0 6px 12px;border-left:3px solid var(--line);border-radius:0 8px 8px 0}
+.cmp-blk-h{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px;
+  display:inline-block;padding:2px 9px;border-radius:9px}
+.cmp-blk-am{border-left-color:#D9A73C;background:linear-gradient(90deg,#FDF7E8,transparent 55%)}
+.cmp-blk-am .cmp-blk-h{background:#F7E7BD;color:#6B5411}
+.cmp-blk-pm{border-left-color:#7FA1DC;background:linear-gradient(90deg,#EFF4FC,transparent 55%)}
+.cmp-blk-pm .cmp-blk-h{background:#DCE7F8;color:#1F4C93}
+.cmp-blk-ev{border-left-color:#9A8CC2;background:linear-gradient(90deg,#F3F1FA,transparent 55%)}
+.cmp-blk-ev .cmp-blk-h{background:#E4DFF3;color:#4E4180}
+.cmp-it{font-size:13px;padding:4px 0;border-bottom:1px dashed var(--line)}
 .cmp-it:last-child{border-bottom:none}
-.cmp-dir{display:inline-block;font-size:10px;padding:0 6px;border-radius:8px;background:var(--sand-l);color:var(--muted);margin-right:6px;vertical-align:1px}
+.cmp-it>b{color:var(--coal)}
+.cmp-dir{display:inline-block;font-size:10px;font-weight:600;padding:1px 7px;border-radius:8px;
+  background:var(--sand-l);color:var(--muted);margin-right:7px;vertical-align:1px}
+.cmp-dir.d-it{background:#E1EBFB;color:#1F4C93}
+.cmp-dir.d-art{background:#FAE6E2;color:#94382D}
+.cmp-dir.d-ev{background:#E1F0E6;color:#2F6544}
+.cmp-dir.d-soft{background:#EDE8F8;color:#4E4180}
+.cmp-dir.d-sci{background:#DDF0EF;color:#1F6360}
+.cmp-dir.d-sport{background:#FBE8DA;color:#95511F}
 .cmp-desc{font-size:12px;color:var(--muted);margin-top:1px}
 /* краткое содержание: текст во всю ширину, кнопки колонкой рядом */
 .cmp-sumwrap{display:grid;grid-template-columns:minmax(0,1fr) 280px;gap:14px;align-items:start}
@@ -1416,7 +1441,6 @@ input.cmp-tpl-n{flex:1;min-width:0;width:auto;text-align:left;font-weight:700;fo
 <!-- ===== ЗАГОРОДНЫЙ ЛАГЕРЬ: СМЕНЫ (резерв + расселение) ===== -->
 <section class="panel" id="campres">
  <h2 class="sec">Загородный лагерь — смены</h2>
- <div class="sec-desc">Каждая смена — свой список: кто <b>подтвердил</b>, кто <b>думает</b>, кто отказался, с предоплатой и доплатой; своё расселение по блокам (<b>в блоке живут дети одного пола</b> — пол задаёт первый поселённый) и программа из конструктора лагеря с кратким содержанием для родителей. Ребёнка подтягиваем из нашей базы или вписываем руками; в AlfaCRM уезжают только подтверждённые.</div>
  <div id="campShiftHead"></div>
  <div id="campResBody"></div>
  <div id="campRoomsBody" hidden></div>
@@ -18751,8 +18775,9 @@ function _campPickerHtml(light){
     h+='<span class="chip'+((sh&&sh.id===s.id)?' on':'')+'" onclick="'+fn+'(\''+_jsStr(s.id)+'\')">'+esc(s.name)+d+(n?(' · '+n):'')+'</span>';
   });
   if(!light){
-    h+='<button class="btn ghost sm" onclick="campAddShift()">+ Смена</button>';
-    if(sh) h+='<button class="btn ghost sm'+(_campDrawer==="cfg"?' on':'')+'" onclick="campToggleCfg()" title="Название, даты, цена, схема корпуса и ссылка на конструктор">⚙ Настройки смены</button>';
+    // только значки: подписи «+ Смена» и «⚙ Настройки смены» распирали строку смен вдвое
+    h+='<button class="btn ghost sm cmp-ib" onclick="campAddShift()" title="Добавить смену">+</button>';
+    if(sh) h+='<button class="btn ghost sm cmp-ib'+(_campDrawer==="cfg"?' on':'')+'" onclick="campToggleCfg()" title="Настройки смены: название, даты, цена, концепция, схема корпуса, ссылка на конструктор">⚙</button>';
   }
   h+='</div>';
   return h;
@@ -18779,6 +18804,7 @@ function _campCfgHtml(sh){
    +'<div class="cmp-fh">Блоки и места правятся на подвкладке «Расселение» → «✎ Правка схемы».</div>'
    +'<label class="cmp-f">Ссылка на конструктор лагеря<input class="cell wide" style="text-align:left" placeholder="https://app.proznanie.club/camp/parents.html?id=…" value="'+esc(sh.progUrl||"")+'" onchange="campSetShift(\'progUrl\',this.value)"></label>'
    +'<div class="cmp-fh">Любая страница смены из конструктора — для родителей, печати или сам конструктор. По ней подтянется программа на подвкладке «Программа».</div>'
+   +(_campProgParentsUrl(sh.progUrl)?('<a class="btn ghost sm" href="'+esc(_campProgParentsUrl(sh.progUrl))+'" target="_blank" rel="noopener" style="margin-bottom:14px">Открыть страницу для родителей ↗</a>'):'')
    +'<label class="cmp-f">Годы рождения (для подборки детей)'
      +'<span class="cmp-f2" style="margin-top:3px"><input class="cell wide" type="number" min="1990" max="2035" placeholder="от 2015" value="'+esc(String(sh.yFrom||""))+'" onchange="campKidsYears(\'yFrom\',this.value)">'
      +'<input class="cell wide" type="number" min="1990" max="2035" placeholder="до 2020" value="'+esc(String(sh.yTo||""))+'" onchange="campKidsYears(\'yTo\',this.value)"></span></label>'
@@ -18820,6 +18846,19 @@ function renderCampShifts(){
    fetch без входа. В модели храним сжатую копию (названия занятий, темы, направления, короткие
    описания, факты смены) — на 10 дней это ~15 КБ, коллеги видят программу без своего запроса. */
 const CAMP_BLOCKS={am:"До обеда",pm:"После обеда",ev:"Вечер"}, CAMP_BLOCK_ORDER=["am","pm","ev"];
+/* Цвет направления занятия. Конструктор присылает название строкой («IT», «Творчество»,
+   «Soft skills / нейро»), поэтому узнаём по корню слова; незнакомое остаётся серым.
+   Без цвета программа читалась сплошной серой простынёй. */
+function _campDirCls(d){
+  const s=String(d||"").toLowerCase();
+  if(/it|програм|robl|minecraft|python|scratch|3d|blender|техни|техно|робот|дрон|бпла/.test(s)) return "d-it";
+  if(/творч|арт|art|рисов|лепк|дизайн|песк/.test(s))                     return "d-art";
+  if(/событ|игр|квест|поход|экскурс|праздн|дискот/.test(s))              return "d-ev";
+  if(/soft|нейро|психол|общен|коммуник|тренинг/.test(s))                 return "d-soft";
+  if(/наук|хим|биол|физик|опыт|эксперим|лаб/.test(s))                    return "d-sci";
+  if(/спорт|актив|бассейн|зарядк|футбол/.test(s))                        return "d-sport";
+  return "";
+}
 const CAMP_LANES=["troop","cluster","outside","stations","chainA","chainB","trip3","trip","tripA","tripB"];
 let _campProgBusy=false, _campProgErr="";
 /* Настроен ли ИИ на сервере: null — ещё не спрашивали, true/false — ответ aiPing. Спрашиваем
@@ -19040,13 +19079,11 @@ function renderCampProg(){
   const p=sh.prog||null, parentsUrl=_campProgParentsUrl(sh.progUrl);
   let h='<div class="cmp-pick">'
    +'<button class="btn sm"'+(_campProgBusy?' disabled':'')+' onclick="campProgPull()">'+(_campProgBusy?"Тяну…":(p?"Обновить из конструктора":"Подтянуть из конструктора"))+'</button>'
-   +(parentsUrl?'<a class="btn ghost sm" href="'+esc(parentsUrl)+'" target="_blank" rel="noopener">Страница для родителей ↗</a>':'')
    +(p?'<button class="btn ghost sm" onclick="campProgCopy()">Скопировать программу текстом</button>':'')
-   +'<button class="btn ghost sm" onclick="campToggleCfg()">⚙ Ссылка на конструктор</button>'
    +(p&&p.days.length?'<button class="btn ghost sm" onclick="campProgPrint()">🖨 Печать программы</button>':'')
    +(p?'<span style="font-size:12px;color:var(--muted)">снимок от '+esc(_campWhen(p.at))+'</span>':'')
    +'</div>';
-  if(!_campProgId(sh.progUrl)) h+='<div class="cmp-warn">Вставьте в «⚙ Смена» ссылку на смену из конструктора лагеря — например, страницу для родителей <code>…/camp/parents.html?id=…</code>. Программа подтянется оттуда, как только смена там опубликована.</div>';
+  if(!_campProgId(sh.progUrl)) h+='<div class="cmp-warn">Вставьте в «⚙ Настройки смены» ссылку на смену из конструктора лагеря — например, страницу для родителей <code>…/camp/parents.html?id=…</code>. Программа подтянется оттуда, как только смена там опубликована.</div>';
   if(_campProgErr) h+='<div class="cmp-warn" style="color:var(--red)">'+esc(_campProgErr)+'</div>';
   // Концепция — не из конструктора, её пишут руками в настройках смены. Показываем первой:
   // менеджеру в разговоре нужна сперва идея смены, а уже потом по дням.
@@ -19066,8 +19103,8 @@ function renderCampProg(){
       const cnt=d.blocks.reduce((m,b)=>m+b.items.length,0);
       h+='<details class="cmp-day"'+(i===0?' open':'')+'><summary><b>День '+(i+1)+'</b><span>'+esc(d.date?_campDmy(d.date):"")+'</span><span>'+(d.off?"выходной":(cnt?(cnt+" занятий"):"программа уточняется"))+'</span></summary>';
       d.blocks.forEach(b=>{
-        h+='<div class="cmp-blk"><div class="cmp-blk-h">'+esc(b.label)+'</div>'
-         +b.items.map(it=>'<div class="cmp-it">'+(it.d?'<span class="cmp-dir">'+esc(it.d)+'</span>':'')+'<b>'+esc(it.n)+'</b>'+(it.th?' <i>«'+esc(it.th)+'»</i>':'')
+        h+='<div class="cmp-blk cmp-blk-'+esc(b.b||"am")+'"><div class="cmp-blk-h">'+esc(b.label)+'</div>'
+         +b.items.map(it=>'<div class="cmp-it">'+(it.d?'<span class="cmp-dir '+_campDirCls(it.d)+'">'+esc(it.d)+'</span>':'')+'<b>'+esc(it.n)+'</b>'+(it.th?' <i>«'+esc(it.th)+'»</i>':'')
            +((it.t&&p.tpls&&p.tpls[it.t])?'<div class="cmp-desc">'+esc(p.tpls[it.t])+'</div>':'')+'</div>').join("")
          +'</div>';
       });
@@ -19179,8 +19216,8 @@ function renderCampRes(){
      +'<td style="white-space:nowrap"><input class="cell" type="date" style="width:132px" value="'+esc(_dobIso(r.dob)||"")+'" onchange="campSetRes(\''+jid+'\',\'dob\',this.value)">'
         +(age?' <span style="font-size:11px;color:var(--muted)" title="'+esc(_ageStrFull(r.dob))+'">'+esc(age)+'</span>':'')+'</td>'
      +'<td><input class="cell" style="width:132px;text-align:left" value="'+esc(r.phone||"")+'" onchange="campSetRes(\''+jid+'\',\'phone\',this.value,false)"></td>'
-     +'<td><select class="cell" style="color:'+st.c+';font-weight:700" onchange="campSetRes(\''+jid+'\',\'status\',this.value)">'
-        +CAMP_STATUS.map(s=>'<option value="'+s[0]+'"'+(r.status===s[0]?' selected':'')+'>'+s[1]+'</option>').join("")+'</select></td>'
+     +'<td><select class="cell cmp-st" style="color:'+st.c+';font-weight:700" onchange="campSetRes(\''+jid+'\',\'status\',this.value)">'
+        +CAMP_STATUS.map(s=>'<option value="'+s[0]+'"'+(r.status===s[0]?' selected':'')+'>'+CAMP_ST[s[0]].ic+' '+s[1]+'</option>').join("")+'</select></td>'
      +'<td><select class="cell" onchange="campSetRes(\''+jid+'\',\'src\',this.value,false)">'
         +CAMP_SRC.map(s=>'<option value="'+s[0]+'"'+((r.src||"")===s[0]?' selected':'')+'>'+s[1]+'</option>').join("")+'</select></td>'
      +'<td><select class="cell" onchange="campSetRes(\''+jid+'\',\'kind\',this.value,false)">'
@@ -19253,8 +19290,9 @@ function renderCampRooms(){
     h+='<div class="cmp-free">';
     unplaced.sort((a,b)=>(a.sex===b.sex?0:(a.sex<b.sex?1:-1))||String(a.fio).localeCompare(String(b.fio),"ru")).forEach(r=>{
       const st=CAMP_ST[r.status]||CAMP_ST.maybe;
-      h+='<span class="cmp-kid'+(r.sex?(' '+r.sex):'')+(_campPick===r.id?' on':'')+'" onclick="campPick(\''+_jsStr(r.id)+'\')" title="'+esc(st.t+(r.sex?(" · "+CAMP_SEXN[r.sex]):" · пол не указан"))+'">'
-       +st.ic+' '+esc(r.fio)+(r.sex?'':' <b style="color:var(--red)">?</b>')+'</span>';
+      const age=_ageStr(r.dob);   // расселять без возраста нельзя: в блок к шестилеткам не селят двенадцатилетнего
+      h+='<span class="cmp-kid'+(r.sex?(' '+r.sex):'')+(_campPick===r.id?' on':'')+'" onclick="campPick(\''+_jsStr(r.id)+'\')" title="'+esc(st.t+(r.sex?(" · "+CAMP_SEXN[r.sex]):" · пол не указан")+(age?(" · "+_ageStrFull(r.dob)):""))+'">'
+       +st.ic+' '+esc(r.fio)+(age?'<i class="cmp-kid-a">'+esc(age)+'</i>':'')+(r.sex?'':' <b style="color:var(--red)">?</b>')+'</span>';
     });
     h+='</div>';
   }
@@ -19896,6 +19934,27 @@ function campCallSet(key,f,v){
     if(cur.c){ try{ _pushLog(["лагерь · "+(sh.name||"")+" · коммент. у "+fio]); }catch(e){} }
   }
 }
+/* Статус резерва правится прямо из подборки: «думает» на звонке часто превращается в «подтвердил»
+   через пять минут, и ради этого не стоит уходить на вкладку смены. Пустое значение — убрать
+   из резерва; если за ребёнком уже числятся деньги или место, спрашиваем. */
+function campKidsResSet(key,v){
+  const sh=_campShift(); if(!sh){ toast("Сначала выберите смену"); return; }
+  const row=(_campPool||[]).find(r=>r.key===key);
+  const r=_campRows(sh).find(x=>_campKidKey(x.fio)===key);
+  if(!v){
+    if(!r) return;
+    const why=[]; if(_campMoney(r)) why.push("внесено "+fmt(_campMoney(r))+" р."); if(r.bed) why.push("есть место в блоке");
+    if(why.length&&!confirm("Убрать «"+r.fio+"» из резерва смены? "+why.join(", ")+".")) { renderCampKids(); return; }
+    const c=_camp(), i=c.res.indexOf(r); if(i>=0) c.res.splice(i,1);
+    _campSave(); renderCampKids(); toast("Убран(а) из резерва: "+r.fio);
+    return;
+  }
+  if(r){ r.status=v; _campSave(); }
+  else if(row) _campToReserve(row,v);
+  else { toast("Ребёнок не найден в подборке"); return; }
+  renderCampKids();
+  toast((row?row.fio:(r&&r.fio)||"")+" · "+(CAMP_ST[v]||{}).t+" в смене «"+sh.name+"»");
+}
 function campKidsToRes(key){
   const row=(_campPool||[]).find(r=>r.key===key); if(!row) return;
   const r=_campToReserve(row,"maybe"); if(r){ toast(row.fio+" → в резерв как «думает»"); renderCampKids(); }
@@ -19997,8 +20056,10 @@ function renderCampKids(){
      +'<td style="text-align:center"><button class="btn ghost sm more-toggle" title="Написать в Viber по шаблону" onclick="campVbOpen(this,\'kids\',\''+jk+'\')">💬</button>'
         +(call.vb?'<div class="cmp-vbok" title="'+esc(call.vbTpl||"")+'">✅ '+esc(_campDate(call.vb))+'</div>':'')+'</td>'
      +'<td><input class="cell wide" style="min-width:180px;text-align:left" value="'+esc(call.c||"")+'" onchange="campCallSet(\''+jk+'\',\'c\',this.value)"></td>'
-     +'<td>'+(res?('<span style="font-weight:700;color:'+(CAMP_ST[res.status]||CAMP_ST.maybe).c+'">'+(CAMP_ST[res.status]||CAMP_ST.maybe).ic+' '+(CAMP_ST[res.status]||CAMP_ST.maybe).t+'</span>')
-                 :(sh?'<button class="btn ghost sm" onclick="campKidsToRes(\''+jk+'\')">→ резерв</button>':''))+'</td>'
+     +'<td>'+(sh?('<select class="cell cmp-st" style="'+(res?("color:"+(CAMP_ST[res.status]||CAMP_ST.maybe).c+";font-weight:700"):"")+'" onchange="campKidsResSet(\''+jk+'\',this.value)">'
+        +'<option value="">— в резерв —</option>'
+        +CAMP_STATUS.map(s=>'<option value="'+s[0]+'"'+((res&&res.status===s[0])?' selected':'')+'>'+CAMP_ST[s[0]].ic+' '+s[1]+'</option>').join("")
+        +'</select>'):'')+'</td>'
      +'</tr>';
   }
   h+='</tbody></table></div>';
