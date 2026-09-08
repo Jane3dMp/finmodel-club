@@ -995,6 +995,10 @@ h3.cmp-fl span{font-weight:400;font-size:12px;color:var(--muted)}
 .cmp-kt td{white-space:nowrap}
 .cmp-yr{display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--muted)}
 .cmp-yr input.cell{width:70px}
+/* строка фильтров по столбцам под шапкой подборки — светлая, чтобы не читалась второй шапкой */
+.cmp-kt thead tr.cmp-flt th{background:var(--sand-l);padding:4px 5px;border-bottom:1px solid var(--line)}
+.cmp-kt .cmp-cf{font-size:11px;padding:3px 6px;height:26px}
+.cmp-kt select.cmp-cf{width:100%;min-width:96px}
 </style>
 </head>
 <body>
@@ -2023,7 +2027,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-09-08-07";
+const APP_VER="2026-09-08-08";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -18890,6 +18894,9 @@ let _campKNoDob=false;        // при заданных годах рожден
 let _campKBusy="";            // что грузится: alfa | amo | hist | pipes
 let _campKMsg="";             // строка состояния над списком
 let _campKFilter="all", _campKSrc="all", _campKQuery="", _campKLimit=300;
+/* Фильтры по столбцам таблицы подборки (Жанна: «добавь фильтр по каждому столбцу»). Складываются
+   с чипами и поиском по И. Возраст понимает «11», «10-12», «>10», «<12». */
+let _campKCol={fio:"",age:"",phone:"",was:"",amo:"",call:"",note:"",res:""};
 const CAMP_LS_ALFA="campPoolAlfa", CAMP_LS_AMO="campPoolAmo";
 function _campCacheGet(k){ try{ const v=localStorage.getItem(k); return v?JSON.parse(v):null; }catch(e){ return null; } }
 function _campCachePut(k,v){ try{ localStorage.setItem(k,JSON.stringify(v)); }catch(e){} }   // не влезло — молча: это только кэш
@@ -18936,20 +18943,58 @@ function _campPoolBuild(){
   return P.rows;
 }
 function _campWas(r){ const h=(r.alfaId!=null)?_campHist[String(r.alfaId)]:null; return !!(r.last||r.grid.length||(h&&h.total>0)); }
-function _campWasHtml(r){
+/* «Был у нас» — строки без разметки: одни и те же для ячейки, печати и фильтра по столбцу. */
+function _campWasParts(r){
   const parts=[];
   const h=(r.alfaId!=null)?_campHist[String(r.alfaId)]:null;
   if(h&&h.subjects){
-    const items=Object.entries(h.subjects).sort((a,b)=>b[1]-a[1]).slice(0,4).map(([sid,n])=>esc(_campSubj[sid]||("предмет "+sid))+" ×"+n);
+    const items=Object.entries(h.subjects).sort((a,b)=>b[1]-a[1]).slice(0,4).map(([sid,n])=>(_campSubj[sid]||("предмет "+sid))+" ×"+n);
     parts.push(items.length?items.join(", "):"занятий не было");
   }
-  if(r.grid.length) parts.push("сейчас: "+esc(r.grid.slice(0,2).join("; ")));
+  if(r.grid.length) parts.push("сейчас: "+r.grid.slice(0,2).join("; "));
   else if(r.wait) parts.push("в списке ожидания");
-  if(r.last) parts.push("посл. визит "+esc(_campDmy(r.last)));
+  if(r.last) parts.push("посл. визит "+_campDmy(r.last));
   else if(r.src.alfa&&r.study===0) parts.push("лид в Альфе, не ходил");
-  else if(r.src.alfa&&r.created) parts.push("в Альфе с "+esc(_campDmy(r.created)));
-  return parts.join("<br>")||'<span style="color:var(--muted)">—</span>';
+  else if(r.src.alfa&&r.created) parts.push("в Альфе с "+_campDmy(r.created));
+  return parts;
 }
+function _campWasHtml(r){ const p=_campWasParts(r); return p.length?p.map(esc).join("<br>"):'<span style="color:var(--muted)">—</span>'; }
+function _campWasText(r){ return _campWasParts(r).join(" · "); }
+function _campAgeMatch(r,q){
+  q=String(q||"").trim(); if(!q) return true;
+  const a=_ageYM(r.dob), y=a?a.y:null;
+  let m=q.match(/^(\d{1,2})\s*[-–—]\s*(\d{1,2})$/);
+  if(m){ if(y==null) return false; const lo=Math.min(+m[1],+m[2]), hi=Math.max(+m[1],+m[2]); return y>=lo&&y<=hi; }
+  m=q.match(/^([<>])\s*(\d{1,2})$/);
+  if(m){ if(y==null) return false; return m[1]===">"?(y>+m[2]):(y<+m[2]); }
+  const n=parseInt(q,10);
+  if(!isNaN(n)){ if(y==null) return false; return y===n; }
+  return true;
+}
+function _campColMatch(r,call,res){
+  const F=_campKCol, has=s=>String(s||"").trim().toLowerCase();
+  if(F.fio&&!String(r.fio).toLowerCase().includes(has(F.fio))) return false;
+  if(!_campAgeMatch(r,F.age)) return false;
+  if(F.phone){ const d=String(F.phone).replace(/\D/g,""); if(!d||!String(r.phone||"").replace(/\D/g,"").includes(d)) return false; }
+  if(F.was&&!_campWasText(r).toLowerCase().includes(has(F.was))) return false;
+  if(F.amo&&!_campAmoText(r).toLowerCase().includes(has(F.amo))) return false;
+  const st=(call&&call.st)||"";
+  if(F.call==="none"&&st) return false;
+  if(F.call==="any"&&!st) return false;
+  if(F.call&&F.call!=="none"&&F.call!=="any"&&st!==F.call) return false;
+  if(F.note&&!String((call&&call.c)||"").toLowerCase().includes(has(F.note))) return false;
+  if(F.res==="in"&&!res) return false;
+  if(F.res==="out"&&res) return false;
+  if(F.res&&F.res!=="in"&&F.res!=="out"&&(!res||res.status!==F.res)) return false;
+  return true;
+}
+function campKidsCol(k,v){
+  if(!(k in _campKCol)) return;
+  _campKCol[k]=String(v||""); _campKLimit=300; renderCampKids();
+  const el=document.querySelector('.cmp-cf[data-k="'+k+'"]');
+  if(el&&el.tagName==="INPUT"){ el.focus(); try{ el.setSelectionRange(el.value.length,el.value.length); }catch(e){} }
+}
+function campKidsColClear(){ Object.keys(_campKCol).forEach(k=>{ _campKCol[k]=""; }); _campKLimit=300; renderCampKids(); }
 function _campAmoText(r){ if(!r.src.amo) return ""; return [r.amoStage,r.amoAt?_campDmy(r.amoAt):"",r.amoResp].filter(Boolean).join(" · "); }
 /* Годы рождения смены: Жанна задаёт руками («2020-2015», порядок любой). Ограничивают и список,
    и «Курсы из Альфы» — историю тянем только тем, кто по возрасту вообще подходит в смену. */
@@ -18960,7 +19005,10 @@ function _campKidsShown(){
   const sh=_campShift(); const m=sh?_campCalls(sh):{};
   const q=_campKQuery.toLowerCase(), qd=q.replace(/\D/g,"");
   const yr=_campYears(sh);
+  const colOn=Object.keys(_campKCol).some(k=>_campKCol[k]);
+  const resByKey={}; if(colOn&&sh) _campRows(sh).forEach(x=>{ resByKey[_campKidKey(x.fio)]=x; });
   return rows.filter(r=>{
+    if(colOn&&!_campColMatch(r,m[r.key],resByKey[r.key])) return false;
     if(yr.from||yr.to){
       const y=_campBirthYear(r);
       if(!y){ if(!_campKNoDob) return false; }
@@ -19238,15 +19286,29 @@ function renderCampKids(){
     h+='<span class="chip'+(_campKNoDob?' on':'')+'" onclick="campKidsToggleNoDob()" title="Без даты рождения по году не отсеять — показать их тоже">без даты рождения · '+noDob+'</span>';
   }
   h+='<span style="font-size:12px;color:var(--muted)">показано '+shown.length+' из '+rows.length+'</span>';
+  const colOn=Object.keys(_campKCol).some(k=>_campKCol[k]);
+  if(colOn) h+='<span class="chip" onclick="campKidsColClear()" title="Очистить фильтры под шапкой таблицы">× сбросить фильтры столбцов</span>';
   h+='<button class="btn ghost sm" onclick="campKidsPrint()" title="Список на бумагу с клеткой «дозвон»">🖨 Печать · '+shown.length+'</button>';
   h+='</div>';
 
-  if(!shown.length){ box.innerHTML=h+'<div class="card" style="color:var(--muted)">Никого не найдено. Снимите фильтр или подтяните базу из Альфы.</div>'; return; }
-  const lim=Math.min(shown.length,_campKLimit);
-  h+='<div class="tscroll"><table class="cmp-t cmp-kt"><thead><tr>'
+  // строка фильтров под шапкой — по каждому столбцу; рисуем и при пустом результате, иначе
+  // фильтр, который всё отсеял, нечем было бы снять
+  const F=_campKCol;
+  const cf=(k,ph,w)=>'<input class="cell cmp-cf" data-k="'+k+'" placeholder="'+ph+'" value="'+esc(F[k]||"")+'" style="width:'+(w||"100%")+';min-width:60px;text-align:left" oninput="campKidsCol(\''+k+'\',this.value)">';
+  const cs=(k,opts)=>'<select class="cell cmp-cf" data-k="'+k+'" onchange="campKidsCol(\''+k+'\',this.value)">'+opts.map(o=>'<option value="'+o[0]+'"'+((F[k]||"")===o[0]?' selected':'')+'>'+o[1]+'</option>').join("")+'</select>';
+  const fltRow='<tr class="cmp-flt"><th></th><th>'+cf('fio','имя')+'</th><th>'+cf('age','11 · 10-12','78px')+'</th><th>'+cf('phone','цифры','110px')+'</th>'
+   +'<th>'+cf('was','курс, лид, визит')+'</th><th>'+cf('amo','этап, менеджер')+'</th>'
+   +'<th>'+cs('call',[["","все"],["none","не звонили"],["any","звонили"],["call","недозвон"],["later","перезвонить"],["yes","подтвердил"],["maybe","думает"],["no","отказ"]])+'</th>'
+   +'<th>'+cf('note','текст')+'</th>'
+   +'<th>'+cs('res',[["","все"],["in","в резерве"],["out","не в резерве"],["yes","подтвердил"],["maybe","думает"],["no","отказ"]])+'</th></tr>';
+  const thead='<thead><tr>'
    +'<th style="width:26px">#</th><th>Ребёнок</th><th>Возраст</th><th>Телефон</th><th>Был у нас</th><th>amo</th>'
    +'<th title="Результат звонка по смене «'+esc(sh?sh.name:"")+'»">Звонок</th><th>Комментарий</th><th>В резерве</th>'
-   +'</tr></thead><tbody>';
+   +'</tr>'+fltRow+'</thead>';
+
+  if(!shown.length){ box.innerHTML=h+'<div class="tscroll"><table class="cmp-t cmp-kt">'+thead+'<tbody><tr><td colspan="9" style="color:var(--muted);padding:14px 10px">Никого не найдено. Снимите фильтр или подтяните базу из Альфы.</td></tr></tbody></table></div>'; return; }
+  const lim=Math.min(shown.length,_campKLimit);
+  h+='<div class="tscroll"><table class="cmp-t cmp-kt">'+thead+'<tbody>';
   for(let i=0;i<lim;i++){
     const r=shown[i], jk=_jsStr(r.key), call=m[r.key]||{}, st=call.st||"", res=resByKey[r.key];
     const cs=CAMP_CALL_ST[st];
