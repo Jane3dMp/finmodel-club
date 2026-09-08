@@ -74,14 +74,26 @@ return [
     // Без этого блока всё остальное работает — кнопка честно скажет, что ИИ не настроен,
     // а «Собрать без ИИ» сложит содержание из названий занятий.
     //
-    // Годится любая служба с интерфейсом OpenAI (`/v1/chat/completions`):
-    //   OpenAI — https://api.openai.com/v1/chat/completions, модель gpt-4o-mini (дёшево и достаточно);
-    //   Groq   — https://api.groq.com/openai/v1/chat/completions, модель llama-3.3-70b-versatile.
+    // Годится любая служба с интерфейсом OpenAI (`/v1/chat/completions`) — меняются только
+    // три строки ниже.
+    //
+    // ⚠️ ЗАПРОС УХОДИТ С СЕРВЕРА В БЕЛАРУСИ, и часть поставщиков её не обслуживает.
+    //    OpenAI отвечает «Country, region, or territory not supported» — проверено на этом хостинге.
+    //    Обходить их блокировку не нужно: это нарушение условий, аккаунт закроют вместе с деньгами.
+    //    Берите поставщика, который работает из РБ:
+    //
+    //   DeepSeek (рекомендуем) — https://api.deepseek.com/chat/completions, модель deepseek-chat.
+    //            Ключ: platform.deepseek.com → API keys. Дешевле OpenAI в разы, пополняется картой.
+    //   YandexGPT — https://llm.api.cloud.yandex.net/v1/chat/completions,
+    //            модель gpt://<id-каталога>/yandexgpt-lite/latest, ключ — API-ключ сервисного
+    //            аккаунта Yandex Cloud (в model обязателен ваш id каталога).
+    //   Mistral  — https://api.mistral.ai/v1/chat/completions, модель mistral-small-latest.
+    //
     // Ключ вписывается ЗДЕСЬ, на сервере, и никуда больше не передаётся. Проверить: ?action=aiPing.
     'ai' => [
-        'url'   => 'https://api.openai.com/v1/chat/completions',
+        'url'   => 'https://api.deepseek.com/chat/completions',
         'key'   => '',
-        'model' => 'gpt-4o-mini',
+        'model' => 'deepseek-chat',
     ],
 
     // Секретный ключ для запуска cron_realization.php ИЗ ВЕБА (wget/curl по URL).

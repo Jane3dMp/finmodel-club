@@ -43,7 +43,10 @@ switch ($action) {
     //     программы, сервер ходит в службу с интерфейсом OpenAI и отдаёт готовый текст.
     //     Персональных данных в запросе нет — только названия занятий и факты смены.
     case 'aiPing':
-        json_out(['ok' => true, 'configured' => ai_configured(), 'model' => (string)((cfg()['ai']['model'] ?? ''))]);
+        $aiUrl = (string)(cfg()['ai']['url'] ?? '');
+        json_out(['ok' => true, 'configured' => ai_configured(),
+                  'model' => (string)(cfg()['ai']['model'] ?? ''),
+                  'host'  => $aiUrl !== '' ? (string)parse_url($aiUrl, PHP_URL_HOST) : '']);
         break;
     case 'aiSummary':
         @set_time_limit(90);

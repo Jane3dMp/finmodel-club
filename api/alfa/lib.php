@@ -290,7 +290,14 @@ function ai_chat(string $system, string $prompt, int $maxTokens = 700): string {
     if (!is_array($j)) json_out(['ok' => false, 'error' => 'Служба ИИ вернула не-JSON (код ' . $code . ')', 'raw' => mb_substr((string)$raw, 0, 300)], 502);
     if ($code >= 400) {
         $msg = is_array($j['error'] ?? null) ? (string)($j['error']['message'] ?? '') : (string)($j['error'] ?? '');
-        json_out(['ok' => false, 'error' => 'Служба ИИ ответила ошибкой: ' . ($msg !== '' ? $msg : ('код ' . $code)), 'code' => $code], 502);
+        // Запрос уходит с сервера в Беларуси, и часть поставщиков её не обслуживает — со стороны
+        // это выглядит как «ИИ сломался», хотя дело в стране, и лечится сменой url/model.
+        $region = (bool)preg_match('/country, region|unsupported_country|not supported.*(country|region|territory)|region.*not supported/iu', $msg);
+        json_out(['ok' => false,
+                  'error' => $region
+                      ? 'Этот поставщик не обслуживает Беларусь (ответ: «' . $msg . '»). Нужен другой — например DeepSeek: он совместим по интерфейсу, меняются только url, key и model.'
+                      : 'Служба ИИ ответила ошибкой: ' . ($msg !== '' ? $msg : ('код ' . $code)),
+                  'regionBlocked' => $region, 'code' => $code], 502);
     }
     $text = trim((string)($j['choices'][0]['message']['content'] ?? ''));
     if ($text === '') json_out(['ok' => false, 'error' => 'Служба ИИ вернула пустой ответ', 'raw' => mb_substr((string)$raw, 0, 300)], 502);
