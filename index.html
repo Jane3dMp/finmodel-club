@@ -1678,6 +1678,17 @@ input.cmp-tpl-n{flex:1;min-width:0;width:auto;text-align:left;font-weight:700;fo
  </div>
 </div>
 
+<!-- Справка «как это считается»: длинные объяснения показываем по кнопке ❓, а не над цифрами -->
+<div class="modal-bg" id="infoModal" onclick="if(event.target===this) closeInfo()">
+ <div class="modal" style="max-width:760px">
+  <h3 id="infoTitle"></h3>
+  <div id="infoBody" style="font-size:13px;line-height:1.6"></div>
+  <div class="hd-actions les-foot" style="margin-top:12px">
+   <button class="btn ghost sm" onclick="closeInfo()">Закрыть</button>
+  </div>
+ </div>
+</div>
+
 <div class="modal-bg" id="kidCardModal">
  <div class="modal" style="max-width:600px">
   <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
@@ -2163,7 +2174,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-09-08-17";
+const APP_VER="2026-09-09-01";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -3169,6 +3180,23 @@ document.addEventListener("click", function(e){
   closeAllMore();
 });
 document.addEventListener("keydown", function(e){ if(e.key==="Escape") closeAllMore(); });
+
+/* ===== СПРАВКА «КАК ЭТО СЧИТАЕТСЯ» В ПОПАПЕ =====
+   Правка Жанны 08.09.2026: длинные объяснения над таблицей читают один раз, а место над
+   цифрами они занимают всегда — в «Заполняемости» это было шесть строк до первой цифры.
+   Текст никуда не делся, он живёт здесь и открывается кнопкой ❓ из своего раздела. Ключ —
+   имя раздела, чтобы следующая такая простыня уехала сюда же, а не завела вторую модалку. */
+const INFO_HELP={};
+function openInfo(k){
+  const h=INFO_HELP[k], m=document.getElementById("infoModal");
+  if(!h||!m) return;
+  const t=document.getElementById("infoTitle"), b=document.getElementById("infoBody");
+  if(t) t.textContent=h.title;
+  if(b) b.innerHTML=h.html;
+  m.classList.add("show");
+}
+function closeInfo(){ const m=document.getElementById("infoModal"); if(m) m.classList.remove("show"); }
+document.addEventListener("keydown", function(e){ if(e.key==="Escape") closeInfo(); });
 /* Доступ проверяется по approved/{uid}. Раньше «нет записи» и «правила не дали прочитать»
    выглядели одинаково («Ждите одобрения»), и было не понять, почему человек не входит,
    хотя админ видит его в списке. Теперь причину показываем прямо на экране. */
@@ -12686,6 +12714,10 @@ async function kassaLoad(){
 function _todayIso(){ const d=new Date(),z=n=>String(n).padStart(2,'0'); return d.getFullYear()+'-'+z(d.getMonth()+1)+'-'+z(d.getDate()); }
 const _RU_MON=["январь","февраль","март","апрель","май","июнь","июль","август","сентябрь","октябрь","ноябрь","декабрь"];
 let _realStore=null, _realBranches=null, _realBranchNames=null, _realBusy=false;
+/* Даты пересчёта. Раньше поле «Неделя» рисовалось с подсказанным понедельником заново на
+   каждой перерисовке — а перерисовка идёт сразу после пересчёта, и выбранная дата слетала.
+   _realFrom пустой = «подскажи сам», _realTo пустой = «считай всю неделю (пн–вс)». */
+let _realFrom="", _realTo="";
 let _realMonth=(function(){ const d=new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0'); })();
 /* Правки задним числом: кто-то изменил в Alfa уже прошедший день. Сервер сравнивает каждый
    пересчитанный день с прежним значением и складывает расхождения сюда. */
@@ -12718,6 +12750,15 @@ async function _realRender(){
   body.innerHTML=_realHtml();
 }
 function realSetMonth(v){ if(v){ _realMonth=v; } const b=document.getElementById("admBody"); if(b) b.innerHTML=_realHtml(); }
+/* Без перерисовки: она увела бы фокус из поля, которое только что правили. Значение просто
+   запоминается — при следующей перерисовке оно подставится обратно. */
+function realSetFrom(v){ _realFrom=v||""; }
+function realSetTo(v){
+  const was=_realTo; _realTo=v||"";
+  /* Кнопка «✕ период» зовёт это с пустой строкой — тогда панель надо перерисовать, иначе
+     вторая дата останется на экране. При обычном вводе даты не трогаем: фокус дороже. */
+  if(!_realTo&&was){ const b=document.getElementById("admBody"); if(b) b.innerHTML=_realHtml(); }
+}
 /* Когда последний раз снимался недельный снимок. Нужно, чтобы было ВИДНО, отработал ли
    воскресный cron: расписание задач живёт в панели хостинга, из приложения его не проверить,
    и без этой строки «сделал ли крон своё дело» выясняется гаданием. */
@@ -12829,8 +12870,11 @@ function _realHtml(){
   <div class="hd-actions" style="margin-bottom:10px">
     <input type="month" class="cell" style="width:auto" value="${_realMonth}" onchange="realSetMonth(this.value)">
     <button class="btn sm" id="realPullBtn" onclick="realPullMonth()">🔄 Обновить месяц из Alfa</button>
-    <button class="btn ghost sm" id="realWeekBtn" onclick="realPullWeek()" title="Посчитать «Ожидается» и доход за конкретную неделю (пн–вс)">📅 Неделя:</button>
-    <input type="date" id="realWeekDate" class="cell" style="width:auto" value="${esc(mon)}">
+    <button class="btn ghost sm" id="realWeekBtn" onclick="realPullWeek()" title="Посчитать «Ожидается» и доход. Поле «по» пустое — считается вся неделя (пн–вс) даты слева; поставьте в него дату, чтобы посчитать произвольный период день в день">📅 Считать с:</button>
+    <input type="date" id="realWeekDate" class="cell" style="width:auto" value="${esc(_realFrom||mon)}" onchange="realSetFrom(this.value)">
+    <span style="font-size:12px;color:var(--muted)">по</span>
+    <input type="date" id="realWeekTo" class="cell" style="width:auto" value="${esc(_realTo)}" onchange="realSetTo(this.value)" title="Пусто — вся неделя (пн–вс) даты слева. Поставьте дату, чтобы посчитать период от и до: смены и каникулы начинаются не в понедельник">
+    ${_realTo?`<button class="btn ghost sm" onclick="realSetTo('')" title="Убрать вторую дату — вернуться к расчёту неделей">✕ период</button>`:""}
     <button class="btn ghost sm" id="realExpBtn" onclick="realFreezeExpect()" title="Зафиксировать «ожидается» на неделю из поля слева (обычно это делает cron в вс 22:00)">🔒 Зафиксировать ожидание</button>
     <button class="btn ghost sm" id="realRebBtn" onclick="realRebuildExpect(false)" title="Для недели, которую не успели заморозить: восстановить «ожидается» по регулярному расписанию. Сначала показывает расчёт и сверку, ничего не записывая">🧩 Восстановить ожидание</button>
     <span id="realPullProg" style="font-size:12px;color:var(--muted)"></span>
@@ -12839,7 +12883,8 @@ function _realHtml(){
     curFrozen
       ? ' — сейчас это <b>следующая</b> неделя с '+esc(nextMon)+', текущая уже зафиксирована.'
       : ' — сейчас это <b>текущая</b> неделя с '+esc(curMon)+': её ещё не фиксировали, и её будущие дни пропадут, если не заморозить до того, как занятия пройдут.'
-    } Дни, где занятия уже проведены, кнопка не трогает — им ожидание восстанавливают отдельно.</div>
+    } Дни, где занятия уже проведены, кнопка не трогает — им ожидание восстанавливают отдельно.
+    Поле «по» — только для пересчёта: 🔒 и 🧩 всегда работают целой неделей, ожидание в Alfa недельное.</div>
   <div style="font-size:12px;color:var(--muted);margin:-4px 0 10px">${_realSnapNote(nextMon)}</div>
   <div class="tscroll" style="max-width:820px"><table id="realTable"><thead><tr>
     <th>Дн</th><th style="text-align:right">Без пропусков</th><th style="text-align:right">С пропусками</th><th style="text-align:right" title="Сколько ожидали ДО начала недели — зафиксировано в вс 22:00 и не меняется">Ожидается</th><th style="text-align:right" title="Реализация от ожидания: (без пропусков + с пропусками) ÷ 2 ÷ ожидание">%</th><th style="text-align:right" title="Нарастающим итогом: среднее «без пропусков» и «с пропусками» — тот же доход, что во «Все показатели» и «Прогноз по всем»">Накопительно</th><th style="text-align:center">Занятий</th>
@@ -12974,24 +13019,39 @@ function _realRebHtml(j){
       <br><button class="btn sm" style="margin-top:8px" onclick="realRebuildExpect(true)">Записать это ожидание</button>
       <span style="font-size:12px;color:var(--muted);margin-left:8px">Дни, где ожидание уже стоит, не тронутся.</span></div></div>`;
 }
-/* Посчитать одну неделю (пн–вс) целиком: и доход, и «Ожидается». */
+/* Посчитать неделю (пн–вс) или произвольный период целиком: и доход, и «Ожидается».
+   Поле «по» пустое — как было, вся неделя даты слева. Заполнено — ровно эти дни, день в день:
+   смены, каникулы и интенсивы начинаются не в понедельник, и округление до недели тянуло бы
+   в расчёт чужие дни. */
 async function realPullWeek(){
   if(_realBusy) return;
-  const v=(document.getElementById("realWeekDate")||{}).value; if(!v){ toast("Выберите дату недели"); return; }
-  const mon=(function(){ const d=new Date(v); const w=d.getDay()===0?7:d.getDay(); d.setDate(d.getDate()-(w-1)); return d; })();
-  const dates=[]; for(let i=0;i<7;i++){ const d=new Date(mon); d.setDate(d.getDate()+i); dates.push(_dIso(d)); }
+  const v=(document.getElementById("realWeekDate")||{}).value; if(!v){ toast("Выберите дату"); return; }
+  const to=((document.getElementById("realWeekTo")||{}).value||"").trim();
+  const dates=[];
+  if(to){
+    let a=v, b=to; if(a>b){ const t=a; a=b; b=t; }                      // перевёрнутый период — опечатка
+    for(let d=new Date(a+"T12:00:00"); _dIso(d)<=b; d.setDate(d.getDate()+1)) dates.push(_dIso(d));
+    /* Каждый день — десятки запросов к Alfa. Полгода одним нажатием положат и Alfa, и терпение:
+       предупреждаем заранее, а не выясняем это на десятой минуте ожидания. */
+    if(dates.length>92){ toast("Период длиннее трёх месяцев — сузьте: каждый день это десятки запросов к Alfa"); return; }
+    if(dates.length>10 && !confirm("Посчитать "+dates.length+" "+_kassaDayWord(dates.length)
+        +" ("+_dmy(a)+" — "+_dmy(b)+") из Alfa? Это несколько минут.")) return;
+  }else{
+    const mon=(function(){ const d=new Date(v); const w=d.getDay()===0?7:d.getDay(); d.setDate(d.getDate()-(w-1)); return d; })();
+    for(let i=0;i<7;i++){ const d=new Date(mon); d.setDate(d.getDate()+i); dates.push(_dIso(d)); }
+  }
   const btn=document.getElementById("realWeekBtn"), prog=document.getElementById("realPullProg");
   _realBusy=true; if(btn) btn.disabled=true;
   try{
     _realStore=_realStore||{};
     for(let i=0;i<dates.length;i+=4){
-      if(prog) prog.textContent="Считаю неделю… "+Math.min(i+4,dates.length)+"/"+dates.length;
+      if(prog) prog.textContent=(to?"Считаю период… ":"Считаю неделю… ")+Math.min(i+4,dates.length)+"/"+dates.length;
       const j=await _pubCall("realizationPull",{dates:dates.slice(i,i+4)});
       Object.assign(_realStore, j.updated||{});
     }
     if(prog) prog.textContent="Готово ✓";
     const b=document.getElementById("admBody"); if(b) b.innerHTML=_realHtml();
-  }catch(e){ const b=document.getElementById("admBody"); if(b){ const d=document.createElement('div'); d.innerHTML=_pubErrHtml(e,"неделя"); b.insertBefore(d.firstChild,b.firstChild); } }
+  }catch(e){ const b=document.getElementById("admBody"); if(b){ const d=document.createElement('div'); d.innerHTML=_pubErrHtml(e,to?"период":"неделя"); b.insertBefore(d.firstChild,b.firstChild); } }
   finally{ _realBusy=false; if(btn) btn.disabled=false; }
 }
 async function realPullMonth(){
@@ -13839,6 +13899,10 @@ function _fmlKid(n){
    Здесь из этого снимка собирается готовый текст сообщения в чат отдела продаж.
    Рейтинг педагогов считается уже тут — по справочнику ставок финмодели (на сервере его нет). */
 let _salesStore=null, _salesWeek=null, _salesBusy=false, _salesErr=null;
+/* Свой период — «c» в _salesWeek плюс две даты. Недельные отчёты замораживает cron, и ключом
+   у них служит понедельник; произвольное окно таким ключом не описывается вовсе, поэтому оно
+   живёт отдельной парой дат и считается на лету. */
+let _salesRange={from:"",to:""};
 async function _salesLoad(){ const j=await _pubCall("salesReport",{}); _salesStore=j; _salesErr=null; }
 function _salesReports(){ return (_salesStore&&_salesStore.reports)||{}; }
 function _salesCfg(){
@@ -13857,7 +13921,27 @@ function salesCfgSet(k,v){ const c=_salesCfg();
 /* Числа как в сообщениях Жанны: 22.578, 102.117 (точка — разделитель тысяч). */
 function _salesNum(n){ return Math.round(+n||0).toLocaleString('ru-RU').replace(/[\s  ]/g,'.'); }
 function _salesRefresh(){ if(_rukSec!=="sales") return; const b=document.getElementById("rukBody"); if(b) b.innerHTML=_salesHtml(); }
-function salesGo(w){ _salesWeek=w||null; _salesRefresh(); }
+function salesGo(w){
+  /* «Свой период» без дат — пустой экран. Берём границы отчёта, который сейчас на экране:
+     обычно надо сдвинуть неделю на день-два, а не набирать даты с нуля. */
+  if(w==="c" && !(_salesRange.from&&_salesRange.to)){
+    const rep=_salesCur();
+    if(rep&&rep.week){ _salesRange.from=rep.week; _salesRange.to=rep.to||rep.week; }
+    else { const t=_todayIso(), d=new Date(t+"T12:00:00"); d.setDate(d.getDate()-6);
+           _salesRange.from=_dIso(d); _salesRange.to=t; }
+  }
+  _salesWeek=w||null; _salesRefresh();
+}
+/* Пустое поле не принимаем: период с одной границей посчитался бы не тем, чем выглядит.
+   Перевёрнутый (по < с) выпрямляем — это опечатка, а не просьба считать назад. */
+function salesSetRange(which,v){
+  if(!v){ _salesRefresh(); return; }
+  if(which==="from") _salesRange.from=v; else _salesRange.to=v;
+  if(_salesRange.from>_salesRange.to){
+    if(which==="from") _salesRange.to=_salesRange.from; else _salesRange.from=_salesRange.to;
+  }
+  _salesWeek="c"; _salesRefresh();
+}
 /* Последний (или выбранный) отчёт. */
 function _salesCur(){
   const R=_salesReports(), keys=Object.keys(R).sort();
@@ -13940,8 +14024,12 @@ function _salesActiveNote(rep){
    ⚠️ Если детоместа за эту неделю ещё не посчитаны, строк НЕ будет вовсе: отправить в чат
    «загрузка 0%» страшнее, чем не отправить ничего. */
 function _salesFillLines(rep){
-  if(typeof _fillAgg!=="function" || !_fillStore || !rep || !rep.week) return [];
-  const from=rep.week, to=rep.to||from;
+  return (rep&&rep.week)?_salesFillLinesFor(rep.week, rep.to||rep.week):[];
+}
+/* Те же строки для произвольного окна: недельный отчёт и «свой период» обязаны считать
+   загрузку ОДНОЙ функцией, иначе однажды разойдутся и верить перестанут обоим. */
+function _salesFillLinesFor(from,to){
+  if(typeof _fillAgg!=="function" || !_fillStore || !from || !to) return [];
   let agg,rows,T;
   try{ agg=_fillAgg(from,to); rows=_fillRows(agg); T=_fillTotals(rows); }catch(e){ return []; }
   if(!T || !T.seats || T.pct==null) return [];
@@ -14165,6 +14253,7 @@ async function salesPullLastYear(week){
   finally{ _salesBusy=false; }
 }
 function salesCopy(which){
+  if(which==="range"){ _copyText(_salesRangeText()).then(ok=>toast(ok?"Скопировано — вставляйте в чат":"Не удалось скопировать")); return; }
   const rep=_salesCur(); if(!rep) return;
   const t=(which==="month")?_salesMonthText(rep,rep.month?_salesTops(rep.month.ym+"-01",_salesMonthEnd(rep.month.ym)):null):_salesWeekText(rep);
   _copyText(t).then(ok=>toast(ok?"Скопировано — вставляйте в чат":"Не удалось скопировать"));
@@ -14173,16 +14262,145 @@ function _salesMonthEnd(ym){ const y=+String(ym).slice(0,4), m=+String(ym).slice
 /* Понедельник недели, в которую попала дата — ключ отчёта (как alfa_monday_of на сервере). */
 function _salesMonday(iso){ const d=new Date(iso); const w=d.getDay()===0?7:d.getDay(); d.setDate(d.getDate()-(w-1)); return _dIso(d); }
 
+/* ===== СВОЙ ПЕРИОД В ОТЧЁТЕ ДЛЯ ОТДЕЛА ПРОДАЖ =====
+   Недельный отчёт замораживает cron, и ключ у него — понедельник. «Шли на», прогноз на
+   следующую неделю и число активных клиентов держатся ЦЕПОЧКОЙ отчёт-за-отчётом и задним
+   числом не восстанавливаются, поэтому произвольное окно полноценным отчётом стать не может —
+   и делать вид, что может, нельзя: отдел продаж сверит цифры и перестанет верить всему разделу.
+   Что здесь считается на лету из дневного хранилища (недельной сетки у него нет вовсе):
+   оборот периода, занятия, тот же период год назад и загрузка групп. Чего нет — написано
+   на экране, чтобы пустое место не выглядело поломкой. */
+function _salesPeriodSel(curKey){
+  const R=_salesReports(), keys=Object.keys(R).sort().reverse(), cust=(_salesWeek==="c");
+  const lab=(_salesRange.from&&_salesRange.to)
+    ? ("Свой период: "+_fillRangeLabel(_salesRange.from,_salesRange.to))
+    : "Свой период: выбрать даты…";
+  return `<select class="cell" style="width:auto" title="Недельные отчёты морозит cron в воскресенье в 22:00. «Свой период» — любые две даты, считается на лету из дневного хранилища" onchange="salesGo(this.value)">
+    <optgroup label="Свой период"><option value="c"${cust?" selected":""}>${esc(lab)}</option></optgroup>
+    ${keys.length?('<optgroup label="Недельные отчёты">'+keys.map(k=>`<option value="${esc(k)}"${(!cust&&curKey===k)?" selected":""}>Неделя ${esc(_salesDate(k))}–${esc(_salesDate(R[k].to))}${R[k].month?" · итоги месяца":""}</option>`).join("")+'</optgroup>'):""}
+  </select>`;
+}
+/* Оборот окна по дневному хранилищу. Прошедший день даёт среднее «без пропусков» и «с
+   пропусками» (тот же факт, что во «Все показатели» и в недельном отчёте), будущий —
+   ожидаемые списания. Ровно как alfa_sales_day_val на сервере: две реализации одной формулы
+   обязаны совпадать. miss — прошедшие дни, которых в хранилище нет: без них оборот занижен
+   молча, и об этом надо сказать вслух. */
+function _salesRangeFact(from,to){
+  const out={sum:0, les:0, dwl:0, known:0, miss:[]};
+  if(!from||!to) return out;
+  const today=_todayIso(), St=_realStore||{};
+  for(let d=new Date(from+"T12:00:00"); _dIso(d)<=to; d.setDate(d.getDate()+1)){
+    const k=_dIso(d), r=St[k];
+    if(!r){ if(k<=today) out.miss.push(k); continue; }
+    out.known++;
+    out.sum += (k<=today) ? (((+r.present||0)+(+r.all||0))/2) : (+r.planned||0);
+    out.les += (+r.lessons||0);
+    if(+r.lessons) out.dwl++;
+  }
+  out.sum=Math.round(out.sum*100)/100;
+  return out;
+}
+function _salesRangeText(){
+  const from=_salesRange.from, to=_salesRange.to; if(!from||!to) return "";
+  const F=_salesRangeFact(from,to), L=[];
+  L.push("Период "+_fillRangeLabel(from,to)+": оборот "+_salesNum(F.sum)+".");
+  const lf=_fillShift(from), lt=_fillShift(to), LY=_salesRangeFact(lf,lt);
+  /* Год назад — сдвиг ровно на 364 дня: день недели сохраняется, среда сравнивается со средой.
+     Если тех дней в хранилище нет, строки просто не будет: ноль вместо факта соврал бы. */
+  if(LY.sum>0){
+    const d=Math.round(100*F.sum/LY.sum)-100;
+    L.push("Год назад ("+_fillRangeLabel(lf,lt)+") - "+_salesNum(LY.sum)+", "+(d>=0?"+":"")+d+"%.");
+  }
+  L.push("Занятий: "+_salesNum(F.les)+", дней с занятиями: "+F.dwl+".");
+  _salesFillLinesFor(from,to).forEach(x=>L.push(x));
+  return L.join("\n");
+}
+/* Досчитать недостающие дни окна. Дневная реализация и детоместа лежат в РАЗНЫХ файлах и
+   наполнялись в разное время: день может быть в одном и отсутствовать в другом, поэтому
+   просим объединение — иначе загрузка тихо считалась бы по неполному окну. */
+async function salesPullRange(){
+  if(_salesBusy) return;
+  const from=_salesRange.from, to=_salesRange.to; if(!from||!to) return;
+  const today=_todayIso(), FS=(_fillStore&&_fillStore.fill)||{}, St=_realStore||{}, need=[];
+  for(let d=new Date(from+"T12:00:00"); _dIso(d)<=to; d.setDate(d.getDate()+1)){
+    const k=_dIso(d); if(k>today) break;
+    if(!St[k] || !FS[k]) need.push(k);
+  }
+  const prog=document.getElementById("salesProg"), btn=document.getElementById("salesRangeBtn");
+  if(!need.length){ if(prog) prog.textContent="Все дни периода уже посчитаны"; return; }
+  if(need.length>92){ toast("Период длиннее трёх месяцев — сузьте: каждый день это десятки запросов к Alfa"); return; }
+  if(need.length>10 && !confirm("Досчитать "+need.length+" "+_kassaDayWord(need.length)+" из Alfa? Это несколько минут.")) return;
+  _salesBusy=true; if(btn) btn.disabled=true;
+  try{
+    _realStore=_realStore||{};
+    for(let i=0;i<need.length;i+=5){
+      if(prog) prog.textContent="Считаю из Alfa… "+Math.min(i+5,need.length)+"/"+need.length;
+      const j=await _pubCall("realizationPull",{dates:need.slice(i,i+5)});
+      Object.assign(_realStore, j.updated||{});
+    }
+    await _fillLoad(true);                 // детоместа пересчитались тем же действием
+    _salesRefresh();
+  }catch(e){ if(prog) prog.innerHTML=_pubErrHtml(e,"период"); }
+  finally{ _salesBusy=false; const b=document.getElementById("salesRangeBtn"); if(b) b.disabled=false; }
+}
+function _salesRangeHtml(){
+  const from=_salesRange.from, to=_salesRange.to;
+  const head=`<div class="callout" style="margin-bottom:10px;font-size:12px">
+    <b>Свой период</b> — любые две даты, а не неделя пн–вс: смены, каникулы и интенсивы начинаются не в понедельник. Считается <b>на лету</b> из дневного хранилища реализации и детомест: оборот, занятия, тот же период год назад и загрузка групп.<br>
+    <b style="color:var(--terra-d)">Чего здесь нет:</b> «шли на», прогноза на следующую неделю и числа активных клиентов. Их морозит воскресный cron по неделям и передаёт цепочкой из отчёта в отчёт — для произвольного окна их неоткуда взять. Нужны они — выберите недельный отчёт в том же списке.</div>`;
+  const bar=`<div class="hd-actions" style="margin-bottom:10px">
+    ${_salesPeriodSel("")}
+    <span style="font-size:12px;color:var(--muted)">с</span>
+    <input type="date" class="cell" style="width:auto" value="${esc(from)}" onchange="salesSetRange('from',this.value)" title="Первый день периода — любой, не обязательно понедельник">
+    <span style="font-size:12px;color:var(--muted)">по</span>
+    <input type="date" class="cell" style="width:auto" value="${esc(to)}" onchange="salesSetRange('to',this.value)" title="Последний день периода — включительно">
+    <button class="btn ghost sm" id="salesRangeBtn" onclick="salesPullRange()" title="Досчитать в Alfa те дни периода, которых ещё нет в хранилище">🧮 Досчитать дни из Alfa</button>
+    <span id="salesProg" style="font-size:12px;color:var(--muted)"></span>
+  </div>`;
+  if(!from||!to) return head+bar+`<div class="callout">Укажите обе даты периода — «с» и «по».</div>`;
+  if(!_realStore) return head+bar+`<div class="callout">⏳ Загружаю дневную реализацию…</div>`;
+  const days=Math.round((new Date(to)-new Date(from))/86400000)+1;
+  const F=_salesRangeFact(from,to);
+  const lf=_fillShift(from), lt=_fillShift(to), LY=_salesRangeFact(lf,lt);
+  const lyDelta=(LY.sum>0)?(Math.round(100*F.sum/LY.sum)-100):null;
+  const warn=[];
+  if(F.miss.length) warn.push(`<b style="color:var(--terra-d)">${F.miss.length} ${_kassaDayWord(F.miss.length)} периода ещё не считали</b> — нажмите «Досчитать дни из Alfa», иначе оборот занижен`);
+  if(!_fillStore) warn.push("детоместа ещё грузятся — строки про загрузку появятся сами");
+  const numRow=(lab,val,note)=>`<tr><td>${lab}</td><td style="text-align:right;white-space:nowrap"><b>${val}</b></td><td style="font-size:12px;color:var(--muted)">${note||""}</td></tr>`;
+  const lyNote=LY.known
+    ? ("сдвиг ровно на 52 недели, дни недели совпадают · дней в хранилище: "+LY.known+" из "+days
+       +(lyDelta!=null?(' · сейчас <b style="color:'+(lyDelta>=0?"var(--green)":"var(--red)")+'">'+(lyDelta>=0?"+":"")+lyDelta+"%</b>"):""))
+    : "тех дней в хранилище нет — сравнивать не с чем";
+  const tab=`<table style="max-width:760px"><tbody>
+    ${numRow("Оборот периода "+esc(_fillRangeLabel(from,to)),
+             '<span style="color:var(--green)">'+_gm(F.sum)+'</span>',
+             "среднее дохода с пропусками и без пополам · дней в периоде: "+days+" · с занятиями: "+F.dwl)}
+    ${numRow("Тот же период год назад ("+esc(_fillRangeLabel(lf,lt))+")",
+             LY.known?_gm(LY.sum):'<span style="color:var(--muted)">—</span>', lyNote)}
+    ${numRow("Занятий", _gm(F.les), "проведённых за период")}
+  </tbody></table>`;
+  return head+bar
+    +(warn.length?`<div class="callout" style="border-color:var(--terra);font-size:12px;margin-bottom:10px">${warn.join("<br>")}</div>`:"")
+    +`<div style="margin:14px 0 6px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <h3 style="margin:0">Сообщение за период</h3>
+        <button class="btn sm" onclick="salesCopy('range')">📋 Копировать сообщение</button></div>
+      <pre style="white-space:pre-wrap;font-size:13px;line-height:1.5;background:var(--paper);border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin:0;max-width:760px">${esc(_salesRangeText())}</pre>`
+    +`<h3 style="margin:16px 0 6px">Откуда цифры</h3>`+tab
+    +`<div style="font-size:12px;color:var(--muted);margin-top:10px">Рейтинг педагогов за этот же период — во вкладке «🏆 Рейтинг педагогов»: там уже есть поля «с» и «по».</div>`;
+}
 function _salesHtml(){
   const head=`<div class="callout" style="margin-bottom:10px;font-size:12px">Готовое сообщение в чат отдела продаж. Цифры замораживает cron <b>в воскресенье в 22:00</b>: оборот недели (факт из Alfa), прогноз на следующую неделю (снимок Alfa) и число активных клиентов. Позже их уже не восстановить — прогноз превращается в факт, а клиенты меняются каждый день. «Идём на» и комментарий вписываете вы: то, что впишете, станет «Шли на» в следующем отчёте.</div>`;
+  /* Свой период не зависит от снимков отчётов — он считается из дневного хранилища. Поэтому
+     его ветка стоит ДО проверок _salesErr/_salesStore: сломавшийся серверный отчёт не должен
+     уносить с собой окно, которое к нему отношения не имеет. */
+  if(_salesWeek==="c") return _salesRangeHtml();
   if(_salesErr) return head+_pubErrHtml(_salesErr,"отчёт для отдела продаж")+
     `<div class="hd-actions" style="margin-top:10px"><button class="btn sm" id="salesBtn" onclick="salesBuild()">🧮 Собрать отчёт за эту неделю</button><span id="salesProg" style="font-size:12px;color:var(--muted)"></span></div>`;
   if(!_salesStore) return head+`<div class="callout">⏳ Загружаю отчёты…</div>`;
   const R=_salesReports(), keys=Object.keys(R).sort().reverse();
   const rep=_salesCur(), curKey=rep?rep.key:"";
   const bar=`<div class="hd-actions" style="margin-bottom:10px">
-    ${keys.length?`<select class="cell" style="width:auto" onchange="salesGo(this.value)">${
-      keys.map(k=>`<option value="${esc(k)}"${curKey===k?" selected":""}>Неделя ${esc(_salesDate(k))}–${esc(_salesDate(R[k].to))}${R[k].month?" · итоги месяца":""}</option>`).join("")}</select>`:''}
+    ${_salesPeriodSel(curKey)}
     <button class="btn sm" id="salesBtn" onclick="salesBuild('${_jsStr(curKey)}')">🔄 Пересобрать эту неделю</button>
     ${R[_salesMonday(_todayIso())]?'':`<button class="btn ghost sm" onclick="salesBuild()" title="Обычно это делает cron в воскресенье в 22:00">🧮 Собрать за текущую неделю</button>`}
     <span id="salesProg" style="font-size:12px;color:var(--muted)">${_salesStore.settings&&_salesStore.settings.lastRun?("последний запуск: "+esc(String(_salesStore.settings.lastRun).slice(0,16).replace("T"," "))):""}</span>
@@ -14439,7 +14657,12 @@ function _progPlanCell(key, snap){
    лучший день группы за период. Источник подписан в строке, чтобы «загрузка 120%» не выглядела
    ошибкой расчёта там, где план просто не вписан. */
 let _fillStore=null, _fillErr=null, _fillBusy=false, _fillLoading=null;
-let _fillPeriod=null;                 // "w:2026-08-31" | "m:2026-03"
+let _fillPeriod=null;                 // "w:2026-08-31" | "m:2026-03" | "c" (свой период)
+/* Свой период — любые две даты. Готовый список умеет только неделю пн–вс и календарный месяц,
+   а считать приходится по сменам и каникулам: они начинаются в среду и кончаются во вторник,
+   и ни одно окно из списка их не описывает. Даты держим отдельно от _fillPeriod, чтобы
+   выбранный режим пережил перерисовку. */
+let _fillRange={from:"",to:""};
 let _fillSort="pct";                  // pct | seats | name
 const _FILL_FMT=["les","seats","paid","trial","att","rev","attPaid","attFree","noAttPaid",
                  "attTrial","attZero","tch","sbj"];
@@ -14594,6 +14817,11 @@ function _fillPeriods(){
     const y=+ym.slice(0,4), m=+ym.slice(5,7), last=new Date(y,m,0);
     out.push({k:"m:"+ym, from:ym+"-01", to:_dIso(last), kind:"m", ym:ym, label:"Месяц: "+_salesMonName(ym)});
   });
+  /* Свой период — в КОНЕЦ списка: P[0] должен остаться свежей неделей, на неё падает
+     умолчание в _fillCur(). */
+  if(_fillRange.from&&_fillRange.to)
+    out.push({k:"c", from:_fillRange.from, to:_fillRange.to, kind:"c",
+              label:"Свой период: "+_fillRangeLabel(_fillRange.from,_fillRange.to)});
   return out;
 }
 /* Список для селекта, разложенный по группам: иначе полсотни недель подряд не пролистать. */
@@ -14602,7 +14830,12 @@ function _fillPeriodOpts(cur){
   const opt=p=>`<option value="${esc(p.k)}"${p.k===cur?" selected":""}>${esc(p.label)}</option>`;
   const grp=(lab,list)=>list.length?(`<optgroup label="${esc(lab)}">`+list.map(opt).join("")+"</optgroup>"):"";
   const yl=y=>y+"/"+String(y+1).slice(2);
-  return grp("Учебный год "+yl(y0), P.filter(p=>p.kind==="w"&&p.y===y0))
+  /* «Свой период» — первым пунктом: за ним тянутся, когда нужного окна в списке нет вовсе.
+     Пункт стоит всегда, даже пока дат не выбрали, — иначе до него было бы не добраться. */
+  const c=P.find(p=>p.kind==="c");
+  return `<optgroup label="Свой период"><option value="c"${cur==="c"?" selected":""}>${
+      c?esc(c.label):"Свой период: выбрать даты…"}</option></optgroup>`
+    +grp("Учебный год "+yl(y0), P.filter(p=>p.kind==="w"&&p.y===y0))
     +grp("Учебный год "+yl(y0-1), P.filter(p=>p.kind==="w"&&p.y===y0-1))
     +grp("Месяцы", P.filter(p=>p.kind==="m"));
 }
@@ -14719,7 +14952,24 @@ function fillPlanSet(gid,v){
   persistLocal(); if(typeof fbSchedulePush==="function") fbSchedulePush();
   _fillRefresh();
 }
-function fillGo(k){ _fillPeriod=k||null; _fillRefresh(); }
+function fillGo(k){
+  /* «Свой период» без дат — пустой экран. Подставляем границы того периода, что уже на
+     экране: обычно нужно сдвинуть неделю на день-два, а не набирать даты с нуля. */
+  if(k==="c" && !(_fillRange.from&&_fillRange.to)){
+    const P=_fillCur(); if(P){ _fillRange.from=P.from; _fillRange.to=P.to; }
+  }
+  _fillPeriod=k||null; _fillRefresh();
+}
+/* Пустое поле не принимаем: период с одной границей посчитался бы не тем, чем выглядит, и
+   молча. Перевёрнутый (по < с) выпрямляем — это опечатка, а не просьба считать назад. */
+function fillSetRange(which,v){
+  if(!v){ _fillRefresh(); return; }
+  if(which==="from") _fillRange.from=v; else _fillRange.to=v;
+  if(_fillRange.from>_fillRange.to){
+    if(which==="from") _fillRange.to=_fillRange.from; else _fillRange.from=_fillRange.to;
+  }
+  _fillPeriod="c"; _fillRefresh();
+}
 function fillSortBy(c){ _fillSort=c; _fillRefresh(); }
 /* Строки свода по группам — из них собираются и таблица, и итоги. */
 function _fillRows(agg){
@@ -14884,12 +15134,17 @@ async function fillPull(all){
   finally{ _fillBusy=false; if(btn) btn.disabled=false; }
 }
 function _fillPctColor(p){ return p>=90?"var(--green)":(p>=70?"#C9922E":"var(--red)"); }
+INFO_HELP.fill={title:"📦 Заполняемость групп: как это считается", html:`
+  <p style="margin:0 0 10px"><b>Детоместо</b> — это <b>плановое место</b> для ребёнка: вместимость группы × число её занятий за период. Потолок загрузки, а не факт. Один ребёнок, который ходит три раза в неделю, занимает три детоместа. <b>Чем места заполнены</b> — отдельные колонки: «Списаний» (прошло списание по абонементу, без пробных), «Пришли», «Без списания». Загрузка = заполнено ÷ детоместа. Чтобы перевести места в детей, есть блок «👥 Дети за период».</p>
+  <p style="margin:0 0 10px"><b>Мест было</b> = вместимость группы × число её занятий за период. Вместимость берём в таком порядке: ваш «План детей» по группе → <b>«Чел/гр» из «Планировщика загрузки»</b> по курсу этой группы → вместимость в AlfaCRM → самое полное занятие за период (подписано в строке). То есть загрузка считается от <b>плана</b>, а не от того, сколько стульев влезает: набрали сверх плана — будет больше 100%. <b>Загрузка</b> = детоместа ÷ мест.</p>
+  <p style="margin:0 0 10px"><b style="color:var(--terra-d)">Про прошлый год.</b> Вместимость всегда берётся сегодняшняя: «План детей» — ваша текущая цифра, а у архивных групп вместимости в Alfa обычно нет, и тогда подставляется самое полное занятие той же недели. Тогда загрузка выходит близкой к 100% просто по построению — смотрите колонку «Мест» и подпись, откуда она взялась.</p>
+  <p style="margin:0"><b>Свой период.</b> В списке периодов первым пунктом — «Свой период»: любые две даты, а не только неделя пн–вс и календарный месяц. Смены и каникулы начинаются не в понедельник, и недельная сетка их не описывает.</p>
+  <p style="margin:10px 0 0;color:var(--muted)">Факт копится сам вместе с ночным пересчётом реализации (22:00). Прошлые месяцы — кнопкой «Пересчитать период».</p>`};
 function _fillHtml(){
-  const head=`<div class="callout" style="margin-bottom:10px;font-size:12px">
-    <b>Детоместо</b> — это <b>плановое место</b> для ребёнка: вместимость группы × число её занятий за период. Потолок загрузки, а не факт. Один ребёнок, который ходит три раза в неделю, занимает три детоместа. <b>Чем места заполнены</b> — отдельные колонки: «Списаний» (прошло списание по абонементу, без пробных), «Пришли», «Без списания». Загрузка = заполнено ÷ детоместа. Чтобы перевести места в детей, есть блок «👥 Дети за период».<br>
-    <b>Мест было</b> = вместимость группы × число её занятий за период. Вместимость берём в таком порядке: ваш «План детей» по группе → <b>«Чел/гр» из «Планировщика загрузки»</b> по курсу этой группы → вместимость в AlfaCRM → самое полное занятие за период (подписано в строке). То есть загрузка считается от <b>плана</b>, а не от того, сколько стульев влезает: набрали сверх плана — будет больше 100%. <b>Загрузка</b> = детоместа ÷ мест.<br>
-    <b style="color:var(--terra-d)">Про прошлый год.</b> Вместимость всегда берётся сегодняшняя: «План детей» — ваша текущая цифра, а у архивных групп вместимости в Alfa обычно нет, и тогда подставляется самое полное занятие той же недели. Тогда загрузка выходит близкой к 100% просто по построению — смотрите колонку «Мест» и подпись, откуда она взялась.<br>
-    Факт копится сам вместе с ночным пересчётом реализации (22:00). Прошлые месяцы — кнопкой «Пересчитать период».</div>`;
+  /* Кнопка ❓ вместо простыни над цифрами. В шапке она нужна только ветками «ошибка» и
+     «ещё гружусь» — в основном виде та же кнопка стоит в панели периода, второй строки не надо. */
+  const helpBtn=`<button class="btn ghost sm" onclick="openInfo('fill')" title="Детоместа, «мест было», загрузка и что происходит с прошлым годом">❓ Как это считается</button>`;
+  const head=`<div class="hd-actions" style="margin-bottom:10px">${helpBtn}</div>`;
   if(_fillErr) return head+_pubErrHtml(_fillErr,"заполняемость")+
     `<div class="hd-actions" style="margin-top:10px"><button class="btn sm" onclick="_fillErr=null;_fillLoad(true).then(_fillRefresh).catch(e=>{_fillErr=e;_fillRefresh();})">↻ Ещё раз</button></div>`;
   if(!_fillStore) return head+`<div class="callout">⏳ Загружаю заполняемость…</div>`;
@@ -14900,17 +15155,24 @@ function _fillHtml(){
   const tile=(n,lab,col,ttl)=>`<div title="${esc(ttl||"")}" style="flex:1;min-width:130px;border:1px solid var(--line);border-radius:9px;padding:8px 12px;background:#fff">
     <div style="font-size:22px;font-weight:700${col?";color:"+col:""}">${n}</div>
     <div style="font-size:12px;color:var(--muted)">${lab}</div></div>`;
+  /* Длину периода считаем до панели: в «своём периоде» она стоит прямо в ней подписью. */
+  const dayCnt=Math.round((new Date(P.to)-new Date(P.from))/86400000)+1;
   const bar=`<div class="hd-actions" style="margin-bottom:10px">
-    <select class="cell" style="width:auto" onchange="fillGo(this.value)" title="Недели учебного года — этого и прошлого. Летних недель в списке нет: летом группы другие, сравнивать их с учебными нечестно">${_fillPeriodOpts(P.k)}</select>
+    <select class="cell" style="width:auto" onchange="fillGo(this.value)" title="Недели учебного года — этого и прошлого, календарные месяцы и «Свой период» — любые две даты. Летних недель в списке нет: летом группы другие, сравнивать их с учебными нечестно">${_fillPeriodOpts(P.k)}</select>
+    ${P.kind==="c"?`<span style="font-size:12px;color:var(--muted)">с</span>
+    <input type="date" class="cell" style="width:auto" value="${esc(P.from)}" onchange="fillSetRange('from',this.value)" title="Первый день периода — любой, не обязательно понедельник">
+    <span style="font-size:12px;color:var(--muted)">по</span>
+    <input type="date" class="cell" style="width:auto" value="${esc(P.to)}" onchange="fillSetRange('to',this.value)" title="Последний день периода — включительно">
+    <span style="font-size:12px;color:var(--muted)">${dayCnt} ${_kassaDayWord(dayCnt)}</span>`:""}
     <select class="cell" style="width:auto" title="Порядок строк" onchange="fillSortBy(this.value)">
       <option value="pct"${_fillSort==="pct"?" selected":""}>Сначала самые пустые</option>
       <option value="seats"${_fillSort==="seats"?" selected":""}>Сначала с самым большим числом списаний</option>
       <option value="name"${_fillSort==="name"?" selected":""}>По названию</option></select>
     <button class="btn ghost sm" id="fillPullBtn" onclick="fillPull(false)" title="Посчитать в Alfa те дни периода, которых ещё нет в хранилище">🧮 Пересчитать период</button>
     <button class="btn ghost sm" onclick="fillPull(true)" title="Пересчитать ВСЕ дни периода заново — нужно один раз для дней, посчитанных до появления счётчика детомест">🔁 Пересчитать заново</button>
+    ${helpBtn}
     <span id="fillProg" style="font-size:12px;color:var(--muted)"></span>
   </div>`;
-  const dayCnt=Math.round((new Date(P.to)-new Date(P.from))/86400000)+1;
   const today=_todayIso();
   const wantDays=Math.min(dayCnt, Math.round((new Date(today<P.to?today:P.to)-new Date(P.from))/86400000)+1);
   const gap=Math.max(0,wantDays-agg.days);
@@ -14962,7 +15224,11 @@ function _fillHtml(){
     })()}
   </div>`;
   /* --- ПЛАН ФИНМОДЕЛИ ↔ ФАКТ ALFA (купленные детоместа) --- */
-  const MP=_fillModelPlan(), wks=(P.kind==="w")?1:(+((S.assume||{}).weeksPerMonth)||4);
+  /* Сколько недель плана укладывается в период. Неделя — одна; месяц — условные 4 (та же
+     цифра, что в «Оборот/месяц» модели); свой период — по числу дней, иначе план за 12 дней
+     сравнивался бы с планом целого месяца и «выполнение» вышло бы втрое ниже. */
+  const MP=_fillModelPlan();
+  const wks=(P.kind==="w")?1:(P.kind==="c"?(Math.round(dayCnt/7*100)/100):(+((S.assume||{}).weeksPerMonth)||4));
   const planSeats=Math.round(MP.seatsWeek*wks);
   const pPct=planSeats>0?100*T.fact/planSeats:null;
   /* ⚠️ ТРИ РАЗНЫЕ ЦИФРЫ, и две из них называются «детоместа». Жанна поймала расхождение
@@ -14984,7 +15250,10 @@ function _fillHtml(){
       <tr><td style="color:var(--muted)">Разница с планом</td><td class="num" style="color:var(--muted)">${planSeats?((T.fact-planSeats>=0?"+":"−")+_gm(Math.abs(T.fact-planSeats))+" детомест"):"—"}</td></tr>
     </tbody></table>
     ${(planSeats>0&&T.seats>0&&planSeats>T.seats)?`<div class="hint" style="margin-top:6px">Почему в «Планировщике» ${_gm(planSeats)}, а в таблице ниже ${_gm(T.seats)}: планировщик считает, сколько мест должно открываться каждую неделю, а раздел — сколько открылось на самом деле. Разница ${_gm(planSeats-T.seats)} — это места занятий, которых не было: каникулы, праздники, ещё не запущенные группы.</div>`:""}
-    <small class="note">План — из вкладки «Планировщик загрузки»: по каждому курсу «чел/гр × групп/нед × визитов». Месяц считается как ${wks} учебных недели — та же условность, что и в «Оборот/месяц» модели (S.assume.weeksPerMonth). Факт — списания из Alfa, дети не уникальные: ребёнок, ходящий 2 раза в неделю, занимает 2 детоместа.</small></div>`;
+    <small class="note">План — из вкладки «Планировщик загрузки»: по каждому курсу «чел/гр × групп/нед × визитов». ${
+      P.kind==="c"?("Период в "+dayCnt+" "+_kassaDayWord(dayCnt)+" пересчитан в "+wks+" недель плана — по числу дней ÷ 7.")
+      :P.kind==="m"?("Месяц считается как "+wks+" учебных недели — та же условность, что и в «Оборот/месяц» модели (S.assume.weeksPerMonth).")
+      :"Неделя — ровно одна неделя плана."} Факт — списания из Alfa, дети не уникальные: ребёнок, ходящий 2 раза в неделю, занимает 2 детоместа.</small></div>`;
   /* ===== ЭТАЛОН: ТОТ ЖЕ ПЕРИОД ГОД НАЗАД =====
      Решение Жанны 08.09.2026: «если я ставлю 2–7, то и в прошлом сентябре это должно быть
      первая неделя с 3 по 8 — среда–понедельник».
@@ -15076,7 +15345,7 @@ function _fillHtml(){
         <td class="num">${W.free?`<b style="color:var(--red)">${_gm(W.free)}</b>`:"—"}</td></tr>
     </tbody></table></div></div>`;
   const warnHtml=warn.length?`<div class="callout" style="border-color:var(--terra);margin-bottom:10px">${warn.join(" · ")}</div>`:"";
-  return head+bar+warnHtml+tiles+whoRow+catBox+_fillKidsHtml()+modelBlk+baseBlk+table;
+  return bar+warnHtml+tiles+whoRow+catBox+_fillKidsHtml()+modelBlk+baseBlk+table;
 }
 
 function _progHtml(){
