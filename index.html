@@ -999,8 +999,31 @@ h3.cmp-fl span{font-weight:400;font-size:12px;color:var(--muted)}
 .cmp-kt thead tr.cmp-flt th{background:var(--sand-l);padding:4px 5px;border-bottom:1px solid var(--line)}
 .cmp-kt .cmp-cf{font-size:11px;padding:3px 6px;height:26px}
 .cmp-kt select.cmp-cf{width:100%;min-width:96px}
-/* даты смены в настройках: в 62 px умещалось только «01.11» */
-.cmp-cfg input[type=date]{width:142px}
+/* Настройки смены — выезжающей панелью справа. Семь полей строкой посреди экрана закрывали
+   собой сам список детей, ради которого вкладку и открывают. */
+.cmp-drawer{position:fixed;top:0;right:0;height:100%;width:min(430px,94vw);background:#fff;z-index:81;
+  border-left:1px solid var(--line);box-shadow:-10px 0 34px rgba(28,20,16,.18);
+  transform:translateX(102%);transition:transform .22s ease;overflow-y:auto;overscroll-behavior:contain}
+.cmp-drawer.show{transform:translateX(0)}
+.cmp-drawer-bd{position:fixed;inset:0;background:rgba(28,20,16,.35);z-index:80;opacity:0;pointer-events:none;transition:opacity .22s}
+.cmp-drawer-bd.show{opacity:1;pointer-events:auto}
+.cmp-dr-h{display:flex;align-items:center;gap:10px;padding:15px 18px;border-bottom:1px solid var(--line);position:sticky;top:0;background:#fff;z-index:1}
+.cmp-dr-h b{font-size:16px;flex:1}
+.cmp-dr-h .cmp-x{font-size:22px;padding:0 6px}
+.cmp-dr-b{padding:16px 18px 26px}
+.cmp-dr-f{display:flex;gap:8px;flex-wrap:wrap;margin-top:22px;padding-top:14px;border-top:1px solid var(--line)}
+.cmp-f{display:block;font-size:11px;color:var(--muted);font-weight:600;margin-bottom:12px}
+.cmp-f .cell{margin-top:3px}
+.cmp-f2{display:flex;gap:10px}
+.cmp-f2>*{flex:1;min-width:0}
+.cmp-fh{font-size:11px;color:var(--muted);line-height:1.45;margin:-6px 0 14px}
+/* кнопка-тумблер «⚙ Настройки смены», пока панель открыта */
+.btn.ghost.on{background:var(--graphite);border-color:var(--graphite);color:#fff}
+/* textarea с классом .cell вне модалки оставалась шириной в 20 знаков: input.wide{width:100%}
+   работает только для input, а в модалках ширину даёт .modal .cell.wide — вне их не было ничего */
+textarea.cell.wide{width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:7px;
+  padding:8px 10px;font-family:inherit;font-size:13px;line-height:1.45;background:#fff}
+textarea.cell.wide:focus{outline:none;border-color:var(--terra);background:#FFFCF6}
 /* заголовки подборки — кнопки сортировки */
 .cmp-kt th.cmp-th{cursor:pointer;user-select:none;white-space:nowrap}
 .cmp-kt th.cmp-th:hover{text-decoration:underline}
@@ -1009,8 +1032,19 @@ h3.cmp-fl span{font-weight:400;font-size:12px;color:var(--muted)}
 /* меню шаблонов Viber и библиотека сообщений */
 .cmp-vbmenu{max-width:320px}
 .cmp-vbmenu button.btn{white-space:normal}
-.cmp-tpl{border:1px solid var(--line);border-radius:9px;padding:8px 10px;margin-bottom:8px;background:var(--cream)}
-.cmp-tpl textarea.cell{height:120px;text-align:left;margin-top:6px;font-family:inherit;line-height:1.4;resize:vertical}
+/* библиотека — плитками по три в строку: длинный текст в столбик читался хуже, чем рядом */
+.cmp-tpls{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-bottom:12px}
+@media(max-width:1250px){.cmp-tpls{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:780px){.cmp-tpls{grid-template-columns:minmax(0,1fr)}}
+.cmp-tpl{border:1px solid var(--line);border-radius:10px;padding:10px;background:#fff;display:flex;flex-direction:column;min-width:0}
+.cmp-tpl-h{display:flex;gap:6px;align-items:center;margin-bottom:7px}
+input.cmp-tpl-n{flex:1;min-width:0;width:auto;text-align:left;font-weight:700;font-size:13px}
+.cmp-tpl-t{width:100%;box-sizing:border-box;height:185px;border:1px solid var(--line);border-radius:7px;
+  padding:8px 10px;font-family:inherit;font-size:12px;line-height:1.5;background:var(--cream);resize:vertical}
+.cmp-tpl-t:focus{outline:none;border-color:var(--terra);background:#FFFCF6}
+.cmp-tpl-add{align-items:center;justify-content:center;border-style:dashed;color:var(--muted);
+  cursor:pointer;min-height:150px;font-weight:600;font-size:13px}
+.cmp-tpl-add:hover{border-color:var(--terra);color:var(--coal);background:var(--sand-l)}
 .cmp-tplhint{font-size:12px;color:var(--muted);margin-bottom:10px;line-height:1.5}
 .cmp-tplhint code{background:var(--sand-l);padding:0 4px;border-radius:4px;color:var(--coal)}
 /* программа смены из конструктора: дни раскрываются, блоки дня, занятия */
@@ -1026,7 +1060,16 @@ h3.cmp-fl span{font-weight:400;font-size:12px;color:var(--muted)}
 .cmp-it:last-child{border-bottom:none}
 .cmp-dir{display:inline-block;font-size:10px;padding:0 6px;border-radius:8px;background:var(--sand-l);color:var(--muted);margin-right:6px;vertical-align:1px}
 .cmp-desc{font-size:12px;color:var(--muted);margin-top:1px}
-.cmp-sum{height:180px;text-align:left;font-family:inherit;line-height:1.45;resize:vertical}
+/* краткое содержание: текст во всю ширину, кнопки колонкой рядом */
+.cmp-sumwrap{display:grid;grid-template-columns:minmax(0,1fr) 280px;gap:14px;align-items:start}
+@media(max-width:860px){.cmp-sumwrap{grid-template-columns:minmax(0,1fr)}}
+.cmp-sum{width:100%;box-sizing:border-box;height:270px;border:1px solid var(--line);border-radius:9px;
+  padding:12px 14px;font-family:inherit;font-size:13px;line-height:1.55;background:#fff;resize:vertical}
+.cmp-sum:focus{outline:none;border-color:var(--terra);background:#FFFCF6}
+.cmp-sumside{display:flex;flex-direction:column;gap:8px}
+.cmp-sumside .btn{width:100%}
+.cmp-sumside .cmp-fh{margin:0}
+.cmp-sumsep{height:1px;background:var(--line);margin:4px 0}
 .cmp-warn code{background:#fff;padding:0 4px;border-radius:4px}
 </style>
 </head>
@@ -2057,7 +2100,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-09-08-10";
+const APP_VER="2026-09-08-11";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -18303,7 +18346,7 @@ function _campGuessSex(fio){
 
 /* ---------- смены ---------- */
 function campPickShift(id){ _campShiftId=id; try{ localStorage.setItem("campShift",id); }catch(e){}
-  _campPick=null; _campCfg=false; _campDraw(); }
+  _campPick=null; campCloseCfg(); _campDraw(); }
 function campSub(v){ _campSub=(v==="rooms"||v==="prog")?v:"list"; try{ localStorage.setItem("campSub",_campSub); }catch(e){} _campPick=null; _campDraw(); }
 function campAddShift(){
   const c=_camp(), sh=_campShift();
@@ -18313,11 +18356,49 @@ function campAddShift(){
     layoutId:(sh&&sh.layoutId)||((c.layouts[0]||{}).id),sex:{},staff:{}});
   _campSave(); campPickShift(sid); toast("Смена добавлена: "+n.trim());
 }
-function campToggleCfg(){ _campCfg=!_campCfg; _campDraw(); }
+/* Настройки смены — панелью справа, а не строкой посреди экрана: полей семь, среди них длинная
+   ссылка на конструктор, и раскрытые они закрывали собой сам список детей. Панель живёт в body
+   (а не внутри перерисовываемой шапки) — иначе анимация срывалась бы на каждой перерисовке. */
+function _campCfgEls(){
+  if(typeof document==="undefined"||!document.body) return null;
+  let el=document.getElementById("campCfgDrawer");
+  if(!el){
+    el=document.createElement("aside"); el.id="campCfgDrawer"; el.className="cmp-drawer";
+    const bd=document.createElement("div"); bd.id="campCfgBd"; bd.className="cmp-drawer-bd";
+    bd.onclick=function(){ campCloseCfg(); };
+    document.body.appendChild(bd); document.body.appendChild(el);
+    document.addEventListener("keydown",function(e){ if(e.key==="Escape"&&_campCfg) campCloseCfg(); });
+  }
+  return {el:el,bd:document.getElementById("campCfgBd")};
+}
+function campToggleCfg(){ if(_campCfg) campCloseCfg(); else campOpenCfg(); }
+function campOpenCfg(){
+  if(!_campShift()){ toast("Сначала создайте смену"); return; }
+  _campCfg=true; _campCfgRender();
+  const e=_campCfgEls();
+  // класс вешаем следующим кадром, иначе браузер применит его вместе с вставкой и анимации не будет.
+  // Дублируем таймером: в неактивной вкладке кадры не рисуются, и панель осталась бы за краем экрана.
+  if(e){ const show=function(){ e.el.classList.add("show"); e.bd.classList.add("show"); };
+    if(typeof requestAnimationFrame==="function") requestAnimationFrame(show);
+    setTimeout(show,60); }
+  _campDraw();
+}
+function campCloseCfg(){
+  if(!_campCfg) return;
+  _campCfg=false;
+  const e=_campCfgEls();
+  if(e){ e.el.classList.remove("show"); e.bd.classList.remove("show"); }
+  _campDraw();
+}
+function _campCfgRender(){
+  const sh=_campShift(), e=_campCfgEls();
+  if(sh&&e) e.el.innerHTML=_campCfgHtml(sh);
+}
 function campSetShift(f,v){
   const sh=_campShift(); if(!sh) return;
   sh[f]=(f==="price"||f==="prepay")?(+String(v).replace(",",".")||0):v;
   _campSave(); _campDraw();
+  if(_campCfg) _campCfgRender();
 }
 function campDelShift(){
   const sh=_campShift(); if(!sh) return;
@@ -18326,7 +18407,7 @@ function campDelShift(){
   c.res=c.res.filter(r=>r.shiftId!==sh.id);
   c.shifts=c.shifts.filter(s=>s.id!==sh.id);
   delete c.calls[sh.id];
-  _campShiftId=""; _campCfg=false; _campSave(); _campDraw(); toast("Смена удалена");
+  _campShiftId=""; campCloseCfg(); _campSave(); _campDraw(); toast("Смена удалена");
 }
 
 /* ---------- резерв ---------- */
@@ -18633,28 +18714,35 @@ function _campPickerHtml(light){
   });
   if(!light){
     h+='<button class="btn ghost sm" onclick="campAddShift()">+ Смена</button>';
-    if(sh) h+='<button class="btn ghost sm" onclick="campToggleCfg()">'+(_campCfg?'× Закрыть':'⚙ Смена')+'</button>';
+    if(sh) h+='<button class="btn ghost sm'+(_campCfg?' on':'')+'" onclick="campToggleCfg()" title="Название, даты, цена, схема корпуса и ссылка на конструктор">⚙ Настройки смены</button>';
   }
   h+='</div>';
-  if(!light&&_campCfg&&sh) h+=_campCfgHtml(sh);
   return h;
 }
 function _campCfgHtml(sh){
   const opts=_camp().layouts.map(l=>'<option value="'+esc(l.id)+'"'+(l.id===sh.layoutId?' selected':'')+'>'+esc(l.name)+'</option>').join("");
-  return '<div class="card" style="padding:12px">'
-   +'<div class="cmp-cfg">'
-   +'<label>Название<input class="cell wide" value="'+esc(sh.name||"")+'" onchange="campSetShift(\'name\',this.value)"></label>'
-   +'<label>С<input class="cell" type="date" value="'+esc(sh.from||"")+'" onchange="campSetShift(\'from\',this.value)"></label>'
-   +'<label>По<input class="cell" type="date" value="'+esc(sh.to||"")+'" onchange="campSetShift(\'to\',this.value)"></label>'
-   +'<label>Стоимость, р.<input class="cell" type="number" min="0" step="1" value="'+(+sh.price||0)+'" onchange="campSetShift(\'price\',this.value)"></label>'
-   +'<label>Предоплата, р.<input class="cell" type="number" min="0" step="1" value="'+(+sh.prepay||0)+'" onchange="campSetShift(\'prepay\',this.value)"></label>'
-   +'<label>Схема корпуса<select class="cell" onchange="campSetShift(\'layoutId\',this.value)">'+opts+'</select></label>'
-   +'<label style="flex:1 1 320px">Ссылка на конструктор лагеря<input class="cell wide" style="text-align:left" placeholder="https://app.proznanie.club/camp/parents.html?id=…" value="'+esc(sh.progUrl||"")+'" onchange="campSetShift(\'progUrl\',this.value)" title="Страница смены из конструктора (родителям, пульт или сам конструктор) — по ней подтянется программа"></label>'
+  return '<div class="cmp-dr-h"><b>Настройки смены</b><button class="cmp-x" title="Закрыть (Esc)" onclick="campCloseCfg()">×</button></div>'
+   +'<div class="cmp-dr-b">'
+   +'<label class="cmp-f">Название<input class="cell wide" value="'+esc(sh.name||"")+'" onchange="campSetShift(\'name\',this.value)"></label>'
+   +'<div class="cmp-f2">'
+     +'<label class="cmp-f">Начало<input class="cell wide" type="date" value="'+esc(sh.from||"")+'" onchange="campSetShift(\'from\',this.value)"></label>'
+     +'<label class="cmp-f">Конец<input class="cell wide" type="date" value="'+esc(sh.to||"")+'" onchange="campSetShift(\'to\',this.value)"></label>'
    +'</div>'
-   +'<div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">'
-   +'<button class="btn gray sm" onclick="campDelShift()">Удалить смену</button>'
+   +'<div class="cmp-f2">'
+     +'<label class="cmp-f">Стоимость, р.<input class="cell wide" type="number" min="0" step="1" value="'+(+sh.price||0)+'" onchange="campSetShift(\'price\',this.value)"></label>'
+     +'<label class="cmp-f">Предоплата, р.<input class="cell wide" type="number" min="0" step="1" value="'+(+sh.prepay||0)+'" onchange="campSetShift(\'prepay\',this.value)"></label>'
    +'</div>'
-   +'<div style="font-size:11px;color:var(--muted);margin-top:8px">Стоимость нужна колонке «Осталось»: она сама считает долг по каждому ребёнку. Предоплата — подсказка в поле, сумму всегда можно поправить.</div>'
+   +'<div class="cmp-fh">Стоимость нужна колонке «Осталось» — она сама считает долг по каждому ребёнку. Предоплата подставляется подсказкой в поле, сумму всегда можно поправить.</div>'
+   +'<label class="cmp-f">Схема корпуса<select class="cell wide" onchange="campSetShift(\'layoutId\',this.value)">'+opts+'</select></label>'
+   +'<div class="cmp-fh">Блоки и места правятся на подвкладке «Расселение» → «✎ Правка схемы».</div>'
+   +'<label class="cmp-f">Ссылка на конструктор лагеря<input class="cell wide" style="text-align:left" placeholder="https://app.proznanie.club/camp/parents.html?id=…" value="'+esc(sh.progUrl||"")+'" onchange="campSetShift(\'progUrl\',this.value)"></label>'
+   +'<div class="cmp-fh">Любая страница смены из конструктора — для родителей, печати или сам конструктор. По ней подтянется программа на подвкладке «Программа».</div>'
+   +'<label class="cmp-f">Годы рождения (для подборки детей)'
+     +'<span class="cmp-f2" style="margin-top:3px"><input class="cell wide" type="number" min="1990" max="2035" placeholder="от 2015" value="'+esc(String(sh.yFrom||""))+'" onchange="campKidsYears(\'yFrom\',this.value)">'
+     +'<input class="cell wide" type="number" min="1990" max="2035" placeholder="до 2020" value="'+esc(String(sh.yTo||""))+'" onchange="campKidsYears(\'yTo\',this.value)"></span></label>'
+   +'<div class="cmp-fh">Ограничивают список подборки и «Курсы из Альфы». То же поле есть над таблицей подборки.</div>'
+   +'<div class="cmp-dr-f"><button class="btn gray sm" onclick="campDelShift()">Удалить смену</button>'
+     +'<button class="btn ghost sm" onclick="campCloseCfg()">Готово</button></div>'
    +'</div>';
 }
 /* Две части смены — резерв и расселение. Расселение внутри смены, а не отдельной вкладкой:
@@ -18830,6 +18918,24 @@ function campProgToLib(){
   _campSave(); renderCampProg(); toast("В библиотеке: «"+name+"» — отправляйте родителям через 💬");
 }
 async function campProgCopy(){ const t=_campProgText(_campShift()); if(!t){ toast("Программы пока нет"); return; } toast((await _copyText(t))?"Программа скопирована текстом":"Не удалось скопировать"); }
+/* Печать программы — тем же печатным стилем, что и списки на обзвон: Жанна раздаёт бумагу. */
+function campProgPrint(){
+  const sh=_campShift(), p=sh&&sh.prog; if(!p){ toast("Программы пока нет"); return; }
+  let h='<h2>'+esc(sh.name||p.name||"Программа смены")+'</h2><div class="sub">'
+   +esc([_campShiftDates(sh),p.dayCount?(p.dayCount+" дн."):"",p.ages].filter(Boolean).join(" · "))+'</div><table>'
+   +'<tr><th style="width:120px">День</th><th>Программа</th></tr>';
+  p.days.forEach((d,i)=>{
+    const body=d.off?'<span class="mut">выходной</span>'
+      :(d.blocks.length?d.blocks.map(b=>'<b>'+esc(b.label)+':</b> '+esc(b.items.map(it=>it.n+(it.th?(" «"+it.th+"»"):"")).join("; "))).join("<br>")
+                      :'<span class="mut">программа уточняется</span>');
+    h+='<tr><td class="nm">День '+(i+1)+'<br><span class="mut">'+esc(d.date?_campDmy(d.date):"")+'</span></td><td>'+body+'</td></tr>';
+  });
+  h+='</table>';
+  const f=p.facts||{}, facts=[f.address,f.hours?("Работаем "+f.hours):"",f.meals?("Питание: "+f.meals):"",
+    (f.prices&&f.prices.length)?((f.priceNote||"Стоимость")+": "+f.prices.join("; ")):"",f.phone1,f.phone2].filter(Boolean);
+  if(facts.length) h+='<div class="sub">'+esc(facts.join(" · "))+'</div>';
+  _obzPrint("Программа · "+(sh.name||""),h);
+}
 async function campProgSumCopy(){ const sh=_campShift(); const t=String((sh&&sh.progSummary)||"").trim(); if(!t){ toast("Краткого содержания пока нет"); return; } toast((await _copyText(t))?"Скопировано":"Не удалось скопировать"); }
 function renderCampProg(){
   const box=document.getElementById("campProgBody"); if(!box) return;
@@ -18841,6 +18947,7 @@ function renderCampProg(){
    +(parentsUrl?'<a class="btn ghost sm" href="'+esc(parentsUrl)+'" target="_blank" rel="noopener">Страница для родителей ↗</a>':'')
    +(p?'<button class="btn ghost sm" onclick="campProgCopy()">Скопировать программу текстом</button>':'')
    +'<button class="btn ghost sm" onclick="campToggleCfg()">⚙ Ссылка на конструктор</button>'
+   +(p&&p.days.length?'<button class="btn ghost sm" onclick="campProgPrint()">🖨 Печать программы</button>':'')
    +(p?'<span style="font-size:12px;color:var(--muted)">снимок от '+esc(_campWhen(p.at))+'</span>':'')
    +'</div>';
   if(!_campProgId(sh.progUrl)) h+='<div class="cmp-warn">Вставьте в «⚙ Смена» ссылку на смену из конструктора лагеря — например, страницу для родителей <code>…/camp/parents.html?id=…</code>. Программа подтянется оттуда, как только смена там опубликована.</div>';
@@ -18868,15 +18975,20 @@ function renderCampProg(){
     if(facts.length) h+='<div class="cmp-srcs" style="margin-top:10px">'+facts.join("")+'</div>';
     h+='</div>';
   }
+  const sum=String(sh.progSummary||"").trim();
+  const inLib=_campTpls().some(t=>t.name==="Программа · "+(sh.name||"смена"));
   h+='<div class="card"><h3>Краткое содержание для родителей</h3>'
-   +'<div class="cmp-tplhint">Текст уходит в библиотеку сообщений шаблоном «Программа · '+esc(sh.name||"")+'» — дальше его можно отправить любому родителю через 💬 в подборке или резерве; «{родитель}» подставится именем.</div>'
-   +'<textarea class="cell wide cmp-sum" placeholder="Нажмите «✨ Сгенерировать» или «Собрать без ИИ» — текст появится здесь, его можно править" onchange="campProgSummarySet(this.value)">'+esc(sh.progSummary||"")+'</textarea>'
-   +'<div class="cmp-pick" style="margin-top:8px">'
-   +'<button class="btn sm"'+((_campProgBusy||!p)?' disabled':'')+' onclick="campProgAi()">'+(_campProgBusy?"Пишу…":"✨ Сгенерировать (ИИ)")+'</button>'
-   +'<button class="btn ghost sm"'+(!p?' disabled':'')+' onclick="campProgDigest()">Собрать без ИИ</button>'
-   +'<button class="btn ghost sm"'+(String(sh.progSummary||"").trim()?'':' disabled')+' onclick="campProgToLib()">В библиотеку сообщений</button>'
-   +'<button class="btn ghost sm"'+(String(sh.progSummary||"").trim()?'':' disabled')+' onclick="campProgSumCopy()">Скопировать</button>'
-   +'</div></div>';
+   +'<div class="cmp-sumwrap">'
+   +'<textarea class="cmp-sum" placeholder="Нажмите «✨ Сгенерировать (ИИ)» или «Собрать без ИИ» — текст появится здесь, его можно править руками" onchange="campProgSummarySet(this.value)">'+esc(sh.progSummary||"")+'</textarea>'
+   +'<div class="cmp-sumside">'
+     +'<button class="btn"'+((_campProgBusy||!p)?' disabled':'')+' onclick="campProgAi()">'+(_campProgBusy?"Пишу…":"✨ Сгенерировать (ИИ)")+'</button>'
+     +'<button class="btn ghost"'+(!p?' disabled':'')+' onclick="campProgDigest()">Собрать без ИИ</button>'
+     +'<div class="cmp-fh">ИИ пересказывает программу тёплым текстом на 120–180 слов. «Без ИИ» складывает содержание из направлений и названий занятий — ничего не выдумывая.</div>'
+     +'<div class="cmp-sumsep"></div>'
+     +'<button class="btn'+(inLib?' ghost':'')+'"'+(sum?'':' disabled')+' onclick="campProgToLib()">'+(inLib?"Обновить в библиотеке":"В библиотеку сообщений")+'</button>'
+     +'<button class="btn ghost"'+(sum?'':' disabled')+' onclick="campProgSumCopy()">Скопировать текст</button>'
+     +'<div class="cmp-fh">Шаблон «Программа · '+esc(sh.name||"смена")+'»'+(inLib?' уже в библиотеке':'')+' — отправляется родителю через 💬 в подборке или резерве, «{родитель}» подставится именем.</div>'
+   +'</div></div></div>';
   box.innerHTML=h;
 }
 
@@ -19363,14 +19475,16 @@ async function campVbSend(scope,key,tplId){
 function _campTplBoxHtml(){
   const tpls=_campTpls();
   let h='<div class="card" id="campTplBox"><h3>Библиотека сообщений для Viber · '+tpls.length+'</h3>'
-   +'<div class="cmp-tplhint">Подстановки: <code>{имя}</code> — имя ребёнка, <code>{фио}</code>, <code>{родитель}</code> — имя родителя из Альфы (если его нет, «, {родитель}» просто исчезает), <code>{смена}</code>, <code>{даты}</code>, <code>{стоимость}</code>, <code>{предоплата}</code> — из настроек смены. По клику на шаблон текст ложится в буфер, Viber открывается на номер родителя — остаётся вставить.</div>';
+   +'<div class="cmp-tplhint">Подстановки: <code>{имя}</code> — имя ребёнка, <code>{фио}</code>, <code>{родитель}</code> — имя родителя из Альфы (если его нет, «, {родитель}» просто исчезает), <code>{смена}</code>, <code>{даты}</code>, <code>{стоимость}</code>, <code>{предоплата}</code> — из настроек смены. По клику на шаблон текст ложится в буфер, Viber открывается на номер родителя — остаётся вставить.</div>'
+   +'<div class="cmp-tpls">';
   tpls.forEach(t=>{ const jid=_jsStr(t.id);
-    h+='<div class="cmp-tpl"><div style="display:flex;gap:6px;align-items:center">'
-     +'<input class="cell wide" style="text-align:left;font-weight:700" value="'+esc(t.name||"")+'" placeholder="Название" onchange="campTplSet(\''+jid+'\',\'name\',this.value)">'
-     +'<button class="btn ghost sm" title="Удалить шаблон" onclick="campTplDel(\''+jid+'\')">×</button></div>'
-     +'<textarea class="cell wide" onchange="campTplSet(\''+jid+'\',\'text\',this.value)">'+esc(t.text||"")+'</textarea></div>';
+    h+='<div class="cmp-tpl"><div class="cmp-tpl-h">'
+     +'<input class="cell cmp-tpl-n" value="'+esc(t.name||"")+'" placeholder="Название" onchange="campTplSet(\''+jid+'\',\'name\',this.value)">'
+     +'<button class="cmp-x" title="Удалить шаблон" onclick="campTplDel(\''+jid+'\')">×</button></div>'
+     +'<textarea class="cmp-tpl-t" placeholder="Текст сообщения" onchange="campTplSet(\''+jid+'\',\'text\',this.value)">'+esc(t.text||"")+'</textarea></div>';
   });
-  h+='<div style="display:flex;gap:8px"><button class="btn sm" onclick="campTplAdd()">+ Шаблон</button><button class="btn ghost sm" onclick="campTplToggle()">Свернуть</button></div></div>';
+  h+='<div class="cmp-tpl cmp-tpl-add" onclick="campTplAdd()" title="Добавить шаблон"><span>+ Шаблон</span></div>';
+  h+='</div><div style="display:flex;gap:8px"><button class="btn ghost sm" onclick="campTplToggle()">Свернуть</button></div></div>';
   return h;
 }
 function _campAmoText(r){ if(!r.src.amo) return ""; return [r.amoStage,r.amoAt?_campDmy(r.amoAt):"",r.amoResp].filter(Boolean).join(" · "); }
@@ -19427,6 +19541,7 @@ function campKidsYears(f,v){
   sh[f]=n||"";
   const yr=_campYears(sh); if(sh.yFrom&&sh.yTo){ sh.yFrom=yr.from; sh.yTo=yr.to; }   // «2020-2015» — порядок любой
   _campKLimit=300; _campSave(); renderCampKids();
+  if(_campCfg) _campCfgRender();
 }
 function campKidsToggleNoDob(){ _campKNoDob=!_campKNoDob; _campKLimit=300; renderCampKids(); }
 function _campKStatus(t){ const el=document.getElementById("campKMsg"); if(el) el.textContent=t; _campKMsg=t; }
@@ -19598,6 +19713,7 @@ function campKidsPrint(){
 function renderCampKids(){
   const box=document.getElementById("campKidsBody"); if(!box) return;
   const panel=box.closest(".panel"); if(panel&&!panel.classList.contains("active")) return;   // тяжёлая вкладка — только когда она на экране
+  if(_campCfg) campCloseCfg();   // панель настроек смены относится к вкладке «Смены» — на подборке ей висеть незачем
   if(!_campAlfa){ const c=_campCacheGet(CAMP_LS_ALFA); if(c&&Array.isArray(c.list)) _campAlfa=c; }
   if(!_campAmo){ const c=_campCacheGet(CAMP_LS_AMO); if(c&&Array.isArray(c.list)) _campAmo=c; }
   const c=_camp(), sh=_campShift();
