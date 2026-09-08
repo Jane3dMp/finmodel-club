@@ -13704,22 +13704,19 @@ function _salesFillLines(rep){
   const L=["",
     "Загрузка: "+Math.round(T.pct)+"% ("+_salesNum(T.cnt)+" из "+_salesNum(T.seats)+" детомест).",
     "Занятий: "+_salesNum(T.les)+", списаний: "+_salesNum(T.fact)+"."];
-  /* Эталон — в процентных пунктах, а не в списаниях: неделя и месяц дают разные детоместа,
-     и сравнивать их абсолютными числами нельзя. Месяц-образец берём тот же, что в разделе,
-     но только если он НЕ пересекается с этой неделей — иначе сравнение недели с самой собой. */
+  /* Эталон — та же неделя год назад (сдвиг 364 дня, дни недели совпадают) и разница в
+     процентных пунктах, а не в списаниях: год назад было другое число групп, а с ними и
+     детомест. Строка идёт сразу за «Оборот года назад» в том же сообщении — оба показателя
+     обязаны считаться от одних и тех же дней, иначе отдел продаж сверит их и не сойдётся. */
   try{
-    const bYm=String(S.fillBase||"2026-03");
-    const ovl=(bYm+"-01")<=to && (bYm+"-31")>=from;
-    if(!ovl){
-      const bl=new Date(+bYm.slice(0,4),+bYm.slice(5,7),0);
-      const B=_fillTotals(_fillRows(_fillAgg(bYm+"-01",_dIso(bl))));
-      if(B && B.pct!=null){
-        const d=T.pct-B.pct;
-        L.push("Эталон "+_salesMonName(bYm)+": "+Math.round(B.pct)+"%, разница "
-          +(d>=0?"+":"−")+Math.abs(Math.round(d))+" п.п.");
-      }
+    const lf=_fillShift(from), lt=_fillShift(to);
+    const B=_fillTotals(_fillRows(_fillAgg(lf,lt)));
+    if(B && B.pct!=null){
+      const d=T.pct-B.pct;
+      L.push("Год назад ("+_fillRangeLabel(lf,lt)+"): "+Math.round(B.pct)+"%, разница "
+        +(d>=0?"+":"−")+Math.abs(Math.round(d))+" п.п.");
     }
-  }catch(e){ /* эталона нет — строки просто не будет, выдумывать проценты нельзя */ }
+  }catch(e){ /* прошлого года в хранилище нет — строки просто не будет, выдумывать нельзя */ }
   const W=(typeof _fillWho==="function")?_fillWho(rows):null;
   if(W && W.att){
     const parts=[];
@@ -14480,7 +14477,6 @@ function fillPlanSet(gid,v){
 }
 function fillGo(k){ _fillPeriod=k||null; _fillRefresh(); }
 function fillSortBy(c){ _fillSort=c; _fillRefresh(); }
-function fillBaseSet(v){ S.fillBase=String(v||""); persistLocal(); if(typeof fbSchedulePush==="function") fbSchedulePush(); _fillRefresh(); }
 /* Строки свода по группам — из них собираются и таблица, и итоги. */
 function _fillRows(agg){
   const rows=[], ids={};
@@ -14566,49 +14562,65 @@ function _fillModelPlan(){
 /* Подтянуть период из Alfa: тем же действием, что и «Обновить факт» в «Прогнозе по всем».
    Считаем только дни, которых в хранилище ещё нет: пересчёт дня — это десятки запросов к Alfa,
    и гонять их по кругу ради уже посчитанного нельзя. */
-/* Досчитать месяц-эталон прямо из его блока. Раньше для этого надо было выбрать месяц
-   периодом, нажать «Пересчитать период» и вернуться обратно — три действия и потеря
-   выбранного периода. А эталон по неполному месяцу — это первое, что подрывает доверие
-   ко всему блоку: 74% по семи дням сентября выглядят ровно как 74% по тридцати. */
-function _fillMonthMissing(ym){
+/* ===== ПЕРИОД ГОД НАЗАД =====
+   Сдвиг ровно на 364 дня — 52 недели. День недели при этом сохраняется: 02.09.2026 (ср)
+   → 03.09.2025 (ср). Календарный сдвиг «минус год» этого не умеет, а у клуба суббота даёт
+   втрое больше будня — сравнение среды с четвергом показало бы работу календаря, а не клуба.
+   Та же арифметика в _salesLastYearDates и _progLyMon: три места обязаны совпадать. */
+function _fillShift(iso){ const d=new Date(iso+"T12:00:00"); d.setDate(d.getDate()-364); return _dIso(d); }
+function _fillWd(iso){ return ["вс","пн","вт","ср","чт","пт","сб"][new Date(iso+"T12:00:00").getDay()]; }
+function _fillWdPair(from,to){ return from===to?_fillWd(from):(_fillWd(from)+"–"+_fillWd(to)); }
+/* «03.09–09.09.2025» — год обязателен: без него прошлогодняя неделя неотличима от нынешней. */
+function _fillRangeLabel(from,to){
+  if(!from||!to) return "";
+  const y=String(to).slice(0,4);
+  return from===to ? _dmy(from) : (_salesDate(from)+"–"+_salesDate(to)+"."+y);
+}
+/* Дни периода, которых в хранилище ещё нет. Будущие не просим: период, который ещё идёт,
+   «неполон» законно. */
+function _fillRangeMissing(from,to){
   const F=(_fillStore&&_fillStore.fill)||{}, today=_todayIso(), need=[];
-  const y=+String(ym).slice(0,4), m=+String(ym).slice(5,7);
-  if(!y||!m) return need;
-  const last=new Date(y,m,0).getDate();
-  for(let d=1;d<=last;d++){
-    const k=ym+"-"+String(d).padStart(2,"0");
-    if(k>today) break;
+  if(!from||!to) return need;
+  for(let d=new Date(from+"T12:00:00"); _dIso(d)<=to; d.setDate(d.getDate()+1)){
+    const k=_dIso(d); if(k>today) break;
     if(!F[k]) need.push(k);
   }
   return need;
 }
-async function fillPullMonth(ym){
+/* Досчитать прошлогодний период прямо из блока эталона. Иначе пришлось бы выбрать ту неделю
+   периодом, нажать «Пересчитать период» и вернуться обратно — три действия и потеря
+   выбранного периода. А эталон по неполному окну — это первое, что подрывает доверие ко
+   всему блоку: 74% по трём дням выглядят ровно как 74% по семи. */
+async function fillPullRange(from,to){
   if(_fillBusy) return;
-  const need=_fillMonthMissing(ym);
+  const need=_fillRangeMissing(from,to), lab=_fillRangeLabel(from,to);
   const prog=document.getElementById("fillProg");
-  if(!need.length){ if(prog) prog.textContent="Месяц уже посчитан целиком"; return; }
+  if(!need.length){ if(prog) prog.textContent=lab+" уже посчитан целиком"; return; }
   if(need.length>10 && !confirm("Досчитать "+need.length+" "+_kassaDayWord(need.length)
-      +" в "+_salesMonIn(ym)+"? Это несколько минут: каждый день — десятки запросов к Alfa.")) return;
+      +" ("+lab+")? Это несколько минут: каждый день — десятки запросов к Alfa.")) return;
   _fillBusy=true;
   try{
     for(let i=0;i<need.length;i+=7){
-      if(prog) prog.textContent="Досчитываю "+_salesMonIn(ym)+"… "+Math.min(i+7,need.length)+"/"+need.length;
+      if(prog) prog.textContent="Досчитываю "+lab+"… "+Math.min(i+7,need.length)+"/"+need.length;
       await _pubCall("realizationPull",{dates:need.slice(i,i+7)});
     }
     _realStore=null;
     await _fillLoad(true);
     if(prog) prog.textContent="Готово ✓";
     _fillRefresh();
-  }catch(e){ if(prog) prog.innerHTML=_pubErrHtml(e,"месяц-эталон"); }
+  }catch(e){ if(prog) prog.innerHTML=_pubErrHtml(e,"прошлый год"); }
   finally{ _fillBusy=false; }
 }
 async function fillPull(all){
   if(_fillBusy) return;
   const P=_fillCur(); if(!P) return;
-  const F=(_fillStore&&_fillStore.fill)||{}, today=_todayIso(), need=[];
-  for(let d=new Date(P.from+"T12:00:00"); _dIso(d)<=P.to; d.setDate(d.getDate()+1)){
-    const k=_dIso(d); if(k>today) break;
-    if(all||!F[k]) need.push(k);
+  const today=_todayIso();
+  let need=_fillRangeMissing(P.from,P.to);
+  if(all){ need=[];                       // «заново» — гоним и те дни, что уже есть
+    for(let d=new Date(P.from+"T12:00:00"); _dIso(d)<=P.to; d.setDate(d.getDate()+1)){
+      const k=_dIso(d); if(k>today) break;
+      need.push(k);
+    }
   }
   const prog=document.getElementById("fillProg");
   if(!need.length){ if(prog) prog.textContent="Все дни периода уже посчитаны"; return; }
@@ -14729,66 +14741,49 @@ function _fillHtml(){
     </tbody></table>
     ${(planSeats>0&&T.seats>0&&planSeats>T.seats)?`<div class="hint" style="margin-top:6px">Почему в «Планировщике» ${_gm(planSeats)}, а в таблице ниже ${_gm(T.seats)}: планировщик считает, сколько мест должно открываться каждую неделю, а раздел — сколько открылось на самом деле. Разница ${_gm(planSeats-T.seats)} — это места занятий, которых не было: каникулы, праздники, ещё не запущенные группы.</div>`:""}
     <small class="note">План — из вкладки «Планировщик загрузки»: по каждому курсу «чел/гр × групп/нед × визитов». Месяц считается как ${wks} учебных недели — та же условность, что и в «Оборот/месяц» модели (S.assume.weeksPerMonth). Факт — списания из Alfa, дети не уникальные: ребёнок, ходящий 2 раза в неделю, занимает 2 детоместа.</small></div>`;
-  /* --- ЭТАЛОН: загрузка месяца-образца, наложенная на сегодняшнюю вместимость --- */
-  /* Месяц-образец. Если сохранённый пересекается с выбранным периодом, берём умолчание:
-     сравнивать период сам с собой бессмысленно, а молча показывать такую цифру — вреднее,
-     чем проигнорировать настройку. О подмене говорим вслух ниже. */
-  const BASE_DEF="2026-03";
-  const baseSaved=String(S.fillBase||BASE_DEF);
-  const _ovl=(ym)=>(ym+"-01")<=P.to && (ym+"-31")>=P.from;
-  const baseSwapped=_ovl(baseSaved) && !_ovl(BASE_DEF);
-  const baseYm=baseSwapped?BASE_DEF:baseSaved;
-  const bLast=new Date(+baseYm.slice(0,4),+baseYm.slice(5,7),0);
-  const bAgg=_fillAgg(baseYm+"-01",_dIso(bLast)), bRows=_fillRows(bAgg), B=_fillTotals(bRows);
-  const monthsHave={}; Object.keys((_fillStore.fill)||{}).forEach(d=>{monthsHave[String(d).slice(0,7)]=1;});
-  const monthList=Object.keys(monthsHave).sort().reverse();
-  if(!monthsHave[baseYm]) monthList.push(baseYm);
-  const expect=(B.pct!=null&&T.seats>0)?Math.round(T.seats*B.pct/100):null;
-  /* Главная цифра эталона — разница ПРОЦЕНТОВ в процентных пунктах: она сравнима между
-     неделей и месяцем, а сами списания нет — у них разные знаменатели. */
+  /* ===== ЭТАЛОН: ТОТ ЖЕ ПЕРИОД ГОД НАЗАД =====
+     Решение Жанны 08.09.2026: «если я ставлю 2–7, то и в прошлом сентябре это должно быть
+     первая неделя с 3 по 8 — среда–понедельник».
+     Сдвигаем ровно на 52 недели (364 дня), а НЕ на календарный год: тогда сохраняется день
+     недели — среда сравнивается со средой, суббота с субботой. Для клуба это принципиально:
+     выходной даёт втрое больше будня, и один лишь сдвиг календаря нарисовал бы «падение».
+     Так же считается «Год назад» в «Прогнозе по всем» — два раздела обязаны сходиться.
+     Прежний месяц-образец (S.fillBase) убран: он сравнивал неделю с месяцем, требовал
+     досчитать целый месяц ради одной недели и умел незаметно пересечься с самим периодом. */
+  const lyFrom=_fillShift(P.from), lyTo=_fillShift(P.to);
+  const bAgg=_fillAgg(lyFrom,lyTo), bRows=_fillRows(bAgg), B=_fillTotals(bRows);
+  const lyLab=_fillRangeLabel(lyFrom,lyTo), lyMiss=_fillRangeMissing(lyFrom,lyTo);
+  /* Главная цифра — разница ПРОЦЕНТОВ в процентных пунктах. Списания сравнивать нельзя даже
+     при равной длине окна: год назад было другое число групп, а значит и детомест. */
   const dPP=(B.pct!=null&&T.pct!=null)?(T.pct-B.pct):null;
-  /* ⚠️ Эталон имеет смысл, только если месяц-образец НЕ пересекается с выбранным периодом.
-     Иначе сравниваем период сам с собой: те же дни стоят и в эталоне, и в «факте сейчас»,
-     разница получается из одной лишь длины отрезка и ничего не значит. */
-  const baseOverlap=_ovl(baseYm);
+  /* Молчать про недосчитанный прошлый год нельзя: процент по трём дням выглядит ровно так
+     же, как по семи, и отличить их можно только по строке-предупреждению ниже. Досчитать
+     даём прямо оттуда, не уходя из выбранного периода. */
   /* Вывод словами. Одни проценты не отвечают на вопрос «и что?»: −11 п.п. можно прочесть
      и как провал, и как норму начала сентября. Поэтому под цифрами стоит фраза, лучше или
      хуже, и на сколько мест из ста это расходится. */
-  const baseBlk=`<div class="card" style="margin-bottom:10px"><h3>Эталон загрузки</h3>
-    <div class="hd-actions" style="margin-bottom:8px">
-      <span style="font-size:12px;color:var(--muted)">Сравниваем с месяцем, который считаем нормой:</span>
-      <select class="cell" style="width:auto" onchange="fillBaseSet(this.value)">${
-        monthList.map(m=>`<option value="${esc(m)}"${m===baseYm?" selected":""}>${esc(_salesMonName(m))}</option>`).join("")}</select>
-    </div>
+  const baseBlk=`<div class="card" style="margin-bottom:10px"><h3>Эталон загрузки — тот же период год назад</h3>
+    <div class="hint" style="margin-bottom:8px">Сравниваем с <b>${esc(lyLab)}</b> — это ровно те же дни недели (${_fillWdPair(lyFrom,lyTo)}), сдвинутые на 52 недели назад. Не календарный год: у клуба суббота даёт втрое больше будней, и сравнивать надо среду со средой.</div>
     ${B.pct==null
-      ? `<div class="callout">За ${esc(_salesMonName(baseYm))} в хранилище ничего нет. Выберите этот месяц в списке периодов выше и нажмите «Пересчитать период» — Alfa отдаёт прошлые месяцы, просто их надо один раз посчитать.</div>`
-      : `${baseOverlap?`<div class="callout" style="border-color:var(--red);font-size:12px;margin-bottom:8px">
-        <b>Месяц-образец пересекается с выбранным периодом.</b> Те же дни стоят и в эталоне, и в «сейчас» — раздел сравнивает период сам с собой. Выберите месяц, который считаете образцовым, а не текущий.</div>`:""}
-      ${baseSwapped?`<div class="hint" style="margin-bottom:8px">Сохранённый образец «${esc(_salesMonName(baseSaved))}» пересекается с выбранным периодом, поэтому показываю ${esc(_salesMonName(BASE_DEF))}. Выберите другой месяц в списке, если нужен свой.</div>`:""}
-      <table><tbody>
-        <tr><td>Тогда — ${esc(_salesMonName(baseYm))}<br><span style="font-size:11px;color:var(--muted)">${_gm(B.les)} ${_fillLesWord(B.les)} за ${_fillDaysNote(baseYm+"-01",_dIso(bLast),bAgg.lessonDays)}</span></td>
+      ? `<div class="callout">За <b>${esc(lyLab)}</b> в хранилище ничего нет — прошлый год копится только по кнопке.${lyMiss.length?` <button class="btn ghost sm" onclick="fillPullRange('${lyFrom}','${lyTo}')"${_fillBusy?" disabled":""}>посчитать ${lyMiss.length} ${_kassaDayWord(lyMiss.length)} из Alfa</button>`:""}</div>`
+      : `<table><tbody>
+        <tr><td>Год назад — ${esc(lyLab)}<br><span style="font-size:11px;color:var(--muted)">${_gm(B.les)} ${_fillLesWord(B.les)} за ${_fillDaysNote(lyFrom,lyTo,bAgg.lessonDays)}</span></td>
           <td class="num"><b style="color:${_fillPctColor(B.pct)};font-size:18px">${B.pct.toFixed(0)}%</b><br><span style="color:var(--muted);font-size:12px">${_gm(B.fact)} из ${_gm(B.seats)} детомест</span></td></tr>
         <tr><td>Сейчас — ${esc(P.label.toLowerCase())}<br><span style="font-size:11px;color:var(--muted)">${_gm(T.les)} ${_fillLesWord(T.les)} за ${_fillDaysNote(P.from,P.to,agg.lessonDays)}</span></td>
           <td class="num"><b style="color:${T.pct!=null?_fillPctColor(T.pct):"var(--muted)"};font-size:18px">${T.pct!=null?(T.pct.toFixed(0)+"%"):"—"}</b><br><span style="color:var(--muted);font-size:12px">${_gm(T.cnt)} из ${_gm(T.seats)} детомест</span></td></tr>
         <tr class="totrow"><td><b>Разница</b></td><td class="num">${dPP==null?'—':`<b style="color:${dPP>=0?"var(--green)":"var(--red)"};font-size:18px">${dPP>=0?"+":"−"}${Math.abs(dPP).toFixed(0)} п.п.</b>`}</td></tr>
       </tbody></table>
       ${dPP==null?"":`<div style="margin-top:8px;font-size:13px">${
-        Math.abs(dPP)<3 ? "Загружаем примерно так же, как в "+esc(_salesMonIn(baseYm))+"."
-        : (dPP>0 ? "Загружаем <b style=\"color:var(--green)\">лучше</b>, чем в "+esc(_salesMonIn(baseYm))+"."
-                 : "Загружаем <b style=\"color:var(--red)\">хуже</b>, чем в "+esc(_salesMonName(baseYm))+". В группах пустует на "+Math.abs(dPP).toFixed(0)+" из каждых 100 мест больше, чем тогда.")
+        Math.abs(dPP)<3 ? "Загружаем примерно так же, как год назад."
+        : (dPP>0 ? "Загружаем <b style=\"color:var(--green)\">лучше</b>, чем год назад."
+                 : "Загружаем <b style=\"color:var(--red)\">хуже</b>, чем год назад. В группах пустует на "+Math.abs(dPP).toFixed(0)+" из каждых 100 мест больше, чем тогда.")
       }</div>`}
-      ${(function(){
-        const miss=_fillMonthMissing(baseYm);
-        if(!miss.length) return "";
-        /* Молчать нельзя: процент по куску месяца выглядит точно так же, как по месяцу,
-           и отличить их можно только по этой строке. */
-        return `<div class="callout" style="border-color:var(--terra);font-size:12px;margin-top:8px">
-          <b>${esc(_salesMonName(baseYm))} посчитан не весь</b> — не хватает ${miss.length} ${_kassaDayWord(miss.length)}.
-          Процент считается по тем дням, что есть, и может отличаться от месяца целиком.
-          <button class="btn ghost sm" style="margin-left:6px" onclick="fillPullMonth('${esc(baseYm)}')"${_fillBusy?" disabled":""}>досчитать ${miss.length} ${_kassaDayWord(miss.length)}</button>
-        </div>`;
-      })()}
-      <small class="note">Детоместа = вместимость группы × число её занятий, сложенные по всем группам: поэтому у месяца их в несколько раз больше, чем у недели. Загрузка — заполненные места ÷ детоместа. Сравниваем проценты, а не списания: в неделе и в месяце разное число детомест, поэтому сами списания сравнивать напрямую нельзя. Вместимость взята сегодняшняя, поэтому это ориентир: в ${esc(_salesMonIn(baseYm))} состав групп был другим.</small>`}
+      ${lyMiss.length?`<div class="callout" style="border-color:var(--terra);font-size:12px;margin-top:8px">
+        <b>Прошлый год посчитан не весь</b> — из ${esc(lyLab)} не хватает ${lyMiss.length} ${_kassaDayWord(lyMiss.length)}.
+        Процент считается по тем дням, что есть, и сравнение выходит неровным.
+        <button class="btn ghost sm" style="margin-left:6px" onclick="fillPullRange('${lyFrom}','${lyTo}')"${_fillBusy?" disabled":""}>досчитать ${lyMiss.length} ${_kassaDayWord(lyMiss.length)}</button>
+      </div>`:""}
+      <small class="note">Сравниваем проценты, а не списания: год назад было другое число групп, а с ними и детомест. Вместимость (детоместа) везде берётся сегодняшняя — у прошлогодних групп её в Alfa обычно уже нет, и тогда за неё принимается самое полное занятие той недели. От этого прошлогодний процент выходит скорее завышенным, то есть разрыв показан хуже, чем он есть на самом деле.</small>`}
   </div>`;
   const srcMark={model:'<span style="color:var(--blue)" title="Взято из «Планировщика загрузки»">◆</span>', plan:'<span title="План вписан вами" style="color:var(--green)">•</span>',
                  alfa:'<span title="Вместимость группы в AlfaCRM — плана нет" style="color:var(--muted)">•</span>',
