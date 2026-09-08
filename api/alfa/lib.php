@@ -257,6 +257,46 @@ function alfa_http(string $method, string $url, array $body, ?string $token, boo
     return $data;
 }
 
+// ---------- ИИ: чат-модель с интерфейсом OpenAI ----------
+// Один вызов /v1/chat/completions. Поставщик меняется адресом и моделью в config.php;
+// ключ живёт только на сервере. Ошибки отдаём словами — «ИИ не ответил» без причины
+// заставляет гадать, кончился ли ключ, лимит или сеть.
+function ai_configured(): bool {
+    $c = cfg()['ai'] ?? [];
+    return is_array($c) && trim((string)($c['key'] ?? '')) !== '' && trim((string)($c['url'] ?? '')) !== '';
+}
+function ai_chat(string $system, string $prompt, int $maxTokens = 700): string {
+    $c = cfg()['ai'];
+    $messages = [];
+    if ($system !== '') $messages[] = ['role' => 'system', 'content' => $system];
+    $messages[] = ['role' => 'user', 'content' => $prompt];
+    $body = ['model' => (string)($c['model'] ?? 'gpt-4o-mini'), 'messages' => $messages,
+             'max_tokens' => max(100, min(2000, $maxTokens)), 'temperature' => 0.6];
+    $ch = curl_init((string)$c['url']);
+    curl_setopt_array($ch, [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_POST           => true,
+        CURLOPT_HTTPHEADER     => ['Content-Type: application/json', 'Authorization: Bearer ' . trim((string)$c['key'])],
+        CURLOPT_POSTFIELDS     => json_encode($body, JSON_UNESCAPED_UNICODE),
+        CURLOPT_TIMEOUT        => 80,
+        CURLOPT_CONNECTTIMEOUT => 8,
+    ]);
+    $raw  = curl_exec($ch);
+    $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $err  = curl_error($ch);
+    curl_close($ch);
+    if ($raw === false) json_out(['ok' => false, 'error' => 'Сеть до службы ИИ недоступна: ' . $err], 502);
+    $j = json_decode((string)$raw, true);
+    if (!is_array($j)) json_out(['ok' => false, 'error' => 'Служба ИИ вернула не-JSON (код ' . $code . ')', 'raw' => mb_substr((string)$raw, 0, 300)], 502);
+    if ($code >= 400) {
+        $msg = is_array($j['error'] ?? null) ? (string)($j['error']['message'] ?? '') : (string)($j['error'] ?? '');
+        json_out(['ok' => false, 'error' => 'Служба ИИ ответила ошибкой: ' . ($msg !== '' ? $msg : ('код ' . $code)), 'code' => $code], 502);
+    }
+    $text = trim((string)($j['choices'][0]['message']['content'] ?? ''));
+    if ($text === '') json_out(['ok' => false, 'error' => 'Служба ИИ вернула пустой ответ', 'raw' => mb_substr((string)$raw, 0, 300)], 502);
+    return $text;
+}
+
 // Alfa принимает даты ТОЛЬКО как ДД.ММ.ГГГГ (проверено на createCustomer: с ISO-датой запись
 // молча не создавалась). Из <input type="date"> приходит ГГГГ-ММ-ДД — переводим.
 function alfa_date(string $d): string {

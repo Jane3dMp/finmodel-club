@@ -38,6 +38,27 @@ switch ($action) {
         json_out(['ok' => true, 'user' => $user['email'], 'host' => alfa_host()]);
         break;
 
+    // --- ИИ: краткое содержание программы лагеря для родителей ---
+    //     Ключ модели лежит в config.php (блок ai) и наружу не выходит: браузер присылает текст
+    //     программы, сервер ходит в службу с интерфейсом OpenAI и отдаёт готовый текст.
+    //     Персональных данных в запросе нет — только названия занятий и факты смены.
+    case 'aiPing':
+        json_out(['ok' => true, 'configured' => ai_configured(), 'model' => (string)((cfg()['ai']['model'] ?? ''))]);
+        break;
+    case 'aiSummary':
+        @set_time_limit(90);
+        if (!ai_configured()) {
+            json_out(['ok' => false, 'notConfigured' => true,
+                      'error' => 'ИИ не настроен: впишите url, key и model в блок ai файла config.php на сервере (см. config.example.php)']);
+        }
+        $system = trim((string)($in['system'] ?? ''));
+        $prompt = trim((string)($in['prompt'] ?? ''));
+        if ($prompt === '') json_out(['ok' => false, 'error' => 'Пустой запрос: нечего пересказывать']);
+        if (mb_strlen($prompt) > 20000) $prompt = mb_substr($prompt, 0, 20000);   // программа на 10 дней укладывается в разы меньше
+        $text = ai_chat($system, $prompt, (int)($in['maxTokens'] ?? 700));
+        json_out(['ok' => true, 'text' => $text, 'model' => (string)(cfg()['ai']['model'] ?? '')]);
+        break;
+
     // --- список филиалов (глобальный метод, без branch) ---
     case 'branches':
         $r = alfa_call('branch', 'index', ['is_active' => 1, 'page' => 0], true);
