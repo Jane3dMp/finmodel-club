@@ -55,7 +55,10 @@ switch ($action) {
         $filter = is_array($in['filter'] ?? null) ? $in['filter'] : [];
         $filter['removed'] = $filter['removed'] ?? 0;
 
-        $branches = alfa_all_branch_ids();
+        // Подборка лагеря просит ОДИН филиал («Каникулы»): обход всех занимает до минуты и тащит
+        // взрослые «Детали». Без списка — как раньше, все филиалы.
+        $want     = array_values(array_filter(array_map('intval', (array)($in['branches'] ?? []))));
+        $branches = $want ?: alfa_all_branch_ids();
         // имена филиалов (id => name) — чтобы клиент мог отличить «Детали» (взрослое пространство) от детских
         $brNames = [];
         $brResp = alfa_http('POST', 'https://' . alfa_host() . '/v2api/branch/index', ['is_active' => 1, 'page' => 0], alfa_token(), true, 8);

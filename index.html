@@ -993,6 +993,8 @@ h3.cmp-fl span{font-weight:400;font-size:12px;color:var(--muted)}
 .cmp-src>b{width:100%;font-size:13px}
 .cmp-src>span{color:var(--muted);flex:1 1 100%}
 .cmp-kt td{white-space:nowrap}
+.cmp-yr{display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--muted)}
+.cmp-yr input.cell{width:70px}
 </style>
 </head>
 <body>
@@ -2021,7 +2023,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-09-08-06";
+const APP_VER="2026-09-08-07";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -18187,6 +18189,7 @@ function _camp(){
   if(!Array.isArray(c.res))     c.res=[];
   if(!c.calls||typeof c.calls!=="object") c.calls={};          // отметки обзвона: {shiftId:{ключ ребёнка:{st,c,at,by,fio}}}
   if(!c.amoSrc||typeof c.amoSrc!=="object") c.amoSrc={pipelineId:0,before:"2026-06-01"};   // воронка архива amo — своя, не та, что у «Новых из amo»
+  if(typeof c.alfaBranch!=="number") c.alfaBranch=0;   // филиал Альфы для подборки: 0 = ещё не выбран (подставим «Каникулы»)
   _campFlatten(c);
   // первую смену подсеиваем ОДИН раз, в только что созданный узел (флаг init едет в облако вместе
   // с ним): иначе удаление последней смены тут же воскрешало бы её заново
@@ -18881,6 +18884,9 @@ let _campAmo=null;            // {at,pipe,pipeName,before,cut,total,list:[{id,na
 let _campHist={};             // alfaId → {subjects:{sid:n},total} — какие курсы и сколько ходил
 let _campSubj={};             // sid → название предмета
 let _campPipes=null;          // воронки amo (null — ещё не спрашивали)
+let _campAlfaBranches=null;   // филиалы Альфы (null — ещё не спрашивали)
+let _campKAuto=false;         // справочники (филиалы, воронки) в этой сессии уже запрашивали
+let _campKNoDob=false;        // при заданных годах рождения показывать и детей без даты
 let _campKBusy="";            // что грузится: alfa | amo | hist | pipes
 let _campKMsg="";             // строка состояния над списком
 let _campKFilter="all", _campKSrc="all", _campKQuery="", _campKLimit=300;
@@ -18945,11 +18951,21 @@ function _campWasHtml(r){
   return parts.join("<br>")||'<span style="color:var(--muted)">—</span>';
 }
 function _campAmoText(r){ if(!r.src.amo) return ""; return [r.amoStage,r.amoAt?_campDmy(r.amoAt):"",r.amoResp].filter(Boolean).join(" · "); }
+/* Годы рождения смены: Жанна задаёт руками («2020-2015», порядок любой). Ограничивают и список,
+   и «Курсы из Альфы» — историю тянем только тем, кто по возрасту вообще подходит в смену. */
+function _campYears(sh){ const a=+((sh&&sh.yFrom)||0), b=+((sh&&sh.yTo)||0); return {from:(a&&b)?Math.min(a,b):(a||b), to:(a&&b)?Math.max(a,b):(a||b)}; }
+function _campBirthYear(r){ return +String(_dobIso(r.dob)||"").slice(0,4)||0; }
 function _campKidsShown(){
   const rows=_campPool||_campPoolBuild();
   const sh=_campShift(); const m=sh?_campCalls(sh):{};
   const q=_campKQuery.toLowerCase(), qd=q.replace(/\D/g,"");
+  const yr=_campYears(sh);
   return rows.filter(r=>{
+    if(yr.from||yr.to){
+      const y=_campBirthYear(r);
+      if(!y){ if(!_campKNoDob) return false; }
+      else if((yr.from&&y<yr.from)||(yr.to&&y>yr.to)) return false;
+    }
     if(_campKSrc==="our"&&!r.src.our) return false;
     if(_campKSrc==="alfa"&&!r.src.alfa) return false;
     if(_campKSrc==="amo"&&!r.src.amo) return false;
@@ -18978,30 +18994,66 @@ function campKidsQuery(v){
 function campKidsMore(){ _campKLimit+=300; renderCampKids(); }
 function campKidsRebuild(){ _campPool=null; renderCampKids(); }
 function campKidsAmoSet(f,v){ const c=_camp(); c.amoSrc[f]=(f==="pipelineId")?(+v||0):String(v||""); _campSave(); renderCampKids(); }
+function campKidsAlfaSet(v){ const c=_camp(); c.alfaBranch=+v||0; _campSave(); renderCampKids(); }
+function campKidsYears(f,v){
+  const sh=_campShift(); if(!sh){ toast("Сначала выберите смену"); return; }
+  let n=parseInt(String(v||"").replace(/\D/g,""),10); if(!n||n<1990||n>2035) n=0;
+  sh[f]=n||"";
+  const yr=_campYears(sh); if(sh.yFrom&&sh.yTo){ sh.yFrom=yr.from; sh.yTo=yr.to; }   // «2020-2015» — порядок любой
+  _campKLimit=300; _campSave(); renderCampKids();
+}
+function campKidsToggleNoDob(){ _campKNoDob=!_campKNoDob; _campKLimit=300; renderCampKids(); }
 function _campKStatus(t){ const el=document.getElementById("campKMsg"); if(el) el.textContent=t; _campKMsg=t; }
+/* Справочники — филиалы Альфы и воронки amo — один раз за сессию, тихо, два лёгких запроса.
+   Нужны, чтобы по имени найти «Каникулы» и там, и там: Жанна сказала брать детей именно оттуда. */
+function _campPickByName(list,re){ return (list||[]).find(x=>re.test(String((x&&x.name)||""))); }
+async function _campKidsAuto(){
+  const c=_camp(); let changed=false;
+  if(_campAlfaBranches===null){
+    try{ const b=await _pubCall("branches",{}); _campAlfaBranches=(b.branches||[]).filter(x=>x&&x.id!=null); }catch(e){ _campAlfaBranches=[]; }
+    if(!c.alfaBranch){ const hit=_campPickByName(_campAlfaBranches,/каникул/i); if(hit){ c.alfaBranch=+hit.id; changed=true; } }
+  }
+  if(_campPipes===null){
+    try{ const p=await _amoCall("pipelines",{}); _campPipes=p.pipelines||[]; if(!_amoPipes.length) _amoPipes=_campPipes; }catch(e){ _campPipes=[]; }
+    if(!c.amoSrc.pipelineId){ const hit=_campPickByName(_campPipes,/каникул/i); if(hit){ c.amoSrc.pipelineId=+hit.id; changed=true; } }
+  }
+  if(changed) _campSave();
+  renderCampKids();
+}
 
-/* Все клиенты Альфы одним запросом — без кэша на сервере и до минуты по времени, поэтому только
-   по кнопке, а ответ запоминаем в браузере. Из него: был ли у нас и когда (last_attend), лид или
-   ученик (is_study), возраст, телефон, с какого года в Альфе (created). */
+/* Клиенты Альфы одним запросом — без кэша на сервере, поэтому только по кнопке, а ответ
+   запоминаем в браузере. Берём ОДИН филиал — «Каникулы» (Жанна: дети лагеря заводятся там);
+   выбор можно сменить в карточке, 0 — все филиалы. Из ответа: был ли у нас и когда (last_attend),
+   лид или ученик (is_study), возраст, телефон, с какого года в Альфе (created). */
 async function campKidsPullAlfa(){
   if(_campKBusy) return;
-  _campKBusy="alfa"; _campKMsg="Тяну всех клиентов из Альфы — это до минуты…"; renderCampKids();
+  const c=_camp();
+  _campKBusy="alfa"; _campKMsg="Тяну клиентов из Альфы…"; renderCampKids();
   try{
-    const j=await _pubCall("customers",{});
-    const list=(j.customers||[]).filter(c=>c&&c.name).map(c=>({id:c.id,name:cleanKidName(c.name),phone:(c.phones||[])[0]||"",dob:_dobIso(c.dob)||"",
-      study:(c.is_study==null||c.is_study==="")?null:(+c.is_study?1:0),created:_dobIso(c.created)||"",last:_dobIso(c.last_attend)||"",
-      br:(c.branch_ids||[]).map(Number),parent:c.parent||""})).filter(c=>c.name);
-    _campAlfa={at:Date.now(),list:list,brNames:j.branchNames||{}};
+    // список филиалов мог не приехать при тихой автозагрузке — перед выгрузкой спрашиваем ещё раз
+    if(!_campAlfaBranches||!_campAlfaBranches.length){ try{ const b=await _pubCall("branches",{}); _campAlfaBranches=(b.branches||[]).filter(x=>x&&x.id!=null); }catch(e){ _campAlfaBranches=[]; } }
+    if(!c.alfaBranch){ const hit=_campPickByName(_campAlfaBranches,/каникул/i); if(hit) c.alfaBranch=+hit.id; }
+    const bid=+c.alfaBranch||0;
+    const brName=bid?((((_campAlfaBranches||[]).find(x=>+x.id===bid)||{}).name)||("филиал "+bid)):"все филиалы";
+    _campKStatus("Тяну клиентов из Альфы ("+brName+")"+(bid?"…":" — это до минуты…"));
+    const j=await _pubCall("customers",bid?{branches:[bid]}:{});
+    const list=(j.customers||[]).filter(x=>x&&x.name).map(x=>({id:x.id,name:cleanKidName(x.name),phone:(x.phones||[])[0]||"",dob:_dobIso(x.dob)||"",
+      study:(x.is_study==null||x.is_study==="")?null:(+x.is_study?1:0),created:_dobIso(x.created)||"",last:_dobIso(x.last_attend)||"",
+      br:(x.branch_ids||[]).map(Number),parent:x.parent||""})).filter(x=>x.name);
+    _campAlfa={at:Date.now(),list:list,brNames:j.branchNames||{},branch:bid,branchName:brName};
     _campCachePut(CAMP_LS_ALFA,_campAlfa);
     _campPool=null; _campKMsg="";
-    toast("Из Альфы: "+list.length+" клиентов");
+    toast("Из Альфы ("+brName+"): "+list.length+" клиентов");
   }catch(e){ _campKMsg="Альфа не ответила: "+((e&&e.message)||e); }
   finally{ _campKBusy=""; renderCampKids(); }
 }
 async function campKidsLoadPipes(){
   if(_campKBusy) return;
   _campKBusy="pipes"; renderCampKids();
-  try{ const p=await _amoCall("pipelines",{}); _campPipes=p.pipelines||[]; if(!_amoPipes.length) _amoPipes=_campPipes; }
+  try{
+    const p=await _amoCall("pipelines",{}); _campPipes=p.pipelines||[]; if(!_amoPipes.length) _amoPipes=_campPipes;
+    const c=_camp(); if(!c.amoSrc.pipelineId){ const hit=_campPickByName(_campPipes,/каникул/i); if(hit){ c.amoSrc.pipelineId=+hit.id; _campSave(); } }
+  }
   catch(e){ _campPipes=[]; _campKMsg="amo не ответила: "+((e&&e.message)||e); }
   finally{ _campKBusy=""; renderCampKids(); }
 }
@@ -19048,7 +19100,9 @@ async function campKidsLoadHist(){
   if(_campKBusy) return;
   const rows=_campKidsShown().filter(r=>r.alfaId!=null&&!_campHist[String(r.alfaId)]);
   if(!rows.length){ toast("У показанных курсы уже подтянуты (или нет связи с Альфой)"); return; }
-  if(rows.length>100&&!confirm("Подтянуть курсы для "+rows.length+" детей? Это "+Math.ceil(rows.length/25)+" запросов в Альфу, первый раз — несколько минут. Можно сначала сузить список фильтром или поиском.")) return;
+  const yr=_campYears(_campShift());
+  const yrTxt=(yr.from||yr.to)?(" (г.р. "+(yr.from||"…")+"–"+(yr.to||"…")+")"):" (годы рождения не заданы — все показанные)";
+  if(rows.length>100&&!confirm("Подтянуть курсы для "+rows.length+" детей"+yrTxt+"? Это "+Math.ceil(rows.length/25)+" запросов в Альфу, первый раз — несколько минут. Можно сначала сузить список годами рождения, фильтром или поиском.")) return;
   _campKBusy="hist"; renderCampKids();
   try{
     if(!Object.keys(_campSubj).length){ try{ const s=await _pubCall("kidsLessons",{ids:[],refs:true}); if(s.subjects) _campSubj=s.subjects; }catch(e){} }
@@ -19106,7 +19160,8 @@ function campKidsToRes(key){
 function campKidsPrint(){
   const sh=_campShift(); const rows=_campKidsShown();
   const m=sh?_campCalls(sh):{};
-  let h='<h2>Обзвон · '+esc(sh?sh.name:"лагерь")+'</h2><div class="sub">'+rows.length+' детей · '+esc(_campDmy(_campToday()))+'</div>'
+  const yr=_campYears(sh);
+  let h='<h2>Обзвон · '+esc(sh?sh.name:"лагерь")+'</h2><div class="sub">'+rows.length+' детей'+((yr.from||yr.to)?(' · г.р. '+(yr.from||"…")+'–'+(yr.to||"…")):'')+' · '+esc(_campDmy(_campToday()))+'</div>'
    +'<table><tr><th>#</th><th>Ребёнок</th><th>Возраст</th><th>Телефон</th><th>Был у нас</th><th>amo</th><th>Дозвон</th><th>Результат · комментарий</th></tr>';
   rows.forEach((r,i)=>{ const c=m[r.key]||{};
     h+='<tr><td>'+(i+1)+'</td><td class="nm">'+esc(r.fio)+'</td><td>'+esc(_ageStr(r.dob))+'</td><td>'+esc(r.phone||"")+'</td><td>'+_campWasHtml(r)+'</td><td>'+esc(_campAmoText(r))+'</td>'
@@ -19126,16 +19181,21 @@ function renderCampKids(){
   const resByKey={}; if(sh) _campRows(sh).forEach(r=>{ resByKey[_campKidKey(r.fio)]=r; });
   const when=ts=>{ const d=new Date(ts); const z=n=>String(n).padStart(2,"0"); return z(d.getDate())+"."+z(d.getMonth()+1)+" "+z(d.getHours())+":"+z(d.getMinutes()); };
   const busy=_campKBusy;
+  if(!_campKAuto){ _campKAuto=true; _campKidsAuto(); }   // филиалы и воронки — один раз, чтобы найти «Каникулы» по имени
 
   let h=_campPickerHtml(true);
   if(!sh) h+='<div class="cmp-warn">Смены нет — отметки звонков привязываются к смене. Создайте её на вкладке «Смены».</div>';
 
-  const pipes=_campPipes||[];
+  const pipes=_campPipes||[], brs=_campAlfaBranches||[];
   const pipeOpts='<option value="0">— воронка amo —</option>'+pipes.map(p=>'<option value="'+esc(String(p.id))+'"'+((+p.id===+c.amoSrc.pipelineId)?' selected':'')+'>'+esc(p.name)+'</option>').join("");
+  const brOpts='<option value="0">все филиалы</option>'+brs.map(b=>'<option value="'+esc(String(b.id))+'"'+((+b.id===+c.alfaBranch)?' selected':'')+'>'+esc(b.name)+'</option>').join("");
+  const yr=_campYears(sh);
   h+='<div class="card"><h3>Откуда дети</h3><div class="cmp-srcs">'
    +'<div class="cmp-src"><b>Наша база</b><span>'+rows.filter(r=>r.src.our).length+' детей · расписание, ожидание, карточки</span><button class="btn ghost sm" onclick="campKidsRebuild()">Пересобрать</button></div>'
-   +'<div class="cmp-src"><b>AlfaCRM · все клиенты</b><span>'+(_campAlfa?(_campAlfa.list.length+' клиентов · выгрузка '+when(_campAlfa.at)):'ещё не тянули')+'</span>'
-     +'<button class="btn ghost sm" '+(busy?'disabled':'')+' onclick="campKidsPullAlfa()">'+(busy==="alfa"?"Тяну…":(_campAlfa?"Обновить":"Подтянуть"))+'</button></div>'
+   +'<div class="cmp-src"><b>AlfaCRM · клиенты филиала</b>'
+     +(brs.length?('<select class="cell" onchange="campKidsAlfaSet(this.value)" title="Дети лагеря заводятся в филиале «Каникулы»">'+brOpts+'</select>'):'')
+     +'<button class="btn ghost sm" '+(busy?'disabled':'')+' onclick="campKidsPullAlfa()">'+(busy==="alfa"?"Тяну…":(_campAlfa?"Обновить":"Подтянуть"))+'</button>'
+     +'<span>'+(_campAlfa?(_campAlfa.list.length+' клиентов · '+esc(_campAlfa.branchName||"все филиалы")+' · выгрузка '+when(_campAlfa.at)):'ещё не тянули')+'</span></div>'
    +'<div class="cmp-src"><b>amoCRM · архив</b>'
      +(pipes.length?('<select class="cell" onchange="campKidsAmoSet(\'pipelineId\',this.value)">'+pipeOpts+'</select>')
                    :('<button class="btn ghost sm" '+(busy?'disabled':'')+' onclick="campKidsLoadPipes()">'+(busy==="pipes"?"Тяну…":"Показать воронки")+'</button>'))
@@ -19144,8 +19204,9 @@ function renderCampKids(){
      +'<span>'+(_campAmo?(_campAmo.list.length+' детей до '+_campDmy(_campAmo.before)+' · '+esc(_campAmo.pipeName||"")+' · '+when(_campAmo.at)):'ещё не тянули')+'</span>'
      +(_campAmo&&_campAmo.cut?'<span style="color:var(--red)">Воронка больше 2500 сделок — прокси отдал только первые 2500, часть архива не приехала.</span>':'')
    +'</div>'
-   +'<div class="cmp-src"><b>Курсы из Альфы</b><span>'+Object.keys(_campHist).length+' детей с историей · показывается в колонке «Был у нас»</span>'
-     +'<button class="btn ghost sm" '+(busy?'disabled':'')+' onclick="campKidsLoadHist()">'+(busy==="hist"?"Тяну…":"Подтянуть для показанных")+'</button></div>'
+   +'<div class="cmp-src"><b>Курсы из Альфы</b><span>'+Object.keys(_campHist).length+' детей с историей · колонка «Был у нас». Тянем только показанных'
+     +((yr.from||yr.to)?(' — г.р. '+(yr.from||"…")+'–'+(yr.to||"…")):' — задайте годы рождения ниже, чтобы не тянуть всех')+'</span>'
+     +'<button class="btn ghost sm" '+(busy?'disabled':'')+' onclick="campKidsLoadHist()">'+(busy==="hist"?"Тяну…":("Подтянуть для показанных · "+shown.filter(r=>r.alfaId!=null&&!_campHist[String(r.alfaId)]).length))+'</button></div>'
    +'</div>'
    +'<div id="campKMsg" style="font-size:12px;color:'+(/не ответила/.test(_campKMsg)?"var(--red)":"var(--muted)")+';margin-top:8px;min-height:16px">'+esc(_campKMsg)+'</div>'
    +'</div>';
@@ -19169,6 +19230,14 @@ function renderCampKids(){
   [["all","откуда: все"],["was","были у нас"],["our","наша база"],["alfa","Альфа"],["amo","amo"]].forEach(x=>{
     h+='<span class="chip'+(_campKSrc===x[0]?' on':'')+'" onclick="campKidsSrc(\''+x[0]+'\')">'+esc(x[1])+'</span>'; });
   h+='<input class="cell" id="campKQ" style="width:220px;text-align:left" placeholder="поиск по имени и телефону" value="'+esc(_campKQuery)+'" oninput="campKidsQuery(this.value)">';
+  h+='</div><div class="cmp-pick">';
+  // годы рождения — на смене, руками: «2020-2015» в любом порядке
+  h+='<label class="cmp-yr" title="Хранится на смене. Ограничивает список и «Курсы из Альфы»">г.р. от <input class="cell" type="number" min="1990" max="2035" placeholder="2015" value="'+esc(String((sh&&sh.yFrom)||""))+'" onchange="campKidsYears(\'yFrom\',this.value)"> до <input class="cell" type="number" min="1990" max="2035" placeholder="2020" value="'+esc(String((sh&&sh.yTo)||""))+'" onchange="campKidsYears(\'yTo\',this.value)"></label>';
+  if(yr.from||yr.to){
+    const noDob=rows.filter(r=>!_campBirthYear(r)).length;
+    h+='<span class="chip'+(_campKNoDob?' on':'')+'" onclick="campKidsToggleNoDob()" title="Без даты рождения по году не отсеять — показать их тоже">без даты рождения · '+noDob+'</span>';
+  }
+  h+='<span style="font-size:12px;color:var(--muted)">показано '+shown.length+' из '+rows.length+'</span>';
   h+='<button class="btn ghost sm" onclick="campKidsPrint()" title="Список на бумагу с клеткой «дозвон»">🖨 Печать · '+shown.length+'</button>';
   h+='</div>';
 
