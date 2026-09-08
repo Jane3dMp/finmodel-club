@@ -987,11 +987,17 @@ h3.cmp-fl span{font-weight:400;font-size:12px;color:var(--muted)}
 /* подвкладки смены (резерв / расселение) — крупнее обычных чипов, это переключатель, а не фильтр */
 .cmp-sub{margin:2px 0 12px}
 .cmp-sub .chip{font-size:13px;padding:6px 15px;font-weight:600}
-/* источники подборки: наша база / Альфа / amo / курсы */
+/* источники подборки: карточки внутри панели справа + одна строка-сводка на самой вкладке */
 .cmp-srcs{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:8px}
-.cmp-src{border:1px solid var(--line);border-radius:9px;padding:9px 11px;display:flex;flex-wrap:wrap;gap:6px;align-items:center;font-size:12px;background:var(--cream)}
+.cmp-src{border:1px solid var(--line);border-radius:9px;padding:10px 11px;display:flex;flex-wrap:wrap;gap:7px;align-items:center;font-size:12px;background:var(--cream);margin-bottom:10px}
 .cmp-src>b{width:100%;font-size:13px}
-.cmp-src>span{color:var(--muted);flex:1 1 100%}
+.cmp-src>span{color:var(--muted);flex:1 1 100%;line-height:1.45}
+.cmp-src .cell.wide{width:100%}
+.cmp-src .btn{margin-left:auto}
+.cmp-srcdate{display:flex;flex-direction:column;gap:3px;font-size:11px;color:var(--muted)}
+.cmp-srcline{font-size:12px;color:var(--muted);align-items:center}
+.cmp-srcline>span{line-height:1.4}
+.cmp-cut{color:var(--red)}
 .cmp-kt td{white-space:nowrap}
 .cmp-yr{display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--muted)}
 .cmp-yr input.cell{width:70px}
@@ -2116,7 +2122,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-09-08-14";
+const APP_VER="2026-09-08-15";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -18298,7 +18304,9 @@ function _camp(){
 let _campShiftId=(function(){ try{ return localStorage.getItem("campShift")||""; }catch(e){ return ""; } })();
 let _campSub=(function(){ try{ return localStorage.getItem("campSub")||"list"; }catch(e){ return "list"; } })();
 let _campPick=null;      // ребёнок, взятый «в руку» для расселения
-let _campCfg=false;      // открыты настройки смены
+/* Выезжающая панель справа: "" — закрыта, "cfg" — настройки смены, "src" — источники подборки.
+   Панель одна на обе вкладки: две одновременно перекрывали бы друг друга. */
+let _campDrawer="";
 let _campEdit=false;     // режим правки схемы корпуса
 let _campPaste=false;    // открыто поле «вставить список»
 let _campShowNo=false;   // показывать отказавшихся в списке нерасселённых
@@ -18362,7 +18370,7 @@ function _campGuessSex(fio){
 
 /* ---------- смены ---------- */
 function campPickShift(id){ _campShiftId=id; try{ localStorage.setItem("campShift",id); }catch(e){}
-  _campPick=null; campCloseCfg(); _campDraw(); }
+  _campPick=null; if(_campDrawer==="cfg") campCloseCfg(); _campDraw(); }
 function campSub(v){ _campSub=(v==="rooms"||v==="prog")?v:"list"; try{ localStorage.setItem("campSub",_campSub); }catch(e){} _campPick=null; _campDraw(); }
 function campAddShift(){
   const c=_camp(), sh=_campShift();
@@ -18383,38 +18391,42 @@ function _campCfgEls(){
     const bd=document.createElement("div"); bd.id="campCfgBd"; bd.className="cmp-drawer-bd";
     bd.onclick=function(){ campCloseCfg(); };
     document.body.appendChild(bd); document.body.appendChild(el);
-    document.addEventListener("keydown",function(e){ if(e.key==="Escape"&&_campCfg) campCloseCfg(); });
+    document.addEventListener("keydown",function(e){ if(e.key==="Escape"&&_campDrawer) campCloseCfg(); });
   }
   return {el:el,bd:document.getElementById("campCfgBd")};
 }
-function campToggleCfg(){ if(_campCfg) campCloseCfg(); else campOpenCfg(); }
-function campOpenCfg(){
-  if(!_campShift()){ toast("Сначала создайте смену"); return; }
-  _campCfg=true; _campCfgRender();
+function campToggleCfg(){ if(_campDrawer==="cfg") campCloseCfg(); else campOpenCfg("cfg"); }
+function campToggleSrc(){ if(_campDrawer==="src") campCloseCfg(); else campOpenCfg("src"); }
+function campOpenCfg(view){
+  view=(view==="src")?"src":"cfg";
+  if(view==="cfg"&&!_campShift()){ toast("Сначала создайте смену"); return; }
+  _campDrawer=view; _campCfgRender();
   const e=_campCfgEls();
   // класс вешаем следующим кадром, иначе браузер применит его вместе с вставкой и анимации не будет.
   // Дублируем таймером: в неактивной вкладке кадры не рисуются, и панель осталась бы за краем экрана.
   if(e){ const show=function(){ e.el.classList.add("show"); e.bd.classList.add("show"); };
     if(typeof requestAnimationFrame==="function") requestAnimationFrame(show);
     setTimeout(show,60); }
-  _campDraw();
+  if(view==="cfg") _campDraw(); else renderCampKids();
 }
 function campCloseCfg(){
-  if(!_campCfg) return;
-  _campCfg=false;
+  if(!_campDrawer) return;
+  const was=_campDrawer;
+  _campDrawer="";
   const e=_campCfgEls();
   if(e){ e.el.classList.remove("show"); e.bd.classList.remove("show"); }
-  _campDraw();
+  if(was==="cfg") _campDraw(); else renderCampKids();
 }
 function _campCfgRender(){
-  const sh=_campShift(), e=_campCfgEls();
-  if(sh&&e) e.el.innerHTML=_campCfgHtml(sh);
+  const e=_campCfgEls(); if(!e||!_campDrawer) return;
+  if(_campDrawer==="src"){ e.el.innerHTML=_campSrcHtml(); return; }
+  const sh=_campShift(); if(sh) e.el.innerHTML=_campCfgHtml(sh);
 }
 function campSetShift(f,v){
   const sh=_campShift(); if(!sh) return;
   sh[f]=(f==="price"||f==="prepay")?(+String(v).replace(",",".")||0):v;
   _campSave(); _campDraw();
-  if(_campCfg) _campCfgRender();
+  if(_campDrawer==="cfg") _campCfgRender();
 }
 function campDelShift(){
   const sh=_campShift(); if(!sh) return;
@@ -18423,7 +18435,7 @@ function campDelShift(){
   c.res=c.res.filter(r=>r.shiftId!==sh.id);
   c.shifts=c.shifts.filter(s=>s.id!==sh.id);
   delete c.calls[sh.id];
-  _campShiftId=""; campCloseCfg(); _campSave(); _campDraw(); toast("Смена удалена");
+  _campShiftId=""; if(_campDrawer==="cfg") campCloseCfg(); _campSave(); _campDraw(); toast("Смена удалена");
 }
 
 /* ---------- резерв ---------- */
@@ -18730,7 +18742,7 @@ function _campPickerHtml(light){
   });
   if(!light){
     h+='<button class="btn ghost sm" onclick="campAddShift()">+ Смена</button>';
-    if(sh) h+='<button class="btn ghost sm'+(_campCfg?' on':'')+'" onclick="campToggleCfg()" title="Название, даты, цена, схема корпуса и ссылка на конструктор">⚙ Настройки смены</button>';
+    if(sh) h+='<button class="btn ghost sm'+(_campDrawer==="cfg"?' on':'')+'" onclick="campToggleCfg()" title="Название, даты, цена, схема корпуса и ссылка на конструктор">⚙ Настройки смены</button>';
   }
   h+='</div>';
   return h;
@@ -18780,6 +18792,7 @@ function _campSubHtml(){
 }
 function renderCampShifts(){
   const head=document.getElementById("campShiftHead"); if(!head) return;
+  if(_campDrawer==="src") campCloseCfg();   // источники подборки — не про эту вкладку
   head.innerHTML=_campPickerHtml(false)+_campSubHtml();
   renderCampRes(); renderCampRooms(); renderCampProg();
   const rb=document.getElementById("campResBody"), ob=document.getElementById("campRoomsBody"), pb=document.getElementById("campProgBody");
@@ -19618,6 +19631,52 @@ function _campKidsShown(){
   }),m,resByKey);
 }
 function campKidsPickShift(id){ _campShiftId=id; try{ localStorage.setItem("campShift",id); }catch(e){} renderCampKids(); }
+function _campWhenShort(ts){ return _campWhen(ts); }
+/* Одна строка вместо четырёх карточек: сколько детей и откуда, когда тянули. Подробности и
+   кнопки — в панели «⚙ Источники». */
+function _campSrcSummary(rows){
+  const p=[];
+  p.push("наша база · "+rows.filter(r=>r.src.our).length);
+  p.push(_campAlfa?("Альфа · "+_campAlfa.list.length+" ("+(_campAlfa.branchName||"все филиалы")+", "+_campWhen(_campAlfa.at)+")"):"Альфа — не тянули");
+  p.push(_campAmo?("amo · "+_campAmo.list.length+" (до "+_campDmy(_campAmo.before)+", "+_campWhen(_campAmo.at)+")"):"amo — не тянули");
+  const hn=Object.keys(_campHist).length;
+  p.push(hn?("курсы · "+hn):"курсы — не тянули");
+  return esc(p.join(" · "));
+}
+/* Содержимое панели «Источники подборки» — те же четыре карточки, только столбиком. */
+function _campSrcHtml(){
+  const c=_camp(), sh=_campShift();
+  const rows=_campPool||_campPoolBuild();
+  const shown=_campKidsShown();
+  const busy=_campKBusy, when=_campWhen;
+  const pipes=_campPipes||[], brs=_campAlfaBranches||[];
+  const pipeOpts='<option value="0">— воронка amo —</option>'+pipes.map(p=>'<option value="'+esc(String(p.id))+'"'+((+p.id===+c.amoSrc.pipelineId)?' selected':'')+'>'+esc(p.name)+'</option>').join("");
+  const brOpts='<option value="0">все филиалы</option>'+brs.map(b=>'<option value="'+esc(String(b.id))+'"'+((+b.id===+c.alfaBranch)?' selected':'')+'>'+esc(b.name)+'</option>').join("");
+  const yr=_campYears(sh);
+  return '<div class="cmp-dr-h"><b>Источники подборки</b><button class="cmp-x" title="Закрыть (Esc)" onclick="campCloseCfg()">×</button></div>'
+   +'<div class="cmp-dr-b">'
+   +'<div class="cmp-src"><b>Наша база</b><span>'+rows.filter(r=>r.src.our).length+' детей · расписание, список ожидания, карточки. Обновляется сама, запросов не делает.</span>'
+     +'<button class="btn ghost sm" onclick="campKidsRebuild()">Пересобрать</button></div>'
+   +'<div class="cmp-src"><b>AlfaCRM · клиенты филиала</b>'
+     +'<span>'+(_campAlfa?(_campAlfa.list.length+' клиентов · '+esc(_campAlfa.branchName||"все филиалы")+' · выгрузка '+when(_campAlfa.at)):'ещё не тянули')+'</span>'
+     +(brs.length?('<select class="cell wide" onchange="campKidsAlfaSet(this.value)" title="Дети лагеря заводятся в филиале «Каникулы»">'+brOpts+'</select>'):'')
+     +'<button class="btn sm" '+(busy?'disabled':'')+' onclick="campKidsPullAlfa()">'+(busy==="alfa"?"Тяну…":(_campAlfa?"Обновить":"Подтянуть"))+'</button></div>'
+   +'<div class="cmp-src"><b>amoCRM · архив</b>'
+     +'<span>'+(_campAmo?(_campAmo.list.length+' детей до '+_campDmy(_campAmo.before)+' · '+esc(_campAmo.pipeName||"")+' · '+when(_campAmo.at)):'ещё не тянули')+'</span>'
+     +(pipes.length?('<select class="cell wide" onchange="campKidsAmoSet(\'pipelineId\',this.value)">'+pipeOpts+'</select>')
+                   :('<button class="btn ghost sm" '+(busy?'disabled':'')+' onclick="campKidsLoadPipes()">'+(busy==="pipes"?"Тяну…":"Показать воронки")+'</button>'))
+     +'<label class="cmp-srcdate">кто заходил до<input class="cell" type="date" value="'+esc(c.amoSrc.before||"2026-06-01")+'" onchange="campKidsAmoSet(\'before\',this.value)"></label>'
+     +'<button class="btn sm" '+(busy?'disabled':'')+' onclick="campKidsPullAmo()">'+(busy==="amo"?"Тяну…":(_campAmo?"Обновить":"Подтянуть"))+'</button>'
+     +(_campAmo&&_campAmo.cut?'<span class="cmp-cut">Воронка больше 2500 сделок — прокси отдал только первые 2500, часть архива не приехала.</span>':'')
+   +'</div>'
+   +'<div class="cmp-src"><b>Курсы из Альфы</b>'
+     +'<span>'+Object.keys(_campHist).length+' детей с историей · колонка «Был у нас». Тянем только показанных'
+       +((yr.from||yr.to)?(' — г.р. '+(yr.from||"…")+'–'+(yr.to||"…")):', поэтому сузьте список годами рождения')+'.</span>'
+     +'<button class="btn sm" '+(busy?'disabled':'')+' onclick="campKidsLoadHist()">'+(busy==="hist"?"Тяну…":("Подтянуть · "+shown.filter(r=>r.alfaId!=null&&!_campHist[String(r.alfaId)]).length))+'</button></div>'
+   +'<div id="campKMsg" class="cmp-fh" style="margin-top:10px;min-height:16px'+(/не ответила/.test(_campKMsg)?";color:var(--red)":"")+'">'+esc(_campKMsg)+'</div>'
+   +'<div class="cmp-dr-f"><button class="btn ghost sm" onclick="campCloseCfg()">Готово</button></div>'
+   +'</div>';
+}
 function campKidsFilter(v){ _campKFilter=v; _campKLimit=300; renderCampKids(); }
 function campKidsSrc(v){ _campKSrc=v; _campKLimit=300; renderCampKids(); }
 function campKidsQuery(v){
@@ -19634,7 +19693,7 @@ function campKidsYears(f,v){
   sh[f]=n||"";
   const yr=_campYears(sh); if(sh.yFrom&&sh.yTo){ sh.yFrom=yr.from; sh.yTo=yr.to; }   // «2020-2015» — порядок любой
   _campKLimit=300; _campSave(); renderCampKids();
-  if(_campCfg) _campCfgRender();
+  if(_campDrawer==="cfg") _campCfgRender();
 }
 function campKidsToggleNoDob(){ _campKNoDob=!_campKNoDob; _campKLimit=300; renderCampKids(); }
 function _campKStatus(t){ const el=document.getElementById("campKMsg"); if(el) el.textContent=t; _campKMsg=t; }
@@ -19806,7 +19865,7 @@ function campKidsPrint(){
 function renderCampKids(){
   const box=document.getElementById("campKidsBody"); if(!box) return;
   const panel=box.closest(".panel"); if(panel&&!panel.classList.contains("active")) return;   // тяжёлая вкладка — только когда она на экране
-  if(_campCfg) campCloseCfg();   // панель настроек смены относится к вкладке «Смены» — на подборке ей висеть незачем
+  if(_campDrawer==="cfg") campCloseCfg();   // настройки смены относятся к вкладке «Смены» — на подборке им висеть незачем
   if(!_campAlfa){ const c=_campCacheGet(CAMP_LS_ALFA); if(c&&Array.isArray(c.list)) _campAlfa=c; }
   if(!_campAmo){ const c=_campCacheGet(CAMP_LS_AMO); if(c&&Array.isArray(c.list)) _campAmo=c; }
   const c=_camp(), sh=_campShift();
@@ -19821,29 +19880,13 @@ function renderCampKids(){
   let h=_campPickerHtml(true);
   if(!sh) h+='<div class="cmp-warn">Смены нет — отметки звонков привязываются к смене. Создайте её на вкладке «Смены».</div>';
 
-  const pipes=_campPipes||[], brs=_campAlfaBranches||[];
-  const pipeOpts='<option value="0">— воронка amo —</option>'+pipes.map(p=>'<option value="'+esc(String(p.id))+'"'+((+p.id===+c.amoSrc.pipelineId)?' selected':'')+'>'+esc(p.name)+'</option>').join("");
-  const brOpts='<option value="0">все филиалы</option>'+brs.map(b=>'<option value="'+esc(String(b.id))+'"'+((+b.id===+c.alfaBranch)?' selected':'')+'>'+esc(b.name)+'</option>').join("");
   const yr=_campYears(sh);
-  h+='<div class="card"><h3>Откуда дети</h3><div class="cmp-srcs">'
-   +'<div class="cmp-src"><b>Наша база</b><span>'+rows.filter(r=>r.src.our).length+' детей · расписание, ожидание, карточки</span><button class="btn ghost sm" onclick="campKidsRebuild()">Пересобрать</button></div>'
-   +'<div class="cmp-src"><b>AlfaCRM · клиенты филиала</b>'
-     +(brs.length?('<select class="cell" onchange="campKidsAlfaSet(this.value)" title="Дети лагеря заводятся в филиале «Каникулы»">'+brOpts+'</select>'):'')
-     +'<button class="btn ghost sm" '+(busy?'disabled':'')+' onclick="campKidsPullAlfa()">'+(busy==="alfa"?"Тяну…":(_campAlfa?"Обновить":"Подтянуть"))+'</button>'
-     +'<span>'+(_campAlfa?(_campAlfa.list.length+' клиентов · '+esc(_campAlfa.branchName||"все филиалы")+' · выгрузка '+when(_campAlfa.at)):'ещё не тянули')+'</span></div>'
-   +'<div class="cmp-src"><b>amoCRM · архив</b>'
-     +(pipes.length?('<select class="cell" onchange="campKidsAmoSet(\'pipelineId\',this.value)">'+pipeOpts+'</select>')
-                   :('<button class="btn ghost sm" '+(busy?'disabled':'')+' onclick="campKidsLoadPipes()">'+(busy==="pipes"?"Тяну…":"Показать воронки")+'</button>'))
-     +'<label style="font-size:11px;color:var(--muted);display:inline-flex;gap:4px;align-items:center">до <input class="cell" type="date" style="width:138px" value="'+esc(c.amoSrc.before||"2026-06-01")+'" onchange="campKidsAmoSet(\'before\',this.value)"></label>'
-     +'<button class="btn ghost sm" '+(busy?'disabled':'')+' onclick="campKidsPullAmo()">'+(busy==="amo"?"Тяну…":(_campAmo?"Обновить":"Подтянуть"))+'</button>'
-     +'<span>'+(_campAmo?(_campAmo.list.length+' детей до '+_campDmy(_campAmo.before)+' · '+esc(_campAmo.pipeName||"")+' · '+when(_campAmo.at)):'ещё не тянули')+'</span>'
-     +(_campAmo&&_campAmo.cut?'<span style="color:var(--red)">Воронка больше 2500 сделок — прокси отдал только первые 2500, часть архива не приехала.</span>':'')
-   +'</div>'
-   +'<div class="cmp-src"><b>Курсы из Альфы</b><span>'+Object.keys(_campHist).length+' детей с историей · колонка «Был у нас». Тянем только показанных'
-     +((yr.from||yr.to)?(' — г.р. '+(yr.from||"…")+'–'+(yr.to||"…")):' — задайте годы рождения ниже, чтобы не тянуть всех')+'</span>'
-     +'<button class="btn ghost sm" '+(busy?'disabled':'')+' onclick="campKidsLoadHist()">'+(busy==="hist"?"Тяну…":("Подтянуть для показанных · "+shown.filter(r=>r.alfaId!=null&&!_campHist[String(r.alfaId)]).length))+'</button></div>'
-   +'</div>'
-   +'<div id="campKMsg" style="font-size:12px;color:'+(/не ответила/.test(_campKMsg)?"var(--red)":"var(--muted)")+';margin-top:8px;min-height:16px">'+esc(_campKMsg)+'</div>'
+  // Источники уехали в панель справа: четыре карточки занимали пол-экрана, а трогают их раз в день
+  h+='<div class="cmp-pick cmp-srcline">'
+   +'<button class="btn ghost sm'+(_campDrawer==="src"?' on':'')+'" '+(busy?'disabled':'')+' onclick="campToggleSrc()">'+(busy?"Тяну…":"⚙ Источники")+'</button>'
+   +'<span>'+_campSrcSummary(rows)+'</span>'
+   +(_campAmo&&_campAmo.cut?'<span class="cmp-cut">amo обрезан на 2500 сделках</span>':'')
+   +'<span id="campKMsg" class="'+(/не ответила/.test(_campKMsg)?"cmp-cut":"")+'">'+esc(_campKMsg)+'</span>'
    +'</div>';
 
   const called=Object.values(m).filter(x=>x&&x.st).length;
@@ -19928,6 +19971,8 @@ function renderCampKids(){
   h+='</tbody></table></div>';
   if(shown.length>lim) h+='<div style="margin-top:8px"><button class="btn ghost sm" onclick="campKidsMore()">Показать ещё · осталось '+(shown.length-lim)+'</button></div>';
   box.innerHTML=h;
+  // панель источников открыта — обновляем и её: там счётчики, прогресс загрузки и кнопки
+  if(_campDrawer==="src") _campCfgRender();
 }
 
 /* ===== ВКЛАДКА «МАЙСКИЙ» — постоянная сверка оплат с расписанием ===== */
