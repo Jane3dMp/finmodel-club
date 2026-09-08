@@ -930,6 +930,58 @@ details.client .cli-cols .cc-bal{width:74px;font-weight:600}
   background:var(--graphite);color:#fff;padding:10px 16px;border-radius:22px;font-size:13px;
   box-shadow:0 6px 20px rgba(0,0,0,.25);opacity:0;transition:opacity .25s;pointer-events:none}
 .swipe-hint.on{opacity:.95}
+
+/* ===== ЗАГОРОДНЫЙ ЛАГЕРЬ: резерв и расселение по блокам ===== */
+.cmp-pick{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:10px}
+.cmp-pick .chip.on{background:var(--graphite);border-color:var(--graphite);color:#fff}
+.cmp-kpi{display:flex;flex-wrap:wrap;gap:8px;margin:6px 0 12px}
+.cmp-kpi>div{background:#fff;border:1px solid var(--line);border-radius:9px;padding:7px 13px;font-size:11px;color:var(--muted);line-height:1.25}
+.cmp-kpi b{display:block;font-size:18px;color:var(--coal);font-weight:700}
+.cmp-warn{background:#FDF6E3;border:1px solid #E8DCB8;border-radius:8px;padding:8px 11px;font-size:12px;color:#6B5411;margin-bottom:10px}
+.cmp-warn.soft{background:var(--sand-l);border-color:var(--line);color:var(--muted)}
+.cmp-cfg{display:flex;flex-wrap:wrap;gap:12px}
+.cmp-cfg label{display:flex;flex-direction:column;gap:3px;font-size:11px;color:var(--muted)}
+.cmp-t th.a-right,.cmp-t td.a-right{text-align:right}
+.cmp-t td{vertical-align:middle;white-space:nowrap}
+.cmp-t select.cell{max-width:152px}
+.cmp-t .cmp-when{font-size:10px;color:var(--muted);margin-top:1px}
+/* пол подставлен по фамилии и не подтверждён руками — блоки однополые, это надо видеть */
+.cmp-t select.cmp-auto{border-bottom:2px dotted #C9922E}
+.cmp-t tr.cmp-off td{opacity:.55}
+.cmp-ok{color:var(--green);font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap}
+.cmp-ok:hover{text-decoration:underline}
+.cmp-floor{margin-bottom:18px}
+h3.cmp-fl{font-size:14px;margin:0 0 8px;display:flex;align-items:center;gap:8px}
+h3.cmp-fl span{font-weight:400;font-size:12px;color:var(--muted)}
+.cmp-blocks{display:flex;flex-wrap:wrap;gap:10px}
+.cmp-block{background:#fff;border:1px solid var(--line);border-radius:10px;padding:9px 10px;width:214px;
+  box-shadow:0 1px 3px rgba(28,20,16,.04)}
+.cmp-block.m{border-color:#BFD0EE;background:#F8FAFF}
+.cmp-block.f{border-color:#E8C7D0;background:#FFF9FA}
+.cmp-block.staff{border-color:#DED8C8;background:#FBFAF5}
+.cmp-bhead{display:flex;align-items:center;gap:6px;margin-bottom:5px;font-size:13px}
+.cmp-cap{margin-left:auto;font-size:11px;color:var(--muted);white-space:nowrap}
+.cmp-room{margin-bottom:7px}
+.cmp-rname{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;margin-bottom:2px}
+.cmp-rhead{display:flex;gap:4px;align-items:center;margin-bottom:3px}
+.cmp-bed{display:flex;align-items:center;gap:5px;border:1px dashed var(--line);border-radius:7px;
+  padding:4px 7px;margin-bottom:3px;font-size:12px;min-height:29px}
+.cmp-bed.free{color:var(--muted);cursor:pointer;justify-content:center;font-size:11px}
+.cmp-bed.free:hover{border-color:var(--terra);color:var(--coal)}
+.cmp-bed.free.hot{border-color:var(--green);border-style:solid;color:var(--green);background:#F1F7F3}
+.cmp-bed.busy{border-style:solid;background:#fff;cursor:pointer}
+.cmp-bed.busy.on{border-color:var(--graphite);box-shadow:0 0 0 2px rgba(44,47,53,.12)}
+.cmp-bed.staff{border-style:solid;padding:3px 4px}
+.cmp-bn{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cmp-x{border:none;background:none;color:var(--muted);cursor:pointer;font-size:15px;line-height:1;padding:0 3px}
+.cmp-x:hover{color:var(--red)}
+.cmp-bedit{display:flex;flex-wrap:wrap;gap:5px;align-items:center;margin-top:6px;padding-top:6px;border-top:1px dashed var(--line)}
+.cmp-free{display:flex;flex-wrap:wrap;gap:6px}
+.cmp-kid{border:1px solid var(--line);border-radius:14px;padding:3px 11px;font-size:12px;cursor:pointer;background:#fff}
+.cmp-kid:hover{background:var(--sand-l)}
+.cmp-kid.m{border-left:4px solid #1F5BC0}
+.cmp-kid.f{border-left:4px solid #B0493D}
+.cmp-kid.on{background:var(--graphite);color:#fff;border-color:var(--graphite)}
 </style>
 </head>
 <body>
@@ -971,6 +1023,7 @@ details.client .cli-cols .cc-bal{width:74px;font-weight:600}
  <div class="navmode" id="navMode">
   <button class="nm" data-m="work" onclick="setNavMode('work')">Работа</button>
   <button class="nm" data-m="fin" onclick="setNavMode('fin')">Финмодель</button>
+  <button class="nm" data-m="camp" onclick="setNavMode('camp')">Загородный лагерь</button>
   <button class="nm" data-m="ruk" onclick="setNavMode('ruk')" style="display:none">Дашборд Руководителя</button>
   <button class="nm" data-m="adm" onclick="setNavMode('adm')" style="display:none">Дашборд Администратора</button>
  </div>
@@ -988,6 +1041,8 @@ details.client .cli-cols .cc-bal{width:74px;font-weight:600}
  <button class="tab" data-t="price"><i data-ic="price"></i>Прайс</button>
  <button class="tab" data-t="cards"><i data-ic="idcard"></i>О курсах</button>
  <button class="tab" data-t="may"><i data-ic="may"></i>Майский</button>
+ <button class="tab" data-t="campres">Резерв</button>
+ <button class="tab" data-t="camprooms">Расселение</button>
  <button class="tab" data-t="staff">Педсостав и ФОТ</button>
  <button class="tab" data-t="fixed">Постоянные расходы</button>
  <button class="tab" data-t="tax">Налоги РБ и ФОТ</button>
@@ -1235,6 +1290,20 @@ details.client .cli-cols .cc-bal{width:74px;font-weight:600}
  <h2 class="sec">Майский — сверка оплат 💰</h2>
  <div class="sec-desc">Вставьте список оплативших (<b>ФИО ⇥ пометка ⇥ курс</b>). По каждому ребёнку видно, вписан ли он в сетку и куда — или выберите группу и впишите. Отметка 💰 ставится прямо в расписании. Разобранные строки можно убирать.</div>
  <div id="mayReconBody"></div>
+</section>
+
+<!-- ===== ЗАГОРОДНЫЙ ЛАГЕРЬ: РЕЗЕРВ ===== -->
+<section class="panel" id="campres">
+ <h2 class="sec">Загородный лагерь — резерв</h2>
+ <div class="sec-desc">Кто собирается в смену: <b>подтвердил</b>, <b>думает</b> или <b>отказ</b>. Своего ребёнка подтягиваем из нашей базы — телефон и дата рождения приедут сами; незнакомого вписываем руками. Здесь же фиксируем предоплату и доплату (каждая со своей датой) и отмечаем предзапись на следующие каникулы. В AlfaCRM уезжают только подтверждённые.</div>
+ <div id="campResBody"></div>
+</section>
+
+<!-- ===== ЗАГОРОДНЫЙ ЛАГЕРЬ: РАССЕЛЕНИЕ ===== -->
+<section class="panel" id="camprooms">
+ <h2 class="sec">Расселение по блокам</h2>
+ <div class="sec-desc">Схема корпуса: этажи, блоки, комнаты и места. <b>В блоке живут дети одного пола</b> — пол задаёт первый поселённый, дальше блок принимает только своих. Комфорт-комнаты отданы вожатым: там имя пишется прямо в поле. Схему можно править под другой лагерь — «✎ Правка схемы».</div>
+ <div id="campRoomsBody"></div>
 </section>
 
 <!-- ===== ПЕДСОСТАВ ===== -->
@@ -1929,6 +1998,9 @@ const DEFAULT_STATE = {
   // один человек — несколько аккаунтов (перерегистрация, работа с чужого компьютера):
   // [{name:"Ольга Шакуро", emails:["shakuro.olha@gmail.com", "..."]}] — статистика суммируется
   staffAliases: [],
+  // загородный лагерь: {camps, shifts, layouts, res} — создаётся при первом открытии вкладки,
+  // чтобы у тех, кто лагерем не занимается, узел не появлялся вовсе
+  camp: null,
   gasUrl: "https://script.google.com/macros/s/AKfycbxJajbntVctGjXImc1hVhWimvOkXHcNCkuVFpszEbA8ad-B40Lj2Q8gdMMTBar4YLnsew/exec"
 };
 const LS_KEY = "proznanie_finmodel_v1";
@@ -1936,7 +2008,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-09-08-04";
+const APP_VER="2026-09-08-05";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -2133,7 +2205,7 @@ function _applyRemoteRest(remote){
     try{ _lastSnapHash=_snapSig(); }catch(e){}
     if(typeof _resetHistory==="function") _resetHistory();   // стек отмены обесценился
     // перерисовываем то, что не мешает открытой карточке
-    ["renderGroups","renderClients","renderMay","renderCourses"].forEach(fn=>{
+    ["renderGroups","renderClients","renderMay","renderCourses","renderCampRes","renderCampRooms"].forEach(fn=>{
       if(typeof window[fn]==="function"){ try{ window[fn](); }catch(e){} }
     });
   }catch(e){ console.error("Firebase: не удалось применить не-грид часть —",e); }
@@ -2827,7 +2899,7 @@ function fbStart(){
   });
 }
 /* ---- вкладки по ролям ---- */
-const TAB_DEFS=[["dash","Дашборд"],["report","Отчёт по набору"],["courses","Курсы и маржа"],["real","Реальный оборот"],["planner","Планировщик загрузки"],["goals","Набор"],["grid","Расписание (сетка)"],["groups","Группы"],["compos","Состав групп"],["clients","Клиенты"],["price","Прайс"],["cards","О курсах"],["may","Майский"],["staff","Педсостав и ФОТ"],["fixed","Постоянные расходы"],["tax","Налоги РБ и ФОТ"],["break","Точка безубыточности"],["scenario","Сценарии"],["settings","Параметры"],["trials","Пробные"],["ruk","Дашборд Руководителя"],["adm","Дашборд Администратора"]];
+const TAB_DEFS=[["dash","Дашборд"],["report","Отчёт по набору"],["courses","Курсы и маржа"],["real","Реальный оборот"],["planner","Планировщик загрузки"],["goals","Набор"],["grid","Расписание (сетка)"],["groups","Группы"],["compos","Состав групп"],["clients","Клиенты"],["price","Прайс"],["cards","О курсах"],["may","Майский"],["campres","Лагерь: резерв"],["camprooms","Лагерь: расселение"],["staff","Педсостав и ФОТ"],["fixed","Постоянные расходы"],["tax","Налоги РБ и ФОТ"],["break","Точка безубыточности"],["scenario","Сценарии"],["settings","Параметры"],["trials","Пробные"],["ruk","Дашборд Руководителя"],["adm","Дашборд Администратора"]];
 const MANAGER_DEFAULT_TABS=["grid","groups","clients","may","goals"];
 const ALWAYS_TABS={clients:1,price:1,goals:1,cards:1};   // видны всем ролям, даже если не отмечены в доступах
 /* «Пробные» — админская, а не владельческая: контроль пробных это ежедневная работа админа
@@ -2839,13 +2911,13 @@ const OWNER_EMAILS=["smalprince@gmail.com","proznanie.mogilev@gmail.com"];
 let _fbIsOwner=false;
 function _defaultTabsMap(){ const m={}; MANAGER_DEFAULT_TABS.forEach(function(k){ m[k]=true; }); return m; }
 /* ---- режимы навигации: «Работа» (ежедневное) и «Финмодель» (финансы) ---- */
-const TAB_MODES={grid:"work",groups:"work",compos:"work",clients:"work",price:"work",cards:"work",may:"work",goals:"work",dash:"fin",report:"fin",courses:"fin",real:"fin",planner:"fin",staff:"fin",fixed:"fin",tax:"fin","break":"fin",scenario:"fin",settings:"fin",trials:"work",ruk:"ruk",adm:"adm"};
+const TAB_MODES={grid:"work",groups:"work",compos:"work",clients:"work",price:"work",cards:"work",may:"work",goals:"work",campres:"camp",camprooms:"camp",dash:"fin",report:"fin",courses:"fin",real:"fin",planner:"fin",staff:"fin",fixed:"fin",tax:"fin","break":"fin",scenario:"fin",settings:"fin",trials:"work",ruk:"ruk",adm:"adm"};
 // вкладки, видимые в ОБОИХ режимах: «О курсах» заполняет Жанна из «Финмодели»,
 // а менеджеры читают в «Работе» — без этого админу приходилось переключать режим
 // «Пробные» нужны и админу в «Работе», и Жанне из «Финмодели» — как «О курсах»
 const TAB_BOTH_MODES={cards:1,trials:1};
 // Дашборды владельца — это отдельные режимы навигации (как «Работа»/«Финмодель»), рядом с ними
-const NAV_MODES=["work","fin","ruk","adm"];
+const NAV_MODES=["work","fin","camp","ruk","adm"];
 // В этих режимах всего одна панель = сам дашборд; ленту вкладок прячем (режим и есть выбор)
 const SOLO_MODES={ruk:1,adm:1};
 let _tabAccess=null;   // null = все вкладки (админ / до входа), иначе {tabKey:true}
@@ -18005,6 +18077,744 @@ function alfaNewApply(){
   toast("Добавлено в список ожидания: "+added);
 }
 
+/* ===== ЗАГОРОДНЫЙ ЛАГЕРЬ: РЕЗЕРВ И РАССЕЛЕНИЕ ПО БЛОКАМ =====
+   Лагерь у клуба не один и не последний: будут другие корпуса и другие заезды. Поэтому модель
+   трёхуровневая — ЛАГЕРЬ → СМЕНА (заезд) → дети смены, а схема корпуса (этажи / блоки / комнаты /
+   места) лежит отдельным «планом» и переиспользуется всеми сменами: заводя вторую смену, схему
+   не рисуют заново.
+   Резерв — рабочий список менеджера: ребёнка вписывают сразу после разговора («подтвердил /
+   думает / отказ»), деньги фиксируют по факту (предоплата и доплата — каждая со своей датой),
+   и только подтверждённый уезжает в AlfaCRM. До этого резерв — наш черновик, и «думающими»
+   мы CRM не засоряем. */
+const CAMP_ST={yes:{t:"подтвердил",c:"var(--green)",ic:"🟢"},maybe:{t:"думает",c:"#C9922E",ic:"🟡"},no:{t:"отказ",c:"var(--red)",ic:"🔴"}};
+const CAMP_STATUS=[["yes","подтвердил"],["maybe","думает"],["no","отказ"]];
+const CAMP_SRC=[["","— источник —"],["chat","из чата лагеря"],["call","исходящий звонок"],["rec","рекомендация"],["other","другое"]];
+const CAMP_KIND=[["","— вариант —"],["club","клубный"],["camp","лагерный"],["new","новенький"]];
+/* Предзапись на следующие каникулы: спрашиваем прямо в лагере, пока ребёнок здесь и доволен. */
+const CAMP_PRE=[["preExtra","доп. каникулы","Доп"],["preSpring","весенние","Вес"],["preSummer","летние","Лет"]];
+const CAMP_SEXN={m:"мальчики",f:"девочки"};
+
+function _campNewId(p){ return p+Date.now().toString(36)+Math.random().toString(36).slice(2,6); }
+function _campToday(){ const d=new Date(),z=n=>String(n).padStart(2,"0"); return d.getFullYear()+"-"+z(d.getMonth()+1)+"-"+z(d.getDate()); }
+function _campDate(iso){ const m=String(iso||"").match(/^(\d{4})-(\d{2})-(\d{2})/); return m?(m[3]+"."+m[2]):""; }
+
+/* Схема санатория: третий этаж — из файла «Расселение 3 этаж.xlsx», второй — со слов Жанны.
+   3 этаж: блоки 32–39, в каждом две комнаты по 3 места (в файле это «3 + 3»), плюс два доп.
+   места — комнаты 40 и 44 по 3 места. Итого 48 + 6 = 54, как в итоговой строке файла.
+   2 этаж: три блока по 4 ребёнка, два по 5 и три «комфорта» под вожатых. */
+function _campSeedLayout(){
+  const blocks=[];
+  const add=(floor,name,rooms,staff)=>blocks.push({id:_campNewId("b"),floor:floor,name:name,staff:!!staff,
+    rooms:rooms.map((r,i)=>({id:"r"+(i+1),name:r[0],beds:r[1]}))});
+  for(let i=1;i<=3;i++) add("2 этаж","Блок 2."+i,[["комната",4]]);
+  for(let i=4;i<=5;i++) add("2 этаж","Блок 2."+i,[["комната",5]]);
+  for(let i=1;i<=3;i++) add("2 этаж","Комфорт "+i,[["комната",2]],true);
+  for(let n=32;n<=39;n++) add("3 этаж","Блок "+n,[["комната 1",3],["комната 2",3]]);
+  add("3 этаж","Доп. место, к. 40",[["комната",3]]);
+  add("3 этаж","Доп. место, к. 44",[["комната",3]]);
+  return {id:_campNewId("L"),name:"Санаторий · 2 и 3 этаж",blocks:blocks};
+}
+/* Узел S.camp создаём лениво — при первом открытии вкладки, а не у всех подряд. */
+function _camp(){
+  if(!S.camp||typeof S.camp!=="object") S.camp={};
+  const c=S.camp;
+  if(!Array.isArray(c.layouts)) c.layouts=[];
+  if(!Array.isArray(c.camps))   c.camps=[];
+  if(!Array.isArray(c.shifts))  c.shifts=[];
+  if(!Array.isArray(c.res))     c.res=[];
+  if(!c.layouts.length) c.layouts.push(_campSeedLayout());
+  if(!c.camps.length){
+    const id=_campNewId("c");
+    c.camps.push({id:id,name:"Загородный лагерь",note:""});
+    c.shifts.push({id:_campNewId("s"),campId:id,name:"1 смена",from:"",to:"",price:0,prepay:0,layoutId:c.layouts[0].id,sex:{},staff:{}});
+  }
+  return c;
+}
+/* Какую смену смотрим — у каждого своя (в браузере). Держи мы выбор в общей модели, двое
+   коллег перетягивали бы экран друг у друга через облако. */
+let _campShiftId=(function(){ try{ return localStorage.getItem("campShift")||""; }catch(e){ return ""; } })();
+let _campPick=null;      // ребёнок, взятый «в руку» для расселения
+let _campCfg=false;      // открыты настройки смены
+let _campEdit=false;     // режим правки схемы корпуса
+let _campPaste=false;    // открыто поле «вставить список»
+let _campShowNo=false;   // показывать отказавшихся в списке нерасселённых
+let _campFilter="all", _campQuery="";
+
+function _campShift(){
+  const c=_camp();
+  let s=c.shifts.find(x=>x.id===_campShiftId)||c.shifts[0]||null;
+  if(s&&s.id!==_campShiftId){ _campShiftId=s.id; try{ localStorage.setItem("campShift",s.id); }catch(e){} }
+  if(s){ if(!s.sex||typeof s.sex!=="object") s.sex={}; if(!s.staff||typeof s.staff!=="object") s.staff={}; }
+  return s;
+}
+function _campSave(){ persistLocal(); if(typeof fbSchedulePush==="function") fbSchedulePush(); }
+/* Общая перерисовка зовёт нас на каждом старте и после каждой синхронизации. Пока узла S.camp
+   нет — не создаём его: у тех, кто лагерем не занимается, вкладка не должна ничего писать
+   в общую модель. Узел появится в момент, когда вкладку откроют. */
+function _campRedraw(){ if(!S.camp) return; renderCampRes(); renderCampRooms(); }
+function _campDraw(){ renderCampRes(); renderCampRooms(); }
+function _campLayout(sh){ const c=_camp(); return c.layouts.find(l=>l.id===(sh&&sh.layoutId))||c.layouts[0]||null; }
+/* Все места плана одним списком. Ключ места = блок|комната|номер койки. */
+function _campBeds(lay,kidsOnly){
+  const out=[];
+  ((lay&&lay.blocks)||[]).forEach(b=>{ if(kidsOnly&&b.staff) return;
+    (b.rooms||[]).forEach(r=>{ const n=Math.max(0,+r.beds||0);
+      for(let i=0;i<n;i++) out.push({key:b.id+"|"+r.id+"|"+i,block:b,room:r,idx:i,staff:!!b.staff}); }); });
+  return out;
+}
+function _campRows(sh){ const id=sh&&sh.id; return _camp().res.filter(r=>r&&r.shiftId===id); }
+function _campRow(id){ return _camp().res.find(r=>r&&r.id===id)||null; }
+function _campMoney(r){ return (+r.pre||0)+(+r.paid||0); }
+function _campLeft(sh,r){ const need=+((sh&&sh.price)||0); return need?Math.max(0,need-_campMoney(r)):0; }
+
+/* Дети, которых мы уже знаем: из расписания, списка ожидания и карточек по alfaId.
+   «Подтянуть из нашего списка» — это про них: телефон и дата рождения приезжают сами. */
+function _campKnownKids(){
+  const map=new Map();
+  const put=(n,phone,dob,alfaId)=>{
+    const nm=cleanKidName(n); if(!nm) return;
+    const k=_nameKey(nm); if(!k) return;
+    const cur=map.get(k)||{name:nm,phone:"",dob:"",alfaId:null};
+    if(phone&&!cur.phone) cur.phone=phone;
+    if(dob&&!cur.dob) cur.dob=_dobIso(dob)||dob;
+    if(alfaId!=null&&alfaId!==""&&cur.alfaId==null) cur.alfaId=alfaId;
+    map.set(k,cur);
+  };
+  (S.grid||[]).forEach(l=>kidsOf(l).forEach(k=>put(k.n,k.phone,k.dob,k.alfaId)));
+  (Array.isArray(S.waitlist)?S.waitlist:[]).forEach(w=>put(w.n,w.phone,w.dob,w.alfaId));
+  Object.keys(S.children||{}).forEach(id=>{ const r=S.children[id]||{}; put(r.name,r.phone,r.dob,id); });
+  return [...map.values()].sort((a,b)=>a.name.localeCompare(b.name,"ru"));
+}
+/* Пол по фамилии — только черновик. В наших списках ФИО идёт «Фамилия Имя», и женские фамилии
+   почти всегда на -ова/-ева/-ина/-ская. Неоднозначные (Азаренок, Шевчук) не угадываем вовсе:
+   блок однополый, и ошибка здесь дороже лишней проверки. Подставленное помечаем как
+   неподтверждённое — в резерве такой выбор подчёркнут пунктиром, в расселении посчитан отдельно. */
+function _campGuessSex(fio){
+  const w=String(fio||"").trim().split(/\s+/)[0]||"";
+  if(/(ова|ева|ёва|ина|ына|ская|цкая|ная|ая)$/i.test(w)) return "f";
+  if(/(ов|ев|ёв|ин|ын|ский|цкий|ный|ый)$/i.test(w)) return "m";
+  return "";
+}
+
+/* ---------- лагеря и смены ---------- */
+function campPickCamp(id){
+  const c=_camp(); const s=c.shifts.find(x=>x.campId===id);
+  if(s) campPickShift(s.id); else { _campShiftId=""; _campDraw(); }
+}
+function campPickShift(id){ _campShiftId=id; try{ localStorage.setItem("campShift",id); }catch(e){}
+  _campPick=null; _campCfg=false; _campDraw(); }
+function campAddCamp(){
+  const n=prompt("Название лагеря:","Загородный лагерь"); if(!n||!n.trim()) return;
+  const c=_camp(), id=_campNewId("c"), sid=_campNewId("s");
+  c.camps.push({id:id,name:n.trim(),note:""});
+  c.shifts.push({id:sid,campId:id,name:"1 смена",from:"",to:"",price:0,prepay:0,layoutId:(c.layouts[0]||{}).id,sex:{},staff:{}});
+  _campSave(); campPickShift(sid); toast("Лагерь добавлен: "+n.trim());
+}
+function campAddShift(){
+  const sh=_campShift(), c=_camp();
+  const campId=sh?sh.campId:((c.camps[0]||{}).id);
+  if(!campId){ toast("Сначала добавьте лагерь"); return; }
+  const mine=c.shifts.filter(s=>s.campId===campId);
+  const n=prompt("Название смены (заезда):",(mine.length+1)+" смена"); if(!n||!n.trim()) return;
+  const sid=_campNewId("s");
+  c.shifts.push({id:sid,campId:campId,name:n.trim(),from:"",to:"",price:(sh&&+sh.price)||0,prepay:(sh&&+sh.prepay)||0,
+    layoutId:(sh&&sh.layoutId)||((c.layouts[0]||{}).id),sex:{},staff:{}});
+  _campSave(); campPickShift(sid); toast("Смена добавлена: "+n.trim());
+}
+function campToggleCfg(){ _campCfg=!_campCfg; _campDraw(); }
+function campSetShift(f,v){
+  const sh=_campShift(); if(!sh) return;
+  sh[f]=(f==="price"||f==="prepay")?(+String(v).replace(",",".")||0):v;
+  _campSave(); _campDraw();
+}
+function campRenameCamp(){
+  const sh=_campShift(); if(!sh) return;
+  const cm=_camp().camps.find(x=>x.id===sh.campId); if(!cm) return;
+  const n=prompt("Название лагеря:",cm.name); if(!n||!n.trim()) return;
+  cm.name=n.trim(); _campSave(); _campDraw();
+}
+function campDelShift(){
+  const sh=_campShift(); if(!sh) return;
+  const c=_camp(), rows=_campRows(sh);
+  if(!confirm("Удалить смену «"+sh.name+"»"+(rows.length?(" вместе с резервом ("+rows.length+" реб.)"):"")+"? Необратимо.")) return;
+  c.res=c.res.filter(r=>r.shiftId!==sh.id);
+  c.shifts=c.shifts.filter(s=>s.id!==sh.id);
+  _campShiftId=""; _campCfg=false; _campSave(); _campDraw(); toast("Смена удалена");
+}
+function campDelCamp(){
+  const sh=_campShift(); if(!sh) return;
+  const c=_camp(), cm=c.camps.find(x=>x.id===sh.campId); if(!cm) return;
+  const sids=c.shifts.filter(s=>s.campId===cm.id).map(s=>s.id);
+  const n=c.res.filter(r=>sids.indexOf(r.shiftId)>=0).length;
+  if(!confirm("Удалить лагерь «"+cm.name+"» со всеми сменами ("+sids.length+") и резервом ("+n+" реб.)? Необратимо.")) return;
+  c.res=c.res.filter(r=>sids.indexOf(r.shiftId)<0);
+  c.shifts=c.shifts.filter(s=>s.campId!==cm.id);
+  c.camps=c.camps.filter(x=>x.id!==cm.id);
+  _campShiftId=""; _campCfg=false; _campSave(); _campDraw(); toast("Лагерь удалён");
+}
+
+/* ---------- резерв ---------- */
+function campAddRow(o){
+  const sh=_campShift(); if(!sh){ toast("Сначала создайте смену"); return null; }
+  const nm=cleanKidName((o&&o.name)||"");
+  if(!nm){ toast("Введите фамилию и имя"); return null; }
+  if(_campRows(sh).some(r=>_nameKey(r.fio)===_nameKey(nm))){ toast("«"+nm+"» уже в резерве этой смены"); return null; }
+  const guess=_campGuessSex(nm);
+  const r={id:_campNewId("r"),shiftId:sh.id,fio:nm,sex:guess,sexAuto:!!guess,
+    phone:(o&&o.phone)||"",dob:(o&&o.dob)||"",alfaId:(o&&o.alfaId!=null&&o.alfaId!=="")?o.alfaId:null,
+    status:"maybe",src:"",kind:(o&&o.kind)||"",pre:0,preAt:"",paid:0,paidAt:"",
+    preExtra:false,preSpring:false,preSummer:false,bed:"",note:"",at:Date.now()};
+  _camp().res.push(r); _campSave();
+  return r;
+}
+function campAddFromInput(){
+  const inp=document.getElementById("campAddName"); if(!inp) return;
+  const raw=inp.value.trim(); if(!raw){ toast("Введите фамилию и имя"); return; }
+  const known=_campKnownKids().find(k=>_nameKey(k.name)===_nameKey(raw));
+  const r=campAddRow(known?{name:known.name,phone:known.phone,dob:known.dob,alfaId:known.alfaId,kind:"club"}
+                          :{name:raw,kind:"new"});
+  if(!r) return;
+  _campDraw();
+  toast("В резерв: "+r.fio+(known?" · из нашей базы":" · вписан вручную"));
+  const again=document.getElementById("campAddName"); if(again){ again.value=""; again.focus(); }
+}
+function campTogglePaste(){ _campPaste=!_campPaste; renderCampRes();
+  const t=document.getElementById("campPasteBox"); if(t) t.focus(); }
+/* Списки приходят из чата лагеря строкой вида «1. Иванов Пётр +375291234567»:
+   номер и телефон отрезаем, остальное — ФИО. */
+function _campParseLines(raw){
+  const out=[];
+  String(raw||"").split(/\r?\n/).forEach(ln=>{
+    let s=ln.replace(/^\s*\d+\s*[.)]\s*/,"").trim();
+    if(!s) return;
+    let phone="";
+    const m=s.match(/(\+?\d[\d\s()\-]{6,})\s*$/);
+    if(m){ phone=m[1].trim(); s=s.slice(0,m.index).trim(); }
+    s=s.split(/[\t;]/)[0];
+    const nm=cleanKidName(s);
+    if(nm) out.push({name:nm,phone:phone});
+  });
+  return out;
+}
+function campPasteApply(){
+  const t=document.getElementById("campPasteBox"); if(!t) return;
+  const list=_campParseLines(t.value);
+  if(!list.length){ toast("Ничего не разобрал — нужна одна строка на ребёнка"); return; }
+  const known=_campKnownKids();
+  let add=0, dup=0;
+  list.forEach(x=>{
+    const k=known.find(z=>_nameKey(z.name)===_nameKey(x.name));
+    const r=campAddRow(k?{name:k.name,phone:x.phone||k.phone,dob:k.dob,alfaId:k.alfaId,kind:"club"}
+                        :{name:x.name,phone:x.phone,kind:"new"});
+    if(r) add++; else dup++;
+  });
+  t.value=""; _campPaste=false; _campDraw();
+  toast("Вписано: "+add+(dup?(" · уже были: "+dup):""));
+}
+function campSetRes(id,f,v,redraw){
+  const r=_campRow(id); if(!r) return;
+  if(f==="pre"||f==="paid"){
+    v=+String(v).replace(",",".")||0;
+    if(v&&!r[f+"At"]) r[f+"At"]=_campToday();     // деньги без даты — не фиксация, а память
+    if(!v) r[f+"At"]="";
+  }
+  if(f==="sex") r.sexAuto=false;                   // выбрали руками — больше не «подставлено»
+  if(f==="fio") v=cleanKidName(v);
+  r[f]=v;
+  _campSave();
+  if(redraw!==false) _campDraw();
+}
+function campTglRes(id,f,on){ const r=_campRow(id); if(!r) return; r[f]=!!on; _campSave(); }
+function campDelRow(id){
+  const r=_campRow(id); if(!r) return;
+  if(!confirm("Убрать «"+(r.fio||"")+"» из резерва?"+(r.bed?" Место в блоке освободится.":""))) return;
+  const c=_camp(), i=c.res.indexOf(r); if(i>=0) c.res.splice(i,1);
+  _campSave(); _campDraw();
+}
+function campMoveRow(id){
+  const r=_campRow(id); if(!r) return;
+  const c=_camp(), sh=_campShift();
+  const other=c.shifts.filter(s=>s.id!==(sh&&sh.id));
+  if(!other.length){ toast("Другой смены пока нет"); return; }
+  const names=other.map((s,i)=>(i+1)+" — "+((c.camps.find(x=>x.id===s.campId)||{}).name||"")+" · "+s.name).join("\n");
+  const a=prompt("Перенести «"+r.fio+"» в смену:\n"+names+"\n\nНомер:","1");
+  const i=(+a||0)-1; if(!other[i]) return;
+  r.shiftId=other[i].id; r.bed="";               // в другой смене свои блоки — место сбрасываем
+  _campSave(); _campDraw(); toast("Перенесён(а): "+r.fio+" → "+other[i].name);
+}
+function campSetFilter(v){ _campFilter=v; renderCampRes(); }
+function campSetQuery(v){
+  _campQuery=String(v||"").trim(); renderCampRes();
+  const el=document.getElementById("campQ");
+  if(el){ el.focus(); try{ el.setSelectionRange(el.value.length,el.value.length); }catch(e){} }
+}
+function campToggleShowNo(on){ _campShowNo=!!on; renderCampRooms(); }
+
+/* ---------- перевод в AlfaCRM ---------- */
+async function campToAlfa(id){
+  const r=_campRow(id); if(!r) return;
+  if(r.alfaId){ toast("Уже в Альфе · ID "+r.alfaId); return; }
+  if(!confirm("Завести «"+r.fio+"» в AlfaCRM?\n\nЭто реальная запись в вашу CRM — уйдут ФИО"
+      +(r.phone?", телефон":"")+(r.dob?", дата рождения":"")+".")) return;
+  await _campPushAlfa(r,true);
+}
+/* Пачкой — только подтверждённые и только те, кого в Альфе ещё нет. Шлём по одному и с паузой:
+   на том конце запись в CRM, а не в наш файл, и залп из полусотни запросов ей не нужен. */
+async function campToAlfaAll(){
+  const sh=_campShift(); if(!sh) return;
+  const list=_campRows(sh).filter(r=>r.status==="yes"&&!r.alfaId);
+  if(!list.length){ toast("Все подтверждённые уже в Альфе"); return; }
+  if(!confirm("Завести в AlfaCRM "+list.length+" подтверждённых детей?\n\n"
+      +list.slice(0,12).map(r=>"• "+r.fio).join("\n")+(list.length>12?("\n… и ещё "+(list.length-12)):"")
+      +"\n\nЭто реальная запись в вашу CRM.")) return;
+  let ok=0, bad=0;
+  for(const r of list){
+    const done=await _campPushAlfa(r,false);
+    if(done) ok++; else bad++;
+    toast("В Альфу: "+ok+" из "+list.length+(bad?(" · ошибок "+bad):""));
+    await new Promise(res=>setTimeout(res,400));
+  }
+  _campDraw();
+  toast(bad?("Готово: "+ok+", не прошло: "+bad):("Заведено в Альфе: "+ok));
+}
+async function _campPushAlfa(r,loud){
+  try{
+    const token=await _alfaIdToken();
+    const res=await fetch(ALFA_PROXY+"?action=createCustomer",{method:"POST",
+      headers:{"Content-Type":"application/json","Authorization":"Bearer "+token},
+      body:JSON.stringify({name:r.fio,phone:r.phone||"",dob:r.dob||"",dryRun:false})});
+    const j=await _apiJson(res);
+    if(!res.ok||!j.ok){ const raw=j.raw?(" · Альфа: "+JSON.stringify(j.raw).slice(0,240)):""; throw new Error((j.error||("ошибка "+res.status))+raw); }
+    if(j.id!=null){
+      r.alfaId=j.id; r.alfaAt=_campToday();
+      try{ const rec=_childRec(j.id,true); rec.name=r.fio; if(r.phone)rec.phone=r.phone; if(r.dob)rec.dob=r.dob; }catch(e){}
+    }
+    _campSave();
+    if(loud){ _campDraw(); toast("Создан в Альфе ✅: "+shortName(r.fio)+(j.id!=null?(" · ID "+j.id):"")); }
+    return true;
+  }catch(e){
+    if(loud) toast("В Альфу не ушло: "+((e&&e.message)||e));
+    return false;
+  }
+}
+
+/* ---------- расселение ---------- */
+function campPick(id){ _campPick=(_campPick===id)?null:id; renderCampRooms(); }
+function campPlace(bedKey){
+  const sh=_campShift(); if(!sh) return;
+  if(!_campPick){ toast("Сначала выберите ребёнка в списке «Не расселены»"); return; }
+  const r=_campRow(_campPick); if(!r) return;
+  const bed=_campBeds(_campLayout(sh)).find(b=>b.key===bedKey); if(!bed) return;
+  if(bed.staff){ toast("Комната вожатых — впишите имя прямо в поле"); return; }
+  if(!r.sex){ toast("У «"+r.fio+"» не указан пол, а блок только однополый"); return; }
+  const bs=sh.sex[bed.block.id]||"";
+  if(bs&&bs!==r.sex){ toast("В блоке «"+bed.block.name+"» живут "+CAMP_SEXN[bs]); return; }
+  const taken=_campRows(sh).find(x=>x.bed===bedKey&&x.id!==r.id);
+  const from=r.bed||"";
+  /* Место занято. Если переносим ребёнка с другой койки — меняем их местами (никто не «выпадает»
+     из расселения незаметно). Если же ребёнок ещё нигде не жил, менять не на что: молча выселить
+     соседа — худшее, что можно сделать со списком, поэтому просим освободить место руками.
+     Меняем местами только однополых: иначе обмен ломает правило однополого блока. */
+  if(taken&&!from){ toast("Место занято: "+taken.fio+". Освободите его крестиком — или возьмите ребёнка прямо с койки, чтобы поменять их местами"); return; }
+  if(taken&&taken.sex!==r.sex){ toast("Поменять местами можно только детей одного пола"); return; }
+  r.bed=bedKey;
+  if(taken) taken.bed=from;
+  if(!bs) sh.sex[bed.block.id]=r.sex;              // первый поселённый задаёт пол блока
+  _campPick=null; _campSave(); _campDraw();
+}
+function campFree(id){ const r=_campRow(id); if(!r) return; r.bed=""; _campSave(); _campDraw(); }
+function campBlockSex(bid,v){
+  const sh=_campShift(); if(!sh) return;
+  const keys=new Set(_campBeds(_campLayout(sh)).filter(b=>b.block.id===bid).map(b=>b.key));
+  const wrong=_campRows(sh).filter(r=>keys.has(r.bed)&&r.sex&&v&&r.sex!==v);
+  if(wrong.length&&!confirm("В блоке уже живут: "+wrong.map(r=>r.fio).join(", ")+".\nИх места освободятся. Продолжить?")){ renderCampRooms(); return; }
+  wrong.forEach(r=>r.bed="");
+  sh.sex[bid]=v||"";
+  _campSave(); renderCampRooms();
+}
+function campStaffSet(key,v){ const sh=_campShift(); if(!sh) return; sh.staff[key]=String(v||"").trim(); _campSave(); }
+function campAutoFill(){
+  const sh=_campShift(); if(!sh) return;
+  const beds=_campBeds(_campLayout(sh),true);
+  const keys=new Set(beds.map(b=>b.key));
+  const rows=_campRows(sh);
+  const free=rows.filter(r=>r.status==="yes"&&r.sex&&!(r.bed&&keys.has(r.bed)));
+  if(!free.length){ toast("Свободных подтверждённых с указанным полом нет"); return; }
+  if(!confirm("Разложить "+free.length+" подтверждённых по свободным местам?\nУже расселённых не трогаем, блоки остаются однополыми.")) return;
+  const busy=new Set(rows.map(r=>r.bed).filter(Boolean));
+  let n=0;
+  ["m","f"].forEach(sex=>{
+    const mine=free.filter(r=>r.sex===sex);
+    if(!mine.length) return;
+    // сперва блоки, уже отданные этому полу, потом ничейные — так корпус не дробится
+    const order=beds.filter(b=>(sh.sex[b.block.id]||"")===sex).concat(beds.filter(b=>!(sh.sex[b.block.id]||"")));
+    order.forEach(b=>{
+      if(!mine.length||busy.has(b.key)) return;
+      const r=mine.shift();
+      r.bed=b.key; busy.add(b.key); n++;
+      if(!(sh.sex[b.block.id]||"")) sh.sex[b.block.id]=sex;
+    });
+  });
+  _campSave(); _campDraw();
+  toast(n?("Расселено: "+n):"Свободных мест не осталось");
+}
+function campClearRooms(){
+  const sh=_campShift(); if(!sh) return;
+  const rows=_campRows(sh).filter(r=>r.bed);
+  if(!rows.length){ toast("Никто не расселён"); return; }
+  if(!confirm("Снять расселение у "+rows.length+" детей? Пол блоков останется как есть.")) return;
+  rows.forEach(r=>r.bed=""); _campSave(); _campDraw();
+}
+async function campCopyRooms(){
+  const sh=_campShift(); if(!sh) return;
+  const c=_camp(), cm=c.camps.find(x=>x.id===sh.campId)||{};
+  const lay=_campLayout(sh);
+  const byKey={}; _campRows(sh).forEach(r=>{ if(r.bed) byKey[r.bed]=r; });
+  const out=[(cm.name||"Лагерь")+" · "+sh.name+(sh.from?(" · "+_campDate(sh.from)+(sh.to?("–"+_campDate(sh.to)):"")):"")];
+  let floor="";
+  ((lay&&lay.blocks)||[]).forEach(b=>{
+    if((b.floor||"")!==floor){ floor=b.floor||""; out.push("","=== "+(floor||"Без этажа")+" ==="); }
+    const bs=sh.sex[b.id]||"";
+    out.push(b.name+(b.staff?" (вожатые)":(bs?(" — "+CAMP_SEXN[bs]):"")));
+    (b.rooms||[]).forEach(rm=>{
+      const line=[];
+      for(let i=0;i<(+rm.beds||0);i++){
+        const key=b.id+"|"+rm.id+"|"+i;
+        line.push(b.staff?((sh.staff||{})[key]||"—"):((byKey[key]&&byKey[key].fio)||"—"));
+      }
+      out.push("  "+rm.name+": "+line.join(", "));
+    });
+  });
+  const ok=await _copyText(out.join("\n"));
+  toast(ok?"Расселение скопировано":"Не удалось скопировать");
+}
+
+/* ---------- правка схемы корпуса ---------- */
+function campToggleEdit(){ _campEdit=!_campEdit; renderCampRooms(); }
+function _campLay(){ return _campLayout(_campShift()); }
+function campBlockSet(bid,f,v){
+  const lay=_campLay(); const b=((lay&&lay.blocks)||[]).find(x=>x.id===bid); if(!b) return;
+  b[f]=(f==="staff")?!!v:v; _campSave(); renderCampRooms();
+}
+function campRoomBeds(bid,rid,v){
+  const lay=_campLay(); const b=((lay&&lay.blocks)||[]).find(x=>x.id===bid); if(!b) return;
+  const rm=(b.rooms||[]).find(x=>x.id===rid); if(!rm) return;
+  const n=Math.max(0,Math.min(20,+v||0));
+  const sh=_campShift();
+  const lost=_campRows(sh).filter(r=>{ const p=String(r.bed||"").split("|"); return p[0]===bid&&p[1]===rid&&(+p[2])>=n; });
+  if(lost.length&&!confirm("Мест станет меньше — освободятся: "+lost.map(r=>r.fio).join(", ")+". Продолжить?")){ renderCampRooms(); return; }
+  lost.forEach(r=>r.bed="");
+  rm.beds=n; _campSave(); renderCampRooms();
+}
+function campRoomName(bid,rid,v){
+  const lay=_campLay(); const b=((lay&&lay.blocks)||[]).find(x=>x.id===bid); if(!b) return;
+  const rm=(b.rooms||[]).find(x=>x.id===rid); if(!rm) return;
+  rm.name=String(v||"").trim()||"комната"; _campSave();
+}
+function campAddRoom(bid){
+  const lay=_campLay(); const b=((lay&&lay.blocks)||[]).find(x=>x.id===bid); if(!b) return;
+  if(!Array.isArray(b.rooms)) b.rooms=[];
+  let n=1; while(b.rooms.some(r=>r.id==="r"+n)) n++;
+  b.rooms.push({id:"r"+n,name:"комната "+(b.rooms.length+1),beds:3});
+  _campSave(); renderCampRooms();
+}
+function campDelRoom(bid,rid){
+  const lay=_campLay(); const b=((lay&&lay.blocks)||[]).find(x=>x.id===bid); if(!b) return;
+  const lost=_campRows(_campShift()).filter(r=>{ const p=String(r.bed||"").split("|"); return p[0]===bid&&p[1]===rid; });
+  if(!confirm("Удалить комнату из блока «"+b.name+"»?"+(lost.length?(" Освободятся: "+lost.map(r=>r.fio).join(", ")):""))) return;
+  lost.forEach(r=>r.bed="");
+  b.rooms=(b.rooms||[]).filter(r=>r.id!==rid);
+  _campSave(); renderCampRooms();
+}
+function campAddBlock(floor){
+  const lay=_campLay(); if(!lay) return;
+  if(!Array.isArray(lay.blocks)) lay.blocks=[];
+  lay.blocks.push({id:_campNewId("b"),floor:floor||"Новый этаж",name:"Новый блок",staff:false,rooms:[{id:"r1",name:"комната",beds:4}]});
+  _campSave(); renderCampRooms();
+}
+function campAddFloor(){
+  const n=prompt("Название этажа:","4 этаж"); if(!n||!n.trim()) return;
+  campAddBlock(n.trim());
+}
+function campDelBlock(bid){
+  const lay=_campLay(); const b=((lay&&lay.blocks)||[]).find(x=>x.id===bid); if(!b) return;
+  const lost=_campRows(_campShift()).filter(r=>String(r.bed||"").split("|")[0]===bid);
+  if(!confirm("Удалить блок «"+b.name+"»?"+(lost.length?(" Освободятся: "+lost.map(r=>r.fio).join(", ")):""))) return;
+  lost.forEach(r=>r.bed="");
+  lay.blocks=lay.blocks.filter(x=>x.id!==bid);
+  _campSave(); renderCampRooms();
+}
+
+/* ---------- общая шапка: лагерь и смена ---------- */
+function _campPickerHtml(){
+  const c=_camp(), sh=_campShift();
+  const cm=sh?c.camps.find(x=>x.id===sh.campId):(c.camps[0]||null);
+  let h='<div class="cmp-pick">';
+  c.camps.forEach(x=>{
+    h+='<span class="chip'+((cm&&cm.id===x.id)?' on':'')+'" onclick="campPickCamp(\''+_jsStr(x.id)+'\')">'+esc(x.name)+'</span>';
+  });
+  h+='<button class="btn ghost sm" onclick="campAddCamp()" title="Лагерей будет несколько — у каждого свои смены">+ Лагерь</button></div>';
+  h+='<div class="cmp-pick">';
+  c.shifts.filter(s=>cm&&s.campId===cm.id).forEach(s=>{
+    const d=s.from?(' <span style="opacity:.65">'+_campDate(s.from)+(s.to?("–"+_campDate(s.to)):"")+'</span>'):'';
+    const n=c.res.filter(r=>r.shiftId===s.id&&r.status!=="no").length;
+    h+='<span class="chip'+((sh&&sh.id===s.id)?' on':'')+'" onclick="campPickShift(\''+_jsStr(s.id)+'\')">'+esc(s.name)+d+(n?(' · '+n):'')+'</span>';
+  });
+  h+='<button class="btn ghost sm" onclick="campAddShift()">+ Смена</button>';
+  if(sh) h+='<button class="btn ghost sm" onclick="campToggleCfg()">'+(_campCfg?'× Закрыть':'⚙ Смена')+'</button>';
+  h+='</div>';
+  if(_campCfg&&sh) h+=_campCfgHtml(sh);
+  return h;
+}
+function _campCfgHtml(sh){
+  const opts=_camp().layouts.map(l=>'<option value="'+esc(l.id)+'"'+(l.id===sh.layoutId?' selected':'')+'>'+esc(l.name)+'</option>').join("");
+  return '<div class="card" style="padding:12px">'
+   +'<div class="cmp-cfg">'
+   +'<label>Название<input class="cell wide" value="'+esc(sh.name||"")+'" onchange="campSetShift(\'name\',this.value)"></label>'
+   +'<label>С<input class="cell" type="date" value="'+esc(sh.from||"")+'" onchange="campSetShift(\'from\',this.value)"></label>'
+   +'<label>По<input class="cell" type="date" value="'+esc(sh.to||"")+'" onchange="campSetShift(\'to\',this.value)"></label>'
+   +'<label>Стоимость, р.<input class="cell" type="number" min="0" step="1" value="'+(+sh.price||0)+'" onchange="campSetShift(\'price\',this.value)"></label>'
+   +'<label>Предоплата, р.<input class="cell" type="number" min="0" step="1" value="'+(+sh.prepay||0)+'" onchange="campSetShift(\'prepay\',this.value)"></label>'
+   +'<label>Схема корпуса<select class="cell" onchange="campSetShift(\'layoutId\',this.value)">'+opts+'</select></label>'
+   +'</div>'
+   +'<div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">'
+   +'<button class="btn ghost sm" onclick="campRenameCamp()">Переименовать лагерь</button>'
+   +'<button class="btn gray sm" onclick="campDelShift()">Удалить смену</button>'
+   +'<button class="btn gray sm" onclick="campDelCamp()">Удалить лагерь</button>'
+   +'</div>'
+   +'<div style="font-size:11px;color:var(--muted);margin-top:8px">Стоимость нужна колонке «Осталось»: она сама считает долг по каждому ребёнку. Предоплата — подсказка в поле, сумму всегда можно поправить.</div>'
+   +'</div>';
+}
+
+/* ---------- вкладка «Резерв» ---------- */
+function renderCampRes(){
+  const box=document.getElementById("campResBody"); if(!box) return;
+  const sh=_campShift();
+  let h=_campPickerHtml();
+  if(!sh){ box.innerHTML=h+'<div class="card">Смены пока нет. Нажмите «+ Смена» — и можно вписывать детей.</div>'; return; }
+  const rows=_campRows(sh);
+  const cnt={yes:0,maybe:0,no:0};
+  let money=0, wait=0;
+  rows.forEach(r=>{ cnt[r.status]=(cnt[r.status]||0)+1; money+=_campMoney(r); if(r.status!=="no") wait+=_campLeft(sh,r); });
+  const beds=_campBeds(_campLayout(sh),true).length;
+  const placed=rows.filter(r=>r.bed).length;
+  const noSex=rows.filter(r=>r.status!=="no"&&!r.sex).length;
+  const inAlfa=rows.filter(r=>r.alfaId).length;
+
+  h+='<div class="cmp-kpi">'
+   +'<div>подтвердили<b style="color:var(--green)">'+(cnt.yes||0)+'</b></div>'
+   +'<div>думают<b style="color:#C9922E">'+(cnt.maybe||0)+'</b></div>'
+   +'<div>отказ<b style="color:var(--red)">'+(cnt.no||0)+'</b></div>'
+   +'<div>собрано, р.<b>'+fmt(money)+'</b></div>'
+   +'<div>ждём доплат, р.<b>'+(wait?fmt(wait):"—")+'</b></div>'
+   +'<div>расселено<b>'+placed+' / '+beds+'</b></div>'
+   +'<div>заведены в Альфе<b>'+inAlfa+' / '+rows.length+'</b></div>'
+   +'</div>';
+  if(noSex) h+='<div class="cmp-warn">Без пола: '+noSex+'. Расселить их по блокам не получится — блоки только однополые.</div>';
+
+  const known=_campKnownKids();
+  h+='<div class="card"><h3>Вписать ребёнка</h3>'
+   +'<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">'
+   +'<input class="cell wide" id="campAddName" list="campKidsDl" placeholder="Фамилия Имя — начните вводить, подставим из нашей базы" style="min-width:340px" onkeydown="if(event.key===\'Enter\'){event.preventDefault();campAddFromInput();}">'
+   +'<datalist id="campKidsDl">'+known.slice(0,1500).map(k=>'<option value="'+esc(k.name)+'">').join("")+'</datalist>'
+   +'<button class="btn sm" onclick="campAddFromInput()">+ В резерв</button>'
+   +'<button class="btn ghost sm" onclick="campTogglePaste()">'+(_campPaste?'× Закрыть':'📋 Вставить список')+'</button>'
+   +'<span style="font-size:11px;color:var(--muted)">Свой ребёнок приедет с телефоном и датой рождения. Незнакомого вписываем вручную — в Альфу переведём потом.</span>'
+   +'</div>';
+  if(_campPaste){
+    h+='<div style="margin-top:10px">'
+     +'<textarea id="campPasteBox" class="cell wide" style="height:120px;text-align:left" placeholder="По строке на ребёнка:&#10;1. Иванов Пётр +375291234567&#10;Петрова Мария"></textarea>'
+     +'<div style="margin-top:6px"><button class="btn sm" onclick="campPasteApply()">Разобрать и вписать</button></div></div>';
+  }
+  h+='</div>';
+
+  const q=_campQuery.toLowerCase();
+  const shown=rows.filter(r=>{
+    if(_campFilter!=="all"&&r.status!==_campFilter) return false;
+    if(q&&!(String(r.fio||"").toLowerCase().includes(q)||String(r.phone||"").includes(q))) return false;
+    return true;
+  }).sort((a,b)=>String(a.fio).localeCompare(String(b.fio),"ru"));
+
+  h+='<div class="cmp-pick" style="margin-top:4px">';
+  [["all","все · "+rows.length],["yes","подтвердили · "+(cnt.yes||0)],["maybe","думают · "+(cnt.maybe||0)],["no","отказ · "+(cnt.no||0)]].forEach(x=>{
+    h+='<span class="chip'+(_campFilter===x[0]?' on':'')+'" onclick="campSetFilter(\''+x[0]+'\')">'+esc(x[1])+'</span>';
+  });
+  h+='<input class="cell" id="campQ" style="width:210px;text-align:left" placeholder="поиск по имени и телефону" value="'+esc(_campQuery)+'" oninput="campSetQuery(this.value)">';
+  h+='<button class="btn ghost sm" onclick="campToAlfaAll()" title="Только подтверждённые и только те, кого в Альфе ещё нет">→ Альфа: подтверждённые</button>';
+  h+='</div>';
+
+  if(!shown.length){ box.innerHTML=h+'<div class="card" style="color:var(--muted)">Пока никого. Впишите ребёнка выше.</div>'; return; }
+
+  h+='<div class="tscroll"><table class="cmp-t"><thead><tr>'
+   +'<th style="width:26px">#</th><th>Ребёнок</th><th title="Блоки только однополые">Пол</th><th>Дата рождения</th><th>Телефон</th>'
+   +'<th>Статус</th><th>Источник</th><th>Вариант</th>'
+   +'<th class="a-right">Предоплата</th><th class="a-right">Доплата</th><th class="a-right" title="Сколько ещё должен по стоимости смены">Осталось</th>'
+   +CAMP_PRE.map(p=>'<th title="Предзапись: '+p[1]+'" style="width:40px">'+p[2]+'</th>').join("")
+   +'<th>Место</th><th>AlfaCRM</th><th>Комментарий</th><th style="width:64px"></th>'
+   +'</tr></thead><tbody>';
+  shown.forEach((r,i)=>{
+    const jid=_jsStr(r.id);
+    const st=CAMP_ST[r.status]||CAMP_ST.maybe;
+    const age=_ageStr(r.dob);
+    const left=_campLeft(sh,r);
+    const bedTxt=_campBedLabel(sh,r);
+    h+='<tr'+(r.status==="no"?' class="cmp-off"':'')+'>'
+     +'<td style="color:var(--muted);font-size:11px">'+(i+1)+'</td>'
+     +'<td><input class="cell wide" style="min-width:180px" value="'+esc(r.fio||"")+'" onchange="campSetRes(\''+jid+'\',\'fio\',this.value)"></td>'
+     +'<td><select class="cell'+(r.sexAuto?' cmp-auto':'')+'" title="'+(r.sexAuto?"Подставлено по фамилии — проверьте":"Пол ребёнка")+'" onchange="campSetRes(\''+jid+'\',\'sex\',this.value)">'
+        +['','m','f'].map(v=>'<option value="'+v+'"'+(r.sex===v?' selected':'')+'>'+(v===""?"—":(v==="m"?"М":"Д"))+'</option>').join("")+'</select></td>'
+     +'<td style="white-space:nowrap"><input class="cell" type="date" style="width:132px" value="'+esc(_dobIso(r.dob)||"")+'" onchange="campSetRes(\''+jid+'\',\'dob\',this.value)">'
+        +(age?' <span style="font-size:11px;color:var(--muted)" title="'+esc(_ageStrFull(r.dob))+'">'+esc(age)+'</span>':'')+'</td>'
+     +'<td><input class="cell" style="width:132px;text-align:left" value="'+esc(r.phone||"")+'" onchange="campSetRes(\''+jid+'\',\'phone\',this.value,false)"></td>'
+     +'<td><select class="cell" style="color:'+st.c+';font-weight:700" onchange="campSetRes(\''+jid+'\',\'status\',this.value)">'
+        +CAMP_STATUS.map(s=>'<option value="'+s[0]+'"'+(r.status===s[0]?' selected':'')+'>'+s[1]+'</option>').join("")+'</select></td>'
+     +'<td><select class="cell" onchange="campSetRes(\''+jid+'\',\'src\',this.value,false)">'
+        +CAMP_SRC.map(s=>'<option value="'+s[0]+'"'+((r.src||"")===s[0]?' selected':'')+'>'+s[1]+'</option>').join("")+'</select></td>'
+     +'<td><select class="cell" onchange="campSetRes(\''+jid+'\',\'kind\',this.value,false)">'
+        +CAMP_KIND.map(s=>'<option value="'+s[0]+'"'+((r.kind||"")===s[0]?' selected':'')+'>'+s[1]+'</option>').join("")+'</select></td>'
+     +'<td class="a-right"><input class="cell" type="number" min="0" step="1" placeholder="'+((+sh.prepay||0)||"")+'" value="'+(+r.pre||"")+'" onchange="campSetRes(\''+jid+'\',\'pre\',this.value)">'
+        +(r.preAt?'<div class="cmp-when">'+esc(_campDate(r.preAt))+'</div>':'')+'</td>'
+     +'<td class="a-right"><input class="cell" type="number" min="0" step="1" value="'+(+r.paid||"")+'" onchange="campSetRes(\''+jid+'\',\'paid\',this.value)">'
+        +(r.paidAt?'<div class="cmp-when">'+esc(_campDate(r.paidAt))+'</div>':'')+'</td>'
+     +'<td class="a-right" style="font-weight:700;color:'+(left?"var(--red)":"var(--green)")+'">'+((+sh.price)?(left?fmt(left):"✓"):"—")+'</td>'
+     +CAMP_PRE.map(p=>'<td style="text-align:center"><input type="checkbox" title="'+p[1]+'"'+(r[p[0]]?' checked':'')+' onchange="campTglRes(\''+jid+'\',\''+p[0]+'\',this.checked)"></td>').join("")
+     +'<td style="font-size:11px'+(bedTxt?'':';color:var(--muted)')+'">'+(bedTxt?esc(bedTxt):"не расселён")+'</td>'
+     +'<td>'+(r.alfaId
+        ?'<span class="cmp-ok" title="Открыть историю в Альфе" onclick="openAlfaHistory(\''+_jsStr(String(r.alfaId))+'\',\''+_jsStr(r.fio)+'\')">✓ ID '+esc(String(r.alfaId))+'</span>'
+        :'<button class="btn ghost sm" onclick="campToAlfa(\''+jid+'\')">→ Альфа</button>')+'</td>'
+     +'<td><input class="cell wide" style="min-width:150px;text-align:left" value="'+esc(r.note||"")+'" onchange="campSetRes(\''+jid+'\',\'note\',this.value,false)"></td>'
+     +'<td style="white-space:nowrap"><button class="btn ghost sm" title="Перенести в другую смену" onclick="campMoveRow(\''+jid+'\')">⇄</button>'
+        +'<button class="btn ghost sm" title="Убрать из резерва" onclick="campDelRow(\''+jid+'\')">×</button></td>'
+     +'</tr>';
+  });
+  h+='</tbody></table></div>';
+  box.innerHTML=h;
+}
+function _campBedLabel(sh,r){
+  if(!r.bed) return "";
+  const p=String(r.bed).split("|");
+  const b=((_campLayout(sh)||{}).blocks||[]).find(x=>x.id===p[0]); if(!b) return "";
+  const rm=(b.rooms||[]).find(x=>x.id===p[1]); if(!rm) return "";
+  if((+p[2]||0)>=(+rm.beds||0)) return "";
+  return b.name+" · "+rm.name+" · место "+((+p[2]||0)+1);
+}
+
+/* ---------- вкладка «Расселение» ---------- */
+function renderCampRooms(){
+  const box=document.getElementById("campRoomsBody"); if(!box) return;
+  const sh=_campShift();
+  let h=_campPickerHtml();
+  if(!sh){ box.innerHTML=h+'<div class="card">Смены пока нет — создайте её на вкладке «Резерв».</div>'; return; }
+  const lay=_campLayout(sh);
+  if(!lay){ box.innerHTML=h+'<div class="card">Схема корпуса не найдена.</div>'; return; }
+  const beds=_campBeds(lay), kidBeds=beds.filter(b=>!b.staff);
+  const keys=new Set(beds.map(b=>b.key));
+  const rows=_campRows(sh);
+  const byKey={}; rows.forEach(r=>{ if(r.bed&&keys.has(r.bed)) byKey[r.bed]=r; });
+  const live=rows.filter(r=>r.status!=="no");
+  const unplaced=rows.filter(r=>!(r.bed&&keys.has(r.bed))&&(r.status!=="no"||_campShowNo));
+  const placedN=Object.keys(byKey).length;
+
+  h+='<div class="cmp-kpi">'
+   +'<div>расселено<b>'+placedN+' / '+kidBeds.length+'</b></div>'
+   +'<div>свободно мест<b>'+(kidBeds.length-placedN)+'</b></div>'
+   +'<div>в резерве, без отказов<b>'+live.length+'</b></div>'
+   +'<div>мальчики / девочки<b>'+live.filter(r=>r.sex==="m").length+' / '+live.filter(r=>r.sex==="f").length+'</b></div>'
+   +'</div>';
+  const noSex=live.filter(r=>!r.sex).length, auto=live.filter(r=>r.sexAuto).length;
+  if(noSex) h+='<div class="cmp-warn">Без пола: '+noSex+'. Пока пол не проставлен, ребёнка в блок не поставить.</div>';
+  if(auto) h+='<div class="cmp-warn soft">Пол подставлен по фамилии у '+auto+' — проверьте их в резерве, там они помечены пунктиром.</div>';
+
+  h+='<div class="cmp-pick">'
+   +'<button class="btn ghost sm" onclick="campAutoFill()" title="Разложить подтверждённых по свободным местам, не трогая уже расселённых">Разложить подтверждённых</button>'
+   +'<button class="btn ghost sm" onclick="campCopyRooms()">Скопировать список</button>'
+   +'<button class="btn ghost sm" onclick="campClearRooms()">Снять расселение</button>'
+   +'<button class="btn ghost sm" onclick="campToggleEdit()">'+(_campEdit?'× Готово':'✎ Правка схемы')+'</button>'
+   +'</div>';
+
+  h+='<div class="card"><h3>Не расселены · '+unplaced.length+'</h3>'
+   +'<div style="font-size:11px;color:var(--muted);margin-bottom:8px">Нажмите на ребёнка, затем на свободное место в блоке. Клик по уже расселённому — взять и перенести. Пол блока задаёт первый поселённый.</div>';
+  if(!unplaced.length) h+='<div style="color:var(--muted);font-size:13px">Все расселены.</div>';
+  else{
+    h+='<div class="cmp-free">';
+    unplaced.sort((a,b)=>(a.sex===b.sex?0:(a.sex<b.sex?1:-1))||String(a.fio).localeCompare(String(b.fio),"ru")).forEach(r=>{
+      const st=CAMP_ST[r.status]||CAMP_ST.maybe;
+      h+='<span class="cmp-kid'+(r.sex?(' '+r.sex):'')+(_campPick===r.id?' on':'')+'" onclick="campPick(\''+_jsStr(r.id)+'\')" title="'+esc(st.t+(r.sex?(" · "+CAMP_SEXN[r.sex]):" · пол не указан"))+'">'
+       +st.ic+' '+esc(r.fio)+(r.sex?'':' <b style="color:var(--red)">?</b>')+'</span>';
+    });
+    h+='</div>';
+  }
+  h+='<label style="font-size:11px;color:var(--muted);display:inline-flex;gap:5px;align-items:center;margin-top:8px">'
+   +'<input type="checkbox"'+(_campShowNo?' checked':'')+' onchange="campToggleShowNo(this.checked)"> показывать отказавшихся</label>';
+  h+='</div>';
+
+  const floors=[];
+  (lay.blocks||[]).forEach(b=>{ if(floors.indexOf(b.floor||"")<0) floors.push(b.floor||""); });
+  floors.forEach(fl=>{
+    const list=(lay.blocks||[]).filter(b=>(b.floor||"")===fl);
+    const cap=list.filter(b=>!b.staff).reduce((s,b)=>s+(b.rooms||[]).reduce((x,r)=>x+(+r.beds||0),0),0);
+    let busy=0;
+    list.filter(b=>!b.staff).forEach(b=>(b.rooms||[]).forEach(r=>{ for(let i=0;i<(+r.beds||0);i++) if(byKey[b.id+"|"+r.id+"|"+i]) busy++; }));
+    h+='<div class="cmp-floor"><h3 class="cmp-fl">'+esc(fl||"Без этажа")+' <span>'+busy+' из '+cap+' мест</span>'
+      +(_campEdit?' <button class="btn ghost sm" onclick="campAddBlock(\''+_jsStr(fl)+'\')">+ Блок</button>':'')+'</h3><div class="cmp-blocks">';
+    list.forEach(b=>{ h+=_campBlockHtml(sh,b,byKey); });
+    h+='</div></div>';
+  });
+  if(_campEdit) h+='<div style="margin-top:8px"><button class="btn ghost sm" onclick="campAddFloor()">+ Этаж</button></div>';
+  box.innerHTML=h;
+}
+function _campBlockHtml(sh,b,byKey){
+  const bid=_jsStr(b.id);
+  const bs=sh.sex[b.id]||"";
+  const cap=(b.rooms||[]).reduce((s,r)=>s+(+r.beds||0),0);
+  let busy=0; (b.rooms||[]).forEach(r=>{ for(let i=0;i<(+r.beds||0);i++) if(byKey[b.id+"|"+r.id+"|"+i]) busy++; });
+  let h='<div class="cmp-block'+(b.staff?' staff':(bs?(' '+bs):''))+'">';
+  h+='<div class="cmp-bhead">';
+  h+=_campEdit
+    ? '<input class="cell wide" style="text-align:left;font-weight:700" value="'+esc(b.name||"")+'" onchange="campBlockSet(\''+bid+'\',\'name\',this.value)">'
+    : '<b>'+esc(b.name||"")+'</b>';
+  h+='<span class="cmp-cap">'+(b.staff?("вожатые · "+cap):(busy+"/"+cap))+'</span></div>';
+  if(!b.staff){
+    h+='<select class="cell" style="width:100%;margin-bottom:5px" onclick="event.stopPropagation()" onchange="campBlockSex(\''+bid+'\',this.value)" title="В блоке живут дети одного пола">'
+      +[["","— пол не задан —"],["m","мальчики"],["f","девочки"]].map(o=>'<option value="'+o[0]+'"'+(bs===o[0]?' selected':'')+'>'+o[1]+'</option>').join("")
+      +'</select>';
+  }
+  (b.rooms||[]).forEach(rm=>{
+    h+='<div class="cmp-room">';
+    h+=_campEdit
+      ? '<div class="cmp-rhead"><input class="cell" style="width:92px;text-align:left" value="'+esc(rm.name||"")+'" onchange="campRoomName(\''+bid+'\',\''+_jsStr(rm.id)+'\',this.value)">'
+        +'<input class="cell" type="number" min="0" max="20" style="width:54px" title="мест" value="'+(+rm.beds||0)+'" onchange="campRoomBeds(\''+bid+'\',\''+_jsStr(rm.id)+'\',this.value)">'
+        +'<button class="btn ghost sm" title="Удалить комнату" onclick="campDelRoom(\''+bid+'\',\''+_jsStr(rm.id)+'\')">×</button></div>'
+      : '<div class="cmp-rname">'+esc(rm.name||"")+'</div>';
+    for(let i=0;i<(+rm.beds||0);i++){
+      const key=b.id+"|"+rm.id+"|"+i, jkey=_jsStr(key);
+      if(b.staff){
+        h+='<div class="cmp-bed staff"><input class="cell wide" style="text-align:left" placeholder="вожатый" value="'+esc((sh.staff||{})[key]||"")+'" onchange="campStaffSet(\''+jkey+'\',this.value)"></div>';
+        continue;
+      }
+      const r=byKey[key];
+      if(r){
+        const st=CAMP_ST[r.status]||CAMP_ST.maybe;
+        const age=_ageStr(r.dob);
+        h+='<div class="cmp-bed busy'+(_campPick===r.id?' on':'')+'" onclick="campPick(\''+_jsStr(r.id)+'\')" title="'+esc(st.t+(age?(" · "+age):""))+'">'
+         +'<span class="cmp-bn">'+st.ic+' '+esc(r.fio)+'</span>'
+         +'<button class="cmp-x" title="Освободить место" onclick="event.stopPropagation();campFree(\''+_jsStr(r.id)+'\')">×</button></div>';
+      } else {
+        h+='<div class="cmp-bed free'+(_campPick?' hot':'')+'" onclick="campPlace(\''+jkey+'\')">'+(_campPick?'поставить сюда':'свободно')+'</div>';
+      }
+    }
+    h+='</div>';
+  });
+  if(_campEdit){
+    h+='<div class="cmp-bedit"><button class="btn ghost sm" onclick="campAddRoom(\''+bid+'\')">+ комната</button>'
+     +'<label style="font-size:11px;display:inline-flex;gap:4px;align-items:center"><input type="checkbox"'+(b.staff?' checked':'')+' onchange="campBlockSet(\''+bid+'\',\'staff\',this.checked)"> вожатые</label>'
+     +'<input class="cell" style="width:86px;text-align:left" value="'+esc(b.floor||"")+'" title="Этаж" onchange="campBlockSet(\''+bid+'\',\'floor\',this.value)">'
+     +'<button class="btn gray sm" onclick="campDelBlock(\''+bid+'\')">Удалить блок</button></div>';
+  }
+  h+='</div>';
+  return h;
+}
+
 /* ===== ВКЛАДКА «МАЙСКИЙ» — постоянная сверка оплат с расписанием ===== */
 let _mayFilter="all", _mayQuery="", _mayAddOpen=false, _mayHideDone=false;
 /* название курса из Альфы → в название модели (список майских — из Альфы, там свои имена).
@@ -18726,7 +19536,7 @@ function _migrateSingle(){
 function renderAll(){
   _migrateSingle();
   _migrateChildren();
-  renderCourses(); renderPlanner(); renderGrid(); renderGroups(); renderClients(); if(typeof renderPrice==="function") renderPrice(); if(typeof renderCards==="function") renderCards(); if(typeof renderReal==="function") renderReal(); if(typeof renderGoals==="function") renderGoals(); renderMay(); renderStaff(); renderFixed(); renderTax(); renderBreak(); renderSettings(); renderDash(); if(typeof renderReport==="function") renderReport(); onSlider(); renderConflictBanner(); renderScenarioBar(); updateNavHeightDelayed();
+  renderCourses(); renderPlanner(); renderGrid(); renderGroups(); renderClients(); if(typeof renderPrice==="function") renderPrice(); if(typeof renderCards==="function") renderCards(); if(typeof renderReal==="function") renderReal(); if(typeof renderGoals==="function") renderGoals(); renderMay(); _campRedraw(); renderStaff(); renderFixed(); renderTax(); renderBreak(); renderSettings(); renderDash(); if(typeof renderReport==="function") renderReport(); onSlider(); renderConflictBanner(); renderScenarioBar(); updateNavHeightDelayed();
 }
 function toast(m){ const t=document.getElementById("toast"); t.textContent=m; t.classList.add("show");
   clearTimeout(t._h); t._h=setTimeout(()=>t.classList.remove("show"),2200); }
@@ -18852,6 +19662,8 @@ document.querySelectorAll(".tab").forEach(tb=>tb.onclick=()=>{
   if(tb.dataset.t==="goals" && typeof renderGoals==="function") renderGoals();
   if(tb.dataset.t==="cards" && typeof renderCards==="function") renderCards();
   if(tb.dataset.t==="compos" && typeof renderCompos==="function") renderCompos();
+  if(tb.dataset.t==="campres" && typeof renderCampRes==="function") renderCampRes();
+  if(tb.dataset.t==="camprooms" && typeof renderCampRooms==="function") renderCampRooms();
   if(tb.dataset.t==="ruk" && typeof renderRuk==="function") renderRuk();
   if(tb.dataset.t==="adm" && typeof renderAdm==="function") renderAdm();
   if(tb.dataset.t==="trials" && typeof renderTrials==="function"){ renderTrials(); if(!_trData) trLoad(); }
