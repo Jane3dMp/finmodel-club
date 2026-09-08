@@ -16,16 +16,22 @@ function eq(name, got, want) { check(name, got === want, JSON.stringify(got) + '
 const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
 const NAMES = ['_salesNum', '_salesCfg', '_ratAgg', '_ratSubjToCourse', '_ratModelTeacher',
                'fixRateByName', '_ratWage', '_ratTeacherName',
-               '_salesTops', '_salesFillLines', '_salesWeekText', '_salesMonthText',
+               '_salesTops', '_salesFillLines', '_salesFillLinesFor',
+               '_salesWeekText', '_salesMonthText',
                // сводка загрузки считается функциями раздела «Заполняемость» — берём настоящие
                '_fillAgg', '_fillRows', '_fillTotals', '_fillWho', '_fillCap', '_fillCats',
                '_fillPlanPerGroup', '_fillTopId', '_fillTeach', '_fillSubjName',
                '_fillGroupName',
+               // строку «Год назад» в сводке считают эти же функции раздела
+               '_fillRangeLabel',
                '_salesLastYearDates', '_salesLastYearLabel', '_salesLastYearFact',
                '_salesActiveNote', '_salesPace', '_salesPaceLines', '_salesPaceHtml',
+               // «свой период» в отчёте — селектор и его окно
+               '_salesPeriodSel',
                '_salesReports', '_salesCur', '_salesDate', '_salesMonName', '_salesHtml', '_salesCronHtml'];
 const ONE_LINERS = ['_salesMonthEnd', '_salesMonday', '_salesGoals',   // тело в одну строку
-                    '_fillIdx', '_fillGroups', '_fillPlanMap', '_fillArch', '_fillNoName', '_fillTeachName'];
+                    '_fillIdx', '_fillGroups', '_fillPlanMap', '_fillArch', '_fillNoName', '_fillTeachName',
+                    '_fillShift', '_dmy'];
 let src = '';
 function grab(name, re) {
   const m = html.match(re);
@@ -71,6 +77,7 @@ const ctx = {
   _pubErrHtml: e => '<div class="callout">Не получилось: ' + ((e && e.message) || e) + '</div>',
   _kassaDayWord: n => (n === 1 ? 'день' : 'дней'),
   _salesStore: null, _salesWeek: null, _salesErr: null,
+  _salesRange: { from: '', to: '' },      // «свой период»: пункт есть всегда, даты пустые
   _fillStore: null, _fillPeriod: null, _fillKids: null, _fillKidsKey: '',
   _FILL_FMT: ['les','seats','paid','trial','att','rev','attPaid','attFree','noAttPaid','attTrial','attZero','tch','sbj'],
   _fillPctColor: () => 'green', shortName: x => x, _fillSort: 'pct',
@@ -80,7 +87,7 @@ const ctx = {
 };
 const API = new Function('ctx', 'with (ctx) { ' + src +
   ' return {_salesNum,_salesTops,_salesWeekText,_salesMonthText,_salesMonthEnd,_salesCfg,_salesHtml,' +
-  '_salesLastYearDates,_salesLastYearLabel,_salesLastYearFact,_salesActiveNote,_salesFillLines}; }')(ctx);
+  '_salesLastYearDates,_salesLastYearLabel,_salesLastYearFact,_salesActiveNote,_salesFillLines,_fillShift,_fillRangeLabel}; }')(ctx);
 
 /* ================= формат чисел (как в чате: 22.578) ================= */
 eq('число с разделителем тысяч', API._salesNum(22578), '22.578');
@@ -363,6 +370,37 @@ check('обычная неделя — недельный текст на мес
   check('сводка в сообщении', msg.indexOf('Загрузка:') > 0, msg);
   check('оборот по-прежнему первой строкой', msg.indexOf('Оборот недели:') === 0, msg.slice(0, 60));
 
+  /* ===== СТРОКА ЭТАЛОНА: ТОТ ЖЕ ПЕРИОД ГОД НАЗАД =====
+     В сообщении отделу продаж уже есть «Сентябрь 2025 этот же период — 12 017» про оборот.
+     Загрузка обязана считаться от ТЕХ ЖЕ дней: если оборот сравнивается с 01–07.09.2025, а
+     загрузка — с мартом, отдел сверит две строки и не сойдётся ни с одной. */
+  ctx._fillStore.fill = {
+    '2026-09-02': { '10': [1, 8, 7, 0, 6, 210, 5, 1, 2, 0, 0, {}, {}] },   // сейчас: 7 из 10
+    '2025-09-02': { '10': [1, 8, 10, 0, 9, 300, 9, 0, 1, 0, 0, {}, {}] },  // год назад: 10 из 10
+  };
+  const ly = API._salesFillLines(repW);
+  const lyLine = ly.find(x => x.indexOf('Год назад') === 0) || '';
+  check('строка эталона появилась', !!lyLine, ly.join(' | '));
+  check('в ней названо прошлогоднее окно датами', lyLine.indexOf('(01.09–07.09.2025)') > 0, lyLine);
+  check('и процент года назад', lyLine.indexOf('100%') > 0, lyLine);
+  // ⚠️ разница именно в процентных пунктах: списания у окон разной вместимости несравнимы
+  check('разница в п.п.', lyLine.indexOf('п.п.') > 0, lyLine);
+  check('и знак минус, раз стало хуже', lyLine.indexOf('−30 п.п.') > 0, lyLine);
+  // прошлого года в хранилище нет — строку не выдумываем
+  ctx._fillStore.fill = { '2026-09-02': { '10': [1, 8, 7, 0, 6, 210, 5, 1, 2, 0, 0, {}, {}] } };
+  check('без прошлого года строки эталона нет',
+        !API._salesFillLines(repW).some(x => x.indexOf('Год назад') === 0),
+        API._salesFillLines(repW).join(' | '));
+  check('но сама загрузка на месте',
+        API._salesFillLines(repW).some(x => x.indexOf('Загрузка:') === 0));
+
+  /* ⚠️ СДВИГ НА ГОД СЧИТАЮТ ТРИ МЕСТА, И ОНИ ОБЯЗАНЫ СОВПАДАТЬ: _salesLastYearDates (оборот
+     в сообщении), _fillShift (загрузка в сообщении и в разделе) и _progLyMon («Прогноз по
+     всем», см. test-prog-lastyear.cjs). Разойдутся — в одном сообщении встанут две разные
+     «прошлогодние недели», и это заметят раньше, чем поймут. */
+  const lyDates = API._salesLastYearDates('2026-08-31');
+  eq('оборот и загрузка берут одно начало', API._fillShift('2026-08-31'), lyDates[0]);
+  eq('и один конец', API._fillShift('2026-09-06'), lyDates[6]);
   ctx._fillStore = keepFill; ctx._fillPeriod = keepPeriod; ctx._fillKids = keepKids;
   ctx._fillKidsKey = ''; ctx.S.fillPlan = { '20': 6 };
 }

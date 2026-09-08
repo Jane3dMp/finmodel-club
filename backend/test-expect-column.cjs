@@ -57,6 +57,9 @@ put(14, { planned: 3243, plannedLessons: 19 });
 
 const ctx = {
   _realMonth: '2026-09', _realStore: store, _realBusy: false,
+  /* Окно «от даты до даты» в «Реализации»: пусто = поведение по умолчанию («дату подскажи
+     сам», «считай всю неделю пн–вс»). Без этих двух полей _realHtml не собирается вовсе. */
+  _realFrom: '', _realTo: '',
   _RU_MON: ['январь','февраль','март','апрель','май','июнь','июль','август','сентябрь','октябрь','ноябрь','декабрь'],
   _todayIso: () => '2026-09-10',
   _dIso: d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'),
