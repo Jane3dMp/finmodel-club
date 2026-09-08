@@ -2174,7 +2174,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-09-09-01";
+const APP_VER="2026-09-09-02";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -14043,10 +14043,22 @@ function _salesFillLinesFor(from,to){
   try{
     const lf=_fillShift(from), lt=_fillShift(to);
     const B=_fillTotals(_fillRows(_fillAgg(lf,lt)));
-    if(B && B.pct!=null){
-      const d=T.pct-B.pct;
-      L.push("Год назад ("+_fillRangeLabel(lf,lt)+"): "+Math.round(B.pct)+"%, разница "
-        +(d>=0?"+":"−")+Math.abs(Math.round(d))+" п.п.");
+    /* ⚠️ Числитель обоих окон — одним правилом, как в разделе. Галочки применимы только к окну
+       с разложением по деньгам; у прошлогоднего его обычно нет, и «88% по галочкам» против
+       «63% по списаниям» дало бы отделу продаж рост, которого не было. Не умеет хоть одно окно —
+       считаем ОБА по списаниям и пишем это в самой строке, чтобы цифру можно было проверить. */
+    const cmp=(T.split&&B.split);
+    const tp=cmp?T.pct:T.pctFact, bp=cmp?B.pct:B.pctFact;
+    if(bp!=null && tp!=null){
+      const d=tp-bp;
+      const dt=(d>=0?"+":"−")+Math.abs(Math.round(d))+" п.п.";
+      /* Когда сравниваем по списаниям, строка «Загрузка: 88%» выше посчитана по галочкам, и рядом
+         с ней «63%, разница +0 п.п.» читалось бы как противоречие. Поэтому в таком случае
+         называем ОБА процента и правило — тогда арифметику видно прямо в сообщении. */
+      L.push(cmp
+        ? ("Год назад ("+_fillRangeLabel(lf,lt)+"): "+Math.round(bp)+"%, разница "+dt)
+        : ("Год назад ("+_fillRangeLabel(lf,lt)+"): "+Math.round(bp)+"% против "+Math.round(tp)
+           +"% сейчас, разница "+dt+" — по списаниям: у прошлогоднего окна нет разбивки по деньгам."));
     }
   }catch(e){ /* прошлого года в хранилище нет — строки просто не будет, выдумывать нельзя */ }
   const W=(typeof _fillWho==="function")?_fillWho(rows):null;
@@ -15038,8 +15050,20 @@ function _fillTotals(rows){
   /* ⚠️ Итог обязан считаться ТАК ЖЕ, как строки: по выбранному галочками числителю (cnt),
      а не по fact. Иначе галочки меняли проценты в строках, а плитка «загрузка» и ИТОГО жили
      своей жизнью — и сумма не сходилась со своими же слагаемыми. */
+  /* ⚠️ Применимы ли галочки к ЭТОМУ окну. Разложение «кто был с деньгами и без них» появилось
+     позже остальных полей: у дней, посчитанных раньше, массив короче, и _fillRows молча падает
+     на списания (split=false). Пока окно смотрят одно, это безобидно — наверху стоит
+     «нажмите Пересчитать заново». Но эталон сравнивает ДВА окна, и если у них разные правила
+     числителя, разница берётся из ниоткуда: 09.09.2026 на полностью одинаковых данных двух
+     недель вышло «+25 п.п., загружаем лучше». Поэтому окно обязано уметь про себя ответить.
+     Считаем по строкам С ЗАНЯТИЯМИ: группа без занятий числителя не даёт вовсе. */
+  const wl=rows.filter(r=>r.les>0);
+  const split=(wl.length>0 && wl.every(r=>r.split));
   return {seats:seats, fact:fact, les:les, rev:rev, att:att, noCap:noCap, cnt:cnt,
-          pct:(seats>0?100*cnt/seats:null)};
+          split:split,
+          pct:(seats>0?100*cnt/seats:null),
+          /* Процент по списаниям — общий язык двух окон, когда галочки применимы не к обоим. */
+          pctFact:(seats>0?100*fact/seats:null)};
 }
 /* План детомест из финмодели («Планировщик загрузки»): места × визиты в неделю. Именно это
    Жанна называет планом по купленным детоместам — с ним сравнивается факт Alfa. */
@@ -15064,11 +15088,17 @@ function _fillModelPlan(){
 function _fillShift(iso){ const d=new Date(iso+"T12:00:00"); d.setDate(d.getDate()-364); return _dIso(d); }
 function _fillWd(iso){ return ["вс","пн","вт","ср","чт","пт","сб"][new Date(iso+"T12:00:00").getDay()]; }
 function _fillWdPair(from,to){ return from===to?_fillWd(from):(_fillWd(from)+"–"+_fillWd(to)); }
-/* «03.09–09.09.2025» — год обязателен: без него прошлогодняя неделя неотличима от нынешней. */
+/* «03.09–09.09.2025» — год обязателен: без него прошлогодняя неделя неотличима от нынешней.
+   ⚠️ У окна через Новый год год нужен у ОБЕИХ дат. Раньше он брался только из даты конца, и
+   прошлогоднее окно 30.12.2024–05.01.2025 подписывалось «30.12–05.01.2025» — то есть читалось
+   как окно внутри 2025 года, вложенное в выбранную неделю 29.12.2025–04.01.2026. Ровно то,
+   от чего год в подписи и должен спасать. Та же подпись уходит в чат отделу продаж. */
 function _fillRangeLabel(from,to){
   if(!from||!to) return "";
-  const y=String(to).slice(0,4);
-  return from===to ? _dmy(from) : (_salesDate(from)+"–"+_salesDate(to)+"."+y);
+  if(from===to) return _dmy(from);
+  const y1=String(from).slice(0,4), y2=String(to).slice(0,4);
+  return (y1===y2) ? (_salesDate(from)+"–"+_salesDate(to)+"."+y2)
+                   : (_dmy(from)+"–"+_dmy(to));
 }
 /* Дни периода, которых в хранилище ещё нет. Будущие не просим: период, который ещё идёт,
    «неполон» законно. */
@@ -15085,9 +15115,21 @@ function _fillRangeMissing(from,to){
    периодом, нажать «Пересчитать период» и вернуться обратно — три действия и потеря
    выбранного периода. А эталон по неполному окну — это первое, что подрывает доверие ко
    всему блоку: 74% по трём дням выглядят ровно как 74% по семи. */
-async function fillPullRange(from,to){
+/* force — пересчитать и те дни, что уже есть. Нужно для прошлогоднего окна, подтянутого до
+   появления разложения по деньгам: дни в хранилище ЕСТЬ, они лишь короткие, и обычный досчёт
+   («только дыры») их не тронет, а эталон из-за них считает числитель другим правилом. */
+async function fillPullRange(from,to,force){
   if(_fillBusy) return;
-  const need=_fillRangeMissing(from,to), lab=_fillRangeLabel(from,to);
+  const lab=_fillRangeLabel(from,to);
+  let need=_fillRangeMissing(from,to);
+  if(force){
+    need=[];
+    const today=_todayIso();
+    for(let d=new Date(from+"T12:00:00"); _dIso(d)<=to; d.setDate(d.getDate()+1)){
+      const k=_dIso(d); if(k>today) break;
+      need.push(k);
+    }
+  }
   const prog=document.getElementById("fillProg");
   if(!need.length){ if(prog) prog.textContent=lab+" уже посчитан целиком"; return; }
   if(need.length>10 && !confirm("Досчитать "+need.length+" "+_kassaDayWord(need.length)
@@ -15266,9 +15308,20 @@ function _fillHtml(){
   const lyFrom=_fillShift(P.from), lyTo=_fillShift(P.to);
   const bAgg=_fillAgg(lyFrom,lyTo), bRows=_fillRows(bAgg), B=_fillTotals(bRows);
   const lyLab=_fillRangeLabel(lyFrom,lyTo), lyMiss=_fillRangeMissing(lyFrom,lyTo);
-  /* Главная цифра — разница ПРОЦЕНТОВ в процентных пунктах. Списания сравнивать нельзя даже
-     при равной длине окна: год назад было другое число групп, а значит и детомест. */
-  const dPP=(B.pct!=null&&T.pct!=null)?(T.pct-B.pct):null;
+  /* ⚠️ ДВА ОКНА ОБЯЗАНЫ СЧИТАТЬ ЧИСЛИТЕЛЬ ОДНИМ ПРАВИЛОМ.
+     Галочки «что считать занятым местом» применимы только к окну, у которого есть разложение
+     по деньгам (attPaid/attFree/attZero). У прошлогоднего его обычно нет: дни подтянуты до
+     появления этих полей, и _fillRows молча падает на списания. Тогда «88% по галочкам»
+     сравнивались с «63% по списаниям» — и на ПОЛНОСТЬЮ одинаковых данных двух недель экран
+     объявлял «+25 п.п., загружаем лучше» (проверено 09.09.2026). Предупреждения при этом не
+     было ни одного: дыр в окне нет, дни есть, они лишь короткие.
+     Правило: умеют оба — сравниваем по галочкам; не умеет хоть одно — сравниваем ОБА по
+     списаниям и говорим это вслух. Разница в п.п. остаётся главной цифрой: сами списания
+     несравнимы, год назад было другое число групп, а с ними и детомест. */
+  const lyCmp=(T.split&&B.split);
+  const tPct=lyCmp?T.pct:T.pctFact, bPct=lyCmp?B.pct:B.pctFact;
+  const tNum=lyCmp?T.cnt:T.fact,    bNum=lyCmp?B.cnt:B.fact;
+  const dPP=(bPct!=null&&tPct!=null)?(tPct-bPct):null;
   /* Молчать про недосчитанный прошлый год нельзя: процент по трём дням выглядит ровно так
      же, как по семи, и отличить их можно только по строке-предупреждению ниже. Досчитать
      даём прямо оттуда, не уходя из выбранного периода. */
@@ -15277,13 +15330,13 @@ function _fillHtml(){
      хуже, и на сколько мест из ста это расходится. */
   const baseBlk=`<div class="card" style="margin-bottom:10px"><h3>Эталон загрузки — тот же период год назад</h3>
     <div class="hint" style="margin-bottom:8px">Сравниваем с <b>${esc(lyLab)}</b> — это ровно те же дни недели (${_fillWdPair(lyFrom,lyTo)}), сдвинутые на 52 недели назад. Не календарный год: у клуба суббота даёт втрое больше будней, и сравнивать надо среду со средой.</div>
-    ${B.pct==null
+    ${bPct==null
       ? `<div class="callout">За <b>${esc(lyLab)}</b> в хранилище ничего нет — прошлый год копится только по кнопке.${lyMiss.length?` <button class="btn ghost sm" onclick="fillPullRange('${lyFrom}','${lyTo}')"${_fillBusy?" disabled":""}>посчитать ${lyMiss.length} ${_kassaDayWord(lyMiss.length)} из Alfa</button>`:""}</div>`
       : `<table><tbody>
         <tr><td>Год назад — ${esc(lyLab)}<br><span style="font-size:11px;color:var(--muted)">${_gm(B.les)} ${_fillLesWord(B.les)} за ${_fillDaysNote(lyFrom,lyTo,bAgg.lessonDays)}</span></td>
-          <td class="num"><b style="color:${_fillPctColor(B.pct)};font-size:18px">${B.pct.toFixed(0)}%</b><br><span style="color:var(--muted);font-size:12px">${_gm(B.fact)} из ${_gm(B.seats)} детомест</span></td></tr>
+          <td class="num"><b style="color:${_fillPctColor(bPct)};font-size:18px">${bPct.toFixed(0)}%</b><br><span style="color:var(--muted);font-size:12px">${_gm(bNum)} из ${_gm(B.seats)} детомест</span></td></tr>
         <tr><td>Сейчас — ${esc(P.label.toLowerCase())}<br><span style="font-size:11px;color:var(--muted)">${_gm(T.les)} ${_fillLesWord(T.les)} за ${_fillDaysNote(P.from,P.to,agg.lessonDays)}</span></td>
-          <td class="num"><b style="color:${T.pct!=null?_fillPctColor(T.pct):"var(--muted)"};font-size:18px">${T.pct!=null?(T.pct.toFixed(0)+"%"):"—"}</b><br><span style="color:var(--muted);font-size:12px">${_gm(T.cnt)} из ${_gm(T.seats)} детомест</span></td></tr>
+          <td class="num"><b style="color:${tPct!=null?_fillPctColor(tPct):"var(--muted)"};font-size:18px">${tPct!=null?(tPct.toFixed(0)+"%"):"—"}</b><br><span style="color:var(--muted);font-size:12px">${_gm(tNum)} из ${_gm(T.seats)} детомест</span></td></tr>
         <tr class="totrow"><td><b>Разница</b></td><td class="num">${dPP==null?'—':`<b style="color:${dPP>=0?"var(--green)":"var(--red)"};font-size:18px">${dPP>=0?"+":"−"}${Math.abs(dPP).toFixed(0)} п.п.</b>`}</td></tr>
       </tbody></table>
       ${dPP==null?"":`<div style="margin-top:8px;font-size:13px">${
@@ -15291,6 +15344,14 @@ function _fillHtml(){
         : (dPP>0 ? "Загружаем <b style=\"color:var(--green)\">лучше</b>, чем год назад."
                  : "Загружаем <b style=\"color:var(--red)\">хуже</b>, чем год назад. В группах пустует на "+Math.abs(dPP).toFixed(0)+" из каждых 100 мест больше, чем тогда.")
       }</div>`}
+      ${(!lyCmp && bPct!=null)?`<div class="callout" style="border-color:var(--terra);font-size:12px;margin-top:8px">
+        <b>Сравниваем по списаниям, а не по галочкам.</b> Разложения «кто был с деньгами и без них»
+        нет у ${(!T.split&&!B.split)?"обоих окон":(B.split?"выбранного периода":"прошлогоднего окна")}
+        — эти дни считали до того, как оно появилось. Галочки выше на <b>это сравнение</b> не влияют:
+        иначе одно окно считалось бы по галочкам, другое по списаниям, и разница взялась бы из ниоткуда.
+        ${B.split?"":`<button class="btn ghost sm" style="margin-left:6px" onclick="fillPullRange('${lyFrom}','${lyTo}',true)"${_fillBusy?" disabled":""}>пересчитать прошлый год</button>`}
+        ${T.split?"":`<button class="btn ghost sm" style="margin-left:6px" onclick="fillPullRange('${P.from}','${P.to}',true)"${_fillBusy?" disabled":""}>пересчитать выбранный период</button>`}
+      </div>`:""}
       ${lyMiss.length?`<div class="callout" style="border-color:var(--terra);font-size:12px;margin-top:8px">
         <b>Прошлый год посчитан не весь</b> — из ${esc(lyLab)} не хватает ${lyMiss.length} ${_kassaDayWord(lyMiss.length)}.
         Процент считается по тем дням, что есть, и сравнение выходит неровным.
