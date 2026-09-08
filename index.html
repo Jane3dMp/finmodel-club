@@ -999,6 +999,20 @@ h3.cmp-fl span{font-weight:400;font-size:12px;color:var(--muted)}
 .cmp-kt thead tr.cmp-flt th{background:var(--sand-l);padding:4px 5px;border-bottom:1px solid var(--line)}
 .cmp-kt .cmp-cf{font-size:11px;padding:3px 6px;height:26px}
 .cmp-kt select.cmp-cf{width:100%;min-width:96px}
+/* даты смены в настройках: в 62 px умещалось только «01.11» */
+.cmp-cfg input[type=date]{width:142px}
+/* заголовки подборки — кнопки сортировки */
+.cmp-kt th.cmp-th{cursor:pointer;user-select:none;white-space:nowrap}
+.cmp-kt th.cmp-th:hover{text-decoration:underline}
+.cmp-kt th.cmp-th.on{color:var(--acc-soft)}
+.cmp-vbok{font-size:10px;color:var(--green);white-space:nowrap;margin-top:2px}
+/* меню шаблонов Viber и библиотека сообщений */
+.cmp-vbmenu{max-width:320px}
+.cmp-vbmenu button.btn{white-space:normal}
+.cmp-tpl{border:1px solid var(--line);border-radius:9px;padding:8px 10px;margin-bottom:8px;background:var(--cream)}
+.cmp-tpl textarea.cell{height:120px;text-align:left;margin-top:6px;font-family:inherit;line-height:1.4;resize:vertical}
+.cmp-tplhint{font-size:12px;color:var(--muted);margin-bottom:10px;line-height:1.5}
+.cmp-tplhint code{background:var(--sand-l);padding:0 4px;border-radius:4px;color:var(--coal)}
 </style>
 </head>
 <body>
@@ -2027,7 +2041,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-09-08-08";
+const APP_VER="2026-09-08-09";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -18710,7 +18724,7 @@ function renderCampRes(){
    +'<th>Статус</th><th>Источник</th><th>Вариант</th>'
    +'<th class="a-right">Предоплата</th><th class="a-right">Доплата</th><th class="a-right" title="Сколько ещё должен по стоимости смены">Осталось</th>'
    +CAMP_PRE.map(p=>'<th title="Предзапись: '+p[1]+'" style="width:40px">'+p[2]+'</th>').join("")
-   +'<th>Место</th><th>AlfaCRM</th><th>Комментарий</th><th style="width:64px"></th>'
+   +'<th>Место</th><th>AlfaCRM</th><th>Комментарий</th><th style="width:96px"></th>'
    +'</tr></thead><tbody>';
   shown.forEach((r,i)=>{
     const jid=_jsStr(r.id);
@@ -18743,8 +18757,10 @@ function renderCampRes(){
         ?'<span class="cmp-ok" title="Открыть историю в Альфе" onclick="openAlfaHistory(\''+_jsStr(String(r.alfaId))+'\',\''+_jsStr(r.fio)+'\')">✓ ID '+esc(String(r.alfaId))+'</span>'
         :'<button class="btn ghost sm" onclick="campToAlfa(\''+jid+'\')">→ Альфа</button>')+'</td>'
      +'<td><input class="cell wide" style="min-width:150px;text-align:left" value="'+esc(r.note||"")+'" onchange="campSetRes(\''+jid+'\',\'note\',this.value,false)"></td>'
-     +'<td style="white-space:nowrap"><button class="btn ghost sm" title="Перенести в другую смену" onclick="campMoveRow(\''+jid+'\')">⇄</button>'
-        +'<button class="btn ghost sm" title="Убрать из резерва" onclick="campDelRow(\''+jid+'\')">×</button></td>'
+     +'<td style="white-space:nowrap"><button class="btn ghost sm more-toggle" title="Написать в Viber по шаблону" onclick="campVbOpen(this,\'res\',\''+jid+'\')">💬</button>'
+        +'<button class="btn ghost sm" title="Перенести в другую смену" onclick="campMoveRow(\''+jid+'\')">⇄</button>'
+        +'<button class="btn ghost sm" title="Убрать из резерва" onclick="campDelRow(\''+jid+'\')">×</button>'
+        +(r.vbAt?'<div class="cmp-vbok" title="'+esc(r.vbTpl||"")+'">✅ Viber '+esc(_campDate(r.vbAt))+'</div>':'')+'</td>'
      +'</tr>';
   });
   h+='</tbody></table></div>';
@@ -18896,7 +18912,9 @@ let _campKMsg="";             // строка состояния над спис
 let _campKFilter="all", _campKSrc="all", _campKQuery="", _campKLimit=300;
 /* Фильтры по столбцам таблицы подборки (Жанна: «добавь фильтр по каждому столбцу»). Складываются
    с чипами и поиском по И. Возраст понимает «11», «10-12», «>10», «<12». */
-let _campKCol={fio:"",age:"",phone:"",was:"",amo:"",call:"",note:"",res:""};
+let _campKCol={fio:"",age:"",phone:"",was:"",amo:"",call:"",vb:"",note:"",res:""};
+let _campKSort={k:"fio",dir:1};   // сортировка подборки: клик по заголовку, повторный — в обратную сторону
+let _campTplOpen=false;           // открыта библиотека сообщений Viber
 const CAMP_LS_ALFA="campPoolAlfa", CAMP_LS_AMO="campPoolAmo";
 function _campCacheGet(k){ try{ const v=localStorage.getItem(k); return v?JSON.parse(v):null; }catch(e){ return null; } }
 function _campCachePut(k,v){ try{ localStorage.setItem(k,JSON.stringify(v)); }catch(e){} }   // не влезло — молча: это только кэш
@@ -18983,6 +19001,8 @@ function _campColMatch(r,call,res){
   if(F.call==="any"&&!st) return false;
   if(F.call&&F.call!=="none"&&F.call!=="any"&&st!==F.call) return false;
   if(F.note&&!String((call&&call.c)||"").toLowerCase().includes(has(F.note))) return false;
+  if(F.vb==="yes"&&!(call&&call.vb)) return false;
+  if(F.vb==="no"&&(call&&call.vb)) return false;
   if(F.res==="in"&&!res) return false;
   if(F.res==="out"&&res) return false;
   if(F.res&&F.res!=="in"&&F.res!=="out"&&(!res||res.status!==F.res)) return false;
@@ -18995,6 +19015,145 @@ function campKidsCol(k,v){
   if(el&&el.tagName==="INPUT"){ el.focus(); try{ el.setSelectionRange(el.value.length,el.value.length); }catch(e){} }
 }
 function campKidsColClear(){ Object.keys(_campKCol).forEach(k=>{ _campKCol[k]=""; }); _campKLimit=300; renderCampKids(); }
+function campKidsSort(k){ _campKSort=(_campKSort.k===k)?{k:k,dir:-_campKSort.dir}:{k:k,dir:1}; _campKLimit=300; renderCampKids(); }
+/* Сортировка показанных. Пустые значения (нет даты рождения, не звонили, не в резерве) — всегда
+   в конце, в обе стороны: их нечего сравнивать. Возраст по возрастанию = младшие первыми. */
+function _campKidsSorted(rows,m,resByKey){
+  const k=_campKSort.k, dir=_campKSort.dir;
+  const callRank=s=>{ const i=CAMP_CALL.findIndex(o=>o[0]===s); return i<0?99:i; };
+  const val=r=>{
+    const call=m[r.key]||{};
+    switch(k){
+      case "age":  { const d=_dobIso(r.dob); return d?(-new Date(d+"T12:00:00").getTime()):null; }
+      case "phone":return r.phone||null;
+      case "was":  return _campWasText(r)||null;
+      case "amo":  return _campAmoText(r)||null;
+      case "call": return call.st?callRank(call.st):null;
+      case "vb":   return call.vb||null;
+      case "note": return call.c||null;
+      case "res":  { const x=resByKey[r.key]; return x?({yes:0,maybe:1,no:2}[x.status]??3):null; }
+      default:     return r.fio||null;
+    }
+  };
+  return rows.map(r=>({r:r,v:val(r)})).sort((A,B)=>{
+    if(A.v==null&&B.v==null) return String(A.r.fio).localeCompare(String(B.r.fio),"ru");
+    if(A.v==null) return 1;
+    if(B.v==null) return -1;
+    let c=(typeof A.v==="number"&&typeof B.v==="number")?(A.v-B.v):String(A.v).localeCompare(String(B.v),"ru");
+    if(c===0) c=String(A.r.fio).localeCompare(String(B.r.fio),"ru");
+    return c*dir;
+  }).map(x=>x.r);
+}
+
+/* ---------- Viber: библиотека сообщений и отправка ----------
+   Жанна: «добавь опцию отправить сообщение в Viber и библиотеку сообщений — шаблоны, чтобы при
+   клике выбрать, что закинуть в буфер». Механика та же, что у карточки занятия: текст с
+   подстановками → в буфер, Viber открывается на номер родителя, остаётся вставить. Шаблоны
+   общие на всех (лежат в S.camp.tpls), подставляем данные ребёнка и текущей смены. */
+const CAMP_TPL_SEED=[
+  {name:"Приглашение в смену",text:["Здравствуйте, {родитель}! 🌟","","Пишем из клуба «Прознание». {даты} проходит наш загородный лагерь «{смена}», и мы будем очень рады видеть {имя} среди участников!","","Стоимость смены — {стоимость} р., предоплата {предоплата} р. закрепляет место.","","Подскажите, пожалуйста, планируете ли вы поехать? Как только подтвердите — место за {имя} закрепим 💙"].join("\n")},
+  {name:"Напоминание о предоплате",text:["Здравствуйте, {родитель}!","","Напоминаем: чтобы закрепить место за {имя} в смене «{смена}» ({даты}), нужна предоплата {предоплата} р. Остаток — {стоимость} р. минус предоплата — можно внести ближе к заезду.","","Как внесёте — напишите нам, пожалуйста, и мы отметим место 💙"].join("\n")},
+  {name:"Думает — уточнить",text:["Здравствуйте, {родитель}!","","Хотели уточнить: определились ли вы с поездкой {имя} в «{смена}» ({даты})? Мест в блоках остаётся немного, и мы хотим оставить одно за вами.","","Если есть вопросы по программе, питанию или расселению — с радостью ответим 🌿"].join("\n")}
+];
+function _campTpls(){
+  const c=_camp();
+  if(!Array.isArray(c.tpls)) c.tpls=[];
+  if(!c.tplsInit){ c.tplsInit=true; if(!c.tpls.length) c.tpls=CAMP_TPL_SEED.map(t=>({id:_campNewId("t"),name:t.name,text:t.text})); }
+  return c.tpls;
+}
+function campTplToggle(open){
+  _campTplOpen=(open===true)?true:!_campTplOpen;
+  const kids=document.getElementById("campkids");
+  if(_campTplOpen&&kids&&!kids.classList.contains("active")&&typeof activateTab==="function") activateTab("campkids");   // библиотека живёт на подборке
+  renderCampKids();
+  if(_campTplOpen){ const el=document.getElementById("campTplBox"); if(el&&el.scrollIntoView) el.scrollIntoView({block:"start",behavior:"smooth"}); }
+}
+function campTplAdd(){ _campTpls().push({id:_campNewId("t"),name:"Новый шаблон",text:"Здравствуйте, {родитель}!\n\n"}); _campSave(); _campTplOpen=true; renderCampKids(); }
+function campTplSet(id,f,v){ const t=_campTpls().find(x=>x.id===id); if(!t) return; t[f]=String(v||""); _campSave(); }
+function campTplDel(id){
+  const tpls=_campTpls(), t=tpls.find(x=>x.id===id); if(!t) return;
+  if(!confirm("Удалить шаблон «"+(t.name||"")+"»?")) return;
+  _camp().tpls=tpls.filter(x=>x.id!==id); _campSave(); renderCampKids();
+}
+function _campShiftDates(sh){ if(!sh||!sh.from) return ""; return _campDmy(sh.from)+(sh.to?("–"+_campDmy(sh.to)):""); }
+/* Имя родителя из «Заказчика» Альфы — тем же правилом, что и в карточке занятия (_parentFirst):
+   в настоящем ФИО имя — второе слово, в заметке вроде «Мама Оля» — последнее. */
+function _campParentFirst(name){
+  const w=String(name||"").trim().split(/\s+/).filter(Boolean);
+  if(!w.length) return ""; if(w.length===1) return w[0];
+  const surname=/(ов|ова|ев|ева|ин|ина|ский|ская|цкий|цкая|ич|юк|ук|ко|енко|швили|ян|дзе)$/i;
+  if(w.length>=3) return w[1];
+  return surname.test(w[0])?w[1]:w[w.length-1];
+}
+function _campVbText(t,ctx){
+  const sh=ctx.sh||{};
+  const parts=String(ctx.fio||"").trim().split(/\s+/);
+  const imya=parts.length>1?parts[1]:(parts[0]||"");
+  const par=_campParentFirst(ctx.parent);
+  let s=String(t||"");
+  if(!par) s=s.replace(/,\s*\{родитель\}/g,"");          // «Здравствуйте, {родитель}!» → «Здравствуйте!»
+  s=s.replace(/\{родитель\}/g,par).replace(/\{имя\}/g,imya).replace(/\{фио\}/g,ctx.fio||"")
+     .replace(/\{смена\}/g,sh.name||"").replace(/\{даты\}/g,_campShiftDates(sh)||"…")
+     .replace(/\{стоимость\}/g,(+sh.price||0)?String(+sh.price):"…").replace(/\{предоплата\}/g,(+sh.prepay||0)?String(+sh.prepay):"…");
+  return (typeof _tidyMsg==="function")?_tidyMsg(s):s;
+}
+function _campVbTarget(scope,key){
+  if(scope==="res"){ const r=_campRow(key); if(!r) return null;
+    const p=(_campPool||[]).find(x=>x.key===_campKidKey(r.fio));
+    return {fio:r.fio,phone:r.phone,parent:p?(p.parent||""):"",res:r}; }
+  const r=(_campPool||[]).find(x=>x.key===key); if(!r) return null;
+  return {fio:r.fio,phone:r.phone,parent:r.parent||"",row:r};
+}
+/* Меню шаблонов — своё, с position:fixed: таблица лежит в прокручиваемом .tscroll, и обычное
+   выпадающее меню обрезалось бы его краем. Закрывается общим closeAllMore (клик мимо, Escape). */
+function campVbOpen(btn,scope,key){
+  let el=document.getElementById("campVbMenu");
+  if(!el){ el=document.createElement("div"); el.id="campVbMenu"; el.className="more-menu cmp-vbmenu"; document.body.appendChild(el); }
+  const wasOpen=el.classList.contains("show")&&el.dataset.for===scope+"|"+key;
+  if(typeof closeAllMore==="function") closeAllMore(); else el.classList.remove("show");
+  if(wasOpen) return;
+  const t=_campVbTarget(scope,key); if(!t) return;
+  const num=_viberNumber(t.phone);
+  const tpls=_campTpls();
+  el.innerHTML='<span class="menu-who">'+esc(t.fio)+' · '+(num?esc(t.phone):'нет телефона')+'</span>'
+    +(tpls.length?tpls.map(x=>'<button class="btn"'+(num?'':' disabled')+' onclick="campVbSend(\''+scope+'\',\''+_jsStr(key)+'\',\''+_jsStr(x.id)+'\')">'+esc(x.name||"без названия")+'</button>').join(""):'<span class="menu-who">Шаблонов пока нет</span>')
+    +'<div class="menu-sep"></div><button class="btn" onclick="campTplToggle(true)">Библиотека сообщений…</button>';
+  el.dataset.for=scope+"|"+key;
+  const r=btn.getBoundingClientRect();
+  el.style.position="fixed"; el.style.left=Math.max(6,Math.min(r.left,window.innerWidth-280))+"px"; el.style.top=(r.bottom+4)+"px";
+  el.classList.add("show");
+  const h=el.offsetHeight;
+  if(r.bottom+4+h>window.innerHeight-8) el.style.top=Math.max(6,r.top-4-h)+"px";   // снизу не влезает — раскрываем вверх
+}
+async function campVbSend(scope,key,tplId){
+  const sh=_campShift(); if(!sh){ toast("Сначала выберите смену"); return; }
+  const t=_campVbTarget(scope,key); if(!t) return;
+  const num=_viberNumber(t.phone); if(!num){ toast("У «"+t.fio+"» нет телефона — писать некуда"); return; }
+  const tpl=_campTpls().find(x=>x.id===tplId); if(!tpl){ toast("Шаблон не найден"); return; }
+  const msg=_campVbText(tpl.text,{fio:t.fio,parent:t.parent,sh:sh});
+  const copied=await _copyText(msg);
+  _openViber(num);
+  const at=_campToday();
+  if(t.res){ t.res.vbAt=at; t.res.vbTpl=tpl.name||""; }
+  else{ const m=_campCalls(sh); const cur=m[key]||{}; cur.vb=at; cur.vbTpl=tpl.name||""; cur.fio=t.fio; cur.at=cur.at||at; cur.by=cur.by||_fbUserEmail(); m[key]=cur; }
+  _campSave();
+  try{ _pushLog(["лагерь · "+(sh.name||"")+" · ✅ Viber отправлен: "+t.fio+" («"+(tpl.name||"")+"»)"]); }catch(e){}
+  if(t.res) _campDraw(); else renderCampKids();
+  toast(copied?"Текст в буфере — вставьте в Viber (Ctrl+V). Отмечено ✅":"Открываю Viber. Отмечено ✅");
+}
+function _campTplBoxHtml(){
+  const tpls=_campTpls();
+  let h='<div class="card" id="campTplBox"><h3>Библиотека сообщений для Viber · '+tpls.length+'</h3>'
+   +'<div class="cmp-tplhint">Подстановки: <code>{имя}</code> — имя ребёнка, <code>{фио}</code>, <code>{родитель}</code> — имя родителя из Альфы (если его нет, «, {родитель}» просто исчезает), <code>{смена}</code>, <code>{даты}</code>, <code>{стоимость}</code>, <code>{предоплата}</code> — из настроек смены. По клику на шаблон текст ложится в буфер, Viber открывается на номер родителя — остаётся вставить.</div>';
+  tpls.forEach(t=>{ const jid=_jsStr(t.id);
+    h+='<div class="cmp-tpl"><div style="display:flex;gap:6px;align-items:center">'
+     +'<input class="cell wide" style="text-align:left;font-weight:700" value="'+esc(t.name||"")+'" placeholder="Название" onchange="campTplSet(\''+jid+'\',\'name\',this.value)">'
+     +'<button class="btn ghost sm" title="Удалить шаблон" onclick="campTplDel(\''+jid+'\')">×</button></div>'
+     +'<textarea class="cell wide" onchange="campTplSet(\''+jid+'\',\'text\',this.value)">'+esc(t.text||"")+'</textarea></div>';
+  });
+  h+='<div style="display:flex;gap:8px"><button class="btn sm" onclick="campTplAdd()">+ Шаблон</button><button class="btn ghost sm" onclick="campTplToggle()">Свернуть</button></div></div>';
+  return h;
+}
 function _campAmoText(r){ if(!r.src.amo) return ""; return [r.amoStage,r.amoAt?_campDmy(r.amoAt):"",r.amoResp].filter(Boolean).join(" · "); }
 /* Годы рождения смены: Жанна задаёт руками («2020-2015», порядок любой). Ограничивают и список,
    и «Курсы из Альфы» — историю тянем только тем, кто по возрасту вообще подходит в смену. */
@@ -19006,8 +19165,8 @@ function _campKidsShown(){
   const q=_campKQuery.toLowerCase(), qd=q.replace(/\D/g,"");
   const yr=_campYears(sh);
   const colOn=Object.keys(_campKCol).some(k=>_campKCol[k]);
-  const resByKey={}; if(colOn&&sh) _campRows(sh).forEach(x=>{ resByKey[_campKidKey(x.fio)]=x; });
-  return rows.filter(r=>{
+  const resByKey={}; if(sh) _campRows(sh).forEach(x=>{ resByKey[_campKidKey(x.fio)]=x; });
+  return _campKidsSorted(rows.filter(r=>{
     if(colOn&&!_campColMatch(r,m[r.key],resByKey[r.key])) return false;
     if(yr.from||yr.to){
       const y=_campBirthYear(r);
@@ -19030,7 +19189,7 @@ function _campKidsShown(){
       if(!inName&&!inPhone) return false;
     }
     return true;
-  });
+  }),m,resByKey);
 }
 function campKidsPickShift(id){ _campShiftId=id; try{ localStorage.setItem("campShift",id); }catch(e){} renderCampKids(); }
 function campKidsFilter(v){ _campKFilter=v; _campKLimit=300; renderCampKids(); }
@@ -19184,7 +19343,7 @@ function campCallSet(key,f,v){
   const m=_campCalls(sh); const cur=m[key]||{};
   if(f==="st"){
     cur.st=String(v||""); cur.at=_campToday(); cur.by=_fbUserEmail(); cur.fio=fio;
-    if(!cur.st&&!cur.c) delete m[key]; else m[key]=cur;
+    if(!cur.st&&!cur.c&&!cur.vb) delete m[key]; else m[key]=cur;
     _campSave();
     if(cur.st){
       const line=cur.st==="yes"?("ответ ("+fio+"): 🟢 да"):cur.st==="maybe"?("ответ ("+fio+"): 🟡 думает"):cur.st==="no"?("ответ ("+fio+"): 🔴 нет")
@@ -19195,7 +19354,7 @@ function campCallSet(key,f,v){
     renderCampKids();
   } else if(f==="c"){
     cur.c=String(v||"").trim();
-    if(!cur.st&&!cur.c) delete m[key];
+    if(!cur.st&&!cur.c&&!cur.vb) delete m[key];
     else { cur.at=cur.at||_campToday(); cur.by=cur.by||_fbUserEmail(); cur.fio=fio; m[key]=cur; }
     _campSave();
     if(cur.c){ try{ _pushLog(["лагерь · "+(sh.name||"")+" · коммент. у "+fio]); }catch(e){} }
@@ -19259,8 +19418,9 @@ function renderCampKids(){
    +'<div id="campKMsg" style="font-size:12px;color:'+(/не ответила/.test(_campKMsg)?"var(--red)":"var(--muted)")+';margin-top:8px;min-height:16px">'+esc(_campKMsg)+'</div>'
    +'</div>';
 
-  const called=Object.keys(m).length;
-  const cnt={}; Object.values(m).forEach(x=>{ cnt[x.st||""]=(cnt[x.st||""]||0)+1; });
+  const called=Object.values(m).filter(x=>x&&x.st).length;
+  const vbN=Object.values(m).filter(x=>x&&x.vb).length;
+  const cnt={}; Object.values(m).forEach(x=>{ if(x&&x.st) cnt[x.st]=(cnt[x.st]||0)+1; });
   h+='<div class="cmp-kpi">'
    +'<div>всего в подборке<b>'+rows.length+'</b></div>'
    +'<div>с телефоном<b>'+rows.filter(r=>_phoneKey(r.phone)).length+'</b></div>'
@@ -19269,6 +19429,7 @@ function renderCampKids(){
    +'<div>звонили<b>'+called+'</b></div>'
    +'<div>подтвердили / думают<b><span style="color:var(--green)">'+(cnt.yes||0)+'</span> / <span style="color:#C9922E">'+(cnt.maybe||0)+'</span></b></div>'
    +'<div>недозвон / отказ<b>'+((cnt.call||0)+(cnt.later||0))+' / <span style="color:var(--red)">'+(cnt.no||0)+'</span></b></div>'
+   +'<div>Viber отправлен<b>'+vbN+'</b></div>'
    +'</div>';
 
   h+='<div class="cmp-pick">';
@@ -19289,7 +19450,9 @@ function renderCampKids(){
   const colOn=Object.keys(_campKCol).some(k=>_campKCol[k]);
   if(colOn) h+='<span class="chip" onclick="campKidsColClear()" title="Очистить фильтры под шапкой таблицы">× сбросить фильтры столбцов</span>';
   h+='<button class="btn ghost sm" onclick="campKidsPrint()" title="Список на бумагу с клеткой «дозвон»">🖨 Печать · '+shown.length+'</button>';
+  h+='<button class="btn ghost sm" onclick="campTplToggle()" title="Шаблоны сообщений для Viber">💬 Шаблоны Viber · '+_campTpls().length+'</button>';
   h+='</div>';
+  if(_campTplOpen) h+=_campTplBoxHtml();
 
   // строка фильтров под шапкой — по каждому столбцу; рисуем и при пустом результате, иначе
   // фильтр, который всё отсеял, нечем было бы снять
@@ -19299,14 +19462,17 @@ function renderCampKids(){
   const fltRow='<tr class="cmp-flt"><th></th><th>'+cf('fio','имя')+'</th><th>'+cf('age','11 · 10-12','78px')+'</th><th>'+cf('phone','цифры','110px')+'</th>'
    +'<th>'+cf('was','курс, лид, визит')+'</th><th>'+cf('amo','этап, менеджер')+'</th>'
    +'<th>'+cs('call',[["","все"],["none","не звонили"],["any","звонили"],["call","недозвон"],["later","перезвонить"],["yes","подтвердил"],["maybe","думает"],["no","отказ"]])+'</th>'
+   +'<th>'+cs('vb',[["","все"],["yes","отправлен"],["no","не отправлен"]])+'</th>'
    +'<th>'+cf('note','текст')+'</th>'
    +'<th>'+cs('res',[["","все"],["in","в резерве"],["out","не в резерве"],["yes","подтвердил"],["maybe","думает"],["no","отказ"]])+'</th></tr>';
+  // заголовки — кнопки сортировки: клик, повторный клик — в обратную сторону
+  const th=(k,label,title)=>'<th class="cmp-th'+(_campKSort.k===k?' on':'')+'"'+(title?(' title="'+esc(title)+'"'):'')+' onclick="campKidsSort(\''+k+'\')">'+label+(_campKSort.k===k?(_campKSort.dir>0?' ▲':' ▼'):'')+'</th>';
   const thead='<thead><tr>'
-   +'<th style="width:26px">#</th><th>Ребёнок</th><th>Возраст</th><th>Телефон</th><th>Был у нас</th><th>amo</th>'
-   +'<th title="Результат звонка по смене «'+esc(sh?sh.name:"")+'»">Звонок</th><th>Комментарий</th><th>В резерве</th>'
+   +'<th style="width:26px">#</th>'+th('fio','Ребёнок','Сортировка по имени')+th('age','Возраст','По возрасту: младшие первыми, без даты — в конце')+th('phone','Телефон')+th('was','Был у нас')+th('amo','amo')
+   +th('call','Звонок','Результат звонка по смене «'+(sh?sh.name:"")+'»')+th('vb','Viber','Отправлено ли сообщение')+th('note','Комментарий')+th('res','В резерве')
    +'</tr>'+fltRow+'</thead>';
 
-  if(!shown.length){ box.innerHTML=h+'<div class="tscroll"><table class="cmp-t cmp-kt">'+thead+'<tbody><tr><td colspan="9" style="color:var(--muted);padding:14px 10px">Никого не найдено. Снимите фильтр или подтяните базу из Альфы.</td></tr></tbody></table></div>'; return; }
+  if(!shown.length){ box.innerHTML=h+'<div class="tscroll"><table class="cmp-t cmp-kt">'+thead+'<tbody><tr><td colspan="10" style="color:var(--muted);padding:14px 10px">Никого не найдено. Снимите фильтр или подтяните базу из Альфы.</td></tr></tbody></table></div>'; return; }
   const lim=Math.min(shown.length,_campKLimit);
   h+='<div class="tscroll"><table class="cmp-t cmp-kt">'+thead+'<tbody>';
   for(let i=0;i<lim;i++){
@@ -19324,6 +19490,8 @@ function renderCampKids(){
      +'<td><select class="cell" style="'+(cs?("color:"+cs.c+";font-weight:700"):"")+'" onchange="campCallSet(\''+jk+'\',\'st\',this.value)">'
         +CAMP_CALL.map(o=>'<option value="'+o[0]+'"'+(st===o[0]?' selected':'')+'>'+o[1]+'</option>').join("")+'</select>'
         +(call.at?'<div class="cmp-when" title="'+esc(call.by||"")+'">'+esc(_campDate(call.at))+(call.by?(' · '+esc(String(call.by).split("@")[0])):'')+'</div>':'')+'</td>'
+     +'<td style="text-align:center"><button class="btn ghost sm more-toggle" title="Написать в Viber по шаблону" onclick="campVbOpen(this,\'kids\',\''+jk+'\')">💬</button>'
+        +(call.vb?'<div class="cmp-vbok" title="'+esc(call.vbTpl||"")+'">✅ '+esc(_campDate(call.vb))+'</div>':'')+'</td>'
      +'<td><input class="cell wide" style="min-width:180px;text-align:left" value="'+esc(call.c||"")+'" onchange="campCallSet(\''+jk+'\',\'c\',this.value)"></td>'
      +'<td>'+(res?('<span style="font-weight:700;color:'+(CAMP_ST[res.status]||CAMP_ST.maybe).c+'">'+(CAMP_ST[res.status]||CAMP_ST.maybe).ic+' '+(CAMP_ST[res.status]||CAMP_ST.maybe).t+'</span>')
                  :(sh?'<button class="btn ghost sm" onclick="campKidsToRes(\''+jk+'\')">→ резерв</button>':''))+'</td>'
