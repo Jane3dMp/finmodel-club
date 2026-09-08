@@ -2174,7 +2174,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-09-09-02";
+const APP_VER="2026-09-09-03";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -12519,6 +12519,12 @@ function _kassaTopHtml(){
     ${_kassaCashCard()}
   </div>`;
 }
+/* День в РОДИТЕЛЬНОМ падеже — для позиций «из N …» и «не хватает N …». _kassaDayWord даёт
+   счётную форму («2 дня», «5 дней»), и в этих позициях она врёт: «18 из 31 день», «не хватает
+   4 дня». Правило другое: оканчивается на 1 (кроме 11) — «дня», иначе «дней».
+   ⚠️ Вылезло 09.09.2026, когда в тестах заглушку _kassaDayWord заменили настоящей функцией:
+   заглушка склоняла по-своему и обе ошибки прятала. */
+function _kassaDayOf(n){ n=Math.abs(+n||0); const t=n%10, h=n%100; return (t===1&&h!==11)?"дня":"дней"; }
 function _kassaDayWord(n){
   n=Math.abs(+n||0); const t=n%10, h=n%100;
   if(t===1&&h!==11) return "день";
@@ -14033,9 +14039,26 @@ function _salesFillLinesFor(from,to){
   let agg,rows,T;
   try{ agg=_fillAgg(from,to); rows=_fillRows(agg); T=_fillTotals(rows); }catch(e){ return []; }
   if(!T || !T.seats || T.pct==null) return [];
+  /* ⚠️ ДЕТОМЕСТА И РЕАЛИЗАЦИЯ ЛЕЖАТ В РАЗНЫХ ФАЙЛАХ и наполнялись в разное время: реализация
+     пишется с 31.08.2026, детоместа добавлены 07.09. У дней до этого строк детомест обычно нет,
+     их досчитывает воскресный 30-дневный проход или кнопка. Значит окно из семи дней могло
+     иметь детоместа только за два — и загрузка была занижена в три с половиной раза МОЛЧА:
+     предупреждение на экране проверяет пропуски реализации, а не детомест.
+     Хуже того, в одном сообщении для чата подряд вставали «Занятий: 210» (реализация) и
+     «Занятий: 2» (детоместа) — читалось как ошибка в обеих цифрах. Поэтому при неполном окне
+     строка называет своё покрытие и говорит про себя, что она про детоместа. */
+  const fmiss=(typeof _fillRangeMissing==="function")?_fillRangeMissing(from,to):[];
+  const today=_todayIso(), endPast=(to>today?today:to);
+  const pastDays=Math.max(0,Math.round((new Date(endPast+"T12:00:00")-new Date(from+"T12:00:00"))/86400000)+1);
+  const haveDays=Math.max(0,pastDays-fmiss.length);
+  const part=(fmiss.length>0 && pastDays>0);
+  const cover=part?(" — посчитано за "+haveDays+" "+_kassaDayWord(haveDays)+" из "+pastDays+", цифра занижена"):"";
   const L=["",
-    "Загрузка: "+Math.round(T.pct)+"% ("+_salesNum(T.cnt)+" из "+_salesNum(T.seats)+" детомест).",
-    "Занятий: "+_salesNum(T.les)+", списаний: "+_salesNum(T.fact)+"."];
+    "Загрузка: "+Math.round(T.pct)+"% ("+_salesNum(T.cnt)+" из "+_salesNum(T.seats)+" детомест)"+cover+".",
+    part
+      ? ("Детоместа посчитаны за "+haveDays+" "+_kassaDayWord(haveDays)+" из "+pastDays+": занятий "
+         +_salesNum(T.les)+", списаний "+_salesNum(T.fact)+".")
+      : ("Занятий: "+_salesNum(T.les)+", списаний: "+_salesNum(T.fact)+".")];
   /* Эталон — та же неделя год назад (сдвиг 364 дня, дни недели совпадают) и разница в
      процентных пунктах, а не в списаниях: год назад было другое число групп, а с ними и
      детомест. Строка идёт сразу за «Оборот года назад» в том же сообщении — оба показателя
@@ -14298,12 +14321,18 @@ function _salesPeriodSel(curKey){
    обязаны совпадать. miss — прошедшие дни, которых в хранилище нет: без них оборот занижен
    молча, и об этом надо сказать вслух. */
 function _salesRangeFact(from,to){
-  const out={sum:0, les:0, dwl:0, known:0, miss:[]};
+  /* ⚠️ miss и future — РАЗНЫЕ вещи, и путать их нельзя. miss: день прошёл, а в хранилище его
+     нет — оборот занижен, надо досчитать. future: день ещё не наступил и ожидаемых списаний по
+     нему нет (cron держит вперёд +14 дней) — досчитывать нечего, но и «оборот 0» показывать
+     нельзя: ноль читается как «клуб ничего не заработает». Раньше будущие дни не попадали
+     никуда, и окно осенних каникул выдавало зелёный «0» без единого предупреждения. */
+  const out={sum:0, les:0, dwl:0, known:0, total:0, miss:[], future:[]};
   if(!from||!to) return out;
   const today=_todayIso(), St=_realStore||{};
   for(let d=new Date(from+"T12:00:00"); _dIso(d)<=to; d.setDate(d.getDate()+1)){
     const k=_dIso(d), r=St[k];
-    if(!r){ if(k<=today) out.miss.push(k); continue; }
+    out.total++;
+    if(!r){ if(k<=today) out.miss.push(k); else out.future.push(k); continue; }
     out.known++;
     out.sum += (k<=today) ? (((+r.present||0)+(+r.all||0))/2) : (+r.planned||0);
     out.les += (+r.lessons||0);
@@ -14312,16 +14341,51 @@ function _salesRangeFact(from,to){
   out.sum=Math.round(out.sum*100)/100;
   return out;
 }
+/* ===== ГОД НАЗАД: ТОЛЬКО ПО ПАРАМ ДНЕЙ =====
+   Прошлый год попадает в дневное хранилище только кнопкой, и обычно там лежит ровно одно
+   недельное окно, подтянутое для недельного отчёта. Если сравнивать сумму нынешнего окна с
+   суммой прошлогоднего «сколько нашлось», получается ложь в разы: 14 нынешних дней против 5
+   прошлогодних дали в чат «+196%» там, где роста нет вовсе (найдено 09.09.2026).
+   Правило то же, что в эталоне загрузки: сравнивать можно только сопоставимое. Берём дни,
+   которые есть в ОБОИХ окнах (день ↔ день−364, поэтому день недели совпадает), и говорим,
+   по скольким дням из скольких посчитано. Пар нет — строки не будет: ноль соврал бы. */
+function _salesRangePair(from,to){
+  const out={now:0, ly:0, pairs:0, total:0, lyFrom:"", lyTo:""};
+  if(!from||!to) return out;
+  out.lyFrom=_fillShift(from); out.lyTo=_fillShift(to);
+  const today=_todayIso(), St=_realStore||{};
+  const val=(k,r)=>((k<=today)?(((+r.present||0)+(+r.all||0))/2):(+r.planned||0));
+  for(let d=new Date(from+"T12:00:00"); _dIso(d)<=to; d.setDate(d.getDate()+1)){
+    const k=_dIso(d); out.total++;
+    const lk=_fillShift(k), a=St[k], b=St[lk];
+    if(!a||!b) continue;
+    out.pairs++; out.now+=val(k,a); out.ly+=val(lk,b);
+  }
+  out.now=Math.round(out.now*100)/100; out.ly=Math.round(out.ly*100)/100;
+  return out;
+}
 function _salesRangeText(){
   const from=_salesRange.from, to=_salesRange.to; if(!from||!to) return "";
   const F=_salesRangeFact(from,to), L=[];
-  L.push("Период "+_fillRangeLabel(from,to)+": оборот "+_salesNum(F.sum)+".");
-  const lf=_fillShift(from), lt=_fillShift(to), LY=_salesRangeFact(lf,lt);
+  /* Окно целиком в будущем: «оборот 0» тут — не факт, а отсутствие данных. */
+  if(!F.known && F.future.length===F.total){
+    L.push("Период "+_fillRangeLabel(from,to)+": считать пока нечего — все "+F.total+" "
+      +_kassaDayWord(F.total)+" впереди, ожидаемых списаний по ним в хранилище нет.");
+    return L.join("\n");
+  }
+  L.push("Период "+_fillRangeLabel(from,to)+": оборот "+_salesNum(F.sum)+"."
+    +(F.miss.length?(" ⚠️ Занижен: "+F.miss.length+" "+_kassaDayWord(F.miss.length)+" ещё не считали."):""));
+  if(F.future.length) L.push("В периоде ещё "+F.future.length+" "+_kassaDayWord(F.future.length)
+    +" впереди — ожидаемых списаний по ним в хранилище нет.");
   /* Год назад — сдвиг ровно на 364 дня: день недели сохраняется, среда сравнивается со средой.
-     Если тех дней в хранилище нет, строки просто не будет: ноль вместо факта соврал бы. */
-  if(LY.sum>0){
-    const d=Math.round(100*F.sum/LY.sum)-100;
-    L.push("Год назад ("+_fillRangeLabel(lf,lt)+") - "+_salesNum(LY.sum)+", "+(d>=0?"+":"")+d+"%.");
+     Считаем ТОЛЬКО по дням, которые есть в обоих окнах, и говорим, по скольким. Если пар нет,
+     строки просто не будет: ноль вместо факта соврал бы. */
+  const PR=_salesRangePair(from,to);
+  if(PR.pairs && PR.ly>0){
+    const d=Math.round(100*PR.now/PR.ly)-100;
+    L.push("Год назад ("+_fillRangeLabel(PR.lyFrom,PR.lyTo)+") - "+_salesNum(PR.ly)+", "+(d>=0?"+":"")+d+"%"
+      +(PR.pairs<PR.total?(" — сравнение за "+PR.pairs+" "+_kassaDayWord(PR.pairs)+" из "+PR.total
+        +", где есть оба дня (сейчас по ним "+_salesNum(PR.now)+")"):"")+".");
   }
   L.push("Занятий: "+_salesNum(F.les)+", дней с занятиями: "+F.dwl+".");
   _salesFillLinesFor(from,to).forEach(x=>L.push(x));
@@ -14339,7 +14403,16 @@ async function salesPullRange(){
     if(!St[k] || !FS[k]) need.push(k);
   }
   const prog=document.getElementById("salesProg"), btn=document.getElementById("salesRangeBtn");
-  if(!need.length){ if(prog) prog.textContent="Все дни периода уже посчитаны"; return; }
+  if(!need.length){
+    /* «Все дни посчитаны» для окна из одних будущих дней — неправда, которая ставит в тупик:
+       на экране ноль, а кнопка говорит, что всё готово. */
+    let ahead=0;
+    for(let d=new Date(from+"T12:00:00"); _dIso(d)<=to; d.setDate(d.getDate()+1)) if(_dIso(d)>today) ahead++;
+    if(prog) prog.textContent=ahead
+      ? ("Считать нечего: "+ahead+" "+_kassaDayWord(ahead)+" периода ещё впереди")
+      : "Все дни периода уже посчитаны";
+    return;
+  }
   if(need.length>92){ toast("Период длиннее трёх месяцев — сузьте: каждый день это десятки запросов к Alfa"); return; }
   if(need.length>10 && !confirm("Досчитать "+need.length+" "+_kassaDayWord(need.length)+" из Alfa? Это несколько минут.")) return;
   _salesBusy=true; if(btn) btn.disabled=true;
@@ -14378,6 +14451,13 @@ function _salesRangeHtml(){
   const warn=[];
   if(F.miss.length) warn.push(`<b style="color:var(--terra-d)">${F.miss.length} ${_kassaDayWord(F.miss.length)} периода ещё не считали</b> — нажмите «Досчитать дни из Alfa», иначе оборот занижен`);
   if(!_fillStore) warn.push("детоместа ещё грузятся — строки про загрузку появятся сами");
+  /* ⚠️ Детоместа — отдельный файл, и его пропуски здесь раньше не проверялись вовсе: оборот
+     мог быть полным, а загрузка занижена в разы, и на экране об этом не было ни слова. */
+  const fMiss=(_fillStore&&typeof _fillRangeMissing==="function")?_fillRangeMissing(from,to):[];
+  if(fMiss.length) warn.push(`<b style="color:var(--terra-d)">детоместа посчитаны не за всё окно</b> — не хватает ${fMiss.length} ${_kassaDayOf(fMiss.length)}, поэтому загрузка занижена. Их берёт та же кнопка «Досчитать дни из Alfa»`);
+  /* Будущие дни — не пропуск: досчитывать нечего, но и молчать нельзя, иначе ноль в обороте
+     читается как «клуб ничего не заработает». */
+  if(F.future.length) warn.push(`${F.future.length} ${_kassaDayWord(F.future.length)} периода <b>ещё впереди</b> — ожидаемых списаний по ним в хранилище нет, в обороте они не учтены`);
   const numRow=(lab,val,note)=>`<tr><td>${lab}</td><td style="text-align:right;white-space:nowrap"><b>${val}</b></td><td style="font-size:12px;color:var(--muted)">${note||""}</td></tr>`;
   const lyNote=LY.known
     ? ("сдвиг ровно на 52 недели, дни недели совпадают · дней в хранилище: "+LY.known+" из "+days
@@ -14927,7 +15007,7 @@ function _fillDaysNote(from,to,have){
   const total=Math.max(0,Math.round(ms/86400000))+1;
   if(!(total>0)) return have+" "+_kassaDayWord(have);
   return (have<total)
-    ? (have+" из "+total+" "+_kassaDayWord(total))
+    ? (have+" из "+total+" "+_kassaDayOf(total))
     : (have+" "+_kassaDayWord(have));
 }
 function _fillLesWord(n){
@@ -15353,7 +15433,7 @@ function _fillHtml(){
         ${T.split?"":`<button class="btn ghost sm" style="margin-left:6px" onclick="fillPullRange('${P.from}','${P.to}',true)"${_fillBusy?" disabled":""}>пересчитать выбранный период</button>`}
       </div>`:""}
       ${lyMiss.length?`<div class="callout" style="border-color:var(--terra);font-size:12px;margin-top:8px">
-        <b>Прошлый год посчитан не весь</b> — из ${esc(lyLab)} не хватает ${lyMiss.length} ${_kassaDayWord(lyMiss.length)}.
+        <b>Прошлый год посчитан не весь</b> — из ${esc(lyLab)} не хватает ${lyMiss.length} ${_kassaDayOf(lyMiss.length)}.
         Процент считается по тем дням, что есть, и сравнение выходит неровным.
         <button class="btn ghost sm" style="margin-left:6px" onclick="fillPullRange('${lyFrom}','${lyTo}')"${_fillBusy?" disabled":""}>досчитать ${lyMiss.length} ${_kassaDayWord(lyMiss.length)}</button>
       </div>`:""}

@@ -27,11 +27,12 @@ const NAMES = ['_salesNum', '_salesCfg', '_ratAgg', '_ratSubjToCourse', '_ratMod
                '_salesLastYearDates', '_salesLastYearLabel', '_salesLastYearFact',
                '_salesActiveNote', '_salesPace', '_salesPaceLines', '_salesPaceHtml',
                // «свой период» в отчёте — селектор и его окно
-               '_salesPeriodSel',
+               '_salesPeriodSel', '_salesRangeFact', '_salesRangePair', '_salesRangeText',
+               '_fillRangeMissing', '_salesFillLinesFor', '_kassaDayWord',
                '_salesReports', '_salesCur', '_salesDate', '_salesMonName', '_salesHtml', '_salesCronHtml'];
 const ONE_LINERS = ['_salesMonthEnd', '_salesMonday', '_salesGoals',   // тело в одну строку
                     '_fillIdx', '_fillGroups', '_fillPlanMap', '_fillArch', '_fillNoName', '_fillTeachName',
-                    '_fillShift', '_dmy'];
+                    '_fillShift', '_dmy', '_kassaDayOf'];
 let src = '';
 function grab(name, re) {
   const m = html.match(re);
@@ -75,7 +76,8 @@ const ctx = {
   _jsStr: s => String(s == null ? '' : s),
   _gm: n => String(Math.round(+n || 0)),
   _pubErrHtml: e => '<div class="callout">Не получилось: ' + ((e && e.message) || e) + '</div>',
-  _kassaDayWord: n => (n === 1 ? 'день' : 'дней'),
+  /* _kassaDayWord и _kassaDayOf берём НАСТОЯЩИЕ (в списках ниже): заглушка «1 → день, иначе
+     дней» давала «2 дней» и прятала настоящие падежные ошибки в проде. */
   _salesStore: null, _salesWeek: null, _salesErr: null,
   _salesRange: { from: '', to: '' },      // «свой период»: пункт есть всегда, даты пустые
   _fillStore: null, _fillPeriod: null, _fillKids: null, _fillKidsKey: '',
@@ -87,7 +89,8 @@ const ctx = {
 };
 const API = new Function('ctx', 'with (ctx) { ' + src +
   ' return {_salesNum,_salesTops,_salesWeekText,_salesMonthText,_salesMonthEnd,_salesCfg,_salesHtml,' +
-  '_salesLastYearDates,_salesLastYearLabel,_salesLastYearFact,_salesActiveNote,_salesFillLines,_fillShift,_fillRangeLabel}; }')(ctx);
+  '_salesLastYearDates,_salesLastYearLabel,_salesLastYearFact,_salesActiveNote,_salesFillLines,_salesFillLinesFor,_fillShift,_fillRangeLabel,' +
+  '_salesRangeFact,_salesRangePair,_salesRangeText,_fillRangeMissing}; }')(ctx);
 
 /* ================= формат чисел (как в чате: 22.578) ================= */
 eq('число с разделителем тысяч', API._salesNum(22578), '22.578');
@@ -449,6 +452,150 @@ check('обычная неделя — недельный текст на мес
 
   ctx._fillStore = keepFill; ctx._fillPeriod = keepPeriod; ctx._fillKids = keepKids;
   ctx._fillKidsKey = ''; ctx.S.fillPlan = { '20': 6 };
+}
+
+
+/* ================= СВОЙ ПЕРИОД: СРАВНЕНИЕ ТОЛЬКО ПО ПАРАМ ДНЕЙ =================
+   Дефект, найденный разбором 09.09.2026. Прошлый год попадает в дневное хранилище только кнопкой,
+   и обычно там лежит ровно одно недельное окно, подтянутое для недельного отчёта. Раньше сумма
+   нынешнего окна делилась на сумму прошлогоднего «сколько нашлось», и 14 дней против 5 давали в
+   чат «+196%» — почти троекратный рост там, где роста нет вовсе.
+   Правило то же, что в эталоне загрузки: сравнивать можно только сопоставимое. */
+{
+  const keepToday = ctx._todayIso, keepRange = ctx._salesRange, keepReal = ctx._realStore,
+        keepFill = ctx._fillStore, keepFP = ctx.S.fillPlan;
+  ctx._todayIso = () => '2026-09-09';
+  const day = (v) => ({ present: v, all: v, planned: 0, lessons: 15 });
+
+  /* Сейчас: все 14 дней по 1800. Год назад: только 5 дней из 14, по 1700.
+     Сдвиг 364 дня: 02.09.2026 → 03.09.2025, значит есть пары для 02–06.09.2026. */
+  /* Прошедшие дни окна — 02–09.09 (сегодня 09-е). 10–15.09 впереди, и строк по ним нет:
+     cron держит вперёд +14 дней, но эти дни ещё не наступили. */
+  const St = {};
+  for (let d = 2; d <= 9; d++) St['2026-09-0' + d] = day(1800);
+  for (let d = 3; d <= 7; d++) St['2025-09-0' + d] = day(1700);
+  ctx._realStore = St;
+  ctx._fillStore = null;                       // загрузку тут не проверяем
+  ctx._salesRange = { from: '2026-09-02', to: '2026-09-15' };
+
+  const F = API._salesRangeFact('2026-09-02', '2026-09-15');
+  eq('оборот окна (8 прошедших дней по 1800)', F.sum, 14400);
+  eq('дней в окне', F.total, 14);
+  eq('пропусков нет', F.miss.length, 0);
+  eq('и шесть дней впереди', F.future.length, 6);
+
+  const PR = API._salesRangePair('2026-09-02', '2026-09-15');
+  eq('прошлогоднее окно', PR.lyFrom + '..' + PR.lyTo, '2025-09-03..2025-09-16');
+  eq('пар дней нашлось', PR.pairs, 5);
+  eq('сейчас по этим парам', PR.now, 9000);
+  eq('год назад по ним же', PR.ly, 8500);
+
+  const txt = API._salesRangeText();
+  const ly = txt.split('\n').find(x => x.indexOf('Год назад') === 0) || '';
+  // ⚠️ главное: не «+196%», а честные +6% по сопоставимым дням
+  /* Старый код делил полную сумму окна на сумму «сколько нашлось год назад»: 14.400 / 8.500
+     дало бы +69%, а при полном прошлогоднем окне рост был бы ≈ +6%. Проверяем и то, что
+     ложной цифры больше нет, и то, что верная на месте. */
+  check('ложной разницы больше нет', ly.indexOf('+69%') < 0, ly);
+  check('разница по парам дней', ly.indexOf('+6%') > 0, ly);
+  check('и сказано, за сколько дней', ly.indexOf('сравнение за 5 дней из 14, где есть оба дня') > 0, ly);
+  check('и названа сумма, с которой сравнивали', ly.indexOf('сейчас по ним 9.000') > 0, ly);
+  // а полный оборот окна по-прежнему в первой строке — его никто не подменял
+  check('оборот окна не тронут', txt.indexOf('оборот 14.400') > 0, txt.split('\n')[0]);
+  // ⚠️ будущие дни не пропуск, но и молчать про них нельзя: в обороте их нет
+  check('про будущие дни сказано', txt.indexOf('ещё 6 дней впереди') > 0, txt);
+
+  /* Пар нет вовсе — строки быть не должно: ноль вместо факта соврал бы. */
+  ctx._realStore = (function () { const s = {}; for (let d = 2; d <= 9; d++) s['2026-09-0' + d] = day(1800); return s; })();
+  const noLy = API._salesRangeText();
+  check('без прошлогодних дней строки нет', noLy.indexOf('Год назад') < 0, noLy);
+  check('но оборот на месте', noLy.indexOf('оборот 14.400') > 0, noLy);
+
+  /* ================= ОКНО В БУДУЩЕМ: НЕ «ОБОРОТ 0» =================
+     cron держит вперёд +14 дней. Окно осенних каникул целиком впереди: раньше экран и сообщение
+     показывали зелёный «оборот 0» без единого предупреждения, а кнопка досчёта отвечала
+     «Все дни периода уже посчитаны». Ноль читается как «клуб ничего не заработает». */
+  ctx._realStore = St;
+  ctx._salesRange = { from: '2026-10-26', to: '2026-11-01' };
+  const fut = API._salesRangeFact('2026-10-26', '2026-11-01');
+  eq('будущих дней семь', fut.future.length, 7);
+  eq('пропусков среди них нет', fut.miss.length, 0);
+  eq('и считать нечего', fut.known, 0);
+  const futTxt = API._salesRangeText();
+  check('ноль как оборот не показан', futTxt.indexOf('оборот 0') < 0, futTxt);
+  check('сказано, что считать нечего', futTxt.indexOf('считать пока нечего') > 0, futTxt);
+  check('и почему', futTxt.indexOf('все 7 дней впереди') > 0, futTxt);
+
+  /* Окно наполовину в будущем: оборот есть, но про будущие дни надо сказать. */
+  ctx._salesRange = { from: '2026-09-08', to: '2026-09-20' };
+  const half = API._salesRangeFact('2026-09-08', '2026-09-20');
+  check('часть дней впереди', half.future.length > 0, String(half.future.length));
+  const halfTxt = API._salesRangeText();
+  check('оборот показан', halfTxt.indexOf('оборот ') > 0);
+  check('и про будущие дни сказано', /впереди — ожидаемых списаний/.test(halfTxt), halfTxt);
+
+  /* Прошедший день, которого нет в хранилище, — это занижение, и об этом тоже вслух. */
+  ctx._realStore = (function () { const s = {}; for (let d = 2; d <= 6; d++) s['2026-09-0' + d] = day(1800); return s; })();
+  ctx._salesRange = { from: '2026-09-02', to: '2026-09-09' };
+  const gapTxt = API._salesRangeText();
+  check('занижение названо', gapTxt.indexOf('Занижен') > 0, gapTxt.split('\n')[0]);
+
+  ctx._todayIso = keepToday; ctx._salesRange = keepRange; ctx._realStore = keepReal;
+  ctx._fillStore = keepFill; ctx.S.fillPlan = keepFP;
+}
+
+/* ================= ЗАГРУЗКА В СООБЩЕНИИ: ЧЕСТНОЕ ПОКРЫТИЕ =================
+   Дневная реализация и детоместа лежат в РАЗНЫХ файлах и наполнялись в разное время: реализация
+   пишется с 31.08.2026, детоместа добавлены 07.09. Поэтому окно из семи дней могло иметь детоместа
+   только за два — и загрузка была занижена в три с половиной раза МОЛЧА: предупреждение на экране
+   проверяло пропуски реализации, а не детомест. Хуже того, в одном сообщении подряд вставали
+   «Занятий: 210» (реализация) и «Занятий: 2» (детоместа). */
+{
+  const keepToday = ctx._todayIso, keepRange = ctx._salesRange, keepReal = ctx._realStore,
+        keepFill = ctx._fillStore, keepFP = ctx.S.fillPlan, keepCats = ctx.S.fillCats;
+  ctx._todayIso = () => '2026-09-09';
+  const day = (v) => ({ present: v, all: v, planned: 0, lessons: 30 });
+  const St = {};
+  for (let d = 1; d <= 7; d++) St['2026-09-0' + d] = day(1800);
+  ctx._realStore = St;
+  ctx._salesRange = { from: '2026-09-01', to: '2026-09-07' };
+  ctx.S.fillPlan = { '10': 10 };
+  ctx.S.fillCats = { full: 1, trial: 0, zero: 0, none: 0, miss: 1 };
+  /* Детоместа только за два дня из семи. */
+  ctx._fillStore = {
+    fmt: ['les','seats','paid','trial','att','rev','attPaid','attFree','noAttPaid','attTrial','attZero','tch','sbj'],
+    fill: { '2026-09-06': { '10': [1, 10, 7, 0, 6, 210, 5, 1, 2, 0, 0, {}, {}] },
+            '2026-09-07': { '10': [1, 10, 7, 0, 6, 210, 5, 1, 2, 0, 0, {}, {}] } },
+    groups: { '10': { name: 'Английский №1', subject: 11, teacher: 5, limit: 10 } },
+    groupsOk: true, subjects: {}, teachers: {},
+  };
+
+  eq('детомест не хватает за 5 дней', API._fillRangeMissing('2026-09-01', '2026-09-07').length, 5);
+  const lines = API._salesFillLinesFor('2026-09-01', '2026-09-07');
+  const load = lines.find(x => x.indexOf('Загрузка:') === 0) || '';
+  check('загрузка посчитана', !!load, lines.join(' | '));
+  check('и покрытие названо', load.indexOf('посчитано за 2 дня из 7') > 0, load);
+  check('и сказано, что цифра занижена', load.indexOf('цифра занижена') > 0, load);
+  // ⚠️ двух противоречащих строк «Занятий:» в одном сообщении быть не должно
+  const full = API._salesRangeText();
+  const lesLines = full.split('\n').filter(x => x.indexOf('Занятий:') === 0);
+  eq('строка «Занятий:» одна', lesLines.length, 1);
+  check('и это цифра реализации', lesLines[0].indexOf('210') > 0, lesLines[0]);
+  check('а детоместа названы своей строкой',
+        full.indexOf('Детоместа посчитаны за 2 дня из 7: занятий 2, списаний 14') > 0,
+        full.split('\n').filter(x => x.indexOf('Детоместа') === 0).join(' | '));
+
+  /* Окно посчитано целиком — никаких оговорок, короткие строки как раньше. */
+  const fillAll = { fmt: ctx._fillStore.fmt, groups: ctx._fillStore.groups, groupsOk: true, subjects: {}, teachers: {}, fill: {} };
+  for (let d = 1; d <= 7; d++) fillAll.fill['2026-09-0' + d] = { '10': [1, 10, 7, 0, 6, 210, 5, 1, 2, 0, 0, {}, {}] };
+  ctx._fillStore = fillAll;
+  const ok = API._salesFillLinesFor('2026-09-01', '2026-09-07');
+  const okLoad = ok.find(x => x.indexOf('Загрузка:') === 0) || '';
+  check('полное окно — без оговорки', okLoad.indexOf('посчитано по') < 0, okLoad);
+  check('и строка занятий короткая', ok.some(x => x.indexOf('Занятий: 7, списаний: 49') === 0), ok.join(' | '));
+
+  ctx._todayIso = keepToday; ctx._salesRange = keepRange; ctx._realStore = keepReal;
+  ctx._fillStore = keepFill; ctx.S.fillPlan = keepFP; ctx.S.fillCats = keepCats;
 }
 
 

@@ -23,7 +23,7 @@ const MULTI = ['_fillGroupName', '_fillAcadYear', '_fillYearWeeks', '_fillPeriod
                '_salesMonIn',
                '_fillLesWord',
                '_fillDaysNote',
-               '_fillRangeMissing', '_fillRangeLabel', 'fillGo',
+               '_fillRangeMissing', '_fillRangeLabel', 'fillGo', '_kassaDayWord',
                '_fillSubjName', '_fillTeach', '_fillTopId',
                '_fillPlanPerGroup',
                '_fillAgg', '_fillCap', 'fillPlanSet',
@@ -33,7 +33,7 @@ const ONE = ['_fillIdx', '_fillGroups', '_fillPctColor',
              '_fillTeachName',
              '_fillAcadMonth', '_fillArch', '_fillNoName',
              '_fillRefresh', 'fillSortBy', '_fillPlanMap',
-             '_fillShift', '_fillWd', '_fillWdPair', '_dmy',
+             '_fillShift', '_fillWd', '_fillWdPair', '_dmy', '_kassaDayOf',
              '_salesGoals', '_salesNum', '_salesDate', '_salesMonName', '_salesMonday'];
 let src = '';
 function grab(name, re) {
@@ -75,7 +75,8 @@ const ctx = {
   esc: s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'),
   _jsStr: s => String(s == null ? '' : s),
   _gm: n => String(Math.round(+n || 0)),
-  _kassaDayWord: n => (n === 1 ? 'день' : 'дней'),
+  /* _kassaDayWord и _kassaDayOf берём НАСТОЯЩИЕ (в списках ниже): заглушка «1 → день, иначе
+     дней» давала «2 дней» и прятала настоящие падежные ошибки в проде. */
   shortName: s => String(s),
   courseFromLib: name => ({ name: name, visits: 2, price: 25 }),
   persistLocal: () => {},
@@ -87,7 +88,7 @@ const API = new Function('ctx', 'with (ctx) { ' + src +
   '_fillAcadYear,_fillAcadMonth,_fillYearWeeks,_fillPeriodOpts,_fillArch,_fillNoName,_fillGroupName,' +
   '_fillWho,_fillKidsCur,_fillKidsHtml,_fillPlanPerGroup,_fillCap,_fillTeach,_fillSubjName,_fillTopId,' +
   '_salesMonIn,_fillLesWord,_fillDaysNote,' +
-  '_fillRangeMissing,_fillRangeLabel,_fillShift,_fillWd,_fillWdPair,' +
+  '_fillRangeMissing,_fillRangeLabel,_fillShift,_fillWd,_fillWdPair,_kassaDayWord,_kassaDayOf,' +
   '_fillPlanMap,fillPlanSet,_salesPace,_salesPaceLines,_salesPaceHtml,_salesCfg,_salesGoals}; }')(ctx);
 
 /* ================= 1. свод по группам за неделю ================= */
@@ -718,11 +719,13 @@ ctx._fillStore.fill = FILL;
    читалось бы как пропуск, хотя два дня просто не наступили. */
 {
   const T0 = ctx._todayIso();
-  eq('неполный месяц виден', API._fillDaysNote('2026-03-01', '2026-03-31', 18), '18 из 31 дней');
-  eq('полный месяц лишнего не пишет', API._fillDaysNote('2026-03-01', '2026-03-31', 31), '31 дней');
+  // ⚠️ после «из N» нужен родительный: «из 31 дня», а не «из 31 день/дней». Заглушка
+  // _kassaDayWord в этом харнессе давала «дней» и прятала ошибку.
+  eq('неполный месяц виден', API._fillDaysNote('2026-03-01', '2026-03-31', 18), '18 из 31 дня');
+  eq('полный месяц лишнего не пишет', API._fillDaysNote('2026-03-01', '2026-03-31', 31), '31 день');
   // ⚠️ будущие дни в знаменатель не берём — иначе текущая неделя вечно «неполная»
   eq('текущая неделя считается по сегодня',
-     API._fillDaysNote('2026-09-07', '2026-09-13', 2), '2 дней');
+     API._fillDaysNote('2026-09-07', '2026-09-13', 2), '2 дня');
   eq('а пропуск внутри прошедших дней видно',
      API._fillDaysNote('2026-08-31', '2026-09-06', 5), '5 из 7 дней');
   eq('один день', API._fillDaysNote('2026-09-07', '2026-09-07', 1), '1 день');
@@ -731,6 +734,14 @@ ctx._fillStore.fill = FILL;
   eq('1 занятие', API._fillLesWord(1), 'занятие');
   eq('2 занятия', API._fillLesWord(2), 'занятия');
   eq('5 занятий', API._fillLesWord(5), 'занятий');
+  // счётная форма против родительной — два разных помощника, и путать их нельзя
+  eq('счётная: 2 дня', API._kassaDayWord(2), 'дня');
+  eq('счётная: 31 день', API._kassaDayWord(31), 'день');
+  eq('счётная: 5 дней', API._kassaDayWord(5), 'дней');
+  eq('родительная: из 31 дня', API._kassaDayOf(31), 'дня');
+  eq('родительная: из 2 дней', API._kassaDayOf(2), 'дней');
+  eq('родительная: из 11 дней', API._kassaDayOf(11), 'дней');
+  eq('родительная: из 21 дня', API._kassaDayOf(21), 'дня');
   eq('11 занятий', API._fillLesWord(11), 'занятий');
   eq('214 занятий', API._fillLesWord(214), 'занятий');
   eq('22 занятия', API._fillLesWord(22), 'занятия');
