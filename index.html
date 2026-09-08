@@ -1017,6 +1017,13 @@ h3.cmp-fl span{font-weight:400;font-size:12px;color:var(--muted)}
 .cmp-f2{display:flex;gap:10px}
 .cmp-f2>*{flex:1;min-width:0}
 .cmp-fh{font-size:11px;color:var(--muted);line-height:1.45;margin:-6px 0 14px}
+.cmp-fh code{background:var(--sand-l);padding:0 4px;border-radius:4px;color:var(--coal)}
+.cmp-f textarea.cell.wide{resize:vertical}
+.cmp-ta3{height:80px}
+.cmp-ta6{height:140px}
+/* концепция смены на подвкладке «Программа» */
+.cmp-about{font-size:14px;line-height:1.6;max-width:820px}
+.cmp-about-p{margin-top:12px;font-size:13px;color:var(--muted)}
 /* кнопка-тумблер «⚙ Настройки смены», пока панель открыта */
 .btn.ghost.on{background:var(--graphite);border-color:var(--graphite);color:#fff}
 /* textarea с классом .cell вне модалки оставалась шириной в 20 знаков: input.wide{width:100%}
@@ -2100,7 +2107,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-09-08-11";
+const APP_VER="2026-09-08-12";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -13776,6 +13783,10 @@ function _fmlKid(n){
    Здесь из этого снимка собирается готовый текст сообщения в чат отдела продаж.
    Рейтинг педагогов считается уже тут — по справочнику ставок финмодели (на сервере его нет). */
 let _salesStore=null, _salesWeek=null, _salesBusy=false, _salesErr=null;
+/* Свой период — «c» в _salesWeek плюс две даты. Недельные отчёты замораживает cron и ключом
+   у них служит понедельник; произвольное окно таким ключом не описывается вовсе, поэтому оно
+   живёт отдельной парой дат и считается на лету. */
+let _salesRange={from:"",to:""};
 async function _salesLoad(){ const j=await _pubCall("salesReport",{}); _salesStore=j; _salesErr=null; }
 function _salesReports(){ return (_salesStore&&_salesStore.reports)||{}; }
 function _salesCfg(){
@@ -13794,7 +13805,26 @@ function salesCfgSet(k,v){ const c=_salesCfg();
 /* Числа как в сообщениях Жанны: 22.578, 102.117 (точка — разделитель тысяч). */
 function _salesNum(n){ return Math.round(+n||0).toLocaleString('ru-RU').replace(/[\s  ]/g,'.'); }
 function _salesRefresh(){ if(_rukSec!=="sales") return; const b=document.getElementById("rukBody"); if(b) b.innerHTML=_salesHtml(); }
-function salesGo(w){ _salesWeek=w||null; _salesRefresh(); }
+function salesGo(w){
+  /* «Свой период» без дат — пустой экран. Берём границы отчёта, который сейчас на экране:
+     обычно надо сдвинуть неделю на день-два, а не набирать даты с нуля. */
+  if(w==="c" && !(_salesRange.from&&_salesRange.to)){
+    const rep=_salesCur();
+    if(rep&&rep.week){ _salesRange.from=rep.week; _salesRange.to=rep.to||rep.week; }
+    else { const t=_todayIso(), d=new Date(t+"T12:00:00"); d.setDate(d.getDate()-6);
+           _salesRange.from=_dIso(d); _salesRange.to=t; }
+  }
+  _salesWeek=w||null; _salesRefresh();
+}
+/* Пустое поле не принимаем: период с одной границей посчитался бы не тем, чем выглядит. */
+function salesSetRange(which,v){
+  if(!v){ _salesRefresh(); return; }
+  if(which==="from") _salesRange.from=v; else _salesRange.to=v;
+  if(_salesRange.from>_salesRange.to){
+    if(which==="from") _salesRange.to=_salesRange.from; else _salesRange.from=_salesRange.to;
+  }
+  _salesWeek="c"; _salesRefresh();
+}
 /* Последний (или выбранный) отчёт. */
 function _salesCur(){
   const R=_salesReports(), keys=Object.keys(R).sort();
@@ -13877,8 +13907,12 @@ function _salesActiveNote(rep){
    ⚠️ Если детоместа за эту неделю ещё не посчитаны, строк НЕ будет вовсе: отправить в чат
    «загрузка 0%» страшнее, чем не отправить ничего. */
 function _salesFillLines(rep){
-  if(typeof _fillAgg!=="function" || !_fillStore || !rep || !rep.week) return [];
-  const from=rep.week, to=rep.to||from;
+  return (rep&&rep.week)?_salesFillLinesFor(rep.week, rep.to||rep.week):[];
+}
+/* Те же строки для произвольного окна: недельный отчёт и «свой период» обязаны считать
+   загрузку ОДНОЙ функцией, иначе однажды разойдутся и верить перестанут обоим. */
+function _salesFillLinesFor(from,to){
+  if(typeof _fillAgg!=="function" || !_fillStore || !from || !to) return [];
   let agg,rows,T;
   try{ agg=_fillAgg(from,to); rows=_fillRows(agg); T=_fillTotals(rows); }catch(e){ return []; }
   if(!T || !T.seats || T.pct==null) return [];
@@ -18732,7 +18766,11 @@ function _campCfgHtml(sh){
      +'<label class="cmp-f">Стоимость, р.<input class="cell wide" type="number" min="0" step="1" value="'+(+sh.price||0)+'" onchange="campSetShift(\'price\',this.value)"></label>'
      +'<label class="cmp-f">Предоплата, р.<input class="cell wide" type="number" min="0" step="1" value="'+(+sh.prepay||0)+'" onchange="campSetShift(\'prepay\',this.value)"></label>'
    +'</div>'
-   +'<div class="cmp-fh">Стоимость нужна колонке «Осталось» — она сама считает долг по каждому ребёнку. Предоплата подставляется подсказкой в поле, сумму всегда можно поправить.</div>'
+   +'<div class="cmp-fh">Эти два числа — для расчёта: стоимость нужна колонке «Осталось», она сама считает долг по каждому ребёнку, предоплата подставляется подсказкой в поле.</div>'
+   +'<label class="cmp-f">Стоимость словами — как пишем родителям<textarea class="cell wide cmp-ta3" placeholder="390 р. при оплате до 1 октября, далее 450 р. В стоимость входит проживание, 5-разовое питание и вся программа." onchange="campSetShift(\'priceText\',this.value)">'+esc(sh.priceText||"")+'</textarea></label>'
+   +'<div class="cmp-fh">Подставляется в сообщения как <code>{цена}</code>. Если поле пустое, туда подставится число из «Стоимость, р.».</div>'
+   +'<label class="cmp-f">Концепция смены<textarea class="cell wide cmp-ta6" placeholder="О чём смена: легенда, идея, чем она отличается. Конструктор даёт только расписание занятий — концепцию пишем здесь." onchange="campSetShift(\'about\',this.value)">'+esc(sh.about||"")+'</textarea></label>'
+   +'<div class="cmp-fh">Подставляется как <code>{описание}</code>, показывается на подвкладке «Программа» и уходит в ИИ, когда он собирает краткое содержание для родителей.</div>'
    +'<label class="cmp-f">Схема корпуса<select class="cell wide" onchange="campSetShift(\'layoutId\',this.value)">'+opts+'</select></label>'
    +'<div class="cmp-fh">Блоки и места правятся на подвкладке «Расселение» → «✎ Правка схемы».</div>'
    +'<label class="cmp-f">Ссылка на конструктор лагеря<input class="cell wide" style="text-align:left" placeholder="https://app.proznanie.club/camp/parents.html?id=…" value="'+esc(sh.progUrl||"")+'" onchange="campSetShift(\'progUrl\',this.value)"></label>'
@@ -18857,6 +18895,8 @@ function _campProgText(sh){
   out.push("Программа смены «"+(sh.name||p.name||"")+"»"+(p.name&&p.name!==sh.name?(" — "+p.name):""));
   const when=_campShiftDates(sh)||(p.start?(_campDmy(p.start)+(p.dayCount>1?(" — "+_campDmy(_campDayDate(p.start,p.dayCount-1,false))):"")):"");
   const l2=[when,p.dayCount?(p.dayCount+" дн."):"",p.ages].filter(Boolean).join(" · "); if(l2) out.push(l2);
+  // концепция — руками в настройках смены: конструктор даёт только расписание занятий
+  if(String(sh.about||"").trim()) out.push("","Концепция смены:",String(sh.about).trim());
   p.days.forEach((d,i)=>{
     out.push("","День "+(i+1)+(d.date?(" · "+_campDmy(d.date)):"")+(d.off?" · выходной":""));
     if(!d.blocks.length) out.push("  программа уточняется");
@@ -18866,7 +18906,9 @@ function _campProgText(sh){
   if(f.address) facts.push(f.address);
   if(f.hours) facts.push("Работаем "+f.hours);
   if(f.meals) facts.push("Питание: "+f.meals);
-  if(f.prices&&f.prices.length) facts.push((f.priceNote||"Стоимость")+": "+f.prices.join("; "));
+  const pt=_campPriceText(sh);
+  if(pt) facts.push("Стоимость: "+pt);
+  else if(f.prices&&f.prices.length) facts.push((f.priceNote||"Стоимость")+": "+f.prices.join("; "));
   if(facts.length) out.push("",facts.join("\n"));
   return out.join("\n");
 }
@@ -18881,12 +18923,14 @@ function _campProgDigest(sh){
   })));
   const L=["Здравствуйте, {родитель}!",""];
   L.push("Рассказываем, как пройдёт смена «"+(sh.name||p.name)+"»"+(_campShiftDates(sh)?(" ("+_campShiftDates(sh)+")"):"")+(p.ages?(", для детей "+p.ages):"")+".");
+  if(String(sh.about||"").trim()) L.push(String(sh.about).trim());
   if(dirs.length) L.push("Направления: "+dirs.join(", ")+".");
   if(names.length) L.push("В программе: "+names.slice(0,14).join(", ")+(names.length>14?(" и ещё "+(names.length-14)):"")+".");
   const f=p.facts||{}, fl=[];
   if(f.hours) fl.push("режим "+f.hours); if(f.meals) fl.push("питание: "+f.meals); if(f.address) fl.push(f.address);
   if(fl.length) L.push(fl.join(", ")+".");
-  if(+sh.price) L.push("Стоимость смены — "+(+sh.price)+" р."+((+sh.prepay)?(", предоплата "+(+sh.prepay)+" р. закрепляет место"):"")+".");
+  const pt=_campPriceText(sh);
+  if(pt) L.push("Стоимость: "+pt+((+sh.prepay)?(" Предоплата "+(+sh.prepay)+" р. закрепляет место."):""));
   L.push("","Если появятся вопросы по программе, питанию или расселению — с радостью ответим 💙");
   return L.join("\n");
 }
@@ -18894,9 +18938,10 @@ async function campProgAi(){
   const sh=_campShift(); if(!sh||!sh.prog){ toast("Сначала подтяните программу из конструктора"); return; }
   _campProgBusy=true; _campProgErr=""; renderCampProg();
   try{
-    const system="Ты пишешь родителям от имени детского клуба «Прознание» (Могилёв). Тон тёплый и живой, без канцелярита и восторженных штампов. Пиши по-русски обычным текстом: без markdown, без заголовков и маркеров, 120–180 слов. Опирайся только на присланную программу, ничего не выдумывай. Имена детей и педагогов не упоминай. Начни со строки «Здравствуйте, {родитель}!» — это подстановка, оставь её как есть. В конце одной фразой пригласи задать вопросы.";
+    const system="Ты пишешь родителям от имени детского клуба «Прознание» (Могилёв). Тон тёплый и живой, без канцелярита и восторженных штампов. Пиши по-русски обычным текстом: без markdown, без заголовков и маркеров, 120–180 слов. Опирайся только на присланную программу и концепцию смены, ничего не выдумывай — особенно цены и условия. Если концепция дана, начни с неё: она объясняет, о чём смена, а расписание лишь показывает, чем дети займутся. Имена детей и педагогов не упоминай. Начни со строки «Здравствуйте, {родитель}!» — это подстановка, оставь её как есть. В конце одной фразой пригласи задать вопросы.";
+    const pt=_campPriceText(sh);
     const prompt="Составь краткое содержание программы смены для сообщения родителям.\n\n"+_campProgText(sh)
-      +((+sh.price)?("\n\nСтоимость смены "+(+sh.price)+" р."+((+sh.prepay)?(", предоплата "+(+sh.prepay)+" р. закрепляет место"):"")+"."):"");
+      +(pt?("\n\nСтоимость: "+pt+((+sh.prepay)?(" Предоплата "+(+sh.prepay)+" р. закрепляет место."):"")):"");
     const j=await _pubCall("aiSummary",{system:system,prompt:prompt,maxTokens:700});
     sh.progSummary=String(j.text||"").trim(); _campSave();
     toast("Краткое содержание готово — проверьте и отправьте в библиотеку");
@@ -18922,7 +18967,9 @@ async function campProgCopy(){ const t=_campProgText(_campShift()); if(!t){ toas
 function campProgPrint(){
   const sh=_campShift(), p=sh&&sh.prog; if(!p){ toast("Программы пока нет"); return; }
   let h='<h2>'+esc(sh.name||p.name||"Программа смены")+'</h2><div class="sub">'
-   +esc([_campShiftDates(sh),p.dayCount?(p.dayCount+" дн."):"",p.ages].filter(Boolean).join(" · "))+'</div><table>'
+   +esc([_campShiftDates(sh),p.dayCount?(p.dayCount+" дн."):"",p.ages].filter(Boolean).join(" · "))+'</div>'
+   +(String(sh.about||"").trim()?('<p>'+esc(String(sh.about).trim()).replace(/\n/g,"<br>")+'</p>'):'')
+   +'<table>'
    +'<tr><th style="width:120px">День</th><th>Программа</th></tr>';
   p.days.forEach((d,i)=>{
     const body=d.off?'<span class="mut">выходной</span>'
@@ -18931,8 +18978,10 @@ function campProgPrint(){
     h+='<tr><td class="nm">День '+(i+1)+'<br><span class="mut">'+esc(d.date?_campDmy(d.date):"")+'</span></td><td>'+body+'</td></tr>';
   });
   h+='</table>';
-  const f=p.facts||{}, facts=[f.address,f.hours?("Работаем "+f.hours):"",f.meals?("Питание: "+f.meals):"",
-    (f.prices&&f.prices.length)?((f.priceNote||"Стоимость")+": "+f.prices.join("; ")):"",f.phone1,f.phone2].filter(Boolean);
+  const f=p.facts||{}, pt=_campPriceText(sh);
+  const facts=[f.address,f.hours?("Работаем "+f.hours):"",f.meals?("Питание: "+f.meals):"",
+    pt?("Стоимость: "+pt):((f.prices&&f.prices.length)?((f.priceNote||"Стоимость")+": "+f.prices.join("; ")):""),
+    f.phone1,f.phone2].filter(Boolean);
   if(facts.length) h+='<div class="sub">'+esc(facts.join(" · "))+'</div>';
   _obzPrint("Программа · "+(sh.name||""),h);
 }
@@ -18952,6 +19001,15 @@ function renderCampProg(){
    +'</div>';
   if(!_campProgId(sh.progUrl)) h+='<div class="cmp-warn">Вставьте в «⚙ Смена» ссылку на смену из конструктора лагеря — например, страницу для родителей <code>…/camp/parents.html?id=…</code>. Программа подтянется оттуда, как только смена там опубликована.</div>';
   if(_campProgErr) h+='<div class="cmp-warn" style="color:var(--red)">'+esc(_campProgErr)+'</div>';
+  // Концепция — не из конструктора, её пишут руками в настройках смены. Показываем первой:
+  // менеджеру в разговоре нужна сперва идея смены, а уже потом по дням.
+  const about=String(sh.about||"").trim(), ptxt=_campPriceText(sh);
+  if(about||ptxt){
+    h+='<div class="card"><h3>Концепция смены</h3>'
+     +(about?'<div class="cmp-about">'+esc(about).replace(/\n/g,"<br>")+'</div>':'<div style="font-size:13px;color:var(--muted)">Описание пока не заполнено — «⚙ Настройки смены» → «Концепция смены».</div>')
+     +(ptxt?'<div class="cmp-about-p"><b>Стоимость:</b> '+esc(ptxt)+((+sh.prepay)?(' · предоплата '+(+sh.prepay)+' р. закрепляет место'):'')+'</div>':'')
+     +'</div>';
+  }
   if(p){
     const total=p.days.reduce((n,d)=>n+d.blocks.reduce((m,b)=>m+b.items.length,0),0);
     const when=_campShiftDates(sh)||(p.start?_campDmy(p.start):"");
@@ -19382,8 +19440,8 @@ function _campKidsSorted(rows,m,resByKey){
    подстановками → в буфер, Viber открывается на номер родителя, остаётся вставить. Шаблоны
    общие на всех (лежат в S.camp.tpls), подставляем данные ребёнка и текущей смены. */
 const CAMP_TPL_SEED=[
-  {name:"Приглашение в смену",text:["Здравствуйте, {родитель}! 🌟","","Пишем из клуба «Прознание». {даты} проходит наш загородный лагерь «{смена}», и мы будем очень рады видеть {имя} среди участников!","","Стоимость смены — {стоимость} р., предоплата {предоплата} р. закрепляет место.","","Подскажите, пожалуйста, планируете ли вы поехать? Как только подтвердите — место за {имя} закрепим 💙"].join("\n")},
-  {name:"Напоминание о предоплате",text:["Здравствуйте, {родитель}!","","Напоминаем: чтобы закрепить место за {имя} в смене «{смена}» ({даты}), нужна предоплата {предоплата} р. Остаток — {стоимость} р. минус предоплата — можно внести ближе к заезду.","","Как внесёте — напишите нам, пожалуйста, и мы отметим место 💙"].join("\n")},
+  {name:"Приглашение в смену",text:["Здравствуйте, {родитель}! 🌟","","Пишем из клуба «Прознание». {даты} проходит наш загородный лагерь «{смена}», и мы будем очень рады видеть {имя} среди участников!","","{описание}","","Стоимость: {цена} Предоплата {предоплата} р. закрепляет место.","","Подскажите, пожалуйста, планируете ли вы поехать? Как только подтвердите — место за {имя} закрепим 💙"].join("\n")},
+  {name:"Напоминание о предоплате",text:["Здравствуйте, {родитель}!","","Напоминаем: чтобы закрепить место за {имя} в смене «{смена}» ({даты}), нужна предоплата {предоплата} р. Остальное можно внести ближе к заезду.","","Стоимость: {цена}","","Как внесёте — напишите нам, пожалуйста, и мы отметим место 💙"].join("\n")},
   {name:"Думает — уточнить",text:["Здравствуйте, {родитель}!","","Хотели уточнить: определились ли вы с поездкой {имя} в «{смена}» ({даты})? Мест в блоках остаётся немного, и мы хотим оставить одно за вами.","","Если есть вопросы по программе, питанию или расселению — с радостью ответим 🌿"].join("\n")}
 ];
 function _campTpls(){
@@ -19416,6 +19474,13 @@ function _campParentFirst(name){
   if(w.length>=3) return w[1];
   return surname.test(w[0])?w[1]:w[w.length-1];
 }
+/* Стоимость в сообщении — словами, если Жанна их написала («390 р. до 1 октября, далее 450»),
+   иначе просто число из расчётного поля. */
+function _campPriceText(sh){
+  const t=String((sh&&sh.priceText)||"").trim();
+  if(t) return t;
+  return (+((sh&&sh.price)||0))?((+sh.price)+" р."):"";
+}
 function _campVbText(t,ctx){
   const sh=ctx.sh||{};
   const parts=String(ctx.fio||"").trim().split(/\s+/);
@@ -19425,7 +19490,8 @@ function _campVbText(t,ctx){
   if(!par) s=s.replace(/,\s*\{родитель\}/g,"");          // «Здравствуйте, {родитель}!» → «Здравствуйте!»
   s=s.replace(/\{родитель\}/g,par).replace(/\{имя\}/g,imya).replace(/\{фио\}/g,ctx.fio||"")
      .replace(/\{смена\}/g,sh.name||"").replace(/\{даты\}/g,_campShiftDates(sh)||"…")
-     .replace(/\{стоимость\}/g,(+sh.price||0)?String(+sh.price):"…").replace(/\{предоплата\}/g,(+sh.prepay||0)?String(+sh.prepay):"…");
+     .replace(/\{стоимость\}/g,(+sh.price||0)?String(+sh.price):"…").replace(/\{предоплата\}/g,(+sh.prepay||0)?String(+sh.prepay):"…")
+     .replace(/\{цена\}/g,_campPriceText(sh)||"…").replace(/\{описание\}/g,String(sh.about||"").trim());
   return (typeof _tidyMsg==="function")?_tidyMsg(s):s;
 }
 function _campVbTarget(scope,key){
@@ -19475,7 +19541,7 @@ async function campVbSend(scope,key,tplId){
 function _campTplBoxHtml(){
   const tpls=_campTpls();
   let h='<div class="card" id="campTplBox"><h3>Библиотека сообщений для Viber · '+tpls.length+'</h3>'
-   +'<div class="cmp-tplhint">Подстановки: <code>{имя}</code> — имя ребёнка, <code>{фио}</code>, <code>{родитель}</code> — имя родителя из Альфы (если его нет, «, {родитель}» просто исчезает), <code>{смена}</code>, <code>{даты}</code>, <code>{стоимость}</code>, <code>{предоплата}</code> — из настроек смены. По клику на шаблон текст ложится в буфер, Viber открывается на номер родителя — остаётся вставить.</div>'
+   +'<div class="cmp-tplhint">Подстановки: <code>{имя}</code> — имя ребёнка, <code>{фио}</code>, <code>{родитель}</code> — имя родителя из Альфы (если его нет, «, {родитель}» просто исчезает); из настроек смены — <code>{смена}</code>, <code>{даты}</code>, <code>{цена}</code> (стоимость словами), <code>{описание}</code> (концепция смены), <code>{стоимость}</code> и <code>{предоплата}</code> (числа). По клику на шаблон текст ложится в буфер, Viber открывается на номер родителя — остаётся вставить.</div>'
    +'<div class="cmp-tpls">';
   tpls.forEach(t=>{ const jid=_jsStr(t.id);
     h+='<div class="cmp-tpl"><div class="cmp-tpl-h">'
