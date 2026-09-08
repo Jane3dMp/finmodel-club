@@ -995,8 +995,15 @@ h3.cmp-fl span{font-weight:400;font-size:12px;color:var(--muted)}
 .cmp-src .cell.wide{width:100%}
 .cmp-src .btn{margin-left:auto}
 .cmp-srcdate{display:flex;flex-direction:column;gap:3px;font-size:11px;color:var(--muted)}
-/* кнопки-значки «+» и «⚙» в строке смен */
-.cmp-ib{width:30px;padding:6px 0;text-align:center;font-size:14px;line-height:1}
+/* кнопки-значки «+», «⚙», «🖨» — в строке смен и в панели инструментов подборки */
+.cmp-ib{width:32px;padding:6px 0;text-align:center;font-size:14px;line-height:1;flex:none}
+/* фильтры активны, но панель закрыта: тонкая охристая рамка вместо тёмной заливки —
+   тёмная читалась как «панель открыта» и спорила с активным чипом рядом */
+.btn.ghost.cmp-ib.hint{border-color:#D9A73C;color:#8A6A16;background:#FDF7E8}
+.btn.ghost.cmp-ib.hint:hover{background:#F9EFD6}
+/* название смены крупнее: это заголовок раздела, а не фильтр */
+.cmp-pick .chip.cmp-shift{font-size:13px;font-weight:600;padding:6px 13px}
+.cmp-pick .chip.cmp-shift span{font-size:11px;font-weight:400}
 /* статус в выпадающих списках — те же кружки и цвета, что в остальном приложении */
 .cmp-st{min-width:132px}
 .cmp-st option{color:var(--coal);font-weight:400;background:#fff}
@@ -2156,7 +2163,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-09-08-16";
+const APP_VER="2026-09-08-17";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -18772,7 +18779,7 @@ function _campPickerHtml(light){
   c.shifts.forEach(s=>{
     const d=s.from?(' <span style="opacity:.65">'+_campDate(s.from)+(s.to?("–"+_campDate(s.to)):"")+'</span>'):'';
     const n=c.res.filter(r=>r.shiftId===s.id&&r.status!=="no").length;
-    h+='<span class="chip'+((sh&&sh.id===s.id)?' on':'')+'" onclick="'+fn+'(\''+_jsStr(s.id)+'\')">'+esc(s.name)+d+(n?(' · '+n):'')+'</span>';
+    h+='<span class="chip cmp-shift'+((sh&&sh.id===s.id)?' on':'')+'" onclick="'+fn+'(\''+_jsStr(s.id)+'\')">'+esc(s.name)+d+(n?(' · '+n):'')+'</span>';
   });
   if(!light){
     // только значки: подписи «+ Смена» и «⚙ Настройки смены» распирали строку смен вдвое
@@ -20000,21 +20007,31 @@ function renderCampKids(){
   h+='<div class="cmp-pick cmp-bar">';
   [["all","все"],["none","не звонили"],["again","недозвон · перезвонить"],["yes","подтвердили · думают"],["no","отказ"],["any","звонили"]].forEach(x=>{
     h+='<span class="chip'+(_campKFilter===x[0]?' on':'')+'" onclick="campKidsFilter(\''+x[0]+'\')">'+esc(x[1])+' · '+(stCnt[x[0]]||0)+'</span>'; });
-  h+='<button class="btn ghost sm" onclick="campKidsPrint()" title="Список на бумагу с клеткой «дозвон»">🖨 Печать · '+shown.length+'</button>';
-  h+='</div>';
-  // вторая строка — только состояние: что ограничивает список и чем это снять
+  // Что ограничивает список — считаем заранее: от этого зависит и подсказка у шестерёнки
   const limits=[];
   if(yr.from||yr.to) limits.push("г.р. "+(yr.from||"…")+"–"+(yr.to||"…")+(_campKNoDob?" + без даты":""));
   if(_campKSrc!=="all") limits.push("откуда: "+({was:"были у нас",our:"наша база",alfa:"Альфа",amo:"amo"}[_campKSrc]||_campKSrc));
   if(_campKQuery) limits.push("поиск «"+_campKQuery+"»");
   const colOn=Object.keys(_campKCol).some(k=>_campKCol[k]);
-  h+='<div class="cmp-pick cmp-srcline">'
-   +'<button class="btn ghost sm'+((_campDrawer==="src"||limits.length)?' on':'')+'" '+(busy?'disabled':'')+' onclick="campToggleSrc()" title="Источники, кого показывать, сводка и шаблоны">'+(busy?"Тяну…":"⚙ Настройки")+'</button>'
-   +'<span>показано '+shown.length+' из '+rows.length+(limits.length?(' · '+esc(limits.join(" · "))):'')+'</span>'
-   +(_campAmo&&_campAmo.cut?'<span class="cmp-cut">amo обрезан на 2500 сделках</span>':'')
-   +(colOn?'<span class="chip" onclick="campKidsColClear()" title="Очистить фильтры под шапкой таблицы">× фильтры столбцов</span>':'')
-   +'<span id="campKMsg" class="'+(/не ответила/.test(_campKMsg)?"cmp-cut":"")+'">'+esc(_campKMsg)+'</span>'
-   +'</div>';
+  /* Настройки и печать — значками справа. Тёмной кнопку делаем ТОЛЬКО когда панель открыта:
+     раньше её красили и при активных фильтрах, и это читалось как «панель открыта». Теперь
+     ограничения показывает тонкая охристая рамка — заметно, но не спорит с активным чипом. */
+  h+='<button class="btn ghost sm cmp-ib'+(_campDrawer==="src"?' on':(limits.length?' hint':''))+'" '+(busy?'disabled':'')
+    +' onclick="campToggleSrc()" title="'+esc("Настройки подборки: источники, кого показывать, сводка, шаблоны"+(limits.length?(" · сейчас: "+limits.join(" · ")):""))+'">'+(busy?"…":"⚙")+'</button>';
+  h+='<button class="btn ghost sm cmp-ib" onclick="campKidsPrint()" title="Печать списка на бумагу, с клеткой «дозвон» · '+shown.length+'">🖨</button>';
+  h+='</div>';
+  // вторая строка — только если есть что сказать: сколько отсеяно, чем и что пошло не так
+  const note=[];
+  if(shown.length!==rows.length) note.push("показано "+shown.length+" из "+rows.length);
+  if(limits.length) note.push(esc(limits.join(" · ")));
+  if(note.length||colOn||_campKMsg||(_campAmo&&_campAmo.cut)){
+    h+='<div class="cmp-pick cmp-srcline">'
+     +(note.length?'<span>'+note.join(" · ")+'</span>':'')
+     +(_campAmo&&_campAmo.cut?'<span class="cmp-cut">amo обрезан на 2500 сделках</span>':'')
+     +(colOn?'<span class="chip" onclick="campKidsColClear()" title="Очистить фильтры под шапкой таблицы">× фильтры столбцов</span>':'')
+     +'<span id="campKMsg" class="'+(/не ответила/.test(_campKMsg)?"cmp-cut":"")+'">'+esc(_campKMsg)+'</span>'
+     +'</div>';
+  }
   if(_campTplOpen) h+=_campTplBoxHtml();
 
   // строка фильтров под шапкой — по каждому столбцу; рисуем и при пустом результате, иначе
