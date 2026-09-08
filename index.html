@@ -2174,7 +2174,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-09-09-04";
+const APP_VER="2026-09-09-05";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -14085,7 +14085,11 @@ function _salesFillLinesFor(from,to){
     }
   }catch(e){ /* прошлого года в хранилище нет — строки просто не будет, выдумывать нельзя */ }
   const W=(typeof _fillWho==="function")?_fillWho(rows):null;
-  if(W && W.att){
+  /* ⚠️ Без разложения по деньгам корзины не перечисляем: остаток раньше уходил в «пробное»,
+     и в чат летело «Пришли 36: пробное 36» про детей по полной цене. */
+  if(W && W.att && !W.money){
+    L.push("Пришли "+_salesNum(W.att)+" — разбивки по деньгам за это окно нет.");
+  } else if(W && W.att){
     const parts=[];
     if(W.paid) parts.push("полная цена "+_salesNum(W.paid));
     if(W.trial) parts.push("пробное "+_salesNum(W.trial));
@@ -14099,7 +14103,10 @@ function _salesFillLinesFor(from,to){
      выбранного периода раздела, и в сообщение попали бы дети другой недели. */
   const K=(_fillKids && _fillKidsKey===(from+".."+to))?_fillKids:null;
   if(K && K.kids){
-    const per=T.cnt/K.kids;
+    /* ⚠️ Числитель — СПИСАНИЯ (fact), как на экране, а не выбранное галочками (cnt): K.kids —
+       это дети, занявшие ОПЛАЧЕННЫЕ места, и делить на них надо оплаченные места. Раньше экран
+       показывал 3.0, а чат 2 при одной снятой галочке — подпись у обоих одинаковая. */
+    const per=T.fact/K.kids;
     L.push("Уникальных детей: "+_salesNum(K.kids)+", мест на ребёнка: "+(Math.round(per*10)/10)+".");
   }
   return L;
@@ -14326,7 +14333,14 @@ function _salesRangeFact(from,to){
      нему нет (cron держит вперёд +14 дней) — досчитывать нечего, но и «оборот 0» показывать
      нельзя: ноль читается как «клуб ничего не заработает». Раньше будущие дни не попадали
      никуда, и окно осенних каникул выдавало зелёный «0» без единого предупреждения. */
-  const out={sum:0, les:0, dwl:0, known:0, total:0, miss:[], future:[]};
+  /* ⚠️ ФАКТ И ПРОГНОЗ — РАЗНЫЕ ЧИСЛА, И СКЛАДЫВАТЬ ИХ В «ОБОРОТ» НЕЛЬЗЯ.
+     Раньше прошедшие и будущие дни суммировались в одну цифру: неделя 07–13.09 при сегодня
+     09-м давала в чат «оборот 7.700», где 4.400 (больше половины) — это planned по расписанию,
+     а не заработанные деньги. Ни пометки, ни предупреждения: F.miss пуст, потому что дни в
+     хранилище есть. Подпись при этом уверяла «среднее дохода с пропусками и без пополам»
+     (проверено 09.09.2026). Отдел продаж сверил бы такую цифру с кассой и не сошёлся.
+     sum оставляем суммой обоих — на неё смотрит старый код, — но наружу отдаём порознь. */
+  const out={sum:0, fact:0, plan:0, les:0, dwl:0, known:0, total:0, factDays:0, planDays:0, miss:[], future:[]};
   if(!from||!to) return out;
   const today=_todayIso(), St=_realStore||{};
   for(let d=new Date(from+"T12:00:00"); _dIso(d)<=to; d.setDate(d.getDate()+1)){
@@ -14334,11 +14348,13 @@ function _salesRangeFact(from,to){
     out.total++;
     if(!r){ if(k<=today) out.miss.push(k); else out.future.push(k); continue; }
     out.known++;
-    out.sum += (k<=today) ? (((+r.present||0)+(+r.all||0))/2) : (+r.planned||0);
+    if(k<=today){ out.fact += ((+r.present||0)+(+r.all||0))/2; out.factDays++; }
+    else { out.plan += (+r.planned||0); out.planDays++; }
     out.les += (+r.lessons||0);
     if(+r.lessons) out.dwl++;
   }
-  out.sum=Math.round(out.sum*100)/100;
+  out.fact=Math.round(out.fact*100)/100; out.plan=Math.round(out.plan*100)/100;
+  out.sum=Math.round((out.fact+out.plan)*100)/100;
   return out;
 }
 /* ===== ГОД НАЗАД: ТОЛЬКО ПО ПАРАМ ДНЕЙ =====
@@ -14357,6 +14373,9 @@ function _salesRangePair(from,to){
   const val=(k,r)=>((k<=today)?(((+r.present||0)+(+r.all||0))/2):(+r.planned||0));
   for(let d=new Date(from+"T12:00:00"); _dIso(d)<=to; d.setDate(d.getDate()+1)){
     const k=_dIso(d); out.total++;
+    /* Будущий день сравнивать с прошлогодним фактом нельзя: у него planned, а не заработанное.
+       Пары берём только среди прошедших дней. */
+    if(k>today) continue;
     const lk=_fillShift(k), a=St[k], b=St[lk];
     if(!a||!b) continue;
     out.pairs++; out.now+=val(k,a); out.ly+=val(lk,b);
@@ -14373,10 +14392,14 @@ function _salesRangeText(){
       +_kassaDayWord(F.total)+" впереди, ожидаемых списаний по ним в хранилище нет.");
     return L.join("\n");
   }
-  L.push("Период "+_fillRangeLabel(from,to)+": оборот "+_salesNum(F.sum)+"."
+  L.push("Период "+_fillRangeLabel(from,to)+": оборот "+_salesNum(F.fact)+"."
     +(F.miss.length?(" ⚠️ Занижен: "+F.miss.length+" "+_kassaDayWord(F.miss.length)+" ещё не считали."):""));
-  if(F.future.length) L.push("В периоде ещё "+F.future.length+" "+_kassaDayWord(F.future.length)
-    +" впереди — ожидаемых списаний по ним в хранилище нет.");
+  /* Прогноз по расписанию — отдельной строкой и своими словами. В «оборот» он не входит: это
+     не заработанные деньги, а то, что должно списаться, если все придут. */
+  if(F.plan>0) L.push("Ожидается ещё "+_salesNum(F.plan)+" за "+F.planDays+" "
+    +_kassaDayWord(F.planDays)+" впереди — это план по расписанию, а не факт.");
+  if(F.future.length) L.push("И ещё "+F.future.length+" "+_kassaDayWord(F.future.length)
+    +" впереди, по которым ожидаемых списаний в хранилище нет.");
   /* Год назад — сдвиг ровно на 364 дня: день недели сохраняется, среда сравнивается со средой.
      Считаем ТОЛЬКО по дням, которые есть в обоих окнах, и говорим, по скольким. Если пар нет,
      строки просто не будет: ноль вместо факта соврал бы. */
@@ -14458,15 +14481,21 @@ function _salesRangeHtml(){
   /* Будущие дни — не пропуск: досчитывать нечего, но и молчать нельзя, иначе ноль в обороте
      читается как «клуб ничего не заработает». */
   if(F.future.length) warn.push(`${F.future.length} ${_kassaDayWord(F.future.length)} периода <b>ещё впереди</b> — ожидаемых списаний по ним в хранилище нет, в обороте они не учтены`);
+  /* ⚠️ Раньше план и факт складывались в одну цифру «оборот». Теперь они порознь, но сказать
+     об этом надо: в окне, заходящем в будущее, «оборот» меньше того, что показывал раньше. */
+  if(F.plan>0) warn.push(`в окне есть <b>${F.planDays} ${_kassaDayWord(F.planDays)} впереди</b>: их плановые списания (${_gm(F.plan)}) показаны отдельной строкой и в оборот не входят — это не заработанные деньги`);
   const numRow=(lab,val,note)=>`<tr><td>${lab}</td><td style="text-align:right;white-space:nowrap"><b>${val}</b></td><td style="font-size:12px;color:var(--muted)">${note||""}</td></tr>`;
   const lyNote=LY.known
     ? ("сдвиг ровно на 52 недели, дни недели совпадают · дней в хранилище: "+LY.known+" из "+days
        +(lyDelta!=null?(' · сейчас <b style="color:'+(lyDelta>=0?"var(--green)":"var(--red)")+'">'+(lyDelta>=0?"+":"")+lyDelta+"%</b>"):""))
     : "тех дней в хранилище нет — сравнивать не с чем";
   const tab=`<table style="max-width:760px"><tbody>
-    ${numRow("Оборот периода "+esc(_fillRangeLabel(from,to)),
-             '<span style="color:var(--green)">'+_gm(F.sum)+'</span>',
-             "среднее дохода с пропусками и без пополам · дней в периоде: "+days+" · с занятиями: "+F.dwl)}
+    ${numRow("Оборот периода "+esc(_fillRangeLabel(from,to))+" — <b>факт</b>",
+             '<span style="color:var(--green)">'+_gm(F.fact)+'</span>',
+             "среднее дохода с пропусками и без пополам · прошедших дней с данными: "+F.factDays+" из "+days+" · с занятиями: "+F.dwl)}
+    ${F.plan>0?numRow("…и ожидается по расписанию (не факт)",
+             '<span style="color:var(--muted)">'+_gm(F.plan)+'</span>',
+             "плановые списания за "+F.planDays+" "+_kassaDayWord(F.planDays)+" впереди — в оборот не входят"):""}
     ${numRow("Тот же период год назад ("+esc(_fillRangeLabel(lf,lt))+")",
              LY.known?_gm(LY.sum):'<span style="color:var(--muted)">—</span>', lyNote)}
     ${numRow("Занятий", _gm(F.les), "проведённых за период")}
@@ -14952,7 +14981,7 @@ function _fillAgg(from,to){
     Object.keys(day).forEach(k=>{
       const r=day[k]||[], les=+r[ix.les]||0, paid=+r[ix.paid]||0, trial=+r[ix.trial]||0;
       const o=g[k]||(g[k]={les:0,seats:0,paid:0,trial:0,att:0,rev:0,peak:0,attPaid:0,attFree:0,noAttPaid:0,
-                           attTrial:0,attZero:0,rowDays:0,splitDays:0,tch:{},sbj:{}});
+                           attTrial:0,attZero:0,rowDays:0,newDays:0,splitDays:0,tch:{},sbj:{}});
       o.rowDays++;                      // сколько дней у группы вообще есть строка
       o.les+=les; o.seats+=+r[ix.seats]||0; o.paid+=paid; o.trial+=trial;
       o.att+=+r[ix.att]||0; o.rev+=+r[ix.rev]||0;
@@ -14961,6 +14990,7 @@ function _fillAgg(from,to){
          дней периода их вообще имеет, и говорим об этом вслух. */
       if(r.length>ix.noAttPaid){
         o.attPaid+=+r[ix.attPaid]||0; o.attFree+=+r[ix.attFree]||0; o.noAttPaid+=+r[ix.noAttPaid]||0;
+        o.newDays++;                    // у этой группы день с разбивкой по деньгам
         anyNew=true;
       }
       /* Разложение «за 15 / за 0» появилось ещё позже: у дней между двумя правками есть attFree,
@@ -15003,6 +15033,10 @@ function _fillPlanMap(){ if(!S.fillPlan||typeof S.fillPlan!=="object") S.fillPla
    хотя два дня просто ещё не наступили. */
 function _fillDaysNote(from,to,have){
   const today=_todayIso(), end=(to>today?today:to);
+  /* ⚠️ Окно целиком в будущем: end < from, разница отрицательная, и знаменатель схлопывался
+     в единицу — «0 из 1 дня» про семидневные каникулы. Прошедших дней там нет вовсе, и
+     сравнивать не с чем: печатаем то, что есть. */
+  if(from>today) return have+" "+_kassaDayWord(have);
   const ms=(new Date(end+"T12:00:00")-new Date(from+"T12:00:00"));
   const total=Math.max(0,Math.round(ms/86400000))+1;
   if(!(total>0)) return have+" "+_kassaDayWord(have);
@@ -15081,6 +15115,9 @@ function _fillRows(agg){
        обвалилась бы на ровном месте. В этом случае считаем как раньше — по детоместам, —
        а наверху уже стоит предупреждение «нажмите Пересчитать заново». */
     const split=(a.rowDays>0 && a.splitDays===a.rowDays);
+    /* money — есть ли «кто был с деньгами и без них» (второе поколение). Этого уже достаточно,
+       чтобы остаток att−paid−free означал пробных, даже если «за 0» отдельно ещё не считали. */
+    const money=(a.rowDays>0 && a.newDays===a.rowDays);
     const cnt=split
       ? ((CT.full?(a.attPaid||0):0)+(CT.trial?(a.attTrial||0):0)
          +(CT.zero?(a.attZero||0):0)+(CT.none?Math.max(0,(a.attFree||0)-(a.attZero||0)):0)
@@ -15095,7 +15132,7 @@ function _fillRows(agg){
                /* «Без списания» — остаток: пришёл с нулём и без привязанного абонемента. */
                attNone:Math.max(0,(a.attFree||0)-(a.attZero||0)),
                cap:c.cap, capSrc:c.src, capWhy:c.why, seats:seats,
-               cnt:cnt, split:split, pct:(seats>0?100*cnt/seats:null)});
+               cnt:cnt, split:split, money:money, pct:(seats>0?100*cnt/seats:null)});
   });
   const val={pct:r=>(r.pct==null?1e6:r.pct), seats:r=>-r.fact, name:r=>r.name};
   const v=val[_fillSort]||val.pct;
@@ -15118,9 +15155,20 @@ function _fillWho(rows){
   /* Пришедшие с ПРОБНЫМ списанием — остаток: всего пришли минус те, у кого списалось по
      абонементу, минус те, у кого не списалось ничего. Отдельного счётчика не заводим, чтобы
      не хранить в файле цифру, которая всегда выводится из трёх соседних. */
-  /* Пробные считаются явно, но у дней, посчитанных до разложения, поля нет — там выводим
-     остатком, как раньше. Иначе пробники молча исчезли бы из «пришли». */
-  T.trial=rows.reduce((a,r)=>a+(r.attTrial||0),0) || Math.max(0, T.att-T.paid-T.free);
+  /* ⚠️ ОСТАТОК «ПРОБНЫХ» ВЫВОДИМ ТОЛЬКО ТАМ, ГДЕ ЕСТЬ РАЗЛОЖЕНИЕ ПО ДЕНЬГАМ.
+     У дней старого формата attPaid/attFree/attTrial отсутствуют, и остаток T.att−T.paid−T.free
+     равен ВСЕМ пришедшим. В чат отделу продаж уходило «Пришли 36: пробное 36» — 36 детей по
+     полной цене объявлялись пробниками за 15 рублей (проверено 09.09.2026). Это хуже, чем
+     промолчать: цифра выглядит осмысленной и оспорить её нечем.
+     Разложения нет — корзин нет вовсе, и об этом надо сказать вслух (W.split). */
+  const wa=rows.filter(r=>(r.att||0)>0);
+  T.split=(wa.length>0 && wa.every(r=>r.split));
+  T.money=(wa.length>0 && wa.every(r=>r.money));
+  /* Остаток — пробные. Считать его можно со второго поколения (есть attPaid/attFree), а вот
+     на первом остаток равен ВСЕМ пришедшим, и в чат уходило «Пришли 36: пробное 36» про детей
+     по полной цене (проверено 09.09.2026). Нет разбивки — нет и корзин. */
+  T.trial=rows.reduce((a,r)=>a+(r.attTrial||0),0)
+    || (T.money?Math.max(0, T.att-T.paid-T.free):0);
   return T;
 }
 function _fillTotals(rows){
@@ -15212,6 +15260,10 @@ async function fillPullRange(from,to,force){
   }
   const prog=document.getElementById("fillProg");
   if(!need.length){ if(prog) prog.textContent=lab+" уже посчитан целиком"; return; }
+  /* Тот же предел, что у salesPullRange и realPullWeek: «свой период» позволяет выбрать
+     01.09.2025–09.09.2026, и без него один confirm отправлял в Alfa 374 дня по десятку
+     запросов каждый. Три пути к одному и тому же действию обязаны защищаться одинаково. */
+  if(need.length>92){ toast("Период длиннее трёх месяцев — сузьте: каждый день это десятки запросов к Alfa"); return; }
   if(need.length>10 && !confirm("Досчитать "+need.length+" "+_kassaDayWord(need.length)
       +" ("+lab+")? Это несколько минут: каждый день — десятки запросов к Alfa.")) return;
   _fillBusy=true;
@@ -15240,6 +15292,7 @@ async function fillPull(all){
   }
   const prog=document.getElementById("fillProg");
   if(!need.length){ if(prog) prog.textContent="Все дни периода уже посчитаны"; return; }
+  if(need.length>92){ toast("Период длиннее трёх месяцев — сузьте: каждый день это десятки запросов к Alfa"); return; }
   if(need.length>10 && !confirm("Пересчитать в Alfa "+need.length+" "+_kassaDayWord(need.length)+"? Это несколько минут: каждый день — десятки запросов.")) return;
   _fillBusy=true;
   const btn=document.getElementById("fillPullBtn"); if(btn) btn.disabled=true;
@@ -15313,7 +15366,15 @@ function _fillHtml(){
   /* Пришедшие — четырьмя корзинами по деньгам. Одна общая цифра «пришли» ничего не решает:
      полная цена, пробное за 15, ноль по абонементу и «вообще без списания» — разные истории,
      и в загрузку они входят по-разному (галочками выше). */
-  const whoRow=W.att?`<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+  /* Без разложения по деньгам плитки соврали бы иначе: «полная цена 0», «без списания 0» —
+     это не ноль, это «неизвестно». Показываем причину и кнопку вместо цифр. */
+  const whoRow=(W.att&&!W.money)
+    ? `<div class="callout" style="border-color:var(--terra);font-size:12px;margin-bottom:10px">
+        <b>Пришли: ${_gm(W.att)}.</b> Разложения «кто был с деньгами и без них» за это окно нет — дни
+        считали до того, как оно появилось, и делить их по деньгам не на чем.
+        <button class="btn ghost sm" style="margin-left:6px" onclick="fillPullRange('${P.from}','${P.to}',true)"${_fillBusy?" disabled":""}>пересчитать заново</button>
+      </div>`
+    : W.att?`<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
     ${tile(_gm(W.paid),"пришли · полная цена","var(--green)","Списание по абонементу прошло по обычной цене")}
     ${W.trial?tile(_gm(W.trial),"пришли · пробное за 15","var(--terra)","Списалось пробное — цена у него своя"):""}
     ${W.zero?tile(_gm(W.zero),"пришли · списание за 0","#C9922E","Абонемент к занятию привязан, но цена нулевая: отработка, подарок, акция. Место занято, денег нет"):""}

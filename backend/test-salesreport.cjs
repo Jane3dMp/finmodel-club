@@ -28,7 +28,7 @@ const NAMES = ['_salesNum', '_salesCfg', '_ratAgg', '_ratSubjToCourse', '_ratMod
                '_salesActiveNote', '_salesPace', '_salesPaceLines', '_salesPaceHtml',
                // «свой период» в отчёте — селектор и его окно
                '_salesPeriodSel', '_salesRangeFact', '_salesRangePair', '_salesRangeText',
-               '_fillRangeMissing', '_salesFillLinesFor', '_kassaDayWord',
+               '_fillRangeMissing', '_kassaDayWord',
                '_salesReports', '_salesCur', '_salesDate', '_salesMonName', '_salesHtml', '_salesCronHtml'];
 const ONE_LINERS = ['_salesMonthEnd', '_salesMonday', '_salesGoals',   // тело в одну строку
                     '_fillIdx', '_fillGroups', '_fillPlanMap', '_fillArch', '_fillNoName', '_fillTeachName',
@@ -532,7 +532,9 @@ check('обычная неделя — недельный текст на мес
   check('часть дней впереди', half.future.length > 0, String(half.future.length));
   const halfTxt = API._salesRangeText();
   check('оборот показан', halfTxt.indexOf('оборот ') > 0);
-  check('и про будущие дни сказано', /впереди — ожидаемых списаний/.test(halfTxt), halfTxt);
+  // ⚠️ будущие дни, по которым нет даже ожидаемых списаний, названы отдельно от прогноза
+  check('и про будущие дни сказано', /впереди, по которым ожидаемых списаний в хранилище нет/.test(halfTxt), halfTxt);
+  check('а в оборот они не вошли', halfTxt.indexOf('оборот 3.600') > 0, halfTxt);
 
   /* Прошедший день, которого нет в хранилище, — это занижение, и об этом тоже вслух. */
   ctx._realStore = (function () { const s = {}; for (let d = 2; d <= 6; d++) s['2026-09-0' + d] = day(1800); return s; })();
@@ -596,6 +598,102 @@ check('обычная неделя — недельный текст на мес
 
   ctx._todayIso = keepToday; ctx._salesRange = keepRange; ctx._realStore = keepReal;
   ctx._fillStore = keepFill; ctx.S.fillPlan = keepFP; ctx.S.fillCats = keepCats;
+}
+
+
+/* ================= ФАКТ И ПРОГНОЗ НЕЛЬЗЯ СКЛАДЫВАТЬ В «ОБОРОТ» =================
+   Живой дефект (09.09.2026). Прошедшие и будущие дни суммировались в одну цифру: неделя 07–13.09
+   при сегодня 09-м давала в чат «Период 07.09–13.09.2026: оборот 7.700», где 4.400 — больше
+   половины — это planned по расписанию, а не заработанные деньги. Ни пометки, ни предупреждения:
+   F.miss пуст, потому что дни в хранилище ЕСТЬ. Подпись при этом уверяла «среднее дохода с
+   пропусками и без пополам». Отдел продаж сверил бы такую цифру с кассой и не сошёлся. */
+{
+  const keepToday = ctx._todayIso, keepRange = ctx._salesRange, keepReal = ctx._realStore,
+        keepFill = ctx._fillStore;
+  ctx._todayIso = () => '2026-09-09';
+  ctx._fillStore = null;                     // загрузку здесь не проверяем
+  const was = (v) => ({ present: v, all: v, planned: 0, lessons: 10 });
+  const will = (p) => ({ present: 0, all: 0, planned: p, lessons: 0 });
+
+  const St = {};
+  ['2026-09-07', '2026-09-08', '2026-09-09'].forEach(k => St[k] = was(1100));        // факт 3 × 1100
+  ['2026-09-10', '2026-09-11', '2026-09-12', '2026-09-13'].forEach(k => St[k] = will(1100)); // план 4 × 1100
+  ctx._realStore = St;
+  ctx._salesRange = { from: '2026-09-07', to: '2026-09-13' };
+
+  const F = API._salesRangeFact('2026-09-07', '2026-09-13');
+  eq('факт — только прошедшие дни', F.fact, 3300);
+  eq('прогноз — только будущие', F.plan, 4400);
+  eq('прошедших дней с данными', F.factDays, 3);
+  eq('будущих дней с планом', F.planDays, 4);
+  eq('сумма обоих осталась для старого кода', F.sum, 7700);
+  eq('пропусков нет', F.miss.length, 0);
+  eq('и «дней без данных впереди» тоже', F.future.length, 0);
+
+  const txt = API._salesRangeText();
+  // ⚠️ «оборот» — это заработанное, и ничего кроме
+  check('оборот — только факт', txt.indexOf('оборот 3.300') > 0, txt.split('\n')[0]);
+  check('смешанной цифры больше нет', txt.indexOf('7.700') < 0, txt);
+  check('прогноз назван отдельно', txt.indexOf('Ожидается ещё 4.400 за 4 дня впереди') > 0, txt);
+  check('и сказано, что это не факт', txt.indexOf('план по расписанию, а не факт') > 0, txt);
+
+  /* ⚠️ Сравнение с прошлым годом тоже не должно брать будущие дни: у них planned, а не
+     заработанное, и сравнивать их с прошлогодним фактом нельзя. */
+  ['2025-09-08', '2025-09-09', '2025-09-10', '2025-09-11'].forEach(k => St[k] = was(1000));
+  const PR = API._salesRangePair('2026-09-07', '2026-09-13');
+  eq('пары только среди прошедших дней', PR.pairs, 3);
+  eq('и сейчас по ним — факт', PR.now, 3300);
+  eq('а год назад — тоже факт', PR.ly, 3000);
+
+  /* Окно целиком в прошлом: прогноза нет, строки про него тоже. */
+  ctx._salesRange = { from: '2026-09-07', to: '2026-09-09' };
+  const past = API._salesRangeText();
+  check('без будущих дней про прогноз молчим', past.indexOf('Ожидается ещё') < 0, past);
+  check('оборот на месте', past.indexOf('оборот 3.300') > 0, past.split('\n')[0]);
+
+  ctx._todayIso = keepToday; ctx._salesRange = keepRange; ctx._realStore = keepReal;
+  ctx._fillStore = keepFill;
+}
+
+/* ================= «МЕСТ НА РЕБЁНКА» — ОДНИМ ЧИСЛИТЕЛЕМ =================
+   Экран делил списания на детей (T.fact / K.kids), сообщение в чат — выбранное галочками
+   (T.cnt / K.kids), а подпись у обоих одинаковая. Один клик по галочке «пропуск со списанием»
+   разводил цифры: экран 3.0, чат 2. K.kids — это дети, занявшие ОПЛАЧЕННЫЕ места, значит и
+   делить на них надо оплаченные места. */
+{
+  const keepToday = ctx._todayIso, keepReal = ctx._realStore, keepFill = ctx._fillStore,
+        keepKids = ctx._fillKids, keepKey = ctx._fillKidsKey, keepFP = ctx.S.fillPlan,
+        keepCats = ctx.S.fillCats;
+  ctx._todayIso = () => '2026-09-09';
+  ctx.S.fillPlan = { '10': 10 };
+  ctx._realStore = { '2026-09-01': { present: 360, all: 360, planned: 0, lessons: 1 } };
+  ctx._fillStore = {
+    fmt: ['les','seats','paid','trial','att','rev','attPaid','attFree','noAttPaid','attTrial','attZero','tch','sbj'],
+    // 12 списаний, пришли 8 по полной цене, 4 — пропуск со списанием
+    fill: { '2026-09-01': { '10': [1, 10, 12, 0, 8, 360, 8, 0, 4, 0, 0, {}, {}] } },
+    groups: { '10': { name: 'Английский №1', subject: 11, teacher: 5, limit: 10 } },
+    groupsOk: true, subjects: {}, teachers: {},
+  };
+  ctx._fillKids = { from: '2026-09-01', to: '2026-09-01', kids: 4, days: 1, free: [], names: {} };
+  ctx._fillKidsKey = '2026-09-01..2026-09-01';
+
+  const per = (cats) => {
+    ctx.S.fillCats = cats;
+    const line = API._salesFillLinesFor('2026-09-01', '2026-09-01')
+      .find(x => x.indexOf('Уникальных детей') === 0) || '';
+    return line;
+  };
+  // 12 оплаченных мест ÷ 4 ребёнка = 3, и галочки на это не влияют
+  check('со всеми галочками — 3', per({ full: 1, trial: 0, zero: 0, none: 0, miss: 1 }).indexOf('мест на ребёнка: 3') > 0,
+        per({ full: 1, trial: 0, zero: 0, none: 0, miss: 1 }));
+  // ⚠️ вот из-за чего цифры разъезжались: снятая галочка меняла числитель в чате, но не на экране
+  check('без «пропуска со списанием» — те же 3',
+        per({ full: 1, trial: 0, zero: 0, none: 0, miss: 0 }).indexOf('мест на ребёнка: 3') > 0,
+        per({ full: 1, trial: 0, zero: 0, none: 0, miss: 0 }));
+
+  ctx._todayIso = keepToday; ctx._realStore = keepReal; ctx._fillStore = keepFill;
+  ctx._fillKids = keepKids; ctx._fillKidsKey = keepKey; ctx.S.fillPlan = keepFP;
+  ctx.S.fillCats = keepCats;
 }
 
 
