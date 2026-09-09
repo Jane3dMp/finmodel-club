@@ -2197,7 +2197,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-09-09-08";
+const APP_VER="2026-09-09-09";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -12225,7 +12225,23 @@ function kassaSheetSet(key,val){
   persistLocal(); if(typeof fbSchedulePush==="function") fbSchedulePush();
   const b=document.getElementById("admBody"); if(b) b.innerHTML=_kassaHtml();
 }
-function _kassaIsOut(r){ return /расход/i.test(r.pay_type_name||"") || (+r.income||0)<0; }
+/* ⚠️ ТО ЖЕ ПРАВИЛО, ЧТО НА СЕРВЕРЕ (alfa_pay_is_out в api/alfa/lib.php) — две реализации
+   одной формулы обязаны совпадать, иначе «Сверка по дню» и автоснимок разойдутся.
+   Выплата ЗП уходит из кассы деньгами, но зовётся «Выплата ЗП» и приходит с ПОЛОЖИТЕЛЬНОЙ
+   суммой: старое правило считало её приходом, и деньги искажали картину дважды — раздували
+   приход и пропадали из расхода. Признаки по убыванию надёжности: имя операции → pay_type_id
+   (1 приход, 2 расход, 3 перемещение) → знак суммы. */
+function _kassaIsOut(r){
+  const n=String((r&&r.pay_type_name)||"");
+  if(/расход|выплат|зарплат/i.test(n)) return true;
+  if(+((r&&r.pay_type_id)||0)===2) return true;
+  return (+((r&&r.income)||0))<0;
+}
+/* Перемещение между кассами: деньги не покидают клуб, это ни приход, ни расход. */
+function _kassaIsMove(r){
+  const n=String((r&&r.pay_type_name)||"");
+  return /перемещ|перевод/i.test(n) || +((r&&r.pay_type_id)||0)===3;
+}
 function _kassaName(r,refs){
   const acc=(refs.payAccounts||{})[r.pay_account_id];
   if(acc) return acc;
@@ -12451,16 +12467,21 @@ function _kassaMonth(ym){
   if(!Y||!M) return null;
   const dim=new Date(Y,M,0).getDate(), pref=Y+'-'+String(M).padStart(2,'0')+'-';
   const snap=_paySnap||{}, today=_todayIso();
-  const byIn={}, byOut={}; let inc=0, out=0, have=0, cnt=0; const missing=[];
+  const byIn={}, byOut={}; let inc=0, out=0, have=0, cnt=0; const missing=[], old=[];
   for(let d=1;d<=dim;d++){
     const key=pref+String(d).padStart(2,'0');
     const sn=snap[key];
     if(!sn){ if(key<=today && !(key===today&&_kassaTodayBusy)) missing.push(key); continue; }
     have++; cnt+=+sn.count||0; inc+=+sn.income||0; out+=+sn.expense||0;
+    /* ⚠️ Снимки, снятые до 09.09.2026, считали расходом только «Расход» и отрицательные суммы:
+       выплата ЗП уходила из кассы, а в снимке лежала ПРИХОДОМ. Такой день узнаётся по
+       отсутствию byType — его завели той же правкой. Молчать нельзя: цифры за месяц неверны,
+       и понять это по ним самим невозможно. */
+    if(!sn.byType) old.push(key);
     Object.keys(sn.byIn||{}).forEach(k=>{ byIn[k]=(byIn[k]||0)+(+sn.byIn[k]||0); });
     Object.keys(sn.byOut||{}).forEach(k=>{ byOut[k]=(byOut[k]||0)+(+sn.byOut[k]||0); });
   }
-  return {ym:ym, byIn:byIn, byOut:byOut, income:inc, expense:out, days:have, count:cnt, missing:missing};
+  return {ym:ym, byIn:byIn, byOut:byOut, income:inc, expense:out, days:have, count:cnt, missing:missing, old:old};
 }
 /* ВРЕМЯ СНИМКА. В хранилище лежат ДВЕ разные метки: серверная date('c') со смещением пояса
    и браузерная toISOString() — она всегда в UTC. Раньше обе просто резали по символам, и метка
@@ -12519,7 +12540,11 @@ function _kassaTopHtml(){
     +`<div class="hint" style="margin-top:6px">дней с данными: ${M.days} · операций: ${M.count}</div>
     ${M.missing.length?`<div class="hint" style="color:var(--terra-d);margin-top:4px">
       Нет снимка за ${M.missing.length} ${_kassaDayWord(M.missing.length)}: ${esc(M.missing.slice(0,6).map(_kassaDMY).join(', '))}${M.missing.length>6?'…':''} — ${M.missing.length===1?'он в сумму не вошёл':'они в сумму не вошли'}.
-      <button class="btn ghost sm" style="margin-top:5px" id="kassaFillBtn" onclick="kassaFillMonth()">Дособрать из Alfa</button></div>`:''}`;
+      <button class="btn ghost sm" style="margin-top:5px" id="kassaFillBtn" onclick="kassaFillMonth()">Дособрать из Alfa</button></div>`:''}
+    ${M.old.length?`<div class="hint" style="color:var(--terra-d);margin-top:4px">
+      <b>${M.old.length} ${_kassaDayWord(M.old.length)} посчитаны старым правилом</b> — выплаты ЗП тогда попадали в приход, а не в расход.
+      Цифры за эти дни занижены по расходу и завышены по приходу.
+      <button class="btn ghost sm" style="margin-top:5px" id="kassaAgainBtn" onclick="kassaRecountMonth()">Пересчитать ${M.old.length} ${_kassaDayWord(M.old.length)}</button></div>`:''}`;
   } else {
     monCard=`<div style="color:var(--muted);font-size:13px;padding:6px 0">За ${esc(mLab)} снимков пока нет.</div>`;
   }
@@ -12556,6 +12581,27 @@ function _kassaDayWord(n){
 }
 /* Дособрать дни месяца, которых нет в хранилище. Каждый день — отдельный проход по журналу
    Alfa, поэтому идём по одному и показываем прогресс. */
+/* Пересчитать дни, снятые старым правилом. Отдельная кнопка, а не «дособрать»: там дни,
+   которых нет вовсе, здесь — те, что есть, но посчитаны неверно. Смешивать нельзя: «дособрать»
+   их бы не тронул, и месяц так и остался бы с зарплатой в приходе. */
+async function kassaRecountMonth(){
+  if(_kassaBusy) return;
+  const M=_kassaMonth(String(_kassaDate||_todayIso()).slice(0,7));
+  if(!M||!M.old.length){ toast("Все дни месяца уже посчитаны новым правилом"); return; }
+  if(!confirm("Пересчитать "+M.old.length+" "+_kassaDayWord(M.old.length)+"?\nВ них выплаты ЗП лежат в приходе вместо расхода. Alfa отдаёт журнал без фильтра по дате, поэтому каждый день считается отдельно — это займёт до "+Math.ceil(M.old.length*8/60)+" мин.")) return;
+  const btn=document.getElementById("kassaAgainBtn"), prog=document.getElementById("kassaProg");
+  _kassaBusy=true; if(btn) btn.disabled=true;
+  try{
+    for(let i=0;i<M.old.length;i++){
+      if(prog) prog.textContent="Пересчитываю… "+(i+1)+"/"+M.old.length+" ("+_kassaDMY(M.old[i])+")";
+      const j=await _pubCall("paymentsDay",{date:M.old[i]});
+      if(j.snapshot){ _paySnap=_paySnap||{}; _paySnap[j.date]=Object.assign({},j.snapshot,{ts:new Date().toISOString()}); }
+    }
+    if(prog) prog.textContent="Готово ✓";
+    const b=document.getElementById("admBody"); if(b) b.innerHTML=_kassaHtml();
+  }catch(e){ if(prog) prog.textContent=""; const b=document.getElementById("admBody"); if(b){ const d=document.createElement("div"); d.innerHTML=_pubErrHtml(e,"пересчёт дней месяца"); b.insertBefore(d.firstChild,b.firstChild); } }
+  finally{ _kassaBusy=false; if(btn) btn.disabled=false; }
+}
 async function kassaFillMonth(){
   if(_kassaBusy) return;
   const M=_kassaMonth(String(_kassaDate||_todayIso()).slice(0,7));
@@ -12612,7 +12658,9 @@ function _kassaHtml(){
     return head+`<div class="callout">${_paySnap?('За '+esc(_kassaDate)+' автоснимка нет (cron собирает в 22:00). Нажмите «Загрузить из Alfa», чтобы посчитать сейчас.'):'⏳ Читаю сохранённые снимки…'}</div>`+_kassaProbeHtml();
   }
   const refs=D.refs||{}, all=D.payments||[];
-  const inc=all.filter(r=>!_kassaIsOut(r)), out=all.filter(r=>_kassaIsOut(r));
+  const out=all.filter(_kassaIsOut);
+  const moves=all.filter(r=>!_kassaIsOut(r)&&_kassaIsMove(r));
+  const inc=all.filter(r=>!_kassaIsOut(r)&&!_kassaIsMove(r));
   const K=(_kassaSheet()[_kassaDate])||{};
   const by={};
   inc.forEach(r=>{ const k=_kassaName(r,refs); if(!by[k]) by[k]={sum:0,n:0}; by[k].sum+=(+r.income||0); by[k].n++; });
@@ -12711,7 +12759,21 @@ function _kassaFromSnap(sn){
   };
   return `<div style="font-size:12px;color:var(--muted);margin-bottom:6px">Автоснимок от ${esc(_tsDMYHM(sn.ts))} · операций: ${sn.count||0}. Для списка операций нажмите «Загрузить из Alfa».</div>`
     + tbl('Приход', sn.byIn, '', 'var(--green)') + tbl('Расход', sn.byOut, 'out:', 'var(--red)')
+    + _kassaTypesHtml(sn)
     + `<h3 style="margin:12px 0 6px">Приход − расход по кассам за день</h3><div style="max-width:700px">${_kassaNetTable(sn.byIn,sn.byOut)}</div>`;
+}
+/* Какими типами операций набрана касса. Правило «что считать расходом» опирается на имена,
+   которые в Alfa заводит человек и меняет когда угодно, — значит его надо показывать, а не
+   просить верить на слово. Заодно сразу видно новый тип, который мы ещё не научились читать. */
+function _kassaTypesHtml(sn){
+  const T=sn&&sn.byType; if(!T||!Object.keys(T).length) return "";
+  const ks=Object.keys(T).sort((a,b)=>(+T[b].sum||0)-(+T[a].sum||0));
+  const one=k=>'<span style="white-space:nowrap">'+esc(k)+' <b>'+_gm(T[k].sum)+'</b> '
+    +'<i style="font-style:normal;color:'+(T[k].out?"var(--red)":"var(--green)")+'">'+(T[k].out?"расход":"приход")+'</i>'
+    +' <span style="color:var(--muted)">· '+(+T[k].n||0)+'</span></span>';
+  return '<div class="hint" style="margin-top:10px">Типы операций: '+ks.map(one).join(" · ")
+    +((+sn.moveN)?(' · <span style="color:var(--muted)">перемещений между кассами: '+sn.moveN+' на '+_gm(sn.move)+' — в приход и расход не идут</span>'):"")
+    +'</div>';
 }
 function _kassaCustName(id){
   if(!id) return "—";

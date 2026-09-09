@@ -18,10 +18,12 @@ function check(name, ok, detail) {
 function eq(name, got, want) { check(name, got === want, JSON.stringify(got) + ' ≠ ' + JSON.stringify(want)); }
 
 const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
-const NAMES = ['_kassaMonth', '_kassaTopHtml', '_kassaDayWord',
+const NAMES = ['_kassaMonth', '_kassaTopHtml', '_kassaDayWord', '_kassaIsOut', '_kassaIsMove',
                '_tsHM', '_tsDMYHM', '_tsAgo', '_tsFreshHtml',
                '_kassaMerge', '_kassaNetTable', '_kassaAccNames', '_kassaCashAcc', '_kassaCash', '_kassaCashCard',
                '_kassaCashDaily', '_kassaCashDailyHtml'];
+// _kassaIsOut / _kassaIsMove — правило «что считать расходом кассы»; то же самое на сервере
+// (alfa_pay_is_out в api/alfa/lib.php), две реализации обязаны совпадать.
 const ONE_LINERS = ['_kassaDMY', '_kassaOpen'];
 let src = '';
 function grab(name, re) {
@@ -54,7 +56,7 @@ const ctx = {
   _dIso: d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'),
 };
 const API = new Function('ctx', 'with (ctx) { ' + src +
-  ' return {_kassaMonth,_kassaTopHtml,_kassaDayWord,_kassaMerge,_kassaNetTable,_kassaCashAcc,_kassaCash,_kassaCashCard,' +
+  ' return {_kassaMonth,_kassaTopHtml,_kassaDayWord,_kassaIsOut,_kassaIsMove,_kassaMerge,_kassaNetTable,_kassaCashAcc,_kassaCash,_kassaCashCard,' +
   '_kassaCashDaily,_kassaCashDailyHtml,' +
   ' setSnap:v=>{_paySnap=v}, setDate:v=>{_kassaDate=v}}; }')(ctx);
 
@@ -277,6 +279,79 @@ ctx.S.kassaOpen = { acc: 'Наличные', date: '2026-12-31', sum: 100 };
 eq('будущий пересчёт не считаем', API._kassaCashDaily(), null);
 ctx.S.kassaOpen = {};
 
+
+/* ================= ВЫПЛАТА ЗП — ЭТО РАСХОД КАССЫ =================
+   ⚠️ Живой случай 09.09.2026. Выплата ЗП уходит из кассы живыми деньгами, но в Alfa называется
+   «Выплата ЗП» и приходит с ПОЛОЖИТЕЛЬНОЙ суммой. Старое правило («имя содержит расход» ИЛИ
+   «сумма < 0») считало её ПРИХОДОМ: деньги, ушедшие из кассы, искажали картину дважды —
+   раздували приход и пропадали из расхода.
+   ⚠️ ПРАВИЛО ЖИВЁТ В ДВУХ МЕСТАХ и они обязаны совпадать: _kassaIsOut здесь и alfa_pay_is_out
+   в api/alfa/lib.php (проверяется в php backend/test-payments-upsert.php). Разойдутся — «Сверка
+   по дню» и автоснимок покажут разные деньги за один и тот же день. */
+{
+  const O = API._kassaIsOut, MV = API._kassaIsMove;
+  check('«Выплата ЗП» — расход', O({ pay_type_name: 'Выплата ЗП', income: 11 }));
+  check('«Выплата зарплаты» — расход', O({ pay_type_name: 'Выплата зарплаты', income: 300 }));
+  check('«Зарплата» — расход', O({ pay_type_name: 'Зарплата', income: 300 }));
+  check('регистр не важен', O({ pay_type_name: 'ВЫПЛАТА ЗП', income: 11 }));
+  check('«Расход» — расход', O({ pay_type_name: 'Расход', income: 120 }));
+  check('отрицательная сумма — расход', O({ pay_type_name: 'Оплата', income: -50 }));
+  check('pay_type_id = 2 — расход', O({ pay_type_name: '', pay_type_id: 2, income: 40 }));
+
+  check('обычная оплата — не расход', !O({ pay_type_name: 'Оплата', income: 148 }));
+  check('оплата картой — не расход', !O({ pay_type_name: 'Оплата картой', income: 88 }));
+  check('pay_type_id = 1 — не расход', !O({ pay_type_name: '', pay_type_id: 1, income: 40 }));
+  check('пустая запись — не расход', !O({}));
+  // ⚠️ ноль — не отрицательное число
+  check('ноль — не расход', !O({ pay_type_name: 'Оплата', income: 0 }));
+
+  check('перемещение опознано', MV({ pay_type_name: 'Перемещение', income: 500 }));
+  check('и «Перевод»', MV({ pay_type_name: 'Перевод между кассами', income: 500 }));
+  check('и по pay_type_id = 3', MV({ pay_type_id: 3, income: 500 }));
+  check('перемещение — не расход', !O({ pay_type_name: 'Перемещение', income: 500 }));
+  check('оплата — не перемещение', !MV({ pay_type_name: 'Оплата', income: 148 }));
+}
+
+/* ================= СТАРЫЕ СНИМКИ НАДО ПЕРЕСЧИТАТЬ =================
+   Снимки, снятые до правки, считали расходом только «Расход» и отрицательные суммы: выплата ЗП
+   лежит в них приходом. Понять это по самим цифрам нельзя — значит месяц обязан сказать вслух,
+   сколько таких дней, и дать их пересчитать. Признак — отсутствие byType: поле завели той же
+   правкой, у старых снимков его нет. */
+{
+  const keep = ctx._paySnap;
+  ctx._paySnap = {
+    '2026-09-01': { income: 100, expense: 10, count: 3, byIn: { 'Наличные': 100 }, byOut: { 'Наличные': 10 } },
+    '2026-09-02': { income: 200, expense: 20, count: 4, byIn: { 'Наличные': 200 }, byOut: { 'Наличные': 20 },
+                    byType: { 'Оплата': { n: 4, sum: 200, out: false } } },
+    '2026-09-03': { income: 300, expense: 30, count: 5, byIn: { 'Наличные': 300 }, byOut: { 'Наличные': 30 } },
+  };
+  const M = API._kassaMonth('2026-09');
+  eq('дней со снимками', M.days, 3);
+  eq('из них по старому правилу', M.old.length, 2);
+  eq('и это именно они', M.old.join(','), '2026-09-01,2026-09-03');
+  check('день с byType старым не считается', M.old.indexOf('2026-09-02') < 0);
+  // суммы при этом складываются по всем дням: прятать их до пересчёта нельзя, это единственное,
+  // что есть, — но рядом обязана стоять оговорка
+  eq('приход сложен по всем', M.income, 600);
+
+  const h = API._kassaTopHtml();
+  check('сказано, сколько дней по старому правилу', h.indexOf('посчитаны старым правилом') > 0,
+        h.slice(Math.max(0, h.indexOf('Касса за') - 200), h.indexOf('Касса за') + 700));
+  check('названо число дней', h.indexOf('<b>2 дня посчитаны старым правилом</b>') > 0,
+        (h.match(/<b>[^<]*старым правилом<\/b>/) || [''])[0]);
+  check('объяснено, чем это грозит', h.indexOf('выплаты ЗП тогда попадали в приход') > 0);
+  check('и есть кнопка пересчитать', h.indexOf('kassaRecountMonth()') > 0);
+
+  // все дни в новом формате — оговорки быть не должно
+  ctx._paySnap = {
+    '2026-09-02': { income: 200, expense: 20, count: 4, byIn: {}, byOut: {},
+                    byType: { 'Оплата': { n: 4, sum: 200, out: false } } },
+  };
+  eq('новых снимков не считаем старыми', API._kassaMonth('2026-09').old.length, 0);
+  check('и оговорки нет', API._kassaTopHtml().indexOf('посчитаны старым правилом') < 0);
+
+  ctx._paySnap = keep;
+}
 
 console.log(bad ? '\n❌ провалено проверок: ' + bad : '\n✅ всё сошлось');
 process.exit(bad ? 1 : 0);

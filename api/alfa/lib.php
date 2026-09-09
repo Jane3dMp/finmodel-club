@@ -2630,6 +2630,32 @@ function alfa_pay_refs(): array {
     if ($out) @file_put_contents($f, json_encode(['ts' => time(), 'r' => $out], JSON_UNESCAPED_UNICODE), LOCK_EX);
     return $memo = $out;
 }
+/* ===== ЧТО СЧИТАТЬ РАСХОДОМ КАССЫ =====
+   ⚠️ Расход — это НЕ только тип «Расход». Выплата ЗП уходит из кассы живыми деньгами, но в
+   Alfa называется «Выплата ЗП» и приходит с ПОЛОЖИТЕЛЬНОЙ суммой. Старое правило («имя
+   содержит расход» ИЛИ «сумма < 0») считало её ПРИХОДОМ — то есть деньги, ушедшие из кассы,
+   искажали картину дважды: раздували приход и пропадали из расхода. Поймала Жанна 09.09.2026
+   на выплате Козыреву: «наличные расходы это ещё и выплата ЗП, учитывай и их».
+   Порядок признаков — от самого надёжного к запасному:
+     1) имя операции прямо говорит о выплате («Расход», «Выплата», «Зарплата») — это расход
+        при любом знаке и любом типе: приходом такая операция не бывает;
+     2) pay_type_id — собственное поле Alfa: 1 приход, 2 расход, 3 перемещение между кассами;
+     3) отрицательная сумма — как было раньше, для записей без типа и без внятного имени.
+   ⚠️ Перемещение между кассами (3) расходом НЕ считаем: деньги не покидают клуб, из одной
+   кассы они перекладываются в другую. Но и приходом оно не является — про это отдельная
+   строка в сводке, чтобы такие операции не растворялись молча. */
+function alfa_pay_is_out(array $x): bool {
+    $n = (string)($x['pay_type_name'] ?? '');
+    foreach (['расход', 'выплат', 'зарплат'] as $w) if (mb_stripos($n, $w) !== false) return true;
+    if ((int)($x['pay_type_id'] ?? 0) === 2) return true;
+    return ((float)($x['income'] ?? 0) < 0);
+}
+/* Перемещение между кассами: не приход и не расход. Отдаём отдельно, чтобы было видно. */
+function alfa_pay_is_move(array $x): bool {
+    $n = (string)($x['pay_type_name'] ?? '');
+    if (mb_stripos($n, 'перемещ') !== false || mb_stripos($n, 'перевод') !== false) return true;
+    return ((int)($x['pay_type_id'] ?? 0) === 3);
+}
 /* Имя кассы для платежа: счёт → локация → тип оплаты. */
 function alfa_pay_kassa_name(array $x, array $refs): string {
     $acc = $refs['payAccounts'][(int)($x['pay_account_id'] ?? 0)] ?? '';
@@ -2647,13 +2673,22 @@ function alfa_payments_upsert(string $date, ?array $branches = null, ?array $pre
     $r = (is_array($pre) && isset($pre['rows'], $pre['date'])) ? $pre : alfa_payments_day($date, $branches);
     $refs = alfa_pay_refs();
     $inc = 0.0; $out = 0.0; $byIn = []; $byOut = []; $byItem = [];
+    /* Какими типами операций набрана касса — чтобы правило можно было проверить глазами,
+       а не верить ему на слово: имена типов в Alfa заводит человек и меняет когда угодно. */
+    $byType = []; $move = 0.0; $moveN = 0;
     /* Приход по КЛИЕНТАМ: платёж в Alfa привязан к customer_id, и это единственный способ
        сказать, сколько денег принёс конкретный ребёнок. Дневные агрегаты этого не знали. */
     $byCust = [];
     foreach ($r['rows'] as $x) {
         $name = alfa_pay_kassa_name($x, $refs);
-        $isOut = (mb_stripos((string)$x['pay_type_name'], 'расход') !== false) || ((float)$x['income'] < 0);
+        $isOut = alfa_pay_is_out($x);
         $v = abs((float)$x['income']);
+        $tn = trim((string)($x['pay_type_name'] ?? '')); if ($tn === '') $tn = 'без типа';
+        if (!isset($byType[$tn])) $byType[$tn] = ['n' => 0, 'sum' => 0.0, 'out' => $isOut];
+        $byType[$tn]['n']++; $byType[$tn]['sum'] = round($byType[$tn]['sum'] + $v, 2);
+        /* Перемещение между кассами не прибавляет клубу денег: считаем отдельно и в приход
+           не кладём — иначе один и тот же рубль виден дважды. */
+        if (!$isOut && alfa_pay_is_move($x)) { $move += $v; $moveN++; continue; }
         if ($isOut) {
             $byOut[$name] = round(($byOut[$name] ?? 0) + $v, 2); $out += $v;
             // статья расхода («Аренда», «Реклама», …) — для раздела «Расходы ежедневно»
@@ -2675,13 +2710,14 @@ function alfa_payments_upsert(string $date, ?array $branches = null, ?array $pre
     }
     $st[$r['date']] = ['income' => round($inc, 2), 'expense' => round($out, 2),
                        'count' => count($r['rows']), 'byIn' => $byIn, 'byOut' => $byOut,
-                       'byItem' => $byItem, 'byCust' => $byCust, 'ts' => date('c')];
+                       'byItem' => $byItem, 'byCust' => $byCust, 'byType' => $byType,
+                       'move' => round($move, 2), 'moveN' => $moveN, 'ts' => date('c')];
     ksort($st);
     if (count($st) > 400) $st = array_slice($st, -400, null, true);   // храним последние ~13 месяцев
     alfa_pay_store_write($st);
     return ['date' => $r['date'], 'income' => round($inc, 2), 'expense' => round($out, 2),
             'count' => count($r['rows']), 'byIn' => $byIn, 'byOut' => $byOut, 'byItem' => $byItem,
-            'byCust' => $byCust];
+            'byCust' => $byCust, 'byType' => $byType, 'move' => round($move, 2), 'moveN' => $moveN];
 }
 
 /* ===== ПЛАТЕЖИ ЗА ДЕНЬ (кассы) =====
