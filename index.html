@@ -2197,7 +2197,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-09-09-13";
+const APP_VER="2026-09-09-14";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -19385,6 +19385,25 @@ function _campWhyNoTransfer(sh,r){
 }
 /* Уже перенесён? Отметка НАША: в Alfa мы не переспрашиваем на каждый рендер, это десятки
    запросов. Правый клик по кнопке снимает отметку — в самой Alfa при этом ничего не меняется. */
+/* ===== ПРЕДМЕТ ДЛЯ АБОНЕМЕНТА =====
+   ⚠️ 09.09.2026 Жанна упёрлась в «у шаблона не заданы предметы»: её шаблон «950» — поурочный,
+   5 уроков по 190, и предметы в нём не проставлены. Требовать проставить их в Alfa — лишняя
+   работа и не самое верное решение: предмет, за который списываются занятия, знает САМА
+   ГРУППА, и абонемент обязан покрывать именно его.
+   Поэтому порядок такой:
+     1) предмет ГРУППЫ — он и определяет, за что спишется занятие;
+     2) предметы шаблона — если у группы их нет (бывает у сборных групп);
+   Нет ни там, ни там — не выдумываем: говорим, где проставить.
+   Возвращаем и источник: в настройках видно, откуда взялся предмет, ещё до нажатия. */
+function _campSubjIds(sh){
+  const g=(_campAlfaGroups||[]).find(x=>+x.id===+((sh&&sh.alfaGroupId)||0));
+  const t=(_campAlfaTariffs||[]).find(x=>+x.id===+((sh&&sh.alfaTariffId)||0));
+  const gs=((g&&g.subject_ids)||[]).map(Number).filter(Boolean);
+  if(gs.length) return {ids:gs, from:"группы"};
+  const ts=((t&&t.subject_ids)||[]).map(Number).filter(Boolean);
+  if(ts.length) return {ids:ts, from:"шаблона"};
+  return {ids:[], from:""};
+}
 function _campInGroup(sh,r){ return !!(r&&r.alfaGrp&&sh&&String(r.alfaGrp)===String(sh.alfaGroupId)); }
 async function campToGroup(id){
   const sh=_campShift(), r=_campRow(id);
@@ -19416,9 +19435,9 @@ async function campToGroup(id){
     _campSave(); _campDraw();
     /* ⚠️ Абонемент — ОТДЕЛЬНЫЙ шаг и отдельная ошибка. Не вышло с ним — ребёнок всё равно
        уже в группе, и делать вид, что перенос не состоялся, нельзя. */
-    const subj=(t&&(t.subject_ids||[]).length)?t.subject_ids.map(Number):[];
+    const SJ=_campSubjIds(sh), subj=SJ.ids;
     if(!subj.length){
-      toast((wasExt?"Участие продлено":"В группу внесён(а)")+", но абонемент не выдан: у шаблона не заданы предметы");
+      toast((wasExt?"Участие продлено":"В группу внесён(а)")+", но абонемент не выдан: предмет не задан ни у группы, ни у шаблона");
       return;
     }
     const jt=await _pubCall("giveTariff",{dryRun:false, branch:br,
@@ -19723,13 +19742,17 @@ function _campAlfaCfgHtml(sh){
     /* ⚠️ Шаблона на нужную цену может не быть — создать его через API нельзя, это делается
        в самой Alfa. Молчать нельзя: иначе непонятно, почему в списке нет «950». */
     if(!_campAlfaTariffs.length) h+='<div class="cmp-warn">Шаблонов абонемента в этом филиале нет. Создайте шаблон в AlfaCRM и нажмите «Обновить списки».</div>';
-    if(t&&!(t.subject_ids||[]).length) h+='<div class="cmp-warn">У шаблона «'+esc(t.name||"")+'» не заданы предметы — Alfa не примет такой абонемент. Проставьте предмет в шаблоне.</div>';
+    /* ⚠️ Предупреждаем, только когда предмета нет НИГДЕ. Раньше ругались на пустой шаблон,
+       хотя предмет прекрасно берётся из группы — и человек шёл править Alfa зря. */
+    const SJ=_campSubjIds(sh);
+    if(g&&t&&!SJ.ids.length) h+='<div class="cmp-warn">Предмет не задан ни у группы «'+esc(g.name||"")+'», ни у шаблона «'+esc(t.name||"")+'». Alfa не примет такой абонемент — проставьте предмет у группы в AlfaCRM и нажмите «Обновить списки».</div>';
   }
   if(g&&t){
     const p=_campTarPrice(t);
     h+='<div class="cmp-fh" style="margin-top:6px">Переносим в <b>'+esc(g.name||"")+'</b>, абонемент <b>'+esc(t.name||"")+'</b>'
       +(p!=null?(' на <b>'+_gm(p)+' р.</b>'):"")
       +(sh.from&&sh.to?(' · период '+esc(_campDate(sh.from))+'–'+esc(_campDate(sh.to))):' · <b style="color:var(--terra-d)">у смены не заданы даты</b> — период абонемента взять неоткуда')
+      +(_campSubjIds(sh).ids.length?(' · предмет из '+_campSubjIds(sh).from):'')
       +'</div>';
   }
   return h;

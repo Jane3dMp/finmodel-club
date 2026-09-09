@@ -22,7 +22,7 @@ function check(name, ok, detail) {
 function eq(name, got, want) { check(name, got === want, JSON.stringify(got) + ' ≠ ' + JSON.stringify(want)); }
 
 const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
-const MULTI = ['_campSeedLayout', '_campCap', '_campBeds', '_campSplitFloor2', '_campWhyNoTransfer', '_campTarLabel'];
+const MULTI = ['_campSeedLayout', '_campCap', '_campBeds', '_campSplitFloor2', '_campWhyNoTransfer', '_campTarLabel', '_campSubjIds'];
 const ONE = ['_campNewId', '_campInGroup', '_campTarPrice'];
 let src = '';
 function grab(name, re) {
@@ -34,12 +34,12 @@ for (const n of MULTI) grab(n, new RegExp('\\nfunction ' + n + '\\([^)]*\\)\\s*\
 for (const n of ONE) grab(n, new RegExp('\\nfunction ' + n + '\\(.*\\}$', 'm'));
 
 let seq = 0;
-const ctx = { _campNewIdSeq: 0, _gm: n => String(Math.round(+n||0)) };
+const ctx = { _campNewIdSeq: 0, _gm: n => String(Math.round(+n||0)), _campAlfaGroups: null, _campAlfaTariffs: null };
 /* _campBlockHtml рисует карточку блока — вырезаем отдельно, у него свой набор заглушек. */
 const mb = html.match(/\nfunction _campBlockHtml\([^)]*\)\s*\{[\s\S]*?\n\}/m);
 if (!mb) { console.log('не найдено в index.html: _campBlockHtml'); process.exit(1); }
 const blockSrc = mb[0];
-const API = new Function('ctx', 'with (ctx) { ' + src + ' return {_campSeedLayout,_campCap,_campBeds,_campSplitFloor2,_campWhyNoTransfer,_campInGroup,_campTarPrice,_campTarLabel}; }')(ctx);
+const API = new Function('ctx', 'with (ctx) { ' + src + ' return {_campSeedLayout,_campCap,_campBeds,_campSplitFloor2,_campWhyNoTransfer,_campInGroup,_campTarPrice,_campTarLabel,_campSubjIds}; }')(ctx);
 
 /* ================= схема санатория ================= */
 const lay = API._campSeedLayout();
@@ -315,6 +315,53 @@ eq('из них детских', API._campBeds(lay, true).length, 76);
      'Лагерь · 950 р. · 6 зан.');
   eq('без цены', L({ id: 5, name: 'Лагерь' }), 'Лагерь');
   eq('без имени — по id', L({ id: 7 }), 'шаблон 7');
+}
+
+/* ================= ПРЕДМЕТ ДЛЯ АБОНЕМЕНТА =================
+   ⚠️ Живой случай 09.09.2026: Жанна нажала перенос и получила «Участие продлено, но абонемент не
+   выдан: у шаблона не заданы предметы». Её шаблон «950» — поурочный, 5 уроков по 190, предметы
+   в нём действительно пустые.
+   Правильный источник — не шаблон, а ГРУППА: предмет, за который списывается занятие, знает
+   именно она, и абонемент обязан покрывать его. Шаблон остаётся запасным путём (сборные группы
+   без предмета). Нет ни там, ни там — не выдумываем. */
+{
+  const keepG = ctx._campAlfaGroups, keepT = ctx._campAlfaTariffs;
+  const SJ = API._campSubjIds;
+  const sh = { alfaGroupId: 77, alfaTariffId: 5 };
+
+  // 1. у группы предмет есть — берём его, шаблон не спрашиваем
+  ctx._campAlfaGroups = [{ id: 77, name: 'Хогвартс 27', subject_ids: [11] }];
+  ctx._campAlfaTariffs = [{ id: 5, name: '950', subject_ids: [99] }];
+  eq('предмет берём у группы', SJ(sh).ids.join(','), '11');
+  eq('и говорим, откуда', SJ(sh).from, 'группы');
+
+  // 2. ⚠️ ровно случай Жанны: у шаблона пусто, у группы есть — перенос обязан пройти
+  ctx._campAlfaTariffs = [{ id: 5, name: '950', subject_ids: [] }];
+  eq('пустой шаблон не мешает', SJ(sh).ids.join(','), '11');
+
+  // 3. у группы пусто (сборная), у шаблона есть — запасной путь
+  ctx._campAlfaGroups = [{ id: 77, name: 'Сборная', subject_ids: [] }];
+  ctx._campAlfaTariffs = [{ id: 5, name: '950', subject_ids: [99, 100] }];
+  eq('тогда берём у шаблона', SJ(sh).ids.join(','), '99,100');
+  eq('и это видно', SJ(sh).from, 'шаблона');
+
+  // 4. нет нигде — не выдумываем
+  ctx._campAlfaTariffs = [{ id: 5, name: '950', subject_ids: [] }];
+  eq('предмета нет нигде', SJ(sh).ids.length, 0);
+  eq('и источника нет', SJ(sh).from, '');
+
+  // 5. мусор в списках не должен пролезать в запрос к Alfa
+  ctx._campAlfaGroups = [{ id: 77, name: 'Х', subject_ids: [0, null, 11, '12'] }];
+  eq('нули и пустышки отброшены', SJ(sh).ids.join(','), '11,12');
+
+  // 6. списки ещё не загружены / смена без выбора — тихо ноль, а не падение
+  ctx._campAlfaGroups = null; ctx._campAlfaTariffs = null;
+  eq('без загруженных списков', SJ(sh).ids.length, 0);
+  ctx._campAlfaGroups = [{ id: 77, subject_ids: [11] }];
+  eq('смена без группы', SJ({ alfaGroupId: 0, alfaTariffId: 0 }).ids.length, 0);
+  eq('смены нет вовсе', SJ(null).ids.length, 0);
+
+  ctx._campAlfaGroups = keepG; ctx._campAlfaTariffs = keepT;
 }
 
 console.log(bad ? '\nПРОВАЛЕНО: ' + bad : '\nВсё сошлось');
