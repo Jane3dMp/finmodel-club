@@ -1013,6 +1013,10 @@ h3.cmp-fl span{font-weight:400;font-size:12px;color:var(--muted)}
 .cmp-bar{align-items:center;margin-bottom:6px}
 .cmp-bar .chip{font-size:12px;padding:5px 12px}
 .cmp-bar .btn{margin-left:auto}
+/* ⚠️ Только первая кнопка отжимается вправо. У каждой margin-left:auto flex делит свободное
+   место поровну, и шестерёнка зависала посередине строки, далеко от печати (правка Жанны
+   09.09.2026: «шестерёнку рядом с печатью поставь»). */
+.cmp-bar .btn ~ .btn{margin-left:6px}
 .cmp-dr-s{font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;
   margin:18px 0 10px;padding-bottom:5px;border-bottom:1px solid var(--line)}
 .cmp-dr-b>.cmp-dr-s:first-child{margin-top:0}
@@ -2174,7 +2178,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-09-09-05";
+const APP_VER="2026-09-09-06";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
