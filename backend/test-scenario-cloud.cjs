@@ -1,0 +1,190 @@
+// Версии модели: опись снимка и версии, которых нет в этом браузере.
+// Запуск: node backend/test-scenario-cloud.cjs
+//
+// Проверяется НАСТОЯЩИЙ код из index.html — функции вырезаются из файла и исполняются.
+//
+// ⚠️ Живой случай 09.09.2026. Из модели пропала смена «Хогвартс 27»: лагерь перезаписали пустым.
+// Восстанавливать было неоткуда — в облаке версия одна, а список версий строился ТОЛЬКО из
+// localStorage, который у владельца опустел (память браузера переполнилась). Снимки в облаке
+// были, но в списке у них стояло лишь «214 занятий» — по такой подписи нужный не выбрать, и
+// искать пришлось из консоли браузера, разбирая каждый снимок руками.
+// Отсюда две вещи, которые здесь и проверяются:
+//   1) снимок несёт короткую опись — что в нём за смены и сколько в них детей;
+//   2) версии, которых нет в браузере, видны из облака и открываются оттуда БЕЗОПАСНО.
+const fs = require('fs');
+const path = require('path');
+
+let bad = 0;
+function check(name, ok, detail) {
+  if (!ok) bad++;
+  console.log((ok ? '  ok   ' : ' ПЛОХО ') + name + (ok || !detail ? '' : ': ' + detail));
+}
+function eq(name, got, want) { check(name, got === want, JSON.stringify(got) + ' ≠ ' + JSON.stringify(want)); }
+
+const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+const MULTI = ['_snapSum', '_snapSumText'];
+const ONE = ['_fbKey'];
+let src = '';
+function grab(name, re) {
+  const m = html.match(re);
+  if (!m) { console.log('не найдено в index.html: ' + name); process.exit(1); }
+  src += m[0] + '\n';
+}
+for (const n of MULTI) grab(n, new RegExp('\\nfunction ' + n + '\\([^)]*\\)\\s*\\{[\\s\\S]*?\\n\\}', 'm'));
+for (const n of ONE) grab(n, new RegExp('\\nfunction ' + n + '\\(.*\\}$', 'm'));
+
+/* openCloudScenario — открытие версии, которой нет в браузере. Свой набор заглушек: она ходит
+   в облако и переключает модель, мешать её с описью снимка нельзя. */
+const mc = html.match(/\nasync function openCloudScenario\([^)]*\)\s*\{[\s\S]*?\n\}/m);
+if (!mc) { console.log('не найдено в index.html: openCloudScenario'); process.exit(1); }
+const cloudSrc = mc[0];
+
+const ctx = { S: null };
+const API = new Function('ctx', 'with (ctx) { ' + src + ' return {_snapSum,_snapSumText,_fbKey}; }')(ctx);
+
+/* ================= ОПИСЬ СНИМКА ================= */
+{
+  ctx.S = {
+    grid: new Array(214).fill(0),
+    camp: {
+      shifts: [{ id: 's1', name: 'Хогвартс 27' }, { id: 's2', name: 'Весна 27' }],
+      res: [{ shiftId: 's1' }, { shiftId: 's1' }, { shiftId: 's1' }, { shiftId: 's2' }],
+    },
+  };
+  const sum = API._snapSum();
+  eq('занятий в описи', sum.les, 214);
+  eq('смен в описи', sum.camp.length, 2);
+  eq('имя первой смены', sum.camp[0].n, 'Хогвартс 27');
+  // ⚠️ ровно это и было нужно, чтобы найти снимок: сколько детей в каждой смене
+  eq('детей в первой', sum.camp[0].r, 3);
+  eq('детей во второй', sum.camp[1].r, 1);
+  eq('строкой', API._snapSumText(sum), 'лагерь: Хогвартс 27 · 3 | Весна 27 · 1');
+
+  // ⚠️ именно так выглядела подмена: смена одна, и она пустая
+  ctx.S.camp = { shifts: [{ id: 'x', name: 'Новая смена' }], res: [] };
+  eq('подменённый лагерь виден сразу', API._snapSumText(API._snapSum()), 'лагерь: Новая смена · 0');
+
+  // лагеря нет вовсе — так и пишем, а не молчим
+  ctx.S.camp = { shifts: [], res: [] };
+  eq('смен нет', API._snapSumText(API._snapSum()), 'смен лагеря нет');
+  ctx.S.camp = null;
+  eq('узла лагеря нет', API._snapSumText(API._snapSum()), 'смен лагеря нет');
+
+  // ⚠️ опись едет в облако с КАЖДЫМ снимком — она обязана быть маленькой
+  ctx.S.camp = { shifts: [], res: [] };
+  for (let i = 0; i < 40; i++) {
+    ctx.S.camp.shifts.push({ id: 'i' + i, name: 'Смена номер ' + i + ' с очень длинным названием, какие бывают' });
+    ctx.S.camp.res.push({ shiftId: 'i' + i });
+  }
+  const big = API._snapSum();
+  check('смен в описи не больше восьми', big.camp.length <= 8, String(big.camp.length));
+  check('имя обрезано', big.camp[0].n.length <= 40, big.camp[0].n);
+  check('опись остаётся короткой', JSON.stringify(big).length < 600, String(JSON.stringify(big).length));
+
+  // испорченное состояние не должно ронять запись снимка: лучше снимок без описи, чем без снимка
+  ctx.S = null;
+  eq('без состояния опись пустая', API._snapSum(), null);
+  eq('и строка пустая', API._snapSumText(null), '');
+}
+
+/* ================= ИМЯ ВЕРСИИ В КЛЮЧ ОБЛАКА =================
+   Список из облака приходит КЛЮЧАМИ, а локальный — именами. Сверять их надо через _fbKey,
+   иначе версия с точкой в названии покажется «отсутствующей в браузере» и предложит открыть
+   себя из облака поверх самой себя. */
+{
+  eq('обычное имя', API._fbKey('Основной'), 'Основной');
+  eq('точка заменяется', API._fbKey('2026.2027'), '2026_2027');
+  eq('слэш заменяется', API._fbKey('2026/2027'), '2026_2027');
+  eq('решётка и скобки', API._fbKey('А#Б[В]'), 'А_Б_В_');
+  eq('доллар', API._fbKey('Цена$'), 'Цена_');
+  eq('пусто — Основной', API._fbKey(''), 'Основной');
+  // ⚠️ два разных имени могут дать ОДИН ключ: «2026.2027» и «2026/2027». Это свойство самой
+  // Firebase, и полагаться на обратное преобразование ключа в имя нельзя.
+  check('разные имена могут дать один ключ', API._fbKey('2026.2027') === API._fbKey('2026/2027'));
+}
+
+/* ================= ОТКРЫТЬ ВЕРСИЮ ИЗ ОБЛАКА — БЕЗОПАСНО =================
+   ⚠️ Самое опасное место во всей истории. Если сначала переключиться на версию, а потом читать
+   её узел, то при пустом ответе fbConnect засеет узел ТЕКУЩЕЙ моделью — то есть затрёт ровно ту
+   версию, за которой пришли. Именно так теряют данные. Поэтому читаем первыми, и при пустом
+   ответе НЕ трогаем ничего: ни имя версии, ни модель, ни облако. */
+let cloudChecks=Promise.resolve();
+{
+  const C = new Function('ctx', 'with (ctx) { ' + cloudSrc + ' return {openCloudScenario}; }');
+
+  const mk = (cloudVal) => {
+    const log = { applied: 0, persisted: 0, connected: 0, saved: 0, toasts: [] };
+    const ctx2 = {
+      FB_ON: true, S: { meta: { name: 'С майскими' } },
+      _fbDb: { ref: () => ({ once: () => Promise.resolve({ val: () => cloudVal }) }) },
+      _fbKey: n => String(n || 'Основной').replace(/[.#$\[\]\/]/g, '_'),
+      ensureCurrentInList: () => { log.saved++; return {}; },
+      _applyRemote: () => { log.applied++; },
+      _normalizeRemote: v => v,
+      _persistLocalRaw: () => { log.persisted++; },
+      fbConnect: () => { log.connected++; },
+      renderScnList: () => {},
+      toast: m => log.toasts.push(m),
+      document: { getElementById: () => null },
+    };
+    return { api: C(ctx2), ctx: ctx2, log };
+  };
+
+  /* --- узел пуст: не открываем и НИЧЕГО не трогаем --- */
+  cloudChecks = (async () => {
+    for (const empty of [null, {}, { grid: null, rest: '' }]) {
+      const t = mk(empty);
+      await t.api.openCloudScenario('Лагерь');
+      check('пустой узел не открываем (' + JSON.stringify(empty) + ')',
+            t.log.applied === 0 && t.log.connected === 0, JSON.stringify(t.log));
+      // ⚠️ главное: имя версии не подменено — иначе следующий же пуш ушёл бы в чужой узел
+      eq('имя версии не тронуто', t.ctx.S.meta.name, 'С майскими');
+      check('и сказано, почему', t.log.toasts.some(m => /пуст/.test(m)), t.log.toasts.join(' | '));
+    }
+
+    /* --- в узле есть данные: открываем --- */
+    {
+      const t = mk({ grid: { l1: {} }, rest: '{"camp":{}}' });
+      await t.api.openCloudScenario('Лагерь 2027');
+      eq('имя версии переключено', t.ctx.S.meta.name, 'Лагерь 2027');
+      eq('модель применена', t.log.applied, 1);
+      eq('сохранена локально', t.log.persisted, 1);
+      eq('переподключились к облаку', t.log.connected, 1);
+      // ⚠️ текущую версию обязаны сохранить ДО переключения, иначе она потеряется
+      eq('текущая сохранена перед переключением', t.log.saved, 1);
+    }
+
+    /* --- узел только с rest, без grid: тоже данные --- */
+    {
+      const t = mk({ rest: '{"camp":{"shifts":[{"id":"s","name":"Хогвартс 27"}]}}' });
+      await t.api.openCloudScenario('Хогвартс');
+      eq('версия с одним rest открывается', t.ctx.S.meta.name, 'Хогвартс');
+      eq('и применена', t.log.applied, 1);
+    }
+
+    /* --- нет связи: не делаем вид, что открыли --- */
+    {
+      const t = mk({ grid: {}, rest: 'x' });
+      t.ctx.FB_ON = false;
+      await t.api.openCloudScenario('Что угодно');
+      eq('без связи имя не меняем', t.ctx.S.meta.name, 'С майскими');
+      eq('и модель не трогаем', t.log.applied, 0);
+      check('сказано про связь', t.log.toasts.some(m => /связ/.test(m)), t.log.toasts.join(' | '));
+    }
+
+    /* --- облако ответило ошибкой: тоже ничего не трогаем --- */
+    {
+      const t = mk(null);
+      t.ctx._fbDb = { ref: () => ({ once: () => Promise.reject(new Error('сеть')) }) };
+      await t.api.openCloudScenario('Лагерь');
+      eq('при ошибке имя не меняем', t.ctx.S.meta.name, 'С майскими');
+      eq('и модель не трогаем', t.log.applied, 0);
+    }
+  })();
+}
+
+/* Асинхронная часть заканчивает прогон: без этого итог печатался бы до её проверок. */
+cloudChecks.then(()=>{
+  console.log(bad ? '\nПРОВАЛЕНО: ' + bad : '\nВсё сошлось');
+  process.exit(bad ? 1 : 0);
+}, e=>{ console.log(' ПЛОХО облако: '+e.message); process.exit(1); });

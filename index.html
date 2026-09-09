@@ -2197,7 +2197,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-09-09-09";
+const APP_VER="2026-09-09-10";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -2995,6 +2995,27 @@ function closePeek(){ clearTimeout(_peekTimer); const m=document.getElementById(
 let _histTimer=null, _lastSnapHash="";
 function _fbHistRef(){ return (_fbDb && FB_ON) ? _fbDb.ref("history/"+_fbKey(currentScenarioName())) : null; }
 function _snapSig(){ try{ return _hashIdx(JSON.stringify(_gridMap())+_restStr(),0).toString(36); }catch(e){ return ""; } }
+/* ===== ЧТО ЛЕЖИТ В СНИМКЕ =====
+   ⚠️ 09.09.2026 из модели пропала смена «Хогвартс 27»: лагерь перезаписали пустым, а в облаке
+   версия одна — восстанавливать было неоткуда, кроме снимков. Снимки были, но в списке у них
+   стояло только «214 занятий» — по такой подписи выбрать нужный НЕВОЗМОЖНО, и искать пришлось
+   из консоли браузера, разбирая каждый снимок руками.
+   Поэтому снимок теперь несёт короткую опись: сколько занятий и какие смены лагеря с числом
+   детей. Считается при записи — разбирать 30 снимков по мегабайту при открытии окна дорого. */
+function _snapSum(){
+  try{
+    const c=(S.camp||{}), sh=c.shifts||[], res=c.res||[];
+    return {les:(S.grid||[]).length,
+            camp:sh.slice(0,8).map(s=>({n:String(s.name||"").slice(0,40),
+                                        r:res.filter(r=>r.shiftId===s.id).length}))};
+  }catch(e){ return null; }
+}
+/* Опись словами. Одна и та же строка нужна и свежим снимкам, и разобранным по кнопке. */
+function _snapSumText(sum){
+  if(!sum) return "";
+  const c=(sum.camp||[]);
+  return c.length ? ("лагерь: "+c.map(x=>x.n+" · "+x.r).join(" | ")) : "смен лагеря нет";
+}
 function makeSnapshot(manual){
   const ref=_fbHistRef();
   if(!ref){ if(manual) toast("Нет связи с Firebase"); return; }
@@ -3003,7 +3024,7 @@ function makeSnapshot(manual){
   if(!manual && sig===_lastSnapHash) return;              // без изменений — не дублируем
   _ensureLessonIds();
   const email=(_fbAuth()&&_fbAuth().currentUser&&_fbAuth().currentUser.email)||"";
-  ref.child(String(Date.now())).set({at:new Date().toISOString(), by:email, n:(S.grid||[]).length, manual:!!manual, grid:_gridMap(), rest:_restStr()})
+  ref.child(String(Date.now())).set({at:new Date().toISOString(), by:email, n:(S.grid||[]).length, manual:!!manual, sum:_snapSum(), grid:_gridMap(), rest:_restStr()})
     .then(()=>{ _lastSnapHash=sig; _histPrune(ref);
       if(manual){ toast("Снимок сохранён 📸"); const m=document.getElementById("histModal"); if(m&&m.classList.contains("show")) renderHistory(); } })
     .catch(()=>{ if(manual) toast("Не удалось сохранить снимок"); });
@@ -3030,9 +3051,28 @@ function renderHistory(){
         <div style="flex:1;min-width:0">
           <div style="font-size:13px;font-weight:600">${esc(_histWhen(it.at))}${it.manual?' <span style="color:var(--terra)">· вручную</span>':''}</div>
           <div style="font-size:11px;color:var(--muted)">${it.n||0} занятий · ${esc(it.by||"—")}</div>
+          <div style="font-size:11px;color:var(--terra-d)" id="hs_${k}">${
+            it.sum ? esc(_snapSumText(it.sum))
+                   : `<button class="btn ghost sm" style="padding:1px 8px;font-size:11px" onclick="histPeek('${k}')">🔍 что внутри</button>`
+          }</div>
         </div>
         <button class="btn ghost sm" onclick="restoreSnapshot('${k}')">Восстановить</button></div>`; }).join("");
   }).catch(()=>{ box.innerHTML='<div style="color:var(--red);font-size:13px">Не удалось загрузить историю.</div>'; });
+}
+/* Разобрать ОДИН старый снимок по кнопке. У снимков, снятых до появления описи, её нет, а
+   разбирать все тридцать при открытии окна — это десятки мегабайт JSON. Читаем только rest
+   выбранного и только по просьбе. */
+function histPeek(key){
+  const ref=_fbHistRef(); if(!ref) return;
+  const box=document.getElementById("hs_"+key); if(box) box.textContent="читаю…";
+  ref.child(key).child("rest").once("value").then(s=>{
+    let sum=null;
+    try{ const S2=JSON.parse(s.val()||"{}"), c=S2.camp||{}, sh=c.shifts||[], res=c.res||[];
+      sum={les:0, camp:sh.slice(0,8).map(x=>({n:String(x.name||"").slice(0,40),
+                                              r:res.filter(r=>r.shiftId===x.id).length}))};
+    }catch(e){}
+    if(box) box.textContent=sum?_snapSumText(sum):"состав не разобрался";
+  }).catch(()=>{ if(box) box.textContent="не прочиталось"; });
 }
 function restoreSnapshot(key){
   const ref=_fbHistRef(); if(!ref) return;
@@ -21440,8 +21480,51 @@ function toast(m){ const t=document.getElementById("toast"); t.textContent=m; t.
 
 function openScnMenu(){
   document.getElementById("scnCurName").textContent=currentScenarioName();
+  _scnCloud=null;                                     // при каждом открытии спрашиваем облако заново
   renderScnList();
   document.getElementById("scnModal").classList.add("show");
+}
+/* ===== ВЕРСИИ, КОТОРЫХ НЕТ В ЭТОМ БРАУЗЕРЕ =====
+   ⚠️ 09.09.2026: список версий строился ТОЛЬКО из localStorage. У Жанны он опустел (память
+   браузера переполнилась, и приложение перестало сохранять локально) — и в меню осталась одна
+   открытая версия. Со стороны это выглядело как «пропала работа», хотя в облаке всё лежало.
+   Память браузера — расходник: её чистят, она переполняется, у нового компьютера её нет вовсе.
+   Прятать за ней чужую работу нельзя, поэтому спрашиваем облако и показываем разницу.
+   Запрос shallow: возвращает только ИМЕНА узлов, а не модели целиком — иначе открытие окна
+   тянуло бы десятки мегабайт. */
+let _scnCloud=null;                                   // имена версий в облаке; null — ещё не спрашивали
+async function _scnCloudLoad(){
+  try{
+    if(!FB_ON||!FB_CONFIG.databaseURL) return null;
+    const a=_fbAuth(), u=a&&a.currentUser;
+    const t=u?await u.getIdToken():"";
+    const r=await fetch(FB_CONFIG.databaseURL+"/scenarios.json?shallow=true"+(t?("&auth="+t):""));
+    if(!r.ok) return null;
+    const v=await r.json();
+    return v?Object.keys(v):[];
+  }catch(e){ return null; }
+}
+/* Открыть версию, которой в браузере нет. ⚠️ Сначала ЧИТАЕМ узел и убеждаемся, что там есть
+   данные, и только потом переключаемся. Если сделать наоборот, пустой ответ привёл бы к тому,
+   что fbConnect засеял бы этот узел ТЕКУЩЕЙ моделью — то есть затёр бы ровно ту версию, за
+   которой пришли. Именно так теряют данные. */
+async function openCloudScenario(name){
+  if(!FB_ON||!_fbDb){ toast("Нет связи с облаком"); return; }
+  toast("Читаю «"+name+"» из облака…");
+  let val=null;
+  try{ val=(await _fbDb.ref("scenarios/"+_fbKey(name)).once("value")).val(); }
+  catch(e){ toast("Не удалось прочитать версию из облака"); return; }
+  if(!val || !(val.grid||val.rest)){ toast("В облаке эта версия пуста — не открываю, чтобы не затереть"); return; }
+  const list=ensureCurrentInList();                   // текущую сначала сохраняем
+  list[name]=null; delete list[name];
+  if(!S.meta) S.meta={};
+  S.meta.name=name;
+  _applyRemote(_normalizeRemote(val));
+  _persistLocalRaw();
+  if(FB_ON) fbConnect();
+  try{ document.getElementById("scnCurName").textContent=currentScenarioName(); }catch(e){}
+  renderScnList();
+  toast("Открыта версия из облака: "+name);
 }
 function renderScnList(){
   const list=loadScenarioList();
@@ -21459,7 +21542,25 @@ function renderScnList(){
       ${names.length>1?`<button class="btn gray sm" onclick="deleteScenarioByName('${_jsStr(n)}')">×</button>`:''}
     </div>`;
   });
+  /* Версии, которых в этом браузере нет. Спрашиваем облако один раз за открытие окна и
+     дорисовываем блок отдельно — чтобы список не ждал сети. */
+  const only=(_scnCloud||[]).filter(n=>!names.some(x=>_fbKey(x)===n));
+  if(only.length){
+    h+='<div style="margin-top:10px;font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">Есть в облаке, нет в этом браузере</div>'
+     +'<div class="hint" style="margin:4px 0 6px">Память браузера — расходник: её чистят и она переполняется. Эти версии лежат в облаке и открываются оттуда.</div>';
+    only.forEach(n=>{
+      h+=`<div style="display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px dashed var(--line);border-radius:8px;margin-bottom:6px;background:#fff">
+        <span style="flex:1;font-size:13px">☁ ${esc(n)}</span>
+        <button class="btn sm" onclick="openCloudScenario('${_jsStr(n)}')">Открыть из облака</button></div>`;
+    });
+  }
   document.getElementById("scnList").innerHTML=h;
+  /* Спрашиваем облако после отрисовки и перерисовываем, когда ответит: список версий не
+     должен ждать сети, а отсутствие связи не должно оставлять пустое окно. */
+  if(_scnCloud===null && FB_ON){
+    _scnCloud=[];                                     // чтобы не спрашивать повторно на каждый рендер
+    _scnCloudLoad().then(v=>{ if(v&&v.length){ _scnCloud=v; renderScnList(); } });
+  }
 }
 function openScenario(name){
   switchScenario(name);
