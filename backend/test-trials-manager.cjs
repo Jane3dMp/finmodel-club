@@ -147,11 +147,17 @@ delete ctx.S.children['201'];
   {
     const html2 = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
     let s2 = '';
-    for (const n of ['_trPayDays', '_trPaySum', '_trPayHtml', '_trMoneyStage', '_trMgrKidsHtml', '_trMgrUnknownHtml', '_trMgrStats', '_trMgrTableHtml']) {
+    for (const n of ['_trPayDays', '_trPaySum', '_trPayHtml', '_trMoneyStage', '_trMgrKidsHtml', '_trMgrUnknownHtml', '_trMgrStats', '_trMgrTableHtml',
+                     '_trTarText', '_trMgrKidsSorted', '_trPColor', '_trEvText', '_trMgrPrintPage', 'trPrintMgr', 'trPrintMgrAll']) {
       const m = html2.match(new RegExp('\\nfunction ' + n + '\\([^)]*\\)\\s*\\{[\\s\\S]*?\\n\\}', 'm'));
       if (!m) { console.log('не найдено в index.html: ' + n); process.exit(1); }
       s2 += m[0] + '\n';
     }
+    // _jsStr однострочная — берём её так же, как _phoneKey выше. Настоящую, не заглушку:
+    // именно она экранирует имя менеджера в onclick кнопки печати.
+    const one2 = html2.split('\n').find(x => x.indexOf('function _jsStr(') === 0);
+    if (!one2) { console.log('не найдено в index.html: _jsStr'); process.exit(1); }
+    s2 += one2 + '\n';
     // корзины воронки подменяем: здесь проверяется сведение, а не сама воронка
     const kid = (id, done, sum) => ({ id: String(id), les: [{ done: done, sum: sum }] });
     const FN = {
@@ -190,7 +196,7 @@ delete ctx.S.children['201'];
                 noLes: ['без занятий', 'm'], back: ['ходил раньше', 'm'] },
     _TR_BORD: ['came', 'missed', 'waiting', 'noLes', 'back'],
     _trKidLink: id => '<a>Ребёнок ' + id + '</a>',
-    _trPhone: id => ({ '208': '+375291110000' })[String(id)] || '',
+    _trPhone: id => ({ '201': '+375291112233', '208': '+375291110000' })[String(id)] || '',
     _phoneKey: p => { const d = String(p || '').replace(/[^0-9]/g, ''); return d.length >= 9 ? d.slice(-9) : ''; },
       _trHasPaid: id => !!paid[String(id)],
       _trArchived: id => !!arch[String(id)],
@@ -198,7 +204,8 @@ delete ctx.S.children['201'];
       esc: x => String(x),
     };
     const A2 = new Function('ctx', 'with (ctx) { ' + s2 +
-    ' return {_trMgrStats,_trMgrTableHtml,_trMgrUnknownHtml,_trMgrKidsHtml,_trMoneyStage,_trPaySum,_trPayDays,_trPayHtml}; }')(ctx2);
+    ' return {_trMgrStats,_trMgrTableHtml,_trMgrUnknownHtml,_trMgrKidsHtml,_trMoneyStage,_trPaySum,_trPayDays,_trPayHtml,' +
+    '_trTarText,_trMgrKidsSorted,_trPColor,_trEvText,_trMgrPrintPage,trPrintMgr,trPrintMgrAll,_jsStr}; }')(ctx2);
 
     const st = A2._trMgrStats();
     eq('менеджеров в рейтинге', st.length, 3);            // Ольга, Мария и «не определён»
@@ -323,6 +330,65 @@ delete ctx.S.children['201'];
   check('дошедшие идут раньше не дошедших',
         ol.indexOf('дошёл') < ol.indexOf('не дошёл'), 'порядок внутри менеджера');
 
+
+  /* ================= ПЕЧАТЬ СПИСКА ПО МЕНЕДЖЕРУ =================
+     Жанна: «вот эти списки хочу печатать по каждому менеджеру». Лист обязан повторять экран,
+     а не жить своей жизнью: тот же порядок, те же слова этапов — плюс телефон, по которому
+     звонят, и клетка под отметку. */
+  ctx2._trCards = { '201': { evzz: 'Ждём оплату' } };
+  ctx2._trTar = { '201': { paid: true, tariffs: [{ name: 'Робототехника 8', balance: 6 }, { name: 'Пробный', trial: true }] },
+                  '202': {}, '204': { paid: false, tariffs: [] } };
+  let PR = null, TOASTED = '';
+  ctx2._obzPrint = (title, html) => { PR = { title: title, html: html }; };
+  ctx2.toast = t => { TOASTED = t; };
+
+  A2.trPrintMgr('Ольга');
+  check('лист менеджера напечатан', !!PR, 'окно печати не открылось');
+  check('в заголовке — имя менеджера', PR.title.indexOf('Ольга') === 0, PR.title);
+  check('дети перечислены', PR.html.indexOf('Ребёнок 201') > 0, PR.html);
+  check('телефон на месте — без него лист бесполезен', PR.html.indexOf('+375291112233') > 0, PR.html);
+  check('этап по занятиям в листе', PR.html.indexOf('дошёл') > 0);
+  check('этап по деньгам в листе', PR.html.indexOf('оплатил 300 р') > 0, PR.html);
+  check('сводка менеджера в шапке', PR.html.indexOf('дошли 2') > 0 && PR.html.indexOf('не дошли 1') > 0, PR.html.slice(0, 700));
+  check('и «без занятий» тоже', PR.html.indexOf('без занятий 1') > 0, PR.html.slice(0, 700));
+  // ⚠️ чужой ребёнок в листе — это звонок не своему клиенту
+  check('чужих детей в листе нет', PR.html.indexOf('Ребёнок 206') < 0, 'в лист Ольги попал ребёнок Марии');
+  check('порядок тот же, что на экране: дошедшие раньше', PR.html.indexOf('дошёл') < PR.html.indexOf('не дошёл'));
+  /* ⚠️ В печатном окне переменных темы нет: var(--green) там ничего не значит, и лист
+     вышел бы сплошь чёрным — этапы перестали бы различаться с одного взгляда. */
+  check('цвета переведены в hex', PR.html.indexOf('var(--') < 0, PR.html.slice(PR.html.indexOf('style="color:'), PR.html.indexOf('style="color:') + 80));
+  check('и это настоящий зелёный «дошёл»', PR.html.indexOf('#3f7d4e') > 0, PR.html);
+  check('абонемент показан с остатком', PR.html.indexOf('Робототехника 8 · остаток 6') > 0, PR.html);
+  // колонка «Абонемент» не должна повторять то, что уже сказала колонка денег
+  const i204 = PR.html.indexOf('Ребёнок 204');
+  const row204 = PR.html.slice(i204, PR.html.indexOf('</tr>', i204));
+  eq('«без абонемента» в строке сказано один раз', row204.split('без абонемента').length - 1, 1);
+  check('в колонке абонемента — прочерк', row204.indexOf('<span class="mut">—</span>') > 0, row204);
+  check('ЭВ 26/27 подтянут из карточки Alfa', PR.html.indexOf('Ждём оплату') > 0, PR.html);
+  // архивному звонить уже не надо — это должно быть видно на бумаге
+  PR = null; A2.trPrintMgr('менеджер не определён');
+  check('в листе видно, кто в архиве', PR.html.indexOf('в архиве Alfa') > 0, PR.html);
+
+  /* --- все листы разом: каждому менеджеру своя страница --- */
+  PR = null; A2.trPrintMgrAll();
+  check('общая печать открылась', !!PR);
+  eq('страниц столько же, сколько менеджеров', PR.html.split('class="page"').length - 1, 3);
+  check('в общей печати есть и Ольга, и Мария', PR.html.indexOf('Ольга') > 0 && PR.html.indexOf('Мария') > 0);
+
+  /* --- кнопки на экране --- */
+  const hb = A2._trMgrKidsHtml(A2._trMgrStats());
+  eq('кнопка печати у каждого менеджера', hb.split("trPrintMgr('").length - 1, 3);
+  check('кнопка «все списки» есть', hb.indexOf('trPrintMgrAll()') > 0, hb.slice(0, 300));
+  /* ⚠️ Кнопка стоит внутри summary. Без stopPropagation клик по печати заодно свернул бы
+     раскрывашку — список закрывался бы ровно в тот момент, когда его печатают. */
+  check('клик по печати не сворачивает список',
+        hb.indexOf('event.stopPropagation();event.preventDefault();trPrintMgr(') > 0,
+        hb.slice(hb.indexOf('Ольга') - 120, hb.indexOf('Ольга') + 500));
+
+  /* --- менеджера с таким именем нет: говорим, а не молчим --- */
+  PR = null; TOASTED = ''; A2.trPrintMgr('Кого Нет');
+  check('несуществующего не печатаем', PR === null);
+  check('и объясняем почему', TOASTED.indexOf('не собраны') > 0, TOASTED);
 
     // менеджеры не подтянуты — рейтинга нет вовсе
     ctx2._trMgr = null;

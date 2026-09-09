@@ -2197,7 +2197,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-09-09-16";
+const APP_VER="2026-09-09-17";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -11518,10 +11518,7 @@ function _trMoneyStage(id){
 function _trMgrKidsHtml(rows){
   if(!rows||!rows.length) return "";
   const one=m=>{
-    const list=(m.kids2||[]).slice().sort((a,b)=>{
-      const d=_TR_BORD.indexOf(a.b)-_TR_BORD.indexOf(b.b);
-      return d||_trKidName(a.id).localeCompare(_trKidName(b.id),"ru");
-    });
+    const list=_trMgrKidsSorted(m);
     const li=list.map(x=>{
       const b=_TR_BUCK[x.b]||["—","var(--muted)"], ms=_trMoneyStage(x.id);
       return `<div style="display:flex;gap:8px;align-items:baseline;padding:3px 0;border-bottom:1px solid var(--line);flex-wrap:wrap">
@@ -11531,12 +11528,81 @@ function _trMgrKidsHtml(rows){
       </div>`;
     }).join("");
     return `<details style="margin-bottom:6px"><summary style="cursor:pointer;font-size:13px">
-      <b>${esc(m.name)}</b> <span style="color:var(--muted)">— ${m.kids} ${_fmlKid(m.kids)} · дошли ${m.came} · купили ${m.paid} · оплатили ${_gm(m.pay)} р</span></summary>
+      <b>${esc(m.name)}</b> <span style="color:var(--muted)">— ${m.kids} ${_fmlKid(m.kids)} · дошли ${m.came} · купили ${m.paid} · оплатили ${_gm(m.pay)} р</span>
+      <!-- ⚠️ stopPropagation обязателен: кнопка внутри summary, и без него клик по печати
+           заодно свернул бы раскрывашку. -->
+      <button class="btn ghost sm" style="margin-left:8px" title="Напечатать список этого менеджера отдельным листом"
+        onclick="event.stopPropagation();event.preventDefault();trPrintMgr('${_jsStr(m.name)}')">🖨</button></summary>
       <div style="padding:6px 0 4px 4px">${li}</div></details>`;
   };
-  return `<div style="margin-top:10px"><h4 style="margin:8px 0 4px">📋 Дети по менеджерам</h4>
+  return `<div style="margin-top:10px"><h4 style="margin:8px 0 4px">📋 Дети по менеджерам
+    <button class="btn ghost sm" style="margin-left:8px;font-weight:400" title="Все менеджеры сразу — каждому свой лист" onclick="trPrintMgrAll()">🖨 Все списки</button></h4>
     <div class="hint" style="margin-bottom:6px">Два столбца этапов независимы: слева — где ребёнок по занятиям, справа — по деньгам. Оплатить абонемент можно, ещё не придя на первое занятие, — поэтому «Купили» в таблице выше бывает больше «Дошли».</div>
     ${rows.map(one).join("")}</div>`;
+}
+/* ===== ПЕЧАТЬ СПИСКА ПО МЕНЕДЖЕРУ =====
+   Жанна: «вот эти списки хочу печатать по каждому менеджеру». На экране список раскрывается,
+   а менеджеру нужен лист в руки: имя, телефон, где ребёнок по занятиям и где по деньгам.
+   Один менеджер — один лист: класс .page в OBZ_CSS даёт разрыв страницы. */
+/* Порядок детей ОДИН и тот же на экране и в печати. Если разъедется, печатный список
+   перестанет совпадать с тем, что менеджер видит у себя, и сверять их станет невозможно. */
+function _trMgrKidsSorted(m){
+  return ((m&&m.kids2)||[]).slice().sort((a,b)=>{
+    const d=_TR_BORD.indexOf(a.b)-_TR_BORD.indexOf(b.b);
+    return d||_trKidName(a.id).localeCompare(_trKidName(b.id),"ru");
+  });
+}
+/* ⚠️ Цвета этапов на экране заданы переменными темы. В печатном окне их нет вовсе —
+   var(--green) там не значит ничего, и весь список вышел бы чёрным. Переводим в те же
+   hex, что и остальные печатные списки (OBZ_CSS). */
+function _trPColor(c){
+  const M={"var(--green)":"#3f7d4e", "var(--red)":"#b0493d", "var(--terra)":"#a8761f",
+           "var(--muted)":"#8a8178", "var(--coal)":"#1c1410"};
+  return M[c]||c||"";
+}
+function _trEvText(id){
+  const c=_trCards[String(id)]||_trCards[Number(id)];
+  return (c&&c.evzz)?String(c.evzz).trim():"";
+}
+function _trMgrPrintPage(m){
+  const list=_trMgrKidsSorted(m);
+  const body=list.map((x,i)=>{
+    const b=_TR_BUCK[x.b]||["—","var(--muted)"], ms=_trMoneyStage(x.id);
+    /* «Абонемент» показываем, только когда есть что показать: название и остаток. Фразы
+       «без абонемента» и «только пробный» соседняя колонка уже сказала — повторять их
+       второй раз в той же строке значит просто занять место. */
+    const t0=_trTarText(x.id);
+    const tar=(t0==="без абонемента"||t0==="только пробный")?"":t0;
+    return `<tr>
+      <td class="mut">${i+1}</td>
+      <td class="nm">${esc(_trKidName(x.id))}${_trArchived(x.id)?'<div class="mut" style="font-weight:400">в архиве Alfa</div>':""}</td>
+      <td>${esc(_trPhone(x.id)||"—")}</td>
+      <td style="color:${_trPColor(b[1])}">${esc(b[0])}</td>
+      <td style="color:${_trPColor(ms[1])}">${esc(ms[0])}</td>
+      <td>${tar?esc(tar):'<span class="mut">—</span>'}</td>
+      <td class="mut">${esc(_trEvText(x.id))}</td>
+      <td><span class="call"></span></td></tr>`;
+  }).join("");
+  return `<div class="page"><h2>${esc(m.name)} — дети нового набора</h2>
+    <div class="sub">Детей: ${list.length} · дошли ${m.came} · не дошли ${m.missed} · ждём ${m.waiting}${
+      m.noLes?(" · без занятий "+m.noLes):""} · купили абонемент ${m.paid} · оплатили ${_gm(m.pay)} р
+      · напечатано ${esc(new Date().toLocaleDateString("ru-RU"))}
+      <br>Два столбца этапов независимы: слева — где ребёнок по занятиям, справа — по деньгам.
+      Оплатить абонемент можно, ещё не придя на первое занятие, — поэтому купивших бывает больше дошедших.</div>
+    <table><thead><tr><th>№</th><th>Ребёнок</th><th>Телефон</th><th>По занятиям</th>
+      <th>По деньгам</th><th>Абонемент</th><th>ЭВ 26/27</th><th>Отметка</th></tr></thead>
+    <tbody>${body||'<tr><td colspan="8" class="mut">Детей за этим менеджером нет.</td></tr>'}</tbody></table></div>`;
+}
+function trPrintMgr(name){
+  const rows=_trMgrStats();
+  const m=(rows||[]).find(x=>x.name===name);
+  if(!m){ toast("Списки ещё не собраны — нажмите «Пересобрать всё»"); return; }
+  _obzPrint(m.name+" — дети набора", _trMgrPrintPage(m));
+}
+function trPrintMgrAll(){
+  const rows=_trMgrStats();
+  if(!rows||!rows.length){ toast("Списки ещё не собраны — нажмите «Пересобрать всё»"); return; }
+  _obzPrint("Дети по менеджерам", rows.map(m=>_trMgrPrintPage(m)).join(""));
 }
 function _trMgrTableHtml(){
   const rows=_trMgrStats();
