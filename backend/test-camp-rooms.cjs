@@ -1,0 +1,163 @@
+// Расселение по лагерю: сколько мест считать и что показывать на месте ребёнка.
+// Запуск: node backend/test-camp-rooms.cjs
+//
+// Проверяется НАСТОЯЩИЙ код из index.html — функции вырезаются из файла и исполняются.
+//
+// Правило Жанны 09.09.2026: «в расселении не участвуют вожатые, не учитывай их — только блоки
+// для детей, в которых я пометила мальчик или девочка. Если пол не задан — не считай его в этом
+// показателе». Отсюда три разные цифры, и путать их нельзя:
+//   вписано — детей уже на местах;
+//   нужно   — места в детских блоках, У КОТОРЫХ ЗАДАН ПОЛ;
+//   всего   — все детские места санатория, кроме «Комфорта» (блоки вожатых).
+// Раньше знаменатель был один — все 76 детских мест, и «1 / 76» читалось как огромный недобор,
+// хотя размечен был ровно один блок на четверых.
+const fs = require('fs');
+const path = require('path');
+
+let bad = 0;
+function check(name, ok, detail) {
+  if (!ok) bad++;
+  console.log((ok ? '  ok   ' : ' ПЛОХО ') + name + (ok || !detail ? '' : ': ' + detail));
+}
+function eq(name, got, want) { check(name, got === want, JSON.stringify(got) + ' ≠ ' + JSON.stringify(want)); }
+
+const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+const MULTI = ['_campSeedLayout', '_campCap', '_campBeds'];
+const ONE = ['_campNewId'];
+let src = '';
+function grab(name, re) {
+  const m = html.match(re);
+  if (!m) { console.log('не найдено в index.html: ' + name); process.exit(1); }
+  src += m[0] + '\n';
+}
+for (const n of MULTI) grab(n, new RegExp('\\nfunction ' + n + '\\([^)]*\\)\\s*\\{[\\s\\S]*?\\n\\}', 'm'));
+for (const n of ONE) grab(n, new RegExp('\\nfunction ' + n + '\\(.*\\}$', 'm'));
+
+let seq = 0;
+const ctx = { _campNewIdSeq: 0 };
+/* _campBlockHtml рисует карточку блока — вырезаем отдельно, у него свой набор заглушек. */
+const mb = html.match(/\nfunction _campBlockHtml\([^)]*\)\s*\{[\s\S]*?\n\}/m);
+if (!mb) { console.log('не найдено в index.html: _campBlockHtml'); process.exit(1); }
+const blockSrc = mb[0];
+const API = new Function('ctx', 'with (ctx) { ' + src + ' return {_campSeedLayout,_campCap,_campBeds}; }')(ctx);
+
+/* ================= схема санатория ================= */
+const lay = API._campSeedLayout();
+const kid = (lay.blocks || []).filter(b => !b.staff);
+const staff = (lay.blocks || []).filter(b => b.staff);
+const capOf = b => (b.rooms || []).reduce((s, r) => s + (+r.beds || 0), 0);
+
+eq('детских блоков', kid.length, 15);          // 5 на втором этаже + 10 на третьем
+eq('блоков вожатых («Комфорт»)', staff.length, 3);
+eq('мест у вожатых', staff.reduce((s, b) => s + capOf(b), 0), 6);
+// 2 этаж: 3×4 + 2×5 = 22; 3 этаж: 8 блоков по 3+3 = 48, плюс к.40 и к.44 по 3 = 54
+eq('детских мест всего', kid.reduce((s, b) => s + capOf(b), 0), 76);
+eq('мест на 2 этаже', kid.filter(b => b.floor === '2 этаж').reduce((s, b) => s + capOf(b), 0), 22);
+eq('мест на 3 этаже', kid.filter(b => b.floor === '3 этаж').reduce((s, b) => s + capOf(b), 0), 54);
+// ⚠️ _campBeds(lay,true) — «только детские»: вожатых в расселении нет вовсе
+eq('коек всего', API._campBeds(lay).length, 82);
+eq('из них детских', API._campBeds(lay, true).length, 76);
+
+/* ================= три цифры ================= */
+{
+  // ничего не размечено: «нужно заполнить» — ноль, а не 76
+  const C0 = API._campCap({ sex: {} }, lay);
+  eq('всего мест кроме комфорта', C0.all, 76);
+  eq('нужно заполнить, пока пол нигде не задан', C0.need, 0);
+  eq('размеченных блоков нет', C0.marked, 0);
+  eq('а всего детских блоков', C0.blocks, 15);
+
+  // живой случай со скриншота: помечен один блок 2.1 на четверых
+  const b21 = kid.find(b => b.name === 'Блок 2.1');
+  check('блок 2.1 найден', !!b21, kid.map(b => b.name).join(', '));
+  const C1 = API._campCap({ sex: { [b21.id]: 'm' } }, lay);
+  eq('нужно заполнить = места размеченного блока', C1.need, 4);
+  eq('размечен один блок', C1.marked, 1);
+  eq('всего не изменилось', C1.all, 76);
+
+  // ⚠️ блок вожатых пометить полом можно только по ошибке — в счёт он не идёт НИКОГДА
+  const cf = staff[0];
+  const C2 = API._campCap({ sex: { [b21.id]: 'm', [cf.id]: 'f' } }, lay);
+  eq('«Комфорт» в «нужно заполнить» не попал', C2.need, 4);
+  eq('и в «всего» его тоже нет', C2.all, 76);
+  eq('и в числе блоков не считается', C2.blocks, 15);
+
+  // размечаем весь второй этаж — нужно ровно его 22 места
+  const sex2 = {};
+  kid.filter(b => b.floor === '2 этаж').forEach(b => { sex2[b.id] = 'm'; });
+  eq('весь 2 этаж размечен', API._campCap({ sex: sex2 }, lay).need, 22);
+  eq('и это 5 блоков', API._campCap({ sex: sex2 }, lay).marked, 5);
+
+  // размечено всё — «нужно» сходится с «всего»
+  const sexAll = {};
+  kid.forEach(b => { sexAll[b.id] = 'f'; });
+  const C3 = API._campCap({ sex: sexAll }, lay);
+  eq('размечено всё — нужно = всего', C3.need, C3.all);
+  eq('и блоков поровну', C3.marked, C3.blocks);
+
+  // ⚠️ пустая строка в sex — это «пол не задан», а не «задан пустым»
+  const C4 = API._campCap({ sex: { [b21.id]: '' } }, lay);
+  eq('пустой пол не считается заданным', C4.need, 0);
+
+  // смены без sex вовсе (старые данные) не должны ронять расчёт
+  eq('смена без поля sex', API._campCap({}, lay).need, 0);
+  eq('и без схемы', API._campCap({ sex: {} }, null).all, 0);
+}
+
+/* ================= схема без вожатых и пустая ================= */
+{
+  const empty = { id: 'L0', name: 'пусто', blocks: [] };
+  const C = API._campCap({ sex: {} }, empty);
+  eq('пустая схема: всего', C.all, 0);
+  eq('пустая схема: блоков', C.blocks, 0);
+  // блок без комнат — блок есть, мест нет: считаем блок, но не место
+  const one = { id: 'L1', blocks: [{ id: 'b1', name: 'Блок', rooms: [] }] };
+  eq('блок без комнат не даёт мест', API._campCap({ sex: { b1: 'm' } }, one).need, 0);
+  eq('но сам блок посчитан', API._campCap({ sex: { b1: 'm' } }, one).blocks, 1);
+}
+
+/* ================= КАРТОЧКА БЛОКА: ВОЗРАСТ РЯДОМ С ИМЕНЕМ =================
+   Просьба Жанны 09.09.2026: «в карточке с блоками у ребёнка рядом тоже ставь возраст».
+   В списке «Не расселены» возраст был, а на самом месте — нет. А нужен он именно там: в комнату
+   к шестилеткам не селят двенадцатилетнего, и проверять это глазами приходится по карточкам. */
+{
+  const B = new Function('ctx', 'with (ctx) { ' + blockSrc + ' return {_campBlockHtml}; }')({
+    _campEdit: false, _campPick: null,
+    CAMP_ST: { yes: { t: 'подтвердил', c: 'g', ic: '🟢' }, maybe: { t: 'думает', c: 'y', ic: '🟡' }, no: { t: 'отказ', c: 'r', ic: '🔴' } },
+    esc: s => String(s == null ? '' : s),
+    _jsStr: s => String(s == null ? '' : s),
+    _ageStr: d => (d === '2014-08-07' ? '12,1' : (d === '2018-01-15' ? '8,7' : '')),
+  });
+
+  const blk = { id: 'b1', name: 'Блок 2.1', floor: '2 этаж', staff: false, rooms: [{ id: 'r1', name: 'комната', beds: 3 }] };
+  const sh = { sex: { b1: 'm' }, staff: {} };
+  const kid = { id: 'k1', fio: 'Мельников Илья', status: 'maybe', dob: '2018-01-15' };
+  const h = B._campBlockHtml(sh, blk, { 'b1|r1|0': kid });
+
+  check('имя ребёнка на месте', h.indexOf('Мельников Илья') > 0, h.slice(0, 300));
+  check('и возраст рядом с ним', h.indexOf('<i class="cmp-kid-a">8,7</i>') > 0,
+        (h.match(/<span class="cmp-bn">[\s\S]{0,120}/) || [''])[0]);
+  // ⚠️ возраст должен быть ВНУТРИ имени, а не отдельной строкой — иначе место распухнет вдвое
+  check('возраст внутри строки имени',
+        /<span class="cmp-bn">[^<]*Мельников Илья<i class="cmp-kid-a">8,7<\/i><\/span>/.test(h),
+        (h.match(/<span class="cmp-bn">[\s\S]{0,140}/) || [''])[0]);
+  check('свободные места подписаны', h.indexOf('свободно') > 0);
+  check('счётчик блока', h.indexOf('1/3') > 0, (h.match(/cmp-cap">[^<]*/) || [''])[0]);
+
+  // без даты рождения возраста нет — и пустого «<i>» тоже быть не должно
+  const h2 = B._campBlockHtml(sh, blk, { 'b1|r1|0': { id: 'k2', fio: 'Без Даты', status: 'yes', dob: '' } });
+  check('без даты рождения возраст не рисуем', h2.indexOf('cmp-kid-a') < 0,
+        (h2.match(/<span class="cmp-bn">[\s\S]{0,120}/) || [''])[0]);
+  check('но имя на месте', h2.indexOf('Без Даты') > 0);
+
+  /* ⚠️ Блок вожатых — отдельная история: там не дети, а поля для ФИО, и ни возраста, ни
+     выбора пола быть не должно. Именно эти блоки не участвуют в расселении. */
+  const cf = { id: 'c1', name: 'Комфорт 1', floor: '2 этаж', staff: true, rooms: [{ id: 'r1', name: 'комната', beds: 2 }] };
+  const h3 = B._campBlockHtml({ sex: {}, staff: { 'c1|r1|0': 'Иванова А.' } }, cf, {});
+  check('у вожатых поле ФИО', h3.indexOf('вожат') > 0, h3.slice(0, 260));
+  check('и нет выбора пола', h3.indexOf('— пол не задан —') < 0);
+  check('и подпись «вожатые»', h3.indexOf('вожатые · 2') > 0, (h3.match(/cmp-cap">[^<]*/) || [''])[0]);
+}
+
+console.log(bad ? '\nПРОВАЛЕНО: ' + bad : '\nВсё сошлось');
+process.exit(bad ? 1 : 0);

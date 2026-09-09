@@ -1074,6 +1074,17 @@ h3.cmp-fl span{font-weight:400;font-size:12px;color:var(--muted)}
   font-size:11px;line-height:1.45;overflow-x:auto;white-space:pre;color:var(--coal)}
 .cmp-aihelp>div:first-of-type{margin-top:8px}
 /* концепция смены на подвкладке «Программа» */
+/* Заголовок-переключатель: та же карточка, но по клику схлопывается. Маркер треугольника
+   убираем — вместо него подпись «свернуть/развернуть», её видно и понятно без легенды. */
+.cmp-about-d>summary{list-style:none;cursor:pointer;display:flex;align-items:center;gap:10px}
+.cmp-about-d>summary::-webkit-details-marker{display:none}
+.cmp-about-d>summary h3{margin:0}
+.cmp-about-hint{font-size:11px;color:var(--muted);border:1px solid var(--line);border-radius:20px;padding:2px 9px}
+.cmp-about-hint i{font-style:normal}
+.cmp-about-d[open] .cmp-about-hint i:last-child{display:none}
+.cmp-about-d:not([open]) .cmp-about-hint i:first-child{display:none}
+.cmp-about-d>summary:hover .cmp-about-hint{border-color:var(--terra);color:var(--terra-d)}
+.cmp-about-d[open]>summary{margin-bottom:10px}
 .cmp-about{font-size:14px;line-height:1.6;max-width:820px}
 .cmp-about-p{margin-top:12px;font-size:13px;color:var(--muted)}
 /* кнопка-тумблер «⚙ Настройки смены», пока панель открыта */
@@ -2186,7 +2197,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-09-09-07";
+const APP_VER="2026-09-09-08";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -18845,6 +18856,7 @@ let _campSub=(function(){ try{ return localStorage.getItem("campSub")||"list"; }
 let _campPick=null;      // ребёнок, взятый «в руку» для расселения
 /* Выезжающая панель справа: "" — закрыта, "cfg" — настройки смены, "src" — источники подборки.
    Панель одна на обе вкладки: две одновременно перекрывали бы друг друга. */
+let _campAboutOpen=true;   // концепция смены развёрнута, пока её не свернули руками
 let _campDrawer="";
 let _campEdit=false;     // режим правки схемы корпуса
 let _campPaste=false;    // открыто поле «вставить список»
@@ -18871,6 +18883,28 @@ function _campBeds(lay,kidsOnly){
   ((lay&&lay.blocks)||[]).forEach(b=>{ if(kidsOnly&&b.staff) return;
     (b.rooms||[]).forEach(r=>{ const n=Math.max(0,+r.beds||0);
       for(let i=0;i<n;i++) out.push({key:b.id+"|"+r.id+"|"+i,block:b,room:r,idx:i,staff:!!b.staff}); }); });
+  return out;
+}
+/* ===== СКОЛЬКО МЕСТ В РАССЕЛЕНИИ =====
+   Правило Жанны 09.09.2026: «в расселении не участвуют вожатые, не учитывай их — только блоки
+   для детей, в которых я пометила мальчик или девочка. Если пол не задан — не считай его».
+   Отсюда ТРИ разные цифры, и путать их нельзя:
+     • вписано  — сколько детей уже стоит на местах;
+     • нужно    — места в детских блоках, У КОТОРЫХ ЗАДАН ПОЛ. Блок без пола ещё не решён:
+                  неизвестно, чей он, и требовать его заполнить — значит требовать заполнить
+                  то, что не распределено;
+     • всего    — все детские места санатория, кроме «Комфорта» (b.staff — блоки вожатых).
+   Раньше знаменатель был один — все детские места (76), и «1 / 76» выглядело как огромный
+   недобор, хотя размечен был всего один блок на четверых. */
+function _campCap(sh,lay){
+  const out={need:0,all:0,marked:0,blocks:0};
+  const sex=(sh&&sh.sex)||{};
+  ((lay&&lay.blocks)||[]).forEach(b=>{
+    if(b.staff) return;                       // «Комфорт» — вожатым, в расселении не участвует
+    const cap=(b.rooms||[]).reduce((s,r)=>s+(+r.beds||0),0);
+    out.all+=cap; out.blocks++;
+    if(sex[b.id]){ out.need+=cap; out.marked++; }
+  });
   return out;
 }
 function _campRows(sh){ const id=sh&&sh.id; return _camp().res.filter(r=>r&&r.shiftId===id); }
@@ -19324,10 +19358,10 @@ function _campSubHtml(){
   const sh=_campShift(); if(!sh) return "";
   const rows=_campRows(sh);
   const live=rows.filter(r=>r.status!=="no").length;
-  const beds=_campBeds(_campLayout(sh),true).length, placed=rows.filter(r=>r.bed).length;
+  const C=_campCap(sh,_campLayout(sh)), placed=rows.filter(r=>r.bed).length;
   return '<div class="cmp-pick cmp-sub">'
     +'<span class="chip'+(_campSub==="list"?' on':'')+'" onclick="campSub(\'list\')">Резерв · '+live+'</span>'
-    +'<span class="chip'+(_campSub==="rooms"?' on':'')+'" onclick="campSub(\'rooms\')">Расселение · '+placed+' / '+beds+'</span>'
+    +'<span class="chip'+(_campSub==="rooms"?' on':'')+'" onclick="campSub(\'rooms\')" title="'+esc("Вписано "+placed+" · нужно заполнить "+C.need+" (мест в блоках, где задан пол: "+C.marked+" из "+C.blocks+") · всего детских мест в санатории "+C.all+", кроме «Комфорта» для вожатых")+'">Расселение · '+placed+' / '+C.need+' / '+C.all+'</span>'
     +'<span class="chip'+(_campSub==="prog"?' on':'')+'" onclick="campSub(\'prog\')">Программа'+(sh.prog?(' · '+(sh.prog.days||[]).length+' дн.'):'')+'</span>'
     +'</div>';
 }
@@ -19594,10 +19628,14 @@ function renderCampProg(){
   // менеджеру в разговоре нужна сперва идея смены, а уже потом по дням.
   const about=String(sh.about||"").trim(), ptxt=_campPriceText(sh);
   if(about||ptxt){
-    h+='<div class="card"><h3>Концепция смены</h3>'
+    /* Концепция бывает на два экрана и отодвигает программу по дням далеко вниз. Сворачиваем
+       кликом по заголовку — тем же <details>, что и дни программы ниже. Состояние держим в
+       памяти вкладки: это привычка человека, а не данные смены, и в облако ей не надо. */
+    h+='<details class="card cmp-about-d"'+(_campAboutOpen?' open':'')+' ontoggle="_campAboutOpen=this.open">'
+     +'<summary><h3>Концепция смены</h3><span class="cmp-about-hint"><i>свернуть</i><i>развернуть</i></span></summary>'
      +(about?'<div class="cmp-about">'+esc(about).replace(/\n/g,"<br>")+'</div>':'<div style="font-size:13px;color:var(--muted)">Описание пока не заполнено — «⚙ Настройки смены» → «Концепция смены».</div>')
      +(ptxt?'<div class="cmp-about-p"><b>Стоимость:</b> '+esc(ptxt)+((+sh.prepay)?(' · предоплата '+(+sh.prepay)+' р. закрепляет место'):'')+'</div>':'')
-     +'</div>';
+     +'</details>';
   }
   if(p){
     const total=p.days.reduce((n,d)=>n+d.blocks.reduce((m,b)=>m+b.items.length,0),0);
@@ -19763,7 +19801,7 @@ function renderCampRooms(){
   if(!sh){ box.innerHTML='<div class="card">Смены пока нет — нажмите «+ Смена».</div>'; return; }
   const lay=_campLayout(sh);
   if(!lay){ box.innerHTML='<div class="card">Схема корпуса не найдена.</div>'; return; }
-  const beds=_campBeds(lay), kidBeds=beds.filter(b=>!b.staff);
+  const beds=_campBeds(lay);
   const keys=new Set(beds.map(b=>b.key));
   const rows=_campRows(sh);
   const byKey={}; rows.forEach(r=>{ if(r.bed&&keys.has(r.bed)) byKey[r.bed]=r; });
@@ -19771,12 +19809,17 @@ function renderCampRooms(){
   const unplaced=rows.filter(r=>!(r.bed&&keys.has(r.bed))&&(r.status!=="no"||_campShowNo));
   const placedN=Object.keys(byKey).length;
 
+  const C=_campCap(sh,lay);
   let h='<div class="cmp-kpi">'
-   +'<div>расселено<b>'+placedN+' / '+kidBeds.length+'</b></div>'
-   +'<div>свободно мест<b>'+(kidBeds.length-placedN)+'</b></div>'
+   +'<div title="Сколько детей уже стоит на местах">вписано<b>'+placedN+'</b></div>'
+   +'<div title="Места в блоках, где задан пол: '+C.marked+' из '+C.blocks+' детских блоков. Блок без пола ещё не решён и сюда не идёт">нужно заполнить<b>'+C.need+'</b></div>'
+   +'<div title="Все детские места санатория, кроме «Комфорта» — он для вожатых и в расселении не участвует">всего мест<b>'+C.all+'</b></div>'
    +'<div>в резерве, без отказов<b>'+live.length+'</b></div>'
    +'<div>мальчики / девочки<b>'+live.filter(r=>r.sex==="m").length+' / '+live.filter(r=>r.sex==="f").length+'</b></div>'
    +'</div>';
+  /* Ни один блок не размечен — «нужно заполнить 0» выглядит поломкой, хотя это просто
+     нераспределённая схема. Говорим, что делать. */
+  if(!C.marked) h+='<div class="cmp-warn">Ни один блок не размечен по полу. Поставьте в блоке «мальчики» или «девочки» — тогда появится, сколько мест нужно заполнить. Пока считается только «всего мест».</div>';
   const noSex=live.filter(r=>!r.sex).length, auto=live.filter(r=>r.sexAuto).length;
   if(noSex) h+='<div class="cmp-warn">Без пола: '+noSex+'. Пока пол не проставлен, ребёнка в блок не поставить.</div>';
   if(auto) h+='<div class="cmp-warn soft">Пол подставлен по фамилии у '+auto+' — проверьте их в резерве, там они помечены пунктиром.</div>';
@@ -19854,7 +19897,7 @@ function _campBlockHtml(sh,b,byKey){
         const st=CAMP_ST[r.status]||CAMP_ST.maybe;
         const age=_ageStr(r.dob);
         h+='<div class="cmp-bed busy'+(_campPick===r.id?' on':'')+'" onclick="campPick(\''+_jsStr(r.id)+'\')" title="'+esc(st.t+(age?(" · "+age):""))+'">'
-         +'<span class="cmp-bn">'+st.ic+' '+esc(r.fio)+'</span>'
+         +'<span class="cmp-bn">'+st.ic+' '+esc(r.fio)+(age?'<i class="cmp-kid-a">'+esc(age)+'</i>':'')+'</span>'
          +'<button class="cmp-x" title="Освободить место" onclick="event.stopPropagation();campFree(\''+_jsStr(r.id)+'\')">×</button></div>';
       } else {
         h+='<div class="cmp-bed free'+(_campPick?' hot':'')+'" onclick="campPlace(\''+jkey+'\')">'+(_campPick?'поставить сюда':'свободно')+'</div>';
