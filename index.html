@@ -2197,7 +2197,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-09-09-10";
+const APP_VER="2026-09-09-11";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -2224,12 +2224,81 @@ function load(){
   try{ const r=localStorage.getItem(LS_KEY); if(r) return Object.assign(JSON.parse(JSON.stringify(DEFAULT_STATE)),JSON.parse(r)); }catch(e){}
   return JSON.parse(JSON.stringify(DEFAULT_STATE));
 }
+/* Подхватить запасную копию, если она новее локальной. Зовём сразу после старта: localStorage
+   мог перестать сохраняться (общая память домена переполнена), и тогда синхронная копия
+   отстаёт — именно так у Жанны на экране было два ребёнка, а в памяти браузера ноль.
+   ⚠️ Если облако уже отдало свою версию, не трогаем: там правда свежее любой локальной копии. */
+function _idbRestore(){
+  return _idbGet("model").then(v=>{
+    if(!v||!v.json) return false;
+    let lsAt=""; try{ lsAt=localStorage.getItem(LS_AT)||""; }catch(e){}
+    if(_pickNewer(lsAt,v.at)!=="idb") return false;
+    if(_fbApplied) return false;                       // облако уже главнее
+    S=Object.assign(JSON.parse(JSON.stringify(DEFAULT_STATE)),JSON.parse(v.json));
+    try{ renderAll(); }catch(e){}
+    return true;
+  }).catch(()=>false);
+}
 /* ⚠️ Переполнение localStorage раньше глоталось молча: браузер бросал QuotaExceededError на каждом
    сохранении, индикатор синхронизации не менялся, и человек продолжал работать «в никуда» — при
    F5 терялось всё, что накопилось с последней удачной записи. Особенно опасно без Firebase
    (локальный режим), где localStorage — единственная копия. Теперь честно говорим и пробуем
    освободить место, выбрасывая самые старые сохранённые версии модели. */
-let _lsFull=false;
+let _lsFull=false, _idbOk=false, _fbApplied=false;   // _fbApplied: облако уже отдало свою версию
+/* ===== ЗАПАСНОЕ ХРАНИЛИЩЕ: IndexedDB =====
+   ⚠️ localStorage — ОДИН НА ВЕСЬ ДОМЕН, а не на приложение. Финмодель делит пять мегабайт
+   app.proznanie.club с другими инструментами клуба, и своей доли у неё нет и быть не может.
+   09.09.2026 у Жанны там лежало 1058 ключей: конспекты занятий, УТП, рабочие и календарные
+   планы, расписания групп — всё это пишет НЕ финмодель. Сама модель занимала 0,78 МБ и
+   перестала сохраняться. Сжимать её или чистить версии бессмысленно: место занято соседями.
+   Поэтому держим вторую копию в IndexedDB — у него предел на порядки выше и соседи в него
+   не лезут. Порядок такой:
+     • пишем в localStorage, пока влезает — он синхронный, и первый экран рисуется мгновенно;
+     • пишем в IndexedDB ВСЕГДА — это и есть копия, которая переживёт переполнение;
+     • при старте читаем localStorage синхронно, а следом спрашиваем IndexedDB и берём то,
+       что новее по метке времени.
+   ⚠️ Метку держим ОТДЕЛЬНО от модели: положи её внутрь S — и она уедет в облако, где будет
+   значить время чужого браузера. */
+const LS_AT=LS_KEY+"_at", IDB_NAME="proznanie_finmodel", IDB_STORE="state";
+let _idbOff=false;                                    // IndexedDB недоступна (режим инкогнито и т.п.)
+function _idbOpen(){
+  return new Promise((ok,no)=>{
+    try{
+      if(_idbOff||typeof indexedDB==="undefined"||!indexedDB) return no(new Error("нет IndexedDB"));
+      const r=indexedDB.open(IDB_NAME,1);
+      r.onupgradeneeded=()=>{ try{ r.result.createObjectStore(IDB_STORE); }catch(e){} };
+      r.onsuccess=()=>ok(r.result);
+      r.onerror=()=>{ _idbOff=true; no(r.error||new Error("IndexedDB не открылась")); };
+    }catch(e){ _idbOff=true; no(e); }
+  });
+}
+function _idbSet(key,val){
+  return _idbOpen().then(db=>new Promise((ok,no)=>{
+    const t=db.transaction(IDB_STORE,"readwrite");
+    t.objectStore(IDB_STORE).put(val,key);
+    t.oncomplete=()=>ok(true); t.onerror=()=>no(t.error||new Error("запись не прошла"));
+  }));
+}
+function _idbGet(key){
+  return _idbOpen().then(db=>new Promise((ok,no)=>{
+    const t=db.transaction(IDB_STORE,"readonly");
+    const q=t.objectStore(IDB_STORE).get(key);
+    q.onsuccess=()=>ok(q.result); q.onerror=()=>no(q.error||new Error("чтение не прошло"));
+  }));
+}
+/* Какую копию брать. Новее — по метке времени; без метки копия считается старой. Равные —
+   оставляем localStorage: он уже применён, лишняя перерисовка ни к чему. */
+function _pickNewer(lsAt,idbAt){
+  if(!idbAt) return "ls";
+  if(!lsAt) return "idb";
+  /* ⚠️ Сравниваем МОМЕНТЫ, а не строки. «…11:00:00Z» и «…11:00:00.000Z» — одно и то же время,
+     но как строки первая больше второй: «Z» стоит в таблице после точки. Обе метки пишем сами
+     и в одном формате, но полагаться на это нельзя: цена ошибки — подхватится старая копия
+     и затрёт работу. Строки остаются запасным путём, если дату не разобрать. */
+  const a=Date.parse(lsAt), b=Date.parse(idbAt);
+  if(!isNaN(a)&&!isNaN(b)) return (b>a)?"idb":"ls";
+  return (String(idbAt)>String(lsAt))?"idb":"ls";
+}
 /* Сколько места занято в localStorage и чем — чтобы в предупреждении были цифры, а не общие слова. */
 function _lsUsage(){
   let total=0; const by={};
@@ -2277,13 +2346,22 @@ function _lsTrimScenarios(){
   }catch(e){ return false; }
 }
 function _persistLocalRaw(){
-  try{ localStorage.setItem(LS_KEY, JSON.stringify(S)); _lsFull=false; return true; }
+  const json=JSON.stringify(S), at=new Date().toISOString();
+  /* IndexedDB — всегда: именно она переживает переполнение общей памяти домена. Промах не
+     роняет сохранение, но и не молчит: если не удались ОБЕ копии, скажем вслух. */
+  _idbSet("model",{at:at,json:json}).then(()=>{_idbOk=true;}).catch(()=>{_idbOk=false;});
+  let ok=false;
+  try{ localStorage.setItem(LS_KEY,json); localStorage.setItem(LS_AT,at); _lsFull=false; ok=true; }
   catch(e){
     if(_lsTrimScenarios()){                             // попробовали освободить — вторая попытка
-      try{ localStorage.setItem(LS_KEY, JSON.stringify(S)); _lsFull=false; return true; }catch(e2){}
+      try{ localStorage.setItem(LS_KEY,json); localStorage.setItem(LS_AT,at); _lsFull=false; ok=true; }catch(e2){}
     }
-    _lsWarn("состояние модели"); return false;
   }
+  /* ⚠️ Ругаемся, ТОЛЬКО если запасной копии тоже нет. Раньше сообщение про переполнение
+     вылезало постоянно, хотя данные были целы: место в общей памяти домена занимают соседние
+     инструменты клуба, и финмодель на это повлиять не может. */
+  if(!ok && _idbOff) _lsWarn("состояние модели");
+  return ok;
 }
 /* ===== ИСТОРИЯ ОТМЕНЫ ===== */
 let _undoStack = [];      // снимки прошлых состояний (JSON-строки)
@@ -2401,6 +2479,7 @@ function _applyRemoteRest(remote){
   _fbApplying=false;
 }
 function _applyRemote(remote){
+  _fbApplied=true;                          // с этого мига локальные копии больше не главные
   _fbApplying=true;
   try{
     S.grid=Object.values(remote.grid||{});
@@ -21729,6 +21808,9 @@ setTimeout(()=>{ if(_lastSnap===null) _lastSnap=_snap(); updateUndoBtn(); }, 0);
 /* Почасовая всплывашка «Пора в Viber!» убрана: рассылка родителям больше не идёт каждый
    день, и напоминание только мешало. Блок «не отправлено за день» на «Расписании» остался —
    он показывает то же самое, но молча и только тогда, когда на него смотрят. */
+/* Запасная копия модели: поднимаем её, если она новее локальной. Раньше при переполнении
+   общей памяти домена работа шла «в никуда» — на экране одно, в браузере другое. */
+setTimeout(function(){ try{ _idbRestore(); }catch(e){} }, 300);
 /* новые из amo (оплаченный этап) — тихо проверяем при загрузке и раз в 10 минут:
    бейдж в шапке загорается, когда кого-то надо посадить в группу */
 setTimeout(function(){ try{ _amoCheck(true); }catch(e){} }, 12000);
