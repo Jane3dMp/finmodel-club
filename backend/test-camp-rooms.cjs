@@ -22,8 +22,8 @@ function check(name, ok, detail) {
 function eq(name, got, want) { check(name, got === want, JSON.stringify(got) + ' ≠ ' + JSON.stringify(want)); }
 
 const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
-const MULTI = ['_campSeedLayout', '_campCap', '_campBeds', '_campSplitFloor2'];
-const ONE = ['_campNewId'];
+const MULTI = ['_campSeedLayout', '_campCap', '_campBeds', '_campSplitFloor2', '_campWhyNoTransfer', '_campTarLabel'];
+const ONE = ['_campNewId', '_campInGroup', '_campTarPrice'];
 let src = '';
 function grab(name, re) {
   const m = html.match(re);
@@ -34,12 +34,12 @@ for (const n of MULTI) grab(n, new RegExp('\\nfunction ' + n + '\\([^)]*\\)\\s*\
 for (const n of ONE) grab(n, new RegExp('\\nfunction ' + n + '\\(.*\\}$', 'm'));
 
 let seq = 0;
-const ctx = { _campNewIdSeq: 0 };
+const ctx = { _campNewIdSeq: 0, _gm: n => String(Math.round(+n||0)) };
 /* _campBlockHtml рисует карточку блока — вырезаем отдельно, у него свой набор заглушек. */
 const mb = html.match(/\nfunction _campBlockHtml\([^)]*\)\s*\{[\s\S]*?\n\}/m);
 if (!mb) { console.log('не найдено в index.html: _campBlockHtml'); process.exit(1); }
 const blockSrc = mb[0];
-const API = new Function('ctx', 'with (ctx) { ' + src + ' return {_campSeedLayout,_campCap,_campBeds,_campSplitFloor2}; }')(ctx);
+const API = new Function('ctx', 'with (ctx) { ' + src + ' return {_campSeedLayout,_campCap,_campBeds,_campSplitFloor2,_campWhyNoTransfer,_campInGroup,_campTarPrice,_campTarLabel}; }')(ctx);
 
 /* ================= схема санатория ================= */
 const lay = API._campSeedLayout();
@@ -250,6 +250,71 @@ eq('из них детских', API._campBeds(lay, true).length, 76);
   check('у вожатых поле ФИО', h3.indexOf('вожат') > 0, h3.slice(0, 260));
   check('и нет выбора пола', h3.indexOf('— пол не задан —') < 0);
   check('и подпись «вожатые»', h3.indexOf('вожатые · 2') > 0, (h3.match(/cmp-cap">[^<]*/) || [''])[0]);
+}
+
+/* ================= ПЕРЕНОС РЕБЁНКА В ALFACRM: ЧТО МЕШАЕТ =================
+   Просьба Жанны 09.09.2026: «переносить точечно детей в Альфу, в филиал Каникулы и группу
+   Хогвартс 27, заносить их в группу и создавать абонемент на 950».
+   ⚠️ Это ЖИВАЯ запись в CRM, и промах здесь — ребёнок в чужой группе с чужим абонементом.
+   Поэтому кнопка не просто «не работает»: она заранее говорит, чего не хватает. Проверяем, что
+   ни одна из четырёх нехваток не пропускается молча. */
+{
+  const W = API._campWhyNoTransfer, IN = API._campInGroup;
+  const sh = () => ({ id: 's1', name: 'Хогвартс 27', from: '2026-11-01', to: '2026-11-07',
+                      alfaGroupId: 77, alfaTariffId: 5 });
+  const kid = () => ({ id: 'k1', fio: 'Ерш Арсений', alfaId: 502 });
+
+  eq('всё на месте — переносим', W(sh(), kid()), '');
+
+  // ⚠️ ребёнок ещё не заведён в Alfa: заносить в группу некого
+  const noId = kid(); noId.alfaId = null;
+  check('без клиента Alfa не переносим', W(sh(), noId).indexOf('ещё нет в Alfa') >= 0, W(sh(), noId));
+
+  // ⚠️ группа не выбрана — иначе ребёнок уехал бы в группу с id 0
+  const noG = sh(); noG.alfaGroupId = 0;
+  check('без группы не переносим', W(noG, kid()).indexOf('не выбрана группа') >= 0, W(noG, kid()));
+
+  // ⚠️ шаблон не выбран — абонемент не из чего сделать
+  const noT = sh(); noT.alfaTariffId = 0;
+  check('без шаблона не переносим', W(noT, kid()).indexOf('не выбран шаблон') >= 0, W(noT, kid()));
+
+  // ⚠️ без дат смены период абонемента взять неоткуда
+  const noD = sh(); noD.to = '';
+  check('без дат смены не переносим', W(noD, kid()).indexOf('не заданы даты') >= 0, W(noD, kid()));
+  const noD2 = sh(); noD2.from = '';
+  check('и без даты начала тоже', W(noD2, kid()).indexOf('не заданы даты') >= 0);
+
+  // смены нет вовсе / строки нет — тоже причина, а не тихий отказ
+  check('без смены', W(null, kid()).length > 0);
+  check('без строки', W(sh(), null).length > 0);
+
+  /* --- отметка «уже перенесён» --- */
+  const done = kid(); done.alfaGrp = '77';
+  check('перенесённый опознан', IN(sh(), done) === true);
+  // ⚠️ отметка привязана к КОНКРЕТНОЙ группе: сменили группу в настройках — перенос нужен заново
+  const other = sh(); other.alfaGroupId = 88;
+  check('в другой группе отметка не считается', IN(other, done) === false);
+  check('без отметки — не перенесён', IN(sh(), kid()) === false);
+  check('пустая отметка не считается', IN(sh(), Object.assign(kid(), { alfaGrp: '' })) === false);
+  check('без смены не считается', IN(null, done) === false);
+
+  /* --- цена шаблона: Alfa шлёт строкой и бывает с запятой --- */
+  const PR = API._campTarPrice;
+  eq('число', PR({ price: 950 }), 950);
+  eq('строкой', PR({ price: '950' }), 950);
+  eq('с запятой', PR({ price: '950,50' }), 950.5);
+  eq('с точкой', PR({ price: '950.50' }), 950.5);
+  eq('пусто — нет цены', PR({ price: '' }), null);
+  eq('нет поля', PR({}), null);
+  eq('не число', PR({ price: 'бесплатно' }), null);
+  eq('нуль — это цена, а не пустота', PR({ price: 0 }), 0);
+
+  /* --- подпись шаблона: по ней Жанна узнаёт нужный («на 950») --- */
+  const L = API._campTarLabel;
+  eq('имя, цена и занятия', L({ id: 5, name: 'Лагерь', price: '950', lesson_count: 6 }),
+     'Лагерь · 950 р. · 6 зан.');
+  eq('без цены', L({ id: 5, name: 'Лагерь' }), 'Лагерь');
+  eq('без имени — по id', L({ id: 7 }), 'шаблон 7');
 }
 
 console.log(bad ? '\nПРОВАЛЕНО: ' + bad : '\nВсё сошлось');

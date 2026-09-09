@@ -2197,7 +2197,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-09-09-12";
+const APP_VER="2026-09-09-13";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -19337,6 +19337,120 @@ function campSetQuery(v){
 function campToggleShowNo(on){ _campShowNo=!!on; renderCampRooms(); }
 
 /* ---------- перевод в AlfaCRM ---------- */
+/* ===== ПЕРЕНОС РЕБЁНКА В ALFACRM: ГРУППА И АБОНЕМЕНТ =====
+   Просьба Жанны 09.09.2026: «переносить точечно детей в Альфу, в филиал Каникулы и группу
+   Хогвартс 27, заносить их в группу и создавать абонемент на 950». Раньше кнопка «→ Альфа»
+   только ЗАВОДИЛА клиента: ребёнок появлялся в CRM, но не в группе и без абонемента.
+   ⚠️ Ни группу, ни шаблон абонемента НЕ УГАДЫВАЕМ по имени: в Alfa бывают тёзки и архивные
+   группы, а промах здесь — это ребёнок в чужой группе и чужой абонемент. Оба выбираются
+   руками в «⚙ Настройки смены» из живых списков Alfa и запоминаются в смене.
+   Предметы для абонемента берём из самого шаблона (subject_ids): в лагере курса нет, и
+   сопоставление «курс → предмет», как в учебных группах, тут не работает. */
+let _campAlfaGroups=null, _campAlfaTariffs=null, _campRefBusy="";
+async function campLoadAlfaRefs(force){
+  if(_campRefBusy) return;
+  const c=_camp();
+  _campRefBusy="1"; _campCfgRender();
+  try{
+    if(force||!_campAlfaGroups){
+      const j=await _pubCall("groupsList",{branch:+c.alfaBranch||0});
+      _campAlfaGroups=(j.groups||[]).filter(g=>g&&g.id!=null);
+    }
+    if(force||!_campAlfaTariffs){
+      const j=await _pubCall("tariffs",{branch:+c.alfaBranch||0});
+      /* Архивные шаблоны прячем: выдать по ним абонемент нельзя, а в списке они только мешают
+         найти нужный. */
+      _campAlfaTariffs=(j.tariffs||[]).filter(t=>t&&t.id!=null&&!+t.is_archive);
+    }
+  }catch(e){ toast("Alfa не ответила: "+((e&&e.message)||e)); }
+  finally{ _campRefBusy=""; _campCfgRender(); }
+}
+/* Цена шаблона приходит строкой и бывает с запятой — приводим к числу, чтобы показать её
+   рядом с названием: именно по цене Жанна и узнаёт нужный шаблон («на 950»). */
+function _campTarPrice(t){ const v=String((t&&t.price)!=null?t.price:"").replace(",","."); const n=parseFloat(v); return isNaN(n)?null:n; }
+function _campTarLabel(t){
+  const p=_campTarPrice(t), n=+t.lesson_count||0;
+  return String(t.name||("шаблон "+t.id))+(p!=null?(" · "+_gm(p)+" р."):"")+(n?(" · "+n+" зан."):"");
+}
+/* Почему конкретного ребёнка перенести нельзя. Возвращаем ПРИЧИНУ, а не просто false: кнопка
+   без объяснения — это тупик, в котором человек тыкает и не понимает, чего не хватает. */
+function _campWhyNoTransfer(sh,r){
+  if(!sh) return "смена не выбрана";
+  if(!r) return "строка не найдена";
+  if(!r.alfaId) return "ребёнка ещё нет в Alfa — сначала «→ Альфа»";
+  if(!+sh.alfaGroupId) return "в «⚙ Настройки смены» не выбрана группа Alfa";
+  if(!+sh.alfaTariffId) return "в «⚙ Настройки смены» не выбран шаблон абонемента";
+  if(!sh.from||!sh.to) return "у смены не заданы даты — период абонемента взять неоткуда";
+  return "";
+}
+/* Уже перенесён? Отметка НАША: в Alfa мы не переспрашиваем на каждый рендер, это десятки
+   запросов. Правый клик по кнопке снимает отметку — в самой Alfa при этом ничего не меняется. */
+function _campInGroup(sh,r){ return !!(r&&r.alfaGrp&&sh&&String(r.alfaGrp)===String(sh.alfaGroupId)); }
+async function campToGroup(id){
+  const sh=_campShift(), r=_campRow(id);
+  const why=_campWhyNoTransfer(sh,r);
+  if(why){ toast("Нельзя перенести: "+why); return; }
+  if(_campInGroup(sh,r)){ toast("«"+shortName(r.fio)+"» уже перенесён(а)"); return; }
+  const g=(_campAlfaGroups||[]).find(x=>+x.id===+sh.alfaGroupId);
+  const t=(_campAlfaTariffs||[]).find(x=>+x.id===+sh.alfaTariffId);
+  const p=t?_campTarPrice(t):null;
+  if(!confirm("Перенести «"+r.fio+"» в AlfaCRM?"+"\n\n"
+    +"• группа: "+(g?(g.name||("id "+sh.alfaGroupId)):("id "+sh.alfaGroupId))+"\n"
+    +"• абонемент: "+(t?(t.name||("шаблон "+sh.alfaTariffId)):("шаблон "+sh.alfaTariffId))+(p!=null?(" на "+_gm(p)+" р."):"")+"\n"
+    +"• период: "+_campDate(sh.from)+" — "+_campDate(sh.to)+"\n\n"
+    +"Это живая запись в вашу CRM.")) return;
+  const c=_camp(), br=+c.alfaBranch||0;
+  try{
+    const j=await _pubCall("addToGroup",{dryRun:false, groupId:+sh.alfaGroupId, branch:br,
+      customerIds:[+r.alfaId], b_date:sh.from, e_date:sh.to});
+    const errs=j.errors||[];
+    if(errs.length){
+      console.warn("👥 лагерь → группа —",r.fio,errs);
+      toast("В группу не вышло: "+(errs[0].why||"Alfa отказала, подробности в консоли (F12)"));
+      return;
+    }
+    /* Ребёнок мог УЖЕ состоять в группе (прошлая смена) — второе членство Alfa не создаёт,
+       а продлевает срок. Для нас это тот же результат, но сказать об этом надо. */
+    const wasExt=(j.extended||[]).length>0;
+    r.alfaGrp=String(sh.alfaGroupId); r.alfaGrpAt=_campToday();
+    _campSave(); _campDraw();
+    /* ⚠️ Абонемент — ОТДЕЛЬНЫЙ шаг и отдельная ошибка. Не вышло с ним — ребёнок всё равно
+       уже в группе, и делать вид, что перенос не состоялся, нельзя. */
+    const subj=(t&&(t.subject_ids||[]).length)?t.subject_ids.map(Number):[];
+    if(!subj.length){
+      toast((wasExt?"Участие продлено":"В группу внесён(а)")+", но абонемент не выдан: у шаблона не заданы предметы");
+      return;
+    }
+    const jt=await _pubCall("giveTariff",{dryRun:false, branch:br,
+      items:[{customerId:+r.alfaId, tariffId:+sh.alfaTariffId, subjectIds:subj,
+              bDate:sh.from, eDate:sh.to}],
+      b_date:sh.from, e_date:sh.to, separate:false, note:"лагерь · "+(sh.name||"")});
+    const gv=(jt.given||[]).length, sk=(jt.skipped||[]), er=(jt.errors||[]);
+    if(gv){
+      r.alfaTar=String(sh.alfaTariffId); r.alfaTarAt=_campToday(); _campSave(); _campDraw();
+      toast("«"+shortName(r.fio)+"»: "+(wasExt?"участие продлено":"в группе")+" + абонемент ✓");
+    } else if(sk.length){
+      /* «Пропущен» — это чаще всего «действующий абонемент уже есть». Не ошибка, но и не
+         повод молчать: иначе непонятно, почему в Alfa нового абонемента нет. */
+      r.alfaTar=String(sh.alfaTariffId); r.alfaTarAt=_campToday(); _campSave(); _campDraw();
+      toast("В группе ✓ · абонемент не выдан: "+(sk[0].why||"уже есть действующий"));
+    } else {
+      console.warn("🎫 лагерь → абонемент —",r.fio,er);
+      toast("В группе ✓, но абонемент не выдан: "+((er[0]&&er[0].why)||"см. консоль (F12)"));
+    }
+  }catch(e){
+    console.warn("👥 лагерь → Alfa — отказ:",(e&&e.data)||e);
+    toast("Не получилось: "+((e&&e.message)||e));
+  }
+}
+/* Снять НАШУ отметку о переносе. В самой Alfa ничего не удаляется — только наша память,
+   чтобы можно было перенести заново, если в CRM что-то поправили руками. */
+function campGrpReset(id){
+  const r=_campRow(id); if(!r||!r.alfaGrp) return;
+  if(!confirm("Снять отметку о переносе «"+(r.fio||"")+"»?" + "\n\n" + "В AlfaCRM НИЧЕГО не удалится — только наша пометка, чтобы перенести заново.")) return;
+  r.alfaGrp=""; r.alfaGrpAt=""; r.alfaTar=""; r.alfaTarAt="";
+  _campSave(); _campDraw();
+}
 async function campToAlfa(id){
   const r=_campRow(id); if(!r) return;
   if(r.alfaId){ toast("Уже в Альфе · ID "+r.alfaId); return; }
@@ -19566,6 +19680,7 @@ function _campCfgHtml(sh){
    +'<label class="cmp-f">Стоимость словами — как пишем родителям<textarea class="cell wide cmp-ta3" placeholder="390 р. при оплате до 1 октября, далее 450 р. В стоимость входит проживание, 5-разовое питание и вся программа." onchange="campSetShift(\'priceText\',this.value)">'+esc(sh.priceText||"")+'</textarea></label>'
    +'<div class="cmp-fh">Подставляется в сообщения как <code>{цена}</code>. Если поле пустое, туда подставится число из «Стоимость, р.».</div>'
    +'<label class="cmp-f">Концепция смены<textarea class="cell wide cmp-ta6" placeholder="О чём смена: легенда, идея, чем она отличается. Конструктор даёт только расписание занятий — концепцию пишем здесь." onchange="campSetShift(\'about\',this.value)">'+esc(sh.about||"")+'</textarea></label>'
+   +_campAlfaCfgHtml(sh)
    +'<div class="cmp-fh">Подставляется как <code>{описание}</code>, показывается на подвкладке «Программа» и уходит в ИИ, когда он собирает краткое содержание для родителей.</div>'
    +'<label class="cmp-f">Схема корпуса<select class="cell wide" onchange="campSetShift(\'layoutId\',this.value)">'+opts+'</select></label>'
    +'<div class="cmp-fh">Блоки и места правятся на подвкладке «Расселение» → «✎ Правка схемы».</div>'
@@ -19582,6 +19697,43 @@ function _campCfgHtml(sh){
 }
 /* Две части смены — резерв и расселение. Расселение внутри смены, а не отдельной вкладкой:
    Жанна открывает «Хогвартс 27» и там же расселяет тех, кто попал в список. */
+/* Куда переносим детей в Alfa. Оба списка живые — из самой Alfa, чтобы не было «группы
+   с похожим названием». Пока не выбраны, кнопка переноса в строке ребёнка не работает и
+   говорит почему. */
+function _campAlfaCfgHtml(sh){
+  const c=_camp(), br=(_campAlfaBranches||[]).find(x=>+x.id===+c.alfaBranch);
+  const g=(_campAlfaGroups||[]).find(x=>+x.id===+sh.alfaGroupId);
+  const t=(_campAlfaTariffs||[]).find(x=>+x.id===+sh.alfaTariffId);
+  const busy=!!_campRefBusy;
+  let h='<div class="cmp-dr-s">Перенос в AlfaCRM</div>'
+   +'<div class="cmp-fh" style="margin-bottom:8px">Куда попадёт ребёнок по кнопке ⇉ в строке резерва: филиал, группа и шаблон абонемента. Выбирается один раз на смену.</div>'
+   +'<div class="cmp-fh" style="margin-bottom:8px">Филиал: <b>'+esc(br?br.name:("id "+(c.alfaBranch||0)))+'</b></div>';
+  h+='<button class="btn ghost sm" '+(busy?"disabled":"")+' onclick="campLoadAlfaRefs(true)">'+(busy?"Читаю Alfa…":((_campAlfaGroups&&_campAlfaTariffs)?"Обновить списки из Alfa":"Загрузить группы и шаблоны"))+'</button>';
+  if(_campAlfaGroups){
+    h+='<label class="cmp-f" style="margin-top:8px">Группа в Alfa<select class="cell wide" onchange="campSetShift(\'alfaGroupId\',this.value)">'
+      +'<option value="">— не выбрана —</option>'
+      +_campAlfaGroups.map(x=>'<option value="'+esc(x.id)+'"'+(+sh.alfaGroupId===+x.id?" selected":"")+'>'+esc(x.name||("группа "+x.id))+'</option>').join("")
+      +'</select></label>';
+  }
+  if(_campAlfaTariffs){
+    h+='<label class="cmp-f">Шаблон абонемента<select class="cell wide" onchange="campSetShift(\'alfaTariffId\',this.value)">'
+      +'<option value="">— не выбран —</option>'
+      +_campAlfaTariffs.map(x=>'<option value="'+esc(x.id)+'"'+(+sh.alfaTariffId===+x.id?" selected":"")+'>'+esc(_campTarLabel(x))+'</option>').join("")
+      +'</select></label>';
+    /* ⚠️ Шаблона на нужную цену может не быть — создать его через API нельзя, это делается
+       в самой Alfa. Молчать нельзя: иначе непонятно, почему в списке нет «950». */
+    if(!_campAlfaTariffs.length) h+='<div class="cmp-warn">Шаблонов абонемента в этом филиале нет. Создайте шаблон в AlfaCRM и нажмите «Обновить списки».</div>';
+    if(t&&!(t.subject_ids||[]).length) h+='<div class="cmp-warn">У шаблона «'+esc(t.name||"")+'» не заданы предметы — Alfa не примет такой абонемент. Проставьте предмет в шаблоне.</div>';
+  }
+  if(g&&t){
+    const p=_campTarPrice(t);
+    h+='<div class="cmp-fh" style="margin-top:6px">Переносим в <b>'+esc(g.name||"")+'</b>, абонемент <b>'+esc(t.name||"")+'</b>'
+      +(p!=null?(' на <b>'+_gm(p)+' р.</b>'):"")
+      +(sh.from&&sh.to?(' · период '+esc(_campDate(sh.from))+'–'+esc(_campDate(sh.to))):' · <b style="color:var(--terra-d)">у смены не заданы даты</b> — период абонемента взять неоткуда')
+      +'</div>';
+  }
+  return h;
+}
 function _campSubHtml(){
   const sh=_campShift(); if(!sh) return "";
   const rows=_campRows(sh);
@@ -20005,6 +20157,7 @@ function renderCampRes(){
         :'<button class="btn ghost sm" onclick="campToAlfa(\''+jid+'\')">→ Альфа</button>')+'</td>'
      +'<td><input class="cell wide" style="min-width:96px;text-align:left" value="'+esc(r.note||"")+'" onchange="campSetRes(\''+jid+'\',\'note\',this.value,false)"></td>'
      +'<td style="white-space:nowrap"><button class="btn ghost sm more-toggle" title="Написать в Viber по шаблону" onclick="campVbOpen(this,\'res\',\''+jid+'\')">💬</button>'
+        +_campGrpBtn(sh,r,jid)
         +'<button class="btn ghost sm" title="Перенести в другую смену" onclick="campMoveRow(\''+jid+'\')">⇄</button>'
         +'<button class="btn ghost sm" title="Убрать из резерва" onclick="campDelRow(\''+jid+'\')">×</button>'
         +(r.vbAt?'<div class="cmp-vbok" title="'+esc(r.vbTpl||"")+'">✅ Viber '+esc(_campDate(r.vbAt))+'</div>':'')+'</td>'
@@ -20012,6 +20165,20 @@ function renderCampRes(){
   });
   h+='</tbody></table></div>';
   box.innerHTML=h;
+}
+/* Кнопка «в Alfa: группа + абонемент». Зелёной становится только после успешного переноса —
+   по ней и видно, кто уже в CRM. Правый клик снимает НАШУ отметку (в Alfa ничего не трогает). */
+function _campGrpBtn(sh,r,jid){
+  const done=_campInGroup(sh,r);
+  const why=done?"":_campWhyNoTransfer(sh,r);
+  const t=done?("Перенесён(а) в группу Alfa"+(r.alfaGrpAt?(" · "+_campDate(r.alfaGrpAt)):"")
+                +(r.alfaTar?" · абонемент выдан":" · абонемент НЕ выдан")+" · правый клик — снять отметку")
+          :(why?("Нельзя перенести: "+why):"Занести в группу Alfa и выдать абонемент");
+  const style=done?' style="background:#e6f4ea;border-color:#66bb6a"':(why?' disabled':"");
+  return '<button class="btn ghost sm"'+style
+    +' title="'+esc(t)+'" onclick="campToGroup(\''+jid+'\')"'
+    +' oncontextmenu="event.preventDefault();campGrpReset(\''+jid+'\');return false">'
+    +(done?"✓⇉":"⇉")+'</button>';
 }
 function _campBedLabel(sh,r){
   if(!r.bed) return "";
