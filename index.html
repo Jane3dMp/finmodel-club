@@ -2197,7 +2197,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-09-09-15";
+const APP_VER="2026-09-09-16";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -19346,7 +19346,7 @@ function campToggleShowNo(on){ _campShowNo=!!on; renderCampRooms(); }
    руками в «⚙ Настройки смены» из живых списков Alfa и запоминаются в смене.
    Предметы для абонемента берём из самого шаблона (subject_ids): в лагере курса нет, и
    сопоставление «курс → предмет», как в учебных группах, тут не работает. */
-let _campAlfaGroups=null, _campAlfaTariffs=null, _campAlfaSubjects=null, _campRefBusy="";
+let _campAlfaGroups=null, _campAlfaTariffs=null, _campAlfaSubjects=null, _campAlfaLts=null, _campRefBusy="";
 async function campLoadAlfaRefs(force){
   if(_campRefBusy) return;
   const c=_camp();
@@ -19359,6 +19359,7 @@ async function campLoadAlfaRefs(force){
     if(force||!_campAlfaSubjects){
       const j=await _pubCall("refs",{branch:+c.alfaBranch||0});
       _campAlfaSubjects=((j.refs&&j.refs.subjects)||[]).filter(s=>s&&s.id!=null);
+      _campAlfaLts=((j.refs&&j.refs.lesson_types)||[]).filter(s=>s&&s.id!=null);
     }
     if(force||!_campAlfaTariffs){
       const j=await _pubCall("tariffs",{branch:+c.alfaBranch||0});
@@ -19385,6 +19386,10 @@ function _campWhyNoTransfer(sh,r){
   if(!+sh.alfaGroupId) return "в «⚙ Настройки смены» не выбрана группа Alfa";
   if(!+sh.alfaTariffId) return "в «⚙ Настройки смены» не выбран шаблон абонемента";
   if(!sh.from||!sh.to) return "у смены не заданы даты — период абонемента взять неоткуда";
+  /* Предмет и тип урока Alfa требует обязательно. Раньше о них узнавали только после того,
+     как ребёнок уже уехал в группу, — а это два разных отказа подряд и два похода в настройки. */
+  if(!_campSubjIds(sh).ids.length) return "не определён предмет — выберите его в «⚙ Настройки смены»";
+  if(!_campLtIds(sh).ids.length) return "не выбран тип урока — «⚙ Настройки смены»";
   return "";
 }
 /* Уже перенесён? Отметка НАША: в Alfa мы не переспрашиваем на каждый рендер, это десятки
@@ -19412,6 +19417,21 @@ function _campSubjIds(sh){
   if(gs.length) return {ids:gs, from:"группы"};
   const ts=((t&&t.subject_ids)||[]).map(Number).filter(Boolean);
   if(ts.length) return {ids:ts, from:"шаблона"};
+  return {ids:[], from:""};
+}
+/* ===== ТИП УРОКА ДЛЯ АБОНЕМЕНТА =====
+   ⚠️ Alfa отказала: «lesson_type_ids: Необходимо заполнить „Типы уроков"». Поле обязательное,
+   и в учебном переносе оно берётся из настроек публикации (_pubCfg().lessonTypeId). Для лагеря
+   даём свой выбор — публикация к нему отношения не имеет и настроена может быть иначе, —
+   но её значение оставляем запасным: чаще всего тип один и тот же, и заставлять выбирать
+   дважды незачем.
+   Порядок: выбранный в смене → из настроек публикации → пусто (и тогда говорим об этом). */
+function _campLtIds(sh){
+  const own=+((sh&&sh.alfaLtId)||0);
+  if(own) return {ids:[own], from:"настроек смены"};
+  let pub=0;
+  try{ pub=+((_pubCfg()||{}).lessonTypeId||0); }catch(e){}
+  if(pub) return {ids:[pub], from:"настроек публикации"};
   return {ids:[], from:""};
 }
 function _campInGroup(sh,r){ return !!(r&&r.alfaGrp&&sh&&String(r.alfaGrp)===String(sh.alfaGroupId)); }
@@ -19450,9 +19470,16 @@ async function campToGroup(id){
       toast((wasExt?"Участие продлено":"В группу внесён(а)")+", но абонемент не выдан: предмет не задан ни у группы, ни у шаблона");
       return;
     }
+    /* ⚠️ Тип урока Alfa требует обязательно и отдельно от предмета: без него отказ
+       «lesson_type_ids: Необходимо заполнить „Типы уроков"». */
+    const LT=_campLtIds(sh);
+    if(!LT.ids.length){
+      toast((wasExt?"Участие продлено":"В группу внесён(а)")+", но абонемент не выдан: не выбран тип урока");
+      return;
+    }
     const jt=await _pubCall("giveTariff",{dryRun:false, branch:br,
       items:[{customerId:+r.alfaId, tariffId:+sh.alfaTariffId, subjectIds:subj,
-              bDate:sh.from, eDate:sh.to}],
+              lessonTypeIds:LT.ids, bDate:sh.from, eDate:sh.to}],
       b_date:sh.from, e_date:sh.to, separate:false, note:"лагерь · "+(sh.name||"")});
     const gv=(jt.given||[]).length, sk=(jt.skipped||[]), er=(jt.errors||[]);
     if(gv){
@@ -19771,6 +19798,16 @@ function _campAlfaCfgHtml(sh){
     if(!SJn.ids.length) h+='<div class="cmp-warn">Alfa без предмета абонемент не примет, а у '
       +esc(g?("группы «"+(g.name||"")+"»"):"группы")+' и шаблона '+esc(t?("«"+(t.name||"")+"»"):"")
       +' он не задан. Выберите предмет в списке выше — править что-то в AlfaCRM для этого не нужно.</div>';
+  }
+  /* Тип урока Alfa тоже требует обязательно — своим полем, отдельно от предмета. */
+  if(_campAlfaLts){
+    const LT=_campLtIds(sh);
+    h+='<label class="cmp-f">Тип урока<select class="cell wide" onchange="campSetShift(\'alfaLtId\',this.value)">'
+      +'<option value="">— как в настройках публикации —</option>'
+      +_campAlfaLts.map(x=>'<option value="'+esc(x.id)+'"'+(+sh.alfaLtId===+x.id?' selected':'')+'>'+esc(x.name||('тип '+x.id))+'</option>').join('')
+      +'</select></label>'
+      +'<div class="cmp-fh" style="margin:-4px 0 8px">'+(LT.ids.length?('Берётся из '+esc(LT.from)):"")+'</div>';
+    if(!LT.ids.length) h+='<div class="cmp-warn">Alfa требует тип урока — без него абонемент не примет. Выберите его в списке выше.</div>';
   }
   if(g&&t){
     const p=_campTarPrice(t);

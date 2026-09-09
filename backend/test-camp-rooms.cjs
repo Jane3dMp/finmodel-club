@@ -22,7 +22,7 @@ function check(name, ok, detail) {
 function eq(name, got, want) { check(name, got === want, JSON.stringify(got) + ' ≠ ' + JSON.stringify(want)); }
 
 const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
-const MULTI = ['_campSeedLayout', '_campCap', '_campBeds', '_campSplitFloor2', '_campWhyNoTransfer', '_campTarLabel', '_campSubjIds'];
+const MULTI = ['_campSeedLayout', '_campCap', '_campBeds', '_campSplitFloor2', '_campWhyNoTransfer', '_campTarLabel', '_campSubjIds', '_campLtIds'];
 const ONE = ['_campNewId', '_campInGroup', '_campTarPrice'];
 let src = '';
 function grab(name, re) {
@@ -34,12 +34,14 @@ for (const n of MULTI) grab(n, new RegExp('\\nfunction ' + n + '\\([^)]*\\)\\s*\
 for (const n of ONE) grab(n, new RegExp('\\nfunction ' + n + '\\(.*\\}$', 'm'));
 
 let seq = 0;
-const ctx = { _campNewIdSeq: 0, _gm: n => String(Math.round(+n||0)), _campAlfaGroups: null, _campAlfaTariffs: null };
+const ctx = { _campNewIdSeq: 0, _gm: n => String(Math.round(+n||0)), _campAlfaGroups: null, _campAlfaTariffs: null,
+  // тип урока может подставляться из настроек публикации — заглушка их «не настроенными»
+  _pubCfg: () => ({}) };
 /* _campBlockHtml рисует карточку блока — вырезаем отдельно, у него свой набор заглушек. */
 const mb = html.match(/\nfunction _campBlockHtml\([^)]*\)\s*\{[\s\S]*?\n\}/m);
 if (!mb) { console.log('не найдено в index.html: _campBlockHtml'); process.exit(1); }
 const blockSrc = mb[0];
-const API = new Function('ctx', 'with (ctx) { ' + src + ' return {_campSeedLayout,_campCap,_campBeds,_campSplitFloor2,_campWhyNoTransfer,_campInGroup,_campTarPrice,_campTarLabel,_campSubjIds}; }')(ctx);
+const API = new Function('ctx', 'with (ctx) { ' + src + ' return {_campSeedLayout,_campCap,_campBeds,_campSplitFloor2,_campWhyNoTransfer,_campInGroup,_campTarPrice,_campTarLabel,_campSubjIds,_campLtIds}; }')(ctx);
 
 /* ================= схема санатория ================= */
 const lay = API._campSeedLayout();
@@ -260,8 +262,9 @@ eq('из них детских', API._campBeds(lay, true).length, 76);
    ни одна из четырёх нехваток не пропускается молча. */
 {
   const W = API._campWhyNoTransfer, IN = API._campInGroup;
+  /* ⚠️ Alfa требует обязательно и предмет, и тип урока — в рабочей смене они заданы. */
   const sh = () => ({ id: 's1', name: 'Хогвартс 27', from: '2026-11-01', to: '2026-11-07',
-                      alfaGroupId: 77, alfaTariffId: 5 });
+                      alfaGroupId: 77, alfaTariffId: 5, alfaSubjId: 42, alfaLtId: 3 });
   const kid = () => ({ id: 'k1', fio: 'Ерш Арсений', alfaId: 502 });
 
   eq('всё на месте — переносим', W(sh(), kid()), '');
@@ -281,6 +284,12 @@ eq('из них детских', API._campBeds(lay, true).length, 76);
   // ⚠️ без дат смены период абонемента взять неоткуда
   const noD = sh(); noD.to = '';
   check('без дат смены не переносим', W(noD, kid()).indexOf('не заданы даты') >= 0, W(noD, kid()));
+  /* ⚠️ Оба поля Alfa требует обязательно. Раньше о них узнавали ТОЛЬКО после того, как ребёнок
+     уже уехал в группу: два разных отказа подряд и два похода в настройки. */
+  const noS = sh(); noS.alfaSubjId = 0;
+  check('без предмета не переносим', W(noS, kid()).indexOf('не определён предмет') >= 0, W(noS, kid()));
+  const noL = sh(); noL.alfaLtId = 0;
+  check('без типа урока не переносим', W(noL, kid()).indexOf('не выбран тип урока') >= 0, W(noL, kid()));
   const noD2 = sh(); noD2.from = '';
   check('и без даты начала тоже', W(noD2, kid()).indexOf('не заданы даты') >= 0);
 
@@ -386,6 +395,31 @@ eq('из них детских', API._campBeds(lay, true).length, 76);
   eq('а без выбора — снова группа', SJ({ alfaGroupId: 77, alfaTariffId: 5 }).from, 'группы');
   eq('ноль в выборе — это «не выбрано»', SJ({ alfaGroupId: 77, alfaTariffId: 5, alfaSubjId: 0 }).from, 'группы');
   ctx._campAlfaGroups = keepG; ctx._campAlfaTariffs = keepT;
+}
+
+
+/* ⚠️ Тип урока Alfa требует ОТДЕЛЬНО от предмета: отказ «lesson_type_ids: Необходимо заполнить
+   „Типы уроков"». В учебном переносе он берётся из настроек публикации — для лагеря даём
+   свой выбор, но публикацию оставляем запасным путём: чаще всего тип один и тот же. */
+{
+  const LT = API._campLtIds, keepPub = ctx._pubCfg;
+  ctx._pubCfg = () => ({});
+  eq('ничего не задано — типа нет', LT({}).ids.length, 0);
+  eq('и источника нет', LT({}).from, '');
+  eq('выбранный в смене', LT({ alfaLtId: 3 }).ids.join(','), '3');
+  eq('и источник назван', LT({ alfaLtId: 3 }).from, 'настроек смены');
+  // запасной путь: настройки публикации
+  ctx._pubCfg = () => ({ lessonTypeId: 9 });
+  eq('берём из публикации', LT({}).ids.join(','), '9');
+  eq('и это видно', LT({}).from, 'настроек публикации');
+  // ⚠️ выбор в смене главнее публикации: лагерь и учебные занятия — разные типы
+  eq('смена главнее публикации', LT({ alfaLtId: 3 }).ids.join(','), '3');
+  eq('ноль — это «не выбрано»', LT({ alfaLtId: 0 }).from, 'настроек публикации');
+  // испорченные настройки публикации не должны ронять перенос
+  ctx._pubCfg = () => { throw new Error('нет настроек'); };
+  eq('публикация упала — просто нет типа', LT({}).ids.length, 0);
+  eq('а свой выбор всё равно работает', LT({ alfaLtId: 3 }).ids.join(','), '3');
+  ctx._pubCfg = keepPub;
 }
 
 console.log(bad ? '\nПРОВАЛЕНО: ' + bad : '\nВсё сошлось');
