@@ -364,5 +364,29 @@ eq('из них детских', API._campBeds(lay, true).length, 76);
   ctx._campAlfaGroups = keepG; ctx._campAlfaTariffs = keepT;
 }
 
+
+/* ⚠️ Предмет, выбранный руками, главнее всего: у Жанны его не оказалось НИ у группы
+   «Хогвартс 27», НИ у шаблона «950» — в лагере занятия к предмету не привязаны так, как в
+   учебных группах. Отправлять её править Alfa ради одного поля не дело: выбор в настройках
+   смены решает вопрос на месте. */
+{
+  const keepG = ctx._campAlfaGroups, keepT = ctx._campAlfaTariffs;
+  const SJ = API._campSubjIds;
+  ctx._campAlfaGroups = [{ id: 77, name: 'Хогвартс 27', subject_ids: [] }];
+  ctx._campAlfaTariffs = [{ id: 5, name: '950', subject_ids: [] }];
+  // ровно случай со скриншота: пусто и там, и там
+  eq('без выбора предмета нет', SJ({ alfaGroupId: 77, alfaTariffId: 5 }).ids.length, 0);
+  // выбрали руками — работает, ничего в Alfa править не надо
+  const s = { alfaGroupId: 77, alfaTariffId: 5, alfaSubjId: 42 };
+  eq('выбранный предмет взят', SJ(s).ids.join(','), '42');
+  eq('и источник назван', SJ(s).from, 'настроек смены');
+  // ⚠️ выбор главнее группы и шаблона: сменили в настройках — едет он, а не старое
+  ctx._campAlfaGroups = [{ id: 77, name: 'Х', subject_ids: [11] }];
+  eq('выбор главнее группы', SJ(s).ids.join(','), '42');
+  eq('а без выбора — снова группа', SJ({ alfaGroupId: 77, alfaTariffId: 5 }).from, 'группы');
+  eq('ноль в выборе — это «не выбрано»', SJ({ alfaGroupId: 77, alfaTariffId: 5, alfaSubjId: 0 }).from, 'группы');
+  ctx._campAlfaGroups = keepG; ctx._campAlfaTariffs = keepT;
+}
+
 console.log(bad ? '\nПРОВАЛЕНО: ' + bad : '\nВсё сошлось');
 process.exit(bad ? 1 : 0);

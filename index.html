@@ -2197,7 +2197,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-09-09-14";
+const APP_VER="2026-09-09-15";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -19346,7 +19346,7 @@ function campToggleShowNo(on){ _campShowNo=!!on; renderCampRooms(); }
    руками в «⚙ Настройки смены» из живых списков Alfa и запоминаются в смене.
    Предметы для абонемента берём из самого шаблона (subject_ids): в лагере курса нет, и
    сопоставление «курс → предмет», как в учебных группах, тут не работает. */
-let _campAlfaGroups=null, _campAlfaTariffs=null, _campRefBusy="";
+let _campAlfaGroups=null, _campAlfaTariffs=null, _campAlfaSubjects=null, _campRefBusy="";
 async function campLoadAlfaRefs(force){
   if(_campRefBusy) return;
   const c=_camp();
@@ -19355,6 +19355,10 @@ async function campLoadAlfaRefs(force){
     if(force||!_campAlfaGroups){
       const j=await _pubCall("groupsList",{branch:+c.alfaBranch||0});
       _campAlfaGroups=(j.groups||[]).filter(g=>g&&g.id!=null);
+    }
+    if(force||!_campAlfaSubjects){
+      const j=await _pubCall("refs",{branch:+c.alfaBranch||0});
+      _campAlfaSubjects=((j.refs&&j.refs.subjects)||[]).filter(s=>s&&s.id!=null);
     }
     if(force||!_campAlfaTariffs){
       const j=await _pubCall("tariffs",{branch:+c.alfaBranch||0});
@@ -19396,6 +19400,12 @@ function _campWhyNoTransfer(sh,r){
    Нет ни там, ни там — не выдумываем: говорим, где проставить.
    Возвращаем и источник: в настройках видно, откуда взялся предмет, ещё до нажатия. */
 function _campSubjIds(sh){
+  /* ⚠️ Выбранный руками предмет — главнее всего. У Жанны 09.09.2026 предмета не оказалось НИ
+     у группы «Хогвартс 27», НИ у шаблона «950»: в лагере занятия не привязаны к предмету так,
+     как в учебных группах. Отправлять её править Alfa ради одного поля — не дело; проще дать
+     выбрать предмет здесь, из живого справочника Alfa. */
+  const own=+((sh&&sh.alfaSubjId)||0);
+  if(own) return {ids:[own], from:"настроек смены"};
   const g=(_campAlfaGroups||[]).find(x=>+x.id===+((sh&&sh.alfaGroupId)||0));
   const t=(_campAlfaTariffs||[]).find(x=>+x.id===+((sh&&sh.alfaTariffId)||0));
   const gs=((g&&g.subject_ids)||[]).map(Number).filter(Boolean);
@@ -19726,8 +19736,11 @@ function _campAlfaCfgHtml(sh){
   const busy=!!_campRefBusy;
   let h='<div class="cmp-dr-s">Перенос в AlfaCRM</div>'
    +'<div class="cmp-fh" style="margin-bottom:8px">Куда попадёт ребёнок по кнопке ⇉ в строке резерва: филиал, группа и шаблон абонемента. Выбирается один раз на смену.</div>'
-   +'<div class="cmp-fh" style="margin-bottom:8px">Филиал: <b>'+esc(br?br.name:("id "+(c.alfaBranch||0)))+'</b></div>';
-  h+='<button class="btn ghost sm" '+(busy?"disabled":"")+' onclick="campLoadAlfaRefs(true)">'+(busy?"Читаю Alfa…":((_campAlfaGroups&&_campAlfaTariffs)?"Обновить списки из Alfa":"Загрузить группы и шаблоны"))+'</button>';
+   +'<div class="cmp-fh" style="margin-bottom:8px">Филиал: <b>'+esc(br?br.name:("id "+(c.alfaBranch||0)))+'</b>'
+     /* Имя филиала приходит отдельным запросом и к первой отрисовке может не успеть. «id 4»
+        вместо «Каникулы» пугает: похоже, что филиал не тот. Говорим, что это временно. */
+     +(br?'':' <span style="color:var(--muted)">(имя ещё грузится)</span>')+'</div>';
+  h+='<button class="btn ghost sm" '+(busy?"disabled":"")+' onclick="campLoadAlfaRefs(true)">'+(busy?"Читаю Alfa…":((_campAlfaGroups&&_campAlfaTariffs&&_campAlfaSubjects)?"Обновить списки из Alfa":"Загрузить списки из Alfa"))+'</button>';
   if(_campAlfaGroups){
     h+='<label class="cmp-f" style="margin-top:8px">Группа в Alfa<select class="cell wide" onchange="campSetShift(\'alfaGroupId\',this.value)">'
       +'<option value="">— не выбрана —</option>'
@@ -19742,10 +19755,22 @@ function _campAlfaCfgHtml(sh){
     /* ⚠️ Шаблона на нужную цену может не быть — создать его через API нельзя, это делается
        в самой Alfa. Молчать нельзя: иначе непонятно, почему в списке нет «950». */
     if(!_campAlfaTariffs.length) h+='<div class="cmp-warn">Шаблонов абонемента в этом филиале нет. Создайте шаблон в AlfaCRM и нажмите «Обновить списки».</div>';
-    /* ⚠️ Предупреждаем, только когда предмета нет НИГДЕ. Раньше ругались на пустой шаблон,
-       хотя предмет прекрасно берётся из группы — и человек шёл править Alfa зря. */
-    const SJ=_campSubjIds(sh);
-    if(g&&t&&!SJ.ids.length) h+='<div class="cmp-warn">Предмет не задан ни у группы «'+esc(g.name||"")+'», ни у шаблона «'+esc(t.name||"")+'». Alfa не примет такой абонемент — проставьте предмет у группы в AlfaCRM и нажмите «Обновить списки».</div>';
+  }
+  /* Предмет отдельным выбором: у лагерной группы и у поурочного шаблона его может не быть
+     вовсе, а Alfa без него абонемент не примет. Пустой пункт = «взять у группы или шаблона». */
+  if(_campAlfaSubjects){
+    const SJn=_campSubjIds(sh);
+    h+='<label class="cmp-f">Предмет для абонемента<select class="cell wide" onchange="campSetShift(\'alfaSubjId\',this.value)">'
+      +'<option value="">— взять у группы или шаблона —</option>'
+      +_campAlfaSubjects.map(x=>'<option value="'+esc(x.id)+'"'+(+sh.alfaSubjId===+x.id?' selected':'')+'>'+esc(x.name||('предмет '+x.id))+'</option>').join('')
+      +'</select></label>'
+      +'<div class="cmp-fh" style="margin:-4px 0 8px">'+(SJn.ids.length?('Берётся из '+esc(SJn.from)):"")+'</div>';
+    /* ⚠️ Предупреждение ОДНО и только когда предмета нет нигде: у Жанны его не оказалось ни
+       у группы «Хогвартс 27», ни у шаблона «950». Раньше здесь советовали идти править Alfa —
+       не надо: выбор прямо над этой строкой решает вопрос. */
+    if(!SJn.ids.length) h+='<div class="cmp-warn">Alfa без предмета абонемент не примет, а у '
+      +esc(g?("группы «"+(g.name||"")+"»"):"группы")+' и шаблона '+esc(t?("«"+(t.name||"")+"»"):"")
+      +' он не задан. Выберите предмет в списке выше — править что-то в AlfaCRM для этого не нужно.</div>';
   }
   if(g&&t){
     const p=_campTarPrice(t);
