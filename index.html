@@ -2197,7 +2197,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-09-09-17";
+const APP_VER="2026-09-09-18";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -11445,7 +11445,9 @@ function _trMgrStats(){
   };
   const add=(rows,bucket)=>rows.forEach(r=>{
     const m=pick(_trMgrOf(r.id));
-    m.kids++; m[bucket]++; m.kids2.push({id:r.id, b:bucket});
+    /* Саму строку воронки кладём рядом: на листе «не дошли» нужно назвать занятия, которые
+       ребёнок пропустил, — без них лист не отличается от простого перечня фамилий. */
+    m.kids++; m[bucket]++; m.kids2.push({id:r.id, b:bucket, r:r});
     if(bucket==="came"||bucket==="missed"||bucket==="waiting") m.enrolled++;
     /* Конверсия считается от ДОШЕДШИХ, значит и числитель должен быть из них. Иначе абонемент
        ждущего или возвращенца попадал бы в числитель, но не в знаменатель, — так и получались
@@ -11531,12 +11533,15 @@ function _trMgrKidsHtml(rows){
       <b>${esc(m.name)}</b> <span style="color:var(--muted)">— ${m.kids} ${_fmlKid(m.kids)} · дошли ${m.came} · купили ${m.paid} · оплатили ${_gm(m.pay)} р</span>
       <!-- ⚠️ stopPropagation обязателен: кнопка внутри summary, и без него клик по печати
            заодно свернул бы раскрывашку. -->
-      <button class="btn ghost sm" style="margin-left:8px" title="Напечатать список этого менеджера отдельным листом"
-        onclick="event.stopPropagation();event.preventDefault();trPrintMgr('${_jsStr(m.name)}')">🖨</button></summary>
+      <button class="btn ghost sm" style="margin-left:8px" title="Весь список этого менеджера — отдельным листом"
+        onclick="event.stopPropagation();event.preventDefault();trPrintMgr('${_jsStr(m.name)}')">🖨 все</button>${
+      m.missed?`<button class="btn ghost sm" style="margin-left:4px" title="Только не дошедшие — с занятиями, которые ребёнок пропустил, и ближайшим впереди"
+        onclick="event.stopPropagation();event.preventDefault();trPrintMgr('${_jsStr(m.name)}','missed')">🖨 не дошли ${m.missed}</button>`:""}</summary>
       <div style="padding:6px 0 4px 4px">${li}</div></details>`;
   };
   return `<div style="margin-top:10px"><h4 style="margin:8px 0 4px">📋 Дети по менеджерам
-    <button class="btn ghost sm" style="margin-left:8px;font-weight:400" title="Все менеджеры сразу — каждому свой лист" onclick="trPrintMgrAll()">🖨 Все списки</button></h4>
+    <button class="btn ghost sm" style="margin-left:8px;font-weight:400" title="Все менеджеры сразу — каждому свой лист" onclick="trPrintMgrAll()">🖨 Все списки</button>
+    <button class="btn ghost sm" style="margin-left:4px;font-weight:400" title="Только не дошедшие: кому звонить в первую очередь. Менеджеров без таких детей в печать не берём" onclick="trPrintMgrAll('missed')">🖨 Не дошли</button></h4>
     <div class="hint" style="margin-bottom:6px">Два столбца этапов независимы: слева — где ребёнок по занятиям, справа — по деньгам. Оплатить абонемент можно, ещё не придя на первое занятие, — поэтому «Купили» в таблице выше бывает больше «Дошли».</div>
     ${rows.map(one).join("")}</div>`;
 }
@@ -11564,8 +11569,26 @@ function _trEvText(id){
   const c=_trCards[String(id)]||_trCards[Number(id)];
   return (c&&c.evzz)?String(c.evzz).trim():"";
 }
-function _trMgrPrintPage(m){
-  const list=_trMgrKidsSorted(m);
+/* Что именно ребёнок пропустил — то, с чего начинается разговор с родителем. И отдельной
+   строкой: есть ли у него занятие впереди. Это два разных звонка — «вы пропали» и «ждём
+   вас в пятницу», — и на бумаге они должны различаться с одного взгляда. */
+function _trMissCell(x){
+  const les=((x&&x.r&&x.r.les)||[]);
+  const one=l=>_trDayLabel(l.date)+(l.from?(" "+l.from):"")+" · "+(_trRefs.subjects[l.subjectId]||("предмет "+l.subjectId));
+  const gone=les.filter(l=>l.st==="missed");
+  let h=gone.slice(0,6).map(l=>esc(one(l))).join("<br>");
+  if(gone.length>6) h+='<div class="mut">…и ещё '+(gone.length-6)+'</div>';
+  if(!h) h='<span class="mut">занятий в расписании нет</span>';
+  /* Впереди оставляем по одному занятию на курс: расписание регулярное до мая, и три
+     одинаковых строки ничего не добавляют. */
+  const seen={}, ah=[];
+  les.forEach(l=>{ if(l.st!=="ahead"||seen[l.subjectId]) return; seen[l.subjectId]=1; ah.push(l); });
+  if(ah.length) h+='<div class="ok">впереди: '+ah.slice(0,3).map(l=>esc(_trDayLabel(l.date)+" · "+(_trRefs.subjects[l.subjectId]||""))).join("; ")+'</div>';
+  return h;
+}
+function _trMgrPrintPage(m,only){
+  const miss=(only==="missed");
+  const list=_trMgrKidsSorted(m).filter(x=>!miss||x.b==="missed");
   const body=list.map((x,i)=>{
     const b=_TR_BUCK[x.b]||["—","var(--muted)"], ms=_trMoneyStage(x.id);
     /* «Абонемент» показываем, только когда есть что показать: название и остаток. Фразы
@@ -11573,36 +11596,50 @@ function _trMgrPrintPage(m){
        второй раз в той же строке значит просто занять место. */
     const t0=_trTarText(x.id);
     const tar=(t0==="без абонемента"||t0==="только пробный")?"":t0;
+    /* На листе «не дошли» столбец этапа был бы одним и тем же словом во всех строках —
+       место занимает, а не говорит ничего. Отдаём его под пропущенные занятия. */
+    const les=miss?`<td>${_trMissCell(x)}</td>`
+                  :`<td style="color:${_trPColor(b[1])}">${esc(b[0])}</td>`;
     return `<tr>
       <td class="mut">${i+1}</td>
       <td class="nm">${esc(_trKidName(x.id))}${_trArchived(x.id)?'<div class="mut" style="font-weight:400">в архиве Alfa</div>':""}</td>
-      <td>${esc(_trPhone(x.id)||"—")}</td>
-      <td style="color:${_trPColor(b[1])}">${esc(b[0])}</td>
+      <td style="white-space:nowrap">${esc(_trPhone(x.id)||"—")}</td>
+      ${les}
       <td style="color:${_trPColor(ms[1])}">${esc(ms[0])}</td>
       <td>${tar?esc(tar):'<span class="mut">—</span>'}</td>
       <td class="mut">${esc(_trEvText(x.id))}</td>
       <td><span class="call"></span></td></tr>`;
   }).join("");
-  return `<div class="page"><h2>${esc(m.name)} — дети нового набора</h2>
+  const when=esc(new Date().toLocaleDateString("ru-RU"));
+  const head=miss
+    ? `<h2>${esc(m.name)} — не дошли из набора</h2>
+    <div class="sub">Не дошли: ${list.length} из ${m.kids} · занятия у ребёнка уже прошли, а он не был ни на одном · напечатано ${when}
+      <br>Зелёная строка «впереди» значит, что занятие у ребёнка ещё будет: такой не потерян, и разговор с родителем другой.</div>`
+    : `<h2>${esc(m.name)} — дети нового набора</h2>
     <div class="sub">Детей: ${list.length} · дошли ${m.came} · не дошли ${m.missed} · ждём ${m.waiting}${
-      m.noLes?(" · без занятий "+m.noLes):""} · купили абонемент ${m.paid} · оплатили ${_gm(m.pay)} р
-      · напечатано ${esc(new Date().toLocaleDateString("ru-RU"))}
+      m.noLes?(" · без занятий "+m.noLes):""} · купили абонемент ${m.paid} · оплатили ${_gm(m.pay)} р · напечатано ${when}
       <br>Два столбца этапов независимы: слева — где ребёнок по занятиям, справа — по деньгам.
-      Оплатить абонемент можно, ещё не придя на первое занятие, — поэтому купивших бывает больше дошедших.</div>
-    <table><thead><tr><th>№</th><th>Ребёнок</th><th>Телефон</th><th>По занятиям</th>
-      <th>По деньгам</th><th>Абонемент</th><th>ЭВ 26/27</th><th>Отметка</th></tr></thead>
-    <tbody>${body||'<tr><td colspan="8" class="mut">Детей за этим менеджером нет.</td></tr>'}</tbody></table></div>`;
+      Оплатить абонемент можно, ещё не придя на первое занятие, — поэтому купивших бывает больше дошедших.</div>`;
+  return `<div class="page">${head}
+    <!-- Ширины: колонка «Не пришёл на» содержательная и тянет на себя всё место, а имя и
+         телефон от этого ломаются пополам. Список сканируют глазами по фамилии — ей и даём
+         минимум, служебным колонкам ставим потолок. -->
+    <table><thead><tr><th style="width:24px">№</th><th style="min-width:132px">Ребёнок</th><th>Телефон</th><th>${miss?"Не пришёл на":"По занятиям"}</th>
+      <th>По деньгам</th><th>Абонемент</th><th>ЭВ 26/27</th><th style="width:46px">Отметка</th></tr></thead>
+    <tbody>${body||'<tr><td colspan="8" class="mut">'+(miss?"Не дошедших у этого менеджера нет.":"Детей за этим менеджером нет.")+'</td></tr>'}</tbody></table></div>`;
 }
-function trPrintMgr(name){
+function trPrintMgr(name, only){
   const rows=_trMgrStats();
   const m=(rows||[]).find(x=>x.name===name);
   if(!m){ toast("Списки ещё не собраны — нажмите «Пересобрать всё»"); return; }
-  _obzPrint(m.name+" — дети набора", _trMgrPrintPage(m));
+  _obzPrint(m.name+(only==="missed"?" — не дошли":" — дети набора"), _trMgrPrintPage(m,only));
 }
-function trPrintMgrAll(){
-  const rows=_trMgrStats();
-  if(!rows||!rows.length){ toast("Списки ещё не собраны — нажмите «Пересобрать всё»"); return; }
-  _obzPrint("Дети по менеджерам", rows.map(m=>_trMgrPrintPage(m)).join(""));
+function trPrintMgrAll(only){
+  /* Менеджеров без единого не дошедшего в печать не берём: пустой лист на каждого — это
+     стопка бумаги, в которой нужные листы ещё надо найти. */
+  const rows=(_trMgrStats()||[]).filter(m=>only!=="missed"||m.missed>0);
+  if(!rows.length){ toast(only==="missed"?"Не дошедших сейчас ни у кого нет":"Списки ещё не собраны — нажмите «Пересобрать всё»"); return; }
+  _obzPrint(only==="missed"?"Не дошли — по менеджерам":"Дети по менеджерам", rows.map(m=>_trMgrPrintPage(m,only)).join(""));
 }
 function _trMgrTableHtml(){
   const rows=_trMgrStats();

@@ -148,7 +148,8 @@ delete ctx.S.children['201'];
     const html2 = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
     let s2 = '';
     for (const n of ['_trPayDays', '_trPaySum', '_trPayHtml', '_trMoneyStage', '_trMgrKidsHtml', '_trMgrUnknownHtml', '_trMgrStats', '_trMgrTableHtml',
-                     '_trTarText', '_trMgrKidsSorted', '_trPColor', '_trEvText', '_trMgrPrintPage', 'trPrintMgr', 'trPrintMgrAll']) {
+                     '_trTarText', '_trMgrKidsSorted', '_trPColor', '_trEvText', '_trMgrPrintPage', 'trPrintMgr', 'trPrintMgrAll',
+                     '_trMissCell', '_trDayLabel']) {
       const m = html2.match(new RegExp('\\nfunction ' + n + '\\([^)]*\\)\\s*\\{[\\s\\S]*?\\n\\}', 'm'));
       if (!m) { console.log('не найдено в index.html: ' + n); process.exit(1); }
       s2 += m[0] + '\n';
@@ -191,6 +192,7 @@ delete ctx.S.children['201'];
       _trFunnel: () => FN,
       _trMgrOf: id => mgrOf[String(id)] || '',
     _trKidName: id => 'Ребёнок ' + id,
+    _trRefs: { subjects: { 11: 'Робототехника', 12: 'Шахматы' } },
     _trArchBadge: () => '', _fmlKid: n => 'детей',
     _TR_BUCK: { came: ['дошёл', 'g'], missed: ['не дошёл', 'r'], waiting: ['ждём', 't'],
                 noLes: ['без занятий', 'm'], back: ['ходил раньше', 'm'] },
@@ -205,7 +207,7 @@ delete ctx.S.children['201'];
     };
     const A2 = new Function('ctx', 'with (ctx) { ' + s2 +
     ' return {_trMgrStats,_trMgrTableHtml,_trMgrUnknownHtml,_trMgrKidsHtml,_trMoneyStage,_trPaySum,_trPayDays,_trPayHtml,' +
-    '_trTarText,_trMgrKidsSorted,_trPColor,_trEvText,_trMgrPrintPage,trPrintMgr,trPrintMgrAll,_jsStr}; }')(ctx2);
+    '_trTarText,_trMgrKidsSorted,_trPColor,_trEvText,_trMgrPrintPage,trPrintMgr,trPrintMgrAll,_jsStr,_trMissCell}; }')(ctx2);
 
     const st = A2._trMgrStats();
     eq('менеджеров в рейтинге', st.length, 3);            // Ольга, Мария и «не определён»
@@ -377,13 +379,61 @@ delete ctx.S.children['201'];
 
   /* --- кнопки на экране --- */
   const hb = A2._trMgrKidsHtml(A2._trMgrStats());
-  eq('кнопка печати у каждого менеджера', hb.split("trPrintMgr('").length - 1, 3);
+  eq('кнопка «весь список» у каждого менеджера', hb.split("')\">🖨 все").length - 1, 3);
+  // ⚠️ У Марии не дошедших нет — печатать ей пустой лист незачем, и кнопки быть не должно
+  eq('кнопка «не дошли» только там, где они есть', hb.split("','missed')").length - 1, 2);
+  check('и в ней видно, скольким звонить', hb.indexOf('🖨 не дошли 1') > 0, hb.slice(hb.indexOf('Ольга') - 60, hb.indexOf('Ольга') + 700));
   check('кнопка «все списки» есть', hb.indexOf('trPrintMgrAll()') > 0, hb.slice(0, 300));
+  check('и «не дошли» по всем — тоже', hb.indexOf("trPrintMgrAll('missed')") > 0, hb.slice(0, 400));
   /* ⚠️ Кнопка стоит внутри summary. Без stopPropagation клик по печати заодно свернул бы
      раскрывашку — список закрывался бы ровно в тот момент, когда его печатают. */
   check('клик по печати не сворачивает список',
         hb.indexOf('event.stopPropagation();event.preventDefault();trPrintMgr(') > 0,
         hb.slice(hb.indexOf('Ольга') - 120, hb.indexOf('Ольга') + 500));
+
+  /* ================= ЛИСТ «НЕ ДОШЛИ» =================
+     Жанна: «сделай так же недошедшим». Это лист под звонок, поэтому колонка «По занятиям»
+     в нём бессмысленна — во всех строках стояло бы одно слово. На её месте занятия, которые
+     ребёнок пропустил, и отдельной строкой то, что у него ещё впереди. */
+  FN.lists.missedAll[0].les = [
+    { done: false, sum: 0, st: 'missed', date: '2026-09-03', from: '17:00', subjectId: 11 },
+    { done: false, sum: 0, st: 'missed', date: '2026-09-05', from: '17:00', subjectId: 11 },
+    { done: false, sum: 0, st: 'ahead',  date: '2026-09-12', from: '17:00', subjectId: 11 },
+    { done: false, sum: 0, st: 'ahead',  date: '2026-09-19', from: '17:00', subjectId: 11 },
+  ];
+  PR = null; A2.trPrintMgr('Ольга', 'missed');
+  check('лист «не дошли» напечатан', !!PR, 'окно печати не открылось');
+  check('в заголовке окна сказано, что это не дошедшие', PR.title.indexOf('не дошли') > 0, PR.title);
+  check('и в шапке листа тоже', PR.html.indexOf('не дошли из набора') > 0, PR.html.slice(0, 300));
+  // ⚠️ Главное: на лист под звонок не должны попасть те, кто дошёл
+  check('не дошедший в листе есть', PR.html.indexOf('Ребёнок 204') > 0, PR.html);
+  check('дошедших в листе нет', PR.html.indexOf('Ребёнок 201') < 0, PR.html);
+  check('и ждущих тоже нет', PR.html.indexOf('Ребёнок 207') < 0, PR.html);
+  check('видно, сколько их из скольких', PR.html.indexOf('Не дошли: 1 из 4') > 0, PR.html.slice(0, 400));
+  // ради этой колонки лист и печатают: с чего начинать разговор
+  check('колонки «По занятиям» здесь нет', PR.html.indexOf('По занятиям') < 0, PR.html.slice(0, 900));
+  check('вместо неё — что пропустил', PR.html.indexOf('Не пришёл на') > 0, PR.html.slice(0, 900));
+  check('названы пропущенные занятия', PR.html.indexOf('03.09') > 0 && PR.html.indexOf('05.09') > 0, PR.html);
+  check('и предмет назван', PR.html.indexOf('Робототехника') > 0, PR.html);
+  /* «Впереди» — это другой звонок: ребёнок не потерян, его ещё ждут. Без этой строки
+     менеджер разговаривает с родителем не о том. */
+  check('сказано, что занятие ещё впереди', PR.html.indexOf('впереди: 12.09') > 0, PR.html);
+  eq('повторы того же курса впереди не дублируем', PR.html.split('19.09').length - 1, 0);
+  check('деньги на листе остались — часто это и есть причина', PR.html.indexOf('без абонемента') > 0, PR.html);
+  check('телефон на месте', PR.html.indexOf('—') > 0);
+
+  /* --- все листы «не дошли» разом --- */
+  PR = null; A2.trPrintMgrAll('missed');
+  check('общая печать не дошедших открылась', !!PR);
+  /* ⚠️ У Марии не дошедших нет: пустой лист на неё — это стопка бумаги, в которой нужные
+     листы ещё надо найти. Печатаем только тех, кому есть что звонить. */
+  eq('страниц столько, у скольких есть не дошедшие', PR.html.split('class="page"').length - 1, 2);
+  check('Марии пустого листа не досталось', PR.html.indexOf('Мария') < 0, PR.html.slice(0, 500));
+
+  /* --- полный лист от этого не пострадал --- */
+  PR = null; A2.trPrintMgr('Ольга');
+  check('в полном листе по-прежнему все', PR.html.indexOf('Ребёнок 201') > 0 && PR.html.indexOf('Ребёнок 204') > 0, PR.html);
+  check('и колонка «По занятиям» на месте', PR.html.indexOf('По занятиям') > 0, PR.html.slice(0, 900));
 
   /* --- менеджера с таким именем нет: говорим, а не молчим --- */
   PR = null; TOASTED = ''; A2.trPrintMgr('Кого Нет');
