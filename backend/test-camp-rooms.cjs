@@ -22,7 +22,7 @@ function check(name, ok, detail) {
 function eq(name, got, want) { check(name, got === want, JSON.stringify(got) + ' ≠ ' + JSON.stringify(want)); }
 
 const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
-const MULTI = ['_campSeedLayout', '_campCap', '_campBeds'];
+const MULTI = ['_campSeedLayout', '_campCap', '_campBeds', '_campSplitFloor2'];
 const ONE = ['_campNewId'];
 let src = '';
 function grab(name, re) {
@@ -39,7 +39,7 @@ const ctx = { _campNewIdSeq: 0 };
 const mb = html.match(/\nfunction _campBlockHtml\([^)]*\)\s*\{[\s\S]*?\n\}/m);
 if (!mb) { console.log('не найдено в index.html: _campBlockHtml'); process.exit(1); }
 const blockSrc = mb[0];
-const API = new Function('ctx', 'with (ctx) { ' + src + ' return {_campSeedLayout,_campCap,_campBeds}; }')(ctx);
+const API = new Function('ctx', 'with (ctx) { ' + src + ' return {_campSeedLayout,_campCap,_campBeds,_campSplitFloor2}; }')(ctx);
 
 /* ================= схема санатория ================= */
 const lay = API._campSeedLayout();
@@ -114,6 +114,99 @@ eq('из них детских', API._campBeds(lay, true).length, 76);
   const one = { id: 'L1', blocks: [{ id: 'b1', name: 'Блок', rooms: [] }] };
   eq('блок без комнат не даёт мест', API._campCap({ sex: { b1: 'm' } }, one).need, 0);
   eq('но сам блок посчитан', API._campCap({ sex: { b1: 'm' } }, one).blocks, 1);
+}
+
+/* ================= РАЗБИВКА БЛОКОВ 2 ЭТАЖА НА КОМНАТЫ =================
+   Просьба Жанны 09.09.2026: «сделай на 2 этаже тоже разбивку на комнаты как и на 3-м».
+   Схема живёт в данных, а не в коде, поэтому мало поправить _campSeedLayout — надо разрезать
+   уже настроенные схемы.
+   ⚠️ Дети привязаны к месту ключом «блок|комната|номер». Разрежешь комнату, не тронув ключи, —
+   и все, кто сидел дальше нового размера первой комнаты, молча выпадут в «не расселённые».
+   Общее число мест меняться не должно НИ НА ОДНО: 4 = 2+2, 5 = 3+2. */
+{
+  const beds = b => (b.rooms || []).reduce((s, r) => s + (+r.beds || 0), 0);
+
+  /* --- новая схема сразу с комнатами --- */
+  const lay = API._campSeedLayout();
+  const f2 = (lay.blocks || []).filter(b => b.floor === '2 этаж' && !b.staff);
+  eq('детских блоков на 2 этаже', f2.length, 5);
+  check('у каждого по две комнаты', f2.every(b => (b.rooms || []).length === 2),
+        f2.map(b => b.name + ':' + (b.rooms || []).length).join(', '));
+  eq('мест на 2 этаже не изменилось', f2.reduce((s, b) => s + beds(b), 0), 22);
+  eq('блок на 4 разбит как 2+2', (f2.find(b => b.name === 'Блок 2.1').rooms || []).map(r => r.beds).join('+'), '2+2');
+  eq('блок на 5 разбит как 3+2', (f2.find(b => b.name === 'Блок 2.4').rooms || []).map(r => r.beds).join('+'), '3+2');
+  // ⚠️ «Комфорт» не делим: там два места вожатым, комната одна
+  const cf = (lay.blocks || []).filter(b => b.staff);
+  check('«Комфорт» остался одной комнатой', cf.every(b => (b.rooms || []).length === 1),
+        cf.map(b => b.name + ':' + (b.rooms || []).length).join(', '));
+  eq('и мест у вожатых столько же', cf.reduce((s, b) => s + beds(b), 0), 6);
+  // третий этаж не трогали
+  eq('на 3 этаже по-прежнему 54', (lay.blocks || []).filter(b => b.floor === '3 этаж')
+     .reduce((s, b) => s + beds(b), 0), 54);
+
+  /* --- миграция СТАРОЙ схемы: блоки одной комнатой --- */
+  const old = () => ({
+    layouts: [{ id: 'L', blocks: [
+      { id: 'b1', floor: '2 этаж', name: 'Блок 2.1', rooms: [{ id: 'r1', name: 'комната', beds: 4 }] },
+      { id: 'b4', floor: '2 этаж', name: 'Блок 2.4', rooms: [{ id: 'r1', name: 'комната', beds: 5 }] },
+      { id: 'c1', floor: '2 этаж', name: 'Комфорт 1', staff: true, rooms: [{ id: 'r1', name: 'комната', beds: 2 }] },
+      { id: 'b32', floor: '3 этаж', name: 'Блок 32', rooms: [{ id: 'r1', name: 'комната 1', beds: 3 }, { id: 'r2', name: 'комната 2', beds: 3 }] },
+    ] }],
+    res: [
+      { id: 'k0', fio: 'Мельников Илья', bed: 'b1|r1|0' },   // остаётся в первой комнате
+      { id: 'k1', fio: 'Второй',         bed: 'b1|r1|1' },   // тоже
+      { id: 'k2', fio: 'Третий',         bed: 'b1|r1|2' },   // ⚠️ уезжает во вторую: 2 → r2|0
+      { id: 'k3', fio: 'Четвёртый',      bed: 'b1|r1|3' },   // ⚠️ и этот: 3 → r2|1
+      { id: 'k5', fio: 'Пятый',          bed: 'b4|r1|4' },   // из блока на 5: 4 → r2|1
+      { id: 'k9', fio: 'На третьем',     bed: 'b32|r2|0' },  // чужой этаж — не трогать
+      { id: 'kx', fio: 'Без места',      bed: '' },
+    ],
+  });
+
+  const c = old();
+  eq('миграция сработала', API._campSplitFloor2(c), true);
+  const B = id => c.layouts[0].blocks.find(b => b.id === id);
+  eq('блок 2.1 стал двумя комнатами', (B('b1').rooms || []).length, 2);
+  eq('и мест в нём столько же', beds(B('b1')), 4);
+  eq('блок 2.4 тоже', beds(B('b4')), 5);
+  eq('и разбит 3+2', (B('b4').rooms || []).map(r => r.beds).join('+'), '3+2');
+  eq('«Комфорт» не тронут', (B('c1').rooms || []).length, 1);
+  eq('третий этаж не тронут', (B('b32').rooms || []).length, 2);
+
+  const bedOf = id => (c.res.find(r => r.id === id) || {}).bed;
+  // ⚠️ вот ради чего всё: никто не должен выпасть из своего блока
+  eq('первый остался на месте', bedOf('k0'), 'b1|r1|0');
+  eq('второй тоже', bedOf('k1'), 'b1|r1|1');
+  eq('третий переехал во вторую комнату', bedOf('k2'), 'b1|r2|0');
+  eq('четвёртый следом', bedOf('k3'), 'b1|r2|1');
+  eq('пятый из блока на 5', bedOf('k5'), 'b4|r2|1');
+  eq('на третьем этаже место не тронуто', bedOf('k9'), 'b32|r2|0');
+  eq('без места так и остался без места', bedOf('kx'), '');
+  // никто не потерялся и не сел на чужое место
+  const taken = c.res.filter(r => r.bed).map(r => r.bed);
+  eq('расселённых столько же', taken.length, 6);
+  eq('и все на разных местах', new Set(taken).size, 6);
+
+  /* --- повторный прогон ничего не меняет --- */
+  eq('второй раз миграция не срабатывает', API._campSplitFloor2(c), false);
+  eq('и мест не прибавилось', beds(B('b1')), 4);
+  eq('и никто не переехал снова', bedOf('k2'), 'b1|r2|0');
+
+  /* --- блок на 3 места делить нечего --- */
+  const small = { layouts: [{ id: 'L', blocks: [
+    { id: 's1', floor: '2 этаж', name: 'Малый', rooms: [{ id: 'r1', name: 'комната', beds: 3 }] } ] }], res: [] };
+  eq('блок на 3 не делим', API._campSplitFloor2(small), false);
+  eq('и он остался одной комнатой', (small.layouts[0].blocks[0].rooms || []).length, 1);
+
+  /* --- ⚠️ id второй комнаты не должен столкнуться с существующим --- */
+  const clash = { layouts: [{ id: 'L', blocks: [
+    { id: 'x', floor: '2 этаж', name: 'Странный', rooms: [{ id: 'r2', name: 'комната', beds: 4 }] } ] }],
+    res: [{ id: 'q', bed: 'x|r2|3' }] };
+  eq('разбили и такой', API._campSplitFloor2(clash), true);
+  const rm = clash.layouts[0].blocks[0].rooms;
+  eq('комнат две', rm.length, 2);
+  check('идентификаторы разные', rm[0].id !== rm[1].id, rm.map(r => r.id).join(','));
+  eq('и ребёнок переехал в новую', clash.res[0].bed, 'x|' + rm[1].id + '|1');
 }
 
 /* ================= КАРТОЧКА БЛОКА: ВОЗРАСТ РЯДОМ С ИМЕНЕМ =================
