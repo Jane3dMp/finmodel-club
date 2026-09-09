@@ -945,7 +945,9 @@ details.client .cli-cols .cc-bal{width:74px;font-weight:600}
 .cmp-cfg label{display:flex;flex-direction:column;gap:3px;font-size:11px;color:var(--muted)}
 .cmp-t th.a-right,.cmp-t td.a-right{text-align:right}
 .cmp-t td{vertical-align:middle;white-space:nowrap}
-.cmp-t select.cell{max-width:152px}
+/* 152 было шире самого длинного варианта; лишнее уходило в ширину колонки. Обрезанный текст
+   в списке не теряется: полное значение видно, когда список открыт. */
+.cmp-t select.cell{max-width:120px}
 .cmp-t .cmp-when{font-size:10px;color:var(--muted);margin-top:1px}
 /* пол подставлен по фамилии и не подтверждён руками — блоки однополые, это надо видеть */
 .cmp-t select.cmp-auto{border-bottom:2px dotted #C9922E}
@@ -995,6 +997,12 @@ h3.cmp-fl span{font-weight:400;font-size:12px;color:var(--muted)}
 .cmp-src .cell.wide{width:100%}
 .cmp-src .btn{margin-left:auto}
 .cmp-srcdate{display:flex;flex-direction:column;gap:3px;font-size:11px;color:var(--muted)}
+/* ⚠️ input.cell — 62 пикселя: это ширина для числа в таблице модели. Полю даты её мало, и
+   «01.06.2026» обрезалось до «01.0» (правка Жанны 09.09.2026). Хуже, что дату в таком поле
+   не выставить: сегмент года просто не виден, а от него зависит, кого подтянет amo.
+   Поле тянется по ширине карточки и не вылезает за неё: border-box, min-width:0. */
+.cmp-srcdate{flex:1 1 140px;min-width:0}
+.cmp-srcdate .cell{width:100%;min-width:0;box-sizing:border-box;text-align:left}
 /* кнопки-значки «+», «⚙», «🖨» — в строке смен и в панели инструментов подборки */
 .cmp-ib{width:32px;padding:6px 0;text-align:center;font-size:14px;line-height:1;flex:none}
 /* фильтры активны, но панель закрыта: тонкая охристая рамка вместо тёмной заливки —
@@ -1005,7 +1013,7 @@ h3.cmp-fl span{font-weight:400;font-size:12px;color:var(--muted)}
 .cmp-pick .chip.cmp-shift{font-size:13px;font-weight:600;padding:6px 13px}
 .cmp-pick .chip.cmp-shift span{font-size:11px;font-weight:400}
 /* статус в выпадающих списках — те же кружки и цвета, что в остальном приложении */
-.cmp-st{min-width:132px}
+.cmp-st{min-width:118px}
 .cmp-st option{color:var(--coal);font-weight:400;background:#fff}
 /* возраст рядом с именем в списке «Не расселены» */
 .cmp-kid-a{font-style:normal;opacity:.6;margin-left:6px;font-size:11px}
@@ -2178,7 +2186,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-09-09-06";
+const APP_VER="2026-09-09-07";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -19292,7 +19300,7 @@ function _campCfgHtml(sh){
      +'<label class="cmp-f">Стоимость, р.<input class="cell wide" type="number" min="0" step="1" value="'+(+sh.price||0)+'" onchange="campSetShift(\'price\',this.value)"></label>'
      +'<label class="cmp-f">Предоплата, р.<input class="cell wide" type="number" min="0" step="1" value="'+(+sh.prepay||0)+'" onchange="campSetShift(\'prepay\',this.value)"></label>'
    +'</div>'
-   +'<div class="cmp-fh">Эти два числа — для расчёта: стоимость нужна колонке «Осталось», она сама считает долг по каждому ребёнку, предоплата подставляется подсказкой в поле.</div>'
+   +'<div class="cmp-fh">Эти два числа — для расчёта: стоимость нужна колонке «Ост.», она сама считает долг по каждому ребёнку, предоплата подставляется подсказкой в поле.</div>'
    +'<label class="cmp-f">Стоимость словами — как пишем родителям<textarea class="cell wide cmp-ta3" placeholder="390 р. при оплате до 1 октября, далее 450 р. В стоимость входит проживание, 5-разовое питание и вся программа." onchange="campSetShift(\'priceText\',this.value)">'+esc(sh.priceText||"")+'</textarea></label>'
    +'<div class="cmp-fh">Подставляется в сообщения как <code>{цена}</code>. Если поле пустое, туда подставится число из «Стоимость, р.».</div>'
    +'<label class="cmp-f">Концепция смены<textarea class="cell wide cmp-ta6" placeholder="О чём смена: легенда, идея, чем она отличается. Конструктор даёт только расписание занятий — концепцию пишем здесь." onchange="campSetShift(\'about\',this.value)">'+esc(sh.about||"")+'</textarea></label>'
@@ -19695,9 +19703,9 @@ function renderCampRes(){
   h+='<div class="tscroll"><table class="cmp-t"><thead><tr>'
    +'<th style="width:26px">#</th><th>Ребёнок</th><th title="Блоки только однополые">Пол</th><th>Дата рождения</th><th>Телефон</th>'
    +'<th>Статус</th><th>Источник</th><th>Вариант</th>'
-   +'<th class="a-right">Предоплата</th><th class="a-right">Доплата</th><th class="a-right" title="Сколько ещё должен по стоимости смены">Осталось</th>'
+   +'<th class="a-right" title="Предоплата">Предопл.</th><th class="a-right" title="Доплата">Допл.</th><th class="a-right" title="Осталось: сколько ещё должен по стоимости смены">Ост.</th>'
    +CAMP_PRE.map(p=>'<th title="Предзапись: '+p[1]+'" style="width:40px">'+p[2]+'</th>').join("")
-   +'<th>Место</th><th>AlfaCRM</th><th>Комментарий</th><th style="width:96px"></th>'
+   +'<th>Место</th><th>AlfaCRM</th><th>Комментарий</th><th style="width:120px"></th>'
    +'</tr></thead><tbody>';
   shown.forEach((r,i)=>{
     const jid=_jsStr(r.id);
@@ -19707,12 +19715,12 @@ function renderCampRes(){
     const bedTxt=_campBedLabel(sh,r);
     h+='<tr'+(r.status==="no"?' class="cmp-off"':'')+'>'
      +'<td style="color:var(--muted);font-size:11px">'+(i+1)+'</td>'
-     +'<td><input class="cell wide" style="min-width:180px" value="'+esc(r.fio||"")+'" onchange="campSetRes(\''+jid+'\',\'fio\',this.value)"></td>'
+     +'<td><input class="cell wide" style="min-width:146px" value="'+esc(r.fio||"")+'" onchange="campSetRes(\''+jid+'\',\'fio\',this.value)"></td>'
      +'<td><select class="cell'+(r.sexAuto?' cmp-auto':'')+'" title="'+(r.sexAuto?"Подставлено по фамилии — проверьте":"Пол ребёнка")+'" onchange="campSetRes(\''+jid+'\',\'sex\',this.value)">'
         +['','m','f'].map(v=>'<option value="'+v+'"'+(r.sex===v?' selected':'')+'>'+(v===""?"—":(v==="m"?"М":"Д"))+'</option>').join("")+'</select></td>'
-     +'<td style="white-space:nowrap"><input class="cell" type="date" style="width:132px" value="'+esc(_dobIso(r.dob)||"")+'" onchange="campSetRes(\''+jid+'\',\'dob\',this.value)">'
-        +(age?' <span style="font-size:11px;color:var(--muted)" title="'+esc(_ageStrFull(r.dob))+'">'+esc(age)+'</span>':'')+'</td>'
-     +'<td><input class="cell" style="width:132px;text-align:left" value="'+esc(r.phone||"")+'" onchange="campSetRes(\''+jid+'\',\'phone\',this.value,false)"></td>'
+     +'<td style="white-space:nowrap"><input class="cell" type="date" style="width:124px" value="'+esc(_dobIso(r.dob)||"")+'" onchange="campSetRes(\''+jid+'\',\'dob\',this.value)">'
+        +(age?'<div class="cmp-when" title="'+esc(_ageStrFull(r.dob))+'">'+esc(age)+' лет</div>':'')+'</td>'
+     +'<td><input class="cell" style="width:124px;text-align:left" value="'+esc(r.phone||"")+'" onchange="campSetRes(\''+jid+'\',\'phone\',this.value,false)"></td>'
      +'<td><select class="cell cmp-st" style="color:'+st.c+';font-weight:700" onchange="campSetRes(\''+jid+'\',\'status\',this.value)">'
         +CAMP_STATUS.map(s=>'<option value="'+s[0]+'"'+(r.status===s[0]?' selected':'')+'>'+CAMP_ST[s[0]].ic+' '+s[1]+'</option>').join("")+'</select></td>'
      +'<td><select class="cell" onchange="campSetRes(\''+jid+'\',\'src\',this.value,false)">'
@@ -19727,9 +19735,9 @@ function renderCampRes(){
      +CAMP_PRE.map(p=>'<td style="text-align:center"><input type="checkbox" title="'+p[1]+'"'+(r[p[0]]?' checked':'')+' onchange="campTglRes(\''+jid+'\',\''+p[0]+'\',this.checked)"></td>').join("")
      +'<td style="font-size:11px'+(bedTxt?'':';color:var(--muted)')+'">'+(bedTxt?esc(bedTxt):"не расселён")+'</td>'
      +'<td>'+(r.alfaId
-        ?'<span class="cmp-ok" title="Открыть историю в Альфе" onclick="openAlfaHistory(\''+_jsStr(String(r.alfaId))+'\',\''+_jsStr(r.fio)+'\')">✓ ID '+esc(String(r.alfaId))+'</span>'
+        ?'<span class="cmp-ok" title="ID '+esc(String(r.alfaId))+' в AlfaCRM — открыть историю" onclick="openAlfaHistory(\''+_jsStr(String(r.alfaId))+'\',\''+_jsStr(r.fio)+'\')">✓ '+esc(String(r.alfaId))+'</span>'
         :'<button class="btn ghost sm" onclick="campToAlfa(\''+jid+'\')">→ Альфа</button>')+'</td>'
-     +'<td><input class="cell wide" style="min-width:150px;text-align:left" value="'+esc(r.note||"")+'" onchange="campSetRes(\''+jid+'\',\'note\',this.value,false)"></td>'
+     +'<td><input class="cell wide" style="min-width:96px;text-align:left" value="'+esc(r.note||"")+'" onchange="campSetRes(\''+jid+'\',\'note\',this.value,false)"></td>'
      +'<td style="white-space:nowrap"><button class="btn ghost sm more-toggle" title="Написать в Viber по шаблону" onclick="campVbOpen(this,\'res\',\''+jid+'\')">💬</button>'
         +'<button class="btn ghost sm" title="Перенести в другую смену" onclick="campMoveRow(\''+jid+'\')">⇄</button>'
         +'<button class="btn ghost sm" title="Убрать из резерва" onclick="campDelRow(\''+jid+'\')">×</button>'
@@ -20250,6 +20258,7 @@ function _campSrcHtml(){
      +'<label class="cmp-srcdate">кто заходил до<input class="cell" type="date" value="'+esc(c.amoSrc.before||"2026-06-01")+'" onchange="campKidsAmoSet(\'before\',this.value)"></label>'
      +'<button class="btn sm" '+(busy?'disabled':'')+' onclick="campKidsPullAmo()">'+(busy==="amo"?"Тяну…":(_campAmo?"Обновить":"Подтянуть"))+'</button>'
      +(_campAmo&&_campAmo.cut?'<span class="cmp-cut">Воронка больше 2500 сделок — прокси отдал только первые 2500, часть архива не приехала.</span>':'')
+     +_campAmoSkipHtml()
    +'</div>'
    +'<div class="cmp-src"><b>Курсы из Альфы</b>'
      +'<span>'+Object.keys(_campHist).length+' детей с историей · колонка «Был у нас». Тянем только показанных'
@@ -20270,6 +20279,20 @@ function campKidsQuery(v){
 }
 function campKidsMore(){ _campKLimit+=300; renderCampKids(); }
 function campKidsRebuild(){ _campPool=null; renderCampKids(); }
+/* Кого воронка отдала, но в список не взяли. Без этой строки «взялось меньше, чем в amo»
+   объяснялось догадками: молчаливая потеря — та самая, из-за которой перестают верить цифре. */
+function _campAmoSkipHtml(){
+  const a=_campAmo, s=a&&a.skip; if(!s) return "";
+  const lost=(+s.noName||0)+(+s.noDate||0);
+  const p=[];
+  if(+a.total) p.push("в воронке "+a.total);
+  p.push("взяли "+a.list.length);
+  if(+s.after) p.push("позже даты "+s.after);
+  const tail=lost?('<span class="cmp-cut">не взяли '+lost+": "
+    +[( +s.noName?(s.noName+" без имени ребёнка"):""),(+s.noDate?(s.noDate+" без даты создания"):"")]
+      .filter(Boolean).join(", ")+"</span>"):"";
+  return '<span style="flex:1 1 100%;color:var(--muted)">'+p.join(" · ")+(tail?(" · "+tail):"")+"</span>";
+}
 function campKidsAmoSet(f,v){ const c=_camp(); c.amoSrc[f]=(f==="pipelineId")?(+v||0):String(v||""); _campSave(); renderCampKids(); }
 function campKidsAlfaSet(v){ const c=_camp(); c.alfaBranch=+v||0; _campSave(); renderCampKids(); }
 function campKidsYears(f,v){
@@ -20356,16 +20379,22 @@ async function campKidsPullAmo(){
     _amoContacts=j.contacts||{}; _amoNameSrc=keepN||w.nameSrc; _amoNameField=keepF||w.nameField; _amoDobSrc=keepD||w.dobSrc;
     const users=j.users||{};
     const list=[];
+    /* ⚠️ Сделки отбрасывались МОЛЧА — по трём разным причинам, и все выглядели одинаково:
+       «взялось меньше, чем в воронке». Считаем каждую причину отдельно и говорим вслух.
+       «Позже даты» — это работа фильтра, а вот «без имени» и «без даты создания» — потери,
+       и чинятся они по-разному: первое настройкой поля имени, второе только в самой amo. */
+    const skip={after:0,noName:0,noDate:0};
     try{
       if(typeof _amoAutoNameSrc==="function") _amoAutoNameSrc();
       (j.leads||[]).forEach(l=>{
-        if(!(+l.created_at)||(+l.created_at)>=cutTs) return;
-        const nm=cleanKidName(_amoKidName(l)); if(!nm) return;
+        if(!(+l.created_at)){ skip.noDate++; return; }
+        if((+l.created_at)>=cutTs){ skip.after++; return; }
+        const nm=cleanKidName(_amoKidName(l)); if(!nm){ skip.noName++; return; }
         list.push({id:l.id,name:nm,phone:_amoPhone(l)||"",dob:_amoDob(l)||"",created:_campUnixIso(l.created_at),stage:_amoStageName(l.status_id)||"",resp:_campAmoUser(users,l.responsible)});
       });
     } finally { _amoContacts=keepC; _amoNameSrc=keepN; _amoNameField=keepF; _amoDobSrc=keepD; }
     const pipe=(_campPipes||[]).find(p=>+p.id===pid);
-    _campAmo={at:Date.now(),pipe:pid,pipeName:pipe?pipe.name:String(pid),before:before,cut:((+j.pages||0)>=10&&(+j.count||0)>=2500),total:+j.count||0,list:list};
+    _campAmo={at:Date.now(),pipe:pid,pipeName:pipe?pipe.name:String(pid),before:before,cut:((+j.pages||0)>=10&&(+j.count||0)>=2500),total:+j.count||0,skip:skip,list:list};
     _campCachePut(CAMP_LS_AMO,_campAmo);
     _campPool=null; _campKMsg="";
     toast("Из amo: "+list.length+" детей до "+_campDmy(before)+(_campAmo.cut?" · ВНИМАНИЕ: воронка обрезана на 2500 сделках":""));
