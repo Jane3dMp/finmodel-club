@@ -2203,7 +2203,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-09-11-01";
+const APP_VER="2026-09-11-02";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -19057,7 +19057,12 @@ function alfaNewApply(){
    и РАССЕЛЕНИЕ по блокам. Отдельно — ПОДБОРКА ДЕТЕЙ: общий список для обзвона под текущую
    смену (наша база + все клиенты Альфы + архив amo), с результатом звонка и комментарием.
    Резерв — наш черновик: в AlfaCRM уезжают только подтверждённые, «думающими» CRM не засоряем. */
-const CAMP_ST={yes:{t:"подтвердил",c:"var(--green)",ic:"🟢"},maybe:{t:"думает",c:"#C9922E",ic:"🟡"},no:{t:"отказ",c:"var(--red)",ic:"🔴"}};
+/* `c` — цвет ТЕКСТА (им подписан статус в выпадающих списках), `dot` — заливка кружка в
+   расселении. Это разные вещи: Жанна просила «сделай зелёный как во втором скрине», а там
+   кружок 🟢 из выпадающего списка — Segoe UI Emoji, замеренный #16C60C. Тем же значением
+   красить слово «подтвердил» нельзя: яркий зелёный на белом читается хуже тёмного.
+   У «думает» и «отказа» своего dot нет — их эмодзи 🟡 #FFF100 на белом фоне почти теряется. */
+const CAMP_ST={yes:{t:"подтвердил",c:"var(--green)",dot:"#16C60C",ic:"🟢"},maybe:{t:"думает",c:"#C9922E",ic:"🟡"},no:{t:"отказ",c:"var(--red)",ic:"🔴"}};
 const CAMP_STATUS=[["yes","подтвердил"],["maybe","думает"],["no","отказ"]];
 const CAMP_SRC=[["","— источник —"],["chat","из чата лагеря"],["call","исходящий звонок"],["rec","рекомендация"],["other","другое"]];
 const CAMP_KIND=[["","— вариант —"],["club","клубный"],["camp","лагерный"],["new","новенький"]];
@@ -19080,7 +19085,7 @@ function _campPrepaid(r){
 function _campDot(r){
   const st=CAMP_ST[(r&&r.status)||""]||CAMP_ST.maybe;
   const pre=_campPrepaid(r);
-  return '<span class="cmp-dot" style="background:'+st.c+'" title="'
+  return '<span class="cmp-dot" style="background:'+(st.dot||st.c)+'" title="'
     +esc(st.t+(pre?" · деньги внесены":" · оплаты пока нет"))+'">'+(pre?"<i>✓</i>":"")+'</span>';
 }
 function _campNewId(p){ return p+Date.now().toString(36)+Math.random().toString(36).slice(2,6); }

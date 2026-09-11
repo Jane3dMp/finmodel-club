@@ -22,6 +22,9 @@ function check(name, ok, detail) {
 function eq(name, got, want) { check(name, got === want, JSON.stringify(got) + ' ≠ ' + JSON.stringify(want)); }
 
 const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+/* Справочник статусов берём из index.html, а не переписываем сюда: заглушка однажды уже
+   показала старый цвет кружка и проверка прошла на правке, которой в коде не было. */
+const ST = eval('(' + (html.match(/const CAMP_ST=(\{.*?\});/) || [])[1] + ')');
 const MULTI = ['_campSeedLayout', '_campCap', '_campBeds', '_campSplitFloor2', '_campWhyNoTransfer', '_campTarLabel', '_campSubjIds', '_campLtIds',
                '_campPrepaid', '_campDot', '_campGrpFrom'];
 const ONE = ['_campNewId', '_campInGroup', '_campTarPrice'];
@@ -36,8 +39,7 @@ for (const n of ONE) grab(n, new RegExp('\\nfunction ' + n + '\\(.*\\}$', 'm'));
 
 let seq = 0;
 const ctx = { _campNewIdSeq: 0, _gm: n => String(Math.round(+n||0)), _campAlfaGroups: null, _campAlfaTariffs: null,
-  CAMP_ST: { yes: { t: 'подтвердил', c: 'var(--green)', ic: '🟢' }, maybe: { t: 'думает', c: '#C9922E', ic: '🟡' },
-             no: { t: 'отказ', c: 'var(--red)', ic: '🔴' } },
+  CAMP_ST: ST,
   esc: s => String(s == null ? '' : s),
   _campToday: () => '2026-09-11',
   // тип урока может подставляться из настроек публикации — заглушка их «не настроенными»
@@ -230,7 +232,7 @@ eq('из них детских', API._campBeds(lay, true).length, 76);
 {
   const B = new Function('ctx', 'with (ctx) { ' + blockSrc + ' return {_campBlockHtml}; }')({
     _campEdit: false, _campPick: null,
-    CAMP_ST: { yes: { t: 'подтвердил', c: 'var(--green)', ic: '🟢' }, maybe: { t: 'думает', c: '#C9922E', ic: '🟡' }, no: { t: 'отказ', c: 'var(--red)', ic: '🔴' } },
+    CAMP_ST: ST,
     esc: s => String(s == null ? '' : s),
     _jsStr: s => String(s == null ? '' : s),
     _ageStr: d => (d === '2014-08-07' ? '12,1' : (d === '2018-01-15' ? '8,7' : '')),
@@ -302,7 +304,16 @@ eq('из них детских', API._campBeds(lay, true).length, 76);
   check('у неоплатившего галочки нет', dFree.indexOf('✓') < 0, dFree);
   check('кружок один и тот же', dFree.indexOf('cmp-dot') > 0, dFree);
   // цвет по-прежнему отвечает за статус — галочка его не подменяет
-  check('подтвердил — зелёный', dPaid.indexOf('var(--green)') > 0, dPaid);
+  /* Жанна 11.09.2026: «сделай цвет зелёного как во втором скрине» — там кружок 🟢 из
+     выпадающего списка статуса. Замерили его в Segoe UI Emoji: #16C60C. */
+  check('подтвердил — зелёный как у 🟢', dPaid.indexOf('#16C60C') > 0, dPaid);
+  /* ⚠️ Заливка кружка и цвет ТЕКСТА — разные вещи. Тем же значением подписан статус
+     в выпадающих списках, и яркий зелёный на белом читается там хуже тёмного. */
+  eq('а слово «подтвердил» осталось тёмным', ST.yes.c, 'var(--green)');
+  check('кружок берёт не цвет текста', dPaid.indexOf('var(--green)') < 0, dPaid);
+  /* У «думает» своего цвета кружка нет — эмодзи 🟡 #FFF100 на белом фоне почти теряется,
+     поэтому там остаётся фирменная охра. */
+  eq('у «думает» отдельного цвета кружка нет', ST.maybe.dot, undefined);
   check('думает — охра', API._campDot({ status: 'maybe', pre: 50 }).indexOf('#C9922E') > 0, API._campDot({ status: 'maybe', pre: 50 }));
   check('отказ — красный', API._campDot({ status: 'no' }).indexOf('var(--red)') > 0, API._campDot({ status: 'no' }));
   eq('статуса нет — как «думает»', API._campDot({}).indexOf('#C9922E') > 0, true);
