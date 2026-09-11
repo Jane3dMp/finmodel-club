@@ -22,7 +22,8 @@ function check(name, ok, detail) {
 function eq(name, got, want) { check(name, got === want, JSON.stringify(got) + ' ≠ ' + JSON.stringify(want)); }
 
 const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
-const MULTI = ['_campSeedLayout', '_campCap', '_campBeds', '_campSplitFloor2', '_campWhyNoTransfer', '_campTarLabel', '_campSubjIds', '_campLtIds'];
+const MULTI = ['_campSeedLayout', '_campCap', '_campBeds', '_campSplitFloor2', '_campWhyNoTransfer', '_campTarLabel', '_campSubjIds', '_campLtIds',
+               '_campPrepaid', '_campDot', '_campGrpFrom'];
 const ONE = ['_campNewId', '_campInGroup', '_campTarPrice'];
 let src = '';
 function grab(name, re) {
@@ -35,13 +36,24 @@ for (const n of ONE) grab(n, new RegExp('\\nfunction ' + n + '\\(.*\\}$', 'm'));
 
 let seq = 0;
 const ctx = { _campNewIdSeq: 0, _gm: n => String(Math.round(+n||0)), _campAlfaGroups: null, _campAlfaTariffs: null,
+  CAMP_ST: { yes: { t: 'подтвердил', c: 'var(--green)', ic: '🟢' }, maybe: { t: 'думает', c: '#C9922E', ic: '🟡' },
+             no: { t: 'отказ', c: 'var(--red)', ic: '🔴' } },
+  esc: s => String(s == null ? '' : s),
+  _campToday: () => '2026-09-11',
   // тип урока может подставляться из настроек публикации — заглушка их «не настроенными»
   _pubCfg: () => ({}) };
 /* _campBlockHtml рисует карточку блока — вырезаем отдельно, у него свой набор заглушек. */
 const mb = html.match(/\nfunction _campBlockHtml\([^)]*\)\s*\{[\s\S]*?\n\}/m);
 if (!mb) { console.log('не найдено в index.html: _campBlockHtml'); process.exit(1); }
-const blockSrc = mb[0];
-const API = new Function('ctx', 'with (ctx) { ' + src + ' return {_campSeedLayout,_campCap,_campBeds,_campSplitFloor2,_campWhyNoTransfer,_campInGroup,_campTarPrice,_campTarLabel,_campSubjIds,_campLtIds}; }')(ctx);
+/* ⚠️ _campBlockHtml рисует кружок настоящей _campDot — её и её напарницу берём из index.html,
+   иначе заглушка нарисовала бы что угодно и проверка ничего бы не значила. */
+let blockSrc = mb[0];
+for (const n of ['_campDot', '_campPrepaid']) {
+  const mm = html.match(new RegExp('\\nfunction ' + n + '\\([^)]*\\)\\s*\\{[\\s\\S]*?\\n\\}', 'm'));
+  if (!mm) { console.log('не найдено в index.html: ' + n); process.exit(1); }
+  blockSrc += '\n' + mm[0];
+}
+const API = new Function('ctx', 'with (ctx) { ' + src + ' return {_campSeedLayout,_campCap,_campBeds,_campSplitFloor2,_campWhyNoTransfer,_campInGroup,_campTarPrice,_campTarLabel,_campSubjIds,_campLtIds,_campPrepaid,_campDot,_campGrpFrom}; }')(ctx);
 
 /* ================= схема санатория ================= */
 const lay = API._campSeedLayout();
@@ -218,7 +230,7 @@ eq('из них детских', API._campBeds(lay, true).length, 76);
 {
   const B = new Function('ctx', 'with (ctx) { ' + blockSrc + ' return {_campBlockHtml}; }')({
     _campEdit: false, _campPick: null,
-    CAMP_ST: { yes: { t: 'подтвердил', c: 'g', ic: '🟢' }, maybe: { t: 'думает', c: 'y', ic: '🟡' }, no: { t: 'отказ', c: 'r', ic: '🔴' } },
+    CAMP_ST: { yes: { t: 'подтвердил', c: 'var(--green)', ic: '🟢' }, maybe: { t: 'думает', c: '#C9922E', ic: '🟡' }, no: { t: 'отказ', c: 'var(--red)', ic: '🔴' } },
     esc: s => String(s == null ? '' : s),
     _jsStr: s => String(s == null ? '' : s),
     _ageStr: d => (d === '2014-08-07' ? '12,1' : (d === '2018-01-15' ? '8,7' : '')),
@@ -234,7 +246,9 @@ eq('из них детских', API._campBeds(lay, true).length, 76);
         (h.match(/<span class="cmp-bn">[\s\S]{0,120}/) || [''])[0]);
   // ⚠️ возраст должен быть ВНУТРИ имени, а не отдельной строкой — иначе место распухнет вдвое
   check('возраст внутри строки имени',
-        /<span class="cmp-bn">[^<]*Мельников Илья<i class="cmp-kid-a">8,7<\/i><\/span>/.test(h),
+        // ⚠️ Внутри строки имени теперь живёт ещё и кружок статуса (со своим </span>) — но
+        //    возраст обязан идти сразу за именем и закрывать ТУ ЖЕ строку, а не уезжать в свою.
+        /<span class="cmp-bn">[\s\S]{0,160}Мельников Илья<i class="cmp-kid-a">8,7<\/i><\/span>/.test(h),
         (h.match(/<span class="cmp-bn">[\s\S]{0,140}/) || [''])[0]);
   check('свободные места подписаны', h.indexOf('свободно') > 0);
   check('счётчик блока', h.indexOf('1/3') > 0, (h.match(/cmp-cap">[^<]*/) || [''])[0]);
@@ -245,6 +259,20 @@ eq('из них детских', API._campBeds(lay, true).length, 76);
         (h2.match(/<span class="cmp-bn">[\s\S]{0,120}/) || [''])[0]);
   check('но имя на месте', h2.indexOf('Без Даты') > 0);
 
+  /* ⚠️ Кружок с галочкой нужен именно здесь: расселяя, Жанна должна видеть, за кем деньги.
+     Эмодзи 🟢 тут больше нет — в него галочку не поставить. */
+  const hp = B._campBlockHtml(sh, blk, { 'b1|r1|0': { id: 'k3', fio: 'Оплативший Пётр', status: 'yes', pre: 50 } });
+  check('на месте ребёнка кружок, а не эмодзи', hp.indexOf('cmp-dot') > 0 && hp.indexOf('🟢') < 0,
+        (hp.match(/<span class="cmp-bn">[\s\S]{0,160}/) || [''])[0]);
+  check('и в нём галочка', hp.indexOf('<i>✓</i>') > 0, (hp.match(/<span class="cmp-bn">[\s\S]{0,160}/) || [''])[0]);
+  check('у неоплатившего галочки нет', h.indexOf('✓') < 0, (h.match(/<span class="cmp-bn">[\s\S]{0,160}/) || [''])[0]);
+  check('подсказка места говорит про деньги', hp.indexOf('деньги внесены') > 0, (hp.match(/title="[^"]*/) || [''])[0]);
+
+  /* И в списке «Не расселены» — тот же знак: там и там одно и то же читается одинаково. */
+  const freeSrc = (html.match(/\nfunction renderCampRooms\(\)[\s\S]*?\n\}/m) || [''])[0];
+  check('у нерасселённых тоже кружок', freeSrc.indexOf('+_campDot(r)+') > 0, freeSrc.slice(0, 400));
+  check('и эмодзи там не осталось', freeSrc.indexOf('+st.ic+') < 0, freeSrc.slice(0, 400));
+
   /* ⚠️ Блок вожатых — отдельная история: там не дети, а поля для ФИО, и ни возраста, ни
      выбора пола быть не должно. Именно эти блоки не участвуют в расселении. */
   const cf = { id: 'c1', name: 'Комфорт 1', floor: '2 этаж', staff: true, rooms: [{ id: 'r1', name: 'комната', beds: 2 }] };
@@ -252,6 +280,63 @@ eq('из них детских', API._campBeds(lay, true).length, 76);
   check('у вожатых поле ФИО', h3.indexOf('вожат') > 0, h3.slice(0, 260));
   check('и нет выбора пола', h3.indexOf('— пол не задан —') < 0);
   check('и подпись «вожатые»', h3.indexOf('вожатые · 2') > 0, (h3.match(/cmp-cap">[^<]*/) || [''])[0]);
+}
+
+/* ================= ГАЛОЧКА В КРУЖОЧКЕ: ПОДТВЕРЖДЕНО И ОПЛАЧЕНО =================
+   Жанна 11.09.2026: «у детей, у которых предоплата, внутри кружочка ставь галочку — так мы
+   будем знать, что подтверждено и предоплачено». Цвет кружка отвечает на «подтвердил ли»,
+   галочка — на «заплатил ли»; это один знак, а не два соседних значка. */
+{
+  eq('без денег — не оплачен', API._campPrepaid({ status: 'yes' }), false);
+  eq('предоплата — оплачен', API._campPrepaid({ pre: 50 }), true);
+  // ⚠️ Родитель мог внести сразу всю сумму: отдельной предоплаты у него нет, а место закреплено
+  eq('полная оплата без предоплаты — тоже', API._campPrepaid({ paid: 300 }), true);
+  eq('нули деньгами не считаем', API._campPrepaid({ pre: 0, paid: 0 }), false);
+  eq('пустые строки тоже', API._campPrepaid({ pre: '', paid: '' }), false);
+  eq('строка с числом — считаем', API._campPrepaid({ pre: '50' }), true);
+  eq('строки нет вовсе', API._campPrepaid(null), false);
+
+  const dPaid = API._campDot({ status: 'yes', pre: 50 });
+  const dFree = API._campDot({ status: 'yes' });
+  check('у оплатившего галочка в кружке', dPaid.indexOf('<i>✓</i>') > 0, dPaid);
+  check('у неоплатившего галочки нет', dFree.indexOf('✓') < 0, dFree);
+  check('кружок один и тот же', dFree.indexOf('cmp-dot') > 0, dFree);
+  // цвет по-прежнему отвечает за статус — галочка его не подменяет
+  check('подтвердил — зелёный', dPaid.indexOf('var(--green)') > 0, dPaid);
+  check('думает — охра', API._campDot({ status: 'maybe', pre: 50 }).indexOf('#C9922E') > 0, API._campDot({ status: 'maybe', pre: 50 }));
+  check('отказ — красный', API._campDot({ status: 'no' }).indexOf('var(--red)') > 0, API._campDot({ status: 'no' }));
+  eq('статуса нет — как «думает»', API._campDot({}).indexOf('#C9922E') > 0, true);
+  // подсказка должна говорить обе вещи, а не одну
+  check('в подсказке и статус, и деньги', dPaid.indexOf('подтвердил · деньги внесены') > 0, dPaid);
+  check('и когда денег нет — тоже', dFree.indexOf('оплаты пока нет') > 0, dFree);
+}
+
+/* ================= С КАКОЙ ДАТЫ ЧИСЛИТЬ В ГРУППЕ ALFA =================
+   Жанна 11.09.2026: «в группу добавь с даты внесения до 7 ноября». Не с первого дня смены:
+   иначе до самого заезда группа в Alfa выглядит пустой и по ней не видно, кто уже собран. */
+{
+  const sh = { from: '2026-11-01', to: '2026-11-07' };
+  eq('вносим сегодня — числится с сегодня', API._campGrpFrom(sh), '2026-09-11');
+  // ⚠️ смена уже прошла: «сегодня» позже конца, Alfa такой период не примет
+  eq('прошедшая смена — с её начала', API._campGrpFrom({ from: '2026-05-01', to: '2026-05-07' }), '2026-05-01');
+  eq('последний день смены ещё можно', API._campGrpFrom({ from: '2026-09-01', to: '2026-09-11' }), '2026-09-11');
+  eq('дат у смены нет — сегодня', API._campGrpFrom({}), '2026-09-11');
+  eq('смены нет вовсе', API._campGrpFrom(null), '2026-09-11');
+
+  /* ⚠️ Абонемент так растягивать НЕЛЬЗЯ: он оплачен за дни смены. Проверяем прямо по коду
+     переноса, что дату внесения он не подхватил. */
+  const src2 = (html.match(/\nasync function campToGroup\(id\)\{[\s\S]*?\n\}/m) || [''])[0];
+  check('в группу шлём дату внесения', src2.indexOf('b_date:_campGrpFrom(sh)') > 0, src2.slice(0, 900));
+  check('в абонементе остаются даты смены', src2.indexOf('bDate:sh.from, eDate:sh.to') > 0, src2);
+  /* Жанна: «шаблон абонемента в Альфе делай детям раздельными, а не базовыми». У базового
+     лагерные уроки падают в общий баланс и списываются с клубного абонемента на учебный год. */
+  // ⚠️ Ищем именно ВЫЗОВ, а не слово: рядом лежит комментарий со словами «separate:true»,
+  //    и проверка по голой подстроке проходила бы даже с базовым абонементом в коде.
+  check('абонемент выдаём раздельным', src2.indexOf('separate:true, note:') > 0, src2);
+  check('базовым больше не выдаём', src2.indexOf('separate:false') < 0, src2);
+  // и оба периода названы в вопросе, иначе человек жмёт «да» вслепую
+  check('в вопросе назван период в группе', src2.indexOf('• в группе: с ') > 0, src2.slice(0, 900));
+  check('и период абонемента отдельно', src2.indexOf('• абонемент действует: ') > 0, src2.slice(0, 900));
 }
 
 /* ================= ПЕРЕНОС РЕБЁНКА В ALFACRM: ЧТО МЕШАЕТ =================
