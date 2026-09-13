@@ -2208,7 +2208,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-09-13-06";
+const APP_VER="2026-09-13-07";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -11018,13 +11018,18 @@ function _trLesState(L, today){
 function _trFunnel(){
   if(!_trFun) return null;
   const today=_trToday();
-  const f={enrolled:0, came:0, cameFree:0, missedAll:0, missedButAhead:0, waiting:0, noLessons:0, returning:0, ahead:[],
-           lists:{came:[], missedAll:[], waiting:[], noLessons:[], returning:[]}};
+  /* ⚠️ noData — дети набора, про которых Alfa не отдала НИЧЕГО. Раньше они просто выпадали
+     из цикла: ни в одной корзине, ни в одном списке, ни в одном счётчике. Из-за этого
+     «Набор: 151» вверху и «Итого 142» в рейтинге расходились без объяснения. */
+  const f={enrolled:0, came:0, cameFree:0, missedAll:0, missedButAhead:0, waiting:0, noLessons:0, returning:0, noData:0, ahead:[],
+           lists:{came:[], missedAll:[], waiting:[], noLessons:[], returning:[], noData:[]}};
   const set=_trNewSet()||new Set();
   f.returning=0; f.lists.returning=[];
   set.forEach(idStr=>{
     const L=_trFun.kids[idStr]||_trFun.kids[Number(idStr)];
-    if(!L) return;
+    /* Ответа по этому ребёнку нет вовсе — не «нет занятий», а «не спросили или не ответили».
+       Это разные вещи: первое про расписание, второе про сбор данных. */
+    if(!L){ f.noData++; f.lists.noData.push({id:idStr, les:[]}); return; }
     /* Ходил в клубе до начала учебного года — значит не новый клиент, сколько бы модель ни
        говорила обратное. Считаем отдельно и в основные корзины не пускаем. */
     const pv=_trFun.before[idStr]||_trFun.before[Number(idStr)];
@@ -11445,6 +11450,31 @@ function _mgrRukHtml(){
       <button class="btn ghost sm" onclick="_trMgr=null;_mgrRukLoad()">👤 Обновить менеджеров</button>
       <span class="hint">Набор: ${set.size} ${_fmlKid(set.size)}</span></div>`+t;
 }
+/* ===== ПОЧЕМУ «ИТОГО» НЕ РАВНО «НАБОР» =====
+   Жанна 13.09.2026: «почему вверху 151 ребёнок, а внизу 142?» В рейтинг не идут двое:
+   возвращенцы (занимались до 1 сентября — это не новые клиенты, и абонемент у них с прошлого
+   года) и те, про кого Alfa не ответила. Оба исключения осмысленные, но молчаливые —
+   а молчаливое расхождение в цифрах подрывает доверие ко всей таблице. */
+function _trMgrCoverage(rows){
+  const set=(typeof _trNewSet==="function")?_trNewSet():null;
+  const fn=_trFunnel();
+  if(!set||!fn) return null;
+  const inR=(rows||[]).reduce((s,m)=>s+(+m.kids||0),0);
+  return {set:set.size, inRating:inR, returning:+fn.returning||0, noData:+fn.noData||0};
+}
+function _trMgrCoverageNote(rows){
+  const c=_trMgrCoverage(rows);
+  if(!c||c.set<=0||c.set===c.inRating) return "";
+  const why=[];
+  if(c.returning) why.push("<b>"+c.returning+"</b> занимались в клубе до 1 сентября — это не новые клиенты, и в рейтинг набора они не идут");
+  if(c.noData) why.push("<b style=\"color:var(--terra-d)\">"+c.noData+"</b>, по которым Alfa не ответила — нажмите «Пересобрать всё»");
+  /* ⚠️ Если разница не сходится с известными причинами, врать про неё нельзя: говорим,
+     что остаток необъяснён, — это повод разбираться, а не округлять. */
+  const rest=c.set-c.inRating-c.returning-c.noData;
+  if(rest>0) why.push("<b>"+rest+"</b> — причина неизвестна, посмотрите списки под цифрами воронки");
+  return '<div class="hint" style="margin:6px 0">В наборе <b>'+c.set+'</b> '+_fmlKid(c.set)
+    +', в рейтинге <b>'+c.inRating+'</b>. Разница: '+why.join("; ")+'.</div>';
+}
 function _trMgrStats(){
   const fn=_trFunnel(); if(!fn||!_trMgr) return null;
   const by={};
@@ -11728,7 +11758,7 @@ function _trMgrTableHtml(){
     ? `<div class="hint" style="margin:6px 0">Абонементы ещё не загружены — колонки «купили» и «конверсия» пока пустые.</div>` : "";
   return `<details style="margin:10px 0" open><summary style="cursor:pointer;font-weight:600">🏅 Рейтинг менеджеров (${rows.length})</summary>
     <div class="hint" style="margin:6px 0">Считается по тем же корзинам, что и цифры выше, только по этому набору. Кто занимался в клубе до 1 сентября, в рейтинг не входит: это не новые клиенты, и их абонементы к работе менеджера по набору отношения не имеют. Менеджер — ответственный по сделке amoCRM, связь по телефону. <b>Доходимость</b> = дошли ÷ (дошли + не дошли), ждущие не в счёт. <b>Конверсия</b> = купили абонемент ИЗ ДОШЕДШИХ ÷ дошли. В колонке «Купили» первое число — именно они; «всего» через точку — вместе с теми, кто абонемент оплатил, а на занятие ещё не пришёл. <b>Списано</b> — сумма списаний по проведённым занятиям, а не деньги в кассе.</div>
-    ${tarNote}${payNote}
+    ${_trMgrCoverageNote(rows)}${tarNote}${payNote}
     <div class="tscroll"><table><thead><tr>
       <th style="text-align:left">Менеджер</th><th class="num">Детей</th><th class="num" title="Есть хотя бы одно занятие в расписании">Вписаны</th>
       <th class="num">Дошли</th><th class="num">Не дошли</th><th class="num">Ждём</th><th class="num">Доходимость</th>
@@ -11786,6 +11816,7 @@ function _trFunnelHtml(){
     ${tile(f.waiting,"ждём","var(--terra)","Прошедших занятий ещё не было — первое только впереди")}
     ${f.noLessons?tile(f.noLessons,"без занятий","var(--muted)","Ребёнок в наборе есть, а в расписании Alfa занятий у него нет"):""}
     ${f.returning?tile(f.returning,"ходили раньше","var(--muted)","Занимались в клубе до 1 сентября — это не новые клиенты, в остальные цифры они не входят"):""}
+    ${f.noData?tile(f.noData,"Alfa не ответила","var(--terra-d)","Дети набора, по которым из Alfa не пришло ничего. Они не попали ни в одну корзину — нажмите «Пересобрать всё»"):""}
   </div>`;
   /* Рейтинг менеджеров живёт в «Дашборде Руководителя»: администратору в «Работе» нужен
      только ответ «чей это пробник», а не сравнение коллег между собой. */
@@ -11839,6 +11870,8 @@ function _trFunnelHtml(){
     ${_trListHtml("Ходили в клубе раньше",f.lists.returning,"var(--muted)","занимались до 1 сентября — в остальные цифры не входят")}
     ${_trListHtml("Без занятий",f.lists.noLessons,"var(--muted)",
         "в наборе есть, в расписании Alfa занятий нет"+(function(){var a=f.lists.noLessons.filter(x=>_trArchived(x.id)).length;return a?(" · из них в архиве "+a):"";})())}
+    ${_trListHtml("Alfa не ответила по ним",f.lists.noData,"var(--terra-d)",
+        "ответа из Alfa по этим детям нет — они не попали ни в одну корзину и ни в один процент. Нажмите «Пересобрать всё»")}
   </div>`;
   return head+tiles+warn+mgrTab+lists+fc;
 }

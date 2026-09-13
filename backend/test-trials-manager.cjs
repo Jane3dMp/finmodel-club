@@ -149,6 +149,7 @@ delete ctx.S.children['201'];
     let s2 = '';
     for (const n of ['_trPayDays', '_trPaySum', '_trPayHtml', '_trMoneyStage', '_trMgrKidsHtml', '_trMgrUnknownHtml', '_trMgrStats', '_trMgrTableHtml',
                      '_trTarText', '_trMgrKidsSorted', '_trPColor', '_trEvText', '_trMgrPrintPage', 'trPrintMgr', 'trPrintMgrAll',
+                     '_trMgrCoverage', '_trMgrCoverageNote',
                      '_trMissCell', '_trDayLabel', '_trBalance', '_trBalText']) {
       const m = html2.match(new RegExp('\\nfunction ' + n + '\\([^)]*\\)\\s*\\{[\\s\\S]*?\\n\\}', 'm'));
       if (!m) { console.log('не найдено в index.html: ' + n); process.exit(1); }
@@ -184,6 +185,8 @@ delete ctx.S.children['201'];
            balancesAt: '' },
       kidsOf: l => (l && l.kids) || [],
       _trCards: {},
+      /* Набор шире рейтинга: возвращенцы и те, по кому Alfa не ответила, в него не идут. */
+      _trNewSet: () => new Set(['201','202','203','204','205','206','207','208','301','302']),
       _trMgr: {}, _trTar: { '202': {} },
     // касса по дням: у 04.09 разбивки по клиентам ещё нет — сумма должна быть честно неполной
     _trFun: { from: '2026-09-01' },
@@ -214,7 +217,7 @@ delete ctx.S.children['201'];
     };
     const A2 = new Function('ctx', 'with (ctx) { ' + s2 +
     ' return {_trMgrStats,_trMgrTableHtml,_trMgrUnknownHtml,_trMgrKidsHtml,_trMoneyStage,_trPaySum,_trPayDays,_trPayHtml,' +
-    '_trTarText,_trMgrKidsSorted,_trPColor,_trEvText,_trMgrPrintPage,trPrintMgr,trPrintMgrAll,_jsStr,_trMissCell,_trBalance,_trBalText}; }')(ctx2);
+    '_trTarText,_trMgrKidsSorted,_trPColor,_trEvText,_trMgrPrintPage,trPrintMgr,trPrintMgrAll,_jsStr,_trMissCell,_trBalance,_trBalText,_trMgrCoverage,_trMgrCoverageNote}; }')(ctx2);
 
     const st = A2._trMgrStats();
     eq('менеджеров в рейтинге', st.length, 3);            // Ольга, Мария и «не определён»
@@ -339,6 +342,47 @@ delete ctx.S.children['201'];
   check('дошедшие идут раньше не дошедших',
         ol.indexOf('дошёл') < ol.indexOf('не дошёл'), 'порядок внутри менеджера');
 
+
+  /* ================= ПОЧЕМУ «ИТОГО» НЕ РАВНО «НАБОР» =================
+     Жанна 13.09.2026: «почему вверху 151 ребёнок, а внизу 142?» В рейтинг не идут двое:
+     возвращенцы (занимались до 1 сентября — не новые клиенты) и те, по кому Alfa не
+     ответила. Оба исключения осмысленные, но молчаливые: расхождение в цифрах без
+     объяснения подрывает доверие ко всей таблице. */
+  {
+    FN.returning = 1; FN.noData = 2;          // 10 в наборе = 7 в рейтинге + 1 + 2
+    const st3 = A2._trMgrStats();
+    const c = A2._trMgrCoverage(st3);
+    eq('в наборе', c.set, 10);
+    eq('в рейтинге — только корзины воронки', c.inRating, 7);
+    eq('возвращенцы посчитаны', c.returning, 1);
+    eq('и те, по кому Alfa молчит', c.noData, 2);
+
+    const note = A2._trMgrCoverageNote(st3);
+    check('расхождение объяснено прямо под таблицей', note.indexOf('В наборе') > 0 || note.indexOf('В наборе') === 0, note);
+    check('названы оба числа', note.indexOf('>10<') > 0 && note.indexOf('>7<') > 0, note);
+    check('и причина про возвращенцев', note.indexOf('до 1 сентября') > 0, note);
+    check('и про молчащую Alfa', note.indexOf('Alfa не ответила') > 0, note);
+    /* ⚠️ Если разница не сходится с известными причинами, округлять её нельзя — это повод
+       разбираться. Остаток называем вслух. */
+    check('необъяснённого остатка нет', note.indexOf('причина неизвестна') < 0, note);
+    FN.noData = 0;                            // теперь 10 = 7 + 1 + двое неизвестно куда
+    const note2 = A2._trMgrCoverageNote(A2._trMgrStats());
+    check('необъяснённый остаток назван вслух', note2.indexOf('причина неизвестна') > 0, note2);
+    check('и это именно двое', note2.indexOf('>2</b> — причина неизвестна') > 0, note2);
+
+    // сошлось — лишней строки нет
+    FN.returning = 3; FN.noData = 0;
+    ctx2._trNewSet = () => new Set(['a','b','c','d','e','f','g','h','i','j']);
+    eq('когда всё сходится, объяснять нечего', A2._trMgrCoverageNote(A2._trMgrStats()).indexOf('причина неизвестна'), -1);
+    ctx2._trNewSet = () => new Set(['201','202','203','204','205','206','207']);
+    eq('набор равен рейтингу — строки нет вовсе', A2._trMgrCoverageNote(A2._trMgrStats()), '');
+    ctx2._trNewSet = () => new Set(['201','202','203','204','205','206','207','208','301','302']);
+    FN.returning = 1; FN.noData = 2;
+
+    // и сама строка стоит в таблице, а не лежит мёртвым кодом
+    check('сверка попала в таблицу рейтинга', A2._trMgrTableHtml().indexOf('В наборе') > 0,
+          A2._trMgrTableHtml().slice(0, 900));
+  }
 
   /* ================= ДЕНЬГИ НА СЧЕТУ =================
      Жанна 13.09.2026: «сюда нужно баланс добавить, чтобы было видно, что там у них на счетах».
