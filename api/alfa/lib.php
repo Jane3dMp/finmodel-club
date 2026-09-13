@@ -2669,6 +2669,22 @@ function alfa_pay_kassa_name(array $x, array $refs): string {
 /* $pre — уже посчитанный результат alfa_payments_day(). Действие paymentsDay читает журнал само,
    и без этого параметра один запрос проходил 33 тысячи записей ДВАЖДЫ: вдвое дольше и вдвое чаще
    обрывался шлюзом хостинга — а обрыв здесь выглядел как «нажимаю обновить, а данные старые». */
+/* ===== ЧТО ЗА ДЕНЬГИ ПРИШЛИ — ПО СТАТЬЕ ПЛАТЕЖА =====
+   Клуб размечает платежи сам, и это надёжнее суммы: пробное проходит как «Оплата пробного»,
+   лагерь и интенсивы — своими статьями. Жанна 13.09.2026: «лагерь и интенсивы учитывать
+   нельзя» — это другой продукт, к воронке набора он отношения не имеет.
+   ⚠️ Узнаём по куску названия: статьи заводит человек и называет как захочет. Если статью
+   переименуют и она перестанет совпадать, деньги молча уедут в «курсы» — поэтому на экране
+   рядом с цифрами стоит список статей окна с пометкой, какие мы считаем, а какие выкинули. */
+function alfa_pay_item_is_trial(string $n): bool {
+    return $n !== '' && mb_stripos($n, 'пробн') !== false;
+}
+function alfa_pay_item_is_skip(string $n): bool {
+    if ($n === '') return false;
+    foreach (['лагер', 'интенсив', 'смен', 'каникул'] as $w)
+        if (mb_stripos($n, $w) !== false) return true;
+    return false;
+}
 function alfa_payments_upsert(string $date, ?array $branches = null, ?array $pre = null): array {
     $r = (is_array($pre) && isset($pre['rows'], $pre['date'])) ? $pre : alfa_payments_day($date, $branches);
     $refs = alfa_pay_refs();
@@ -2689,10 +2705,13 @@ function alfa_payments_upsert(string $date, ?array $branches = null, ?array $pre
        пополнение». Статья надёжнее суммы: цена пробного когда-нибудь изменится, а разметка
        останется. Сумма остаётся запасным правилом — на дни, снятые до этой правки. */
     $byCustTrial = [];
-    /* Приход по СТАТЬЯМ (у расхода такое уже есть). Нужен для одного вопроса: что вообще
-       попало в окно денег. Окно начинается 1 июня — значит, в нём лето, а летом платят за
-       лагерь, и такой платёж наше правило зачтёт как абонемент. Пока разделять не просили,
-       но видеть это надо, иначе цифра «купили» однажды соврёт молча. */
+    /* Лагерь, интенсивы и прочее, что НЕ курсы. Жанна 13.09.2026: «лагерь и интенсивы
+       учитывать нельзя». Окно денег начинается 1 июня, лето в него попадает целиком, и без
+       этой корзины оплата смены выглядела бы как купленный абонемент. */
+    $byCustSkip = [];
+    /* Приход по СТАТЬЯМ (у расхода такое уже есть). Отвечает на вопрос «что вообще попало в
+       окно»: по нему на экране видно, какие статьи мы считаем курсами, а какие выкинули, —
+       и сразу заметно, если в Alfa завели статью с новым названием. */
     $byItemIn = [];
     foreach ($r['rows'] as $x) {
         $name = alfa_pay_kassa_name($x, $refs);
@@ -2715,8 +2734,10 @@ function alfa_payments_upsert(string $date, ?array $branches = null, ?array $pre
                       if ($cid) { $byCust[$cid] = round(($byCust[$cid] ?? 0) + $v, 2);
                                   if ($v > ($byCustMax[$cid] ?? 0)) $byCustMax[$cid] = round($v, 2);
                                   $pitem = (string)($refs['payItems'][(int)($x['pay_item_id'] ?? 0)] ?? '');
-                                  if ($pitem !== '' && mb_stripos($pitem, 'пробн') !== false)
-                                      $byCustTrial[$cid] = round(($byCustTrial[$cid] ?? 0) + $v, 2); }
+                                  if (alfa_pay_item_is_trial($pitem))
+                                      $byCustTrial[$cid] = round(($byCustTrial[$cid] ?? 0) + $v, 2);
+                                  elseif (alfa_pay_item_is_skip($pitem))
+                                      $byCustSkip[$cid] = round(($byCustSkip[$cid] ?? 0) + $v, 2); }
                       $pin = (string)($refs['payItems'][(int)($x['pay_item_id'] ?? 0)] ?? '');
                       if ($pin === '') $pin = 'Без статьи';
                       $byItemIn[$pin] = round(($byItemIn[$pin] ?? 0) + $v, 2); }
@@ -2733,7 +2754,8 @@ function alfa_payments_upsert(string $date, ?array $branches = null, ?array $pre
     $st[$r['date']] = ['income' => round($inc, 2), 'expense' => round($out, 2),
                        'count' => count($r['rows']), 'byIn' => $byIn, 'byOut' => $byOut,
                        'byItem' => $byItem, 'byCust' => $byCust, 'byCustMax' => $byCustMax,
-                       'byCustTrial' => $byCustTrial, 'byItemIn' => $byItemIn, 'byType' => $byType,
+                       'byCustTrial' => $byCustTrial, 'byCustSkip' => $byCustSkip,
+                       'byItemIn' => $byItemIn, 'byType' => $byType,
                        'move' => round($move, 2), 'moveN' => $moveN, 'ts' => date('c')];
     ksort($st);
     if (count($st) > 400) $st = array_slice($st, -400, null, true);   // храним последние ~13 месяцев
@@ -2741,7 +2763,7 @@ function alfa_payments_upsert(string $date, ?array $branches = null, ?array $pre
     return ['date' => $r['date'], 'income' => round($inc, 2), 'expense' => round($out, 2),
             'count' => count($r['rows']), 'byIn' => $byIn, 'byOut' => $byOut, 'byItem' => $byItem,
             'byCust' => $byCust, 'byCustMax' => $byCustMax, 'byCustTrial' => $byCustTrial,
-            'byItemIn' => $byItemIn, 'byType' => $byType,
+            'byCustSkip' => $byCustSkip, 'byItemIn' => $byItemIn, 'byType' => $byType,
             'move' => round($move, 2), 'moveN' => $moveN];
 }
 
