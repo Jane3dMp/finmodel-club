@@ -172,5 +172,37 @@ check('дата нерабочего дня видна в месяце', (sep2.h
   'hols: ' + JSON.stringify(sep2.hols));
 ctx.S.plan.hol = '';
 
+/* ================= ЗАЛИВКА ДНЕЙ В ТАБЛИЦЕ «РЕАЛИЗАЦИЯ» =================
+   Жанна 13.09.2026: «выходные — пастельно-розовой заливкой, остальные дни однотонно
+   светло-серые». Цвета проверены наведением в настоящем css; здесь стережём то, что
+   ломается молча: правило пропало, вернулась зебра или исчез ховер выходных. */
+{
+  const css = (html.match(/<style>([\s\S]*?)<\/style>/) || [])[1] || '';
+  const rule = re => (css.match(re) || [])[1] || null;
+  const base = rule(/#realTable tbody tr td\{background:(#[0-9A-Fa-f]{6})\}/);
+  const wknd = rule(/#realTable tbody tr\.wknd td\{background:(#[0-9A-Fa-f]{6})\}/);
+  const baseH = rule(/#realTable tbody tr:hover td\{background:(#[0-9A-Fa-f]{6})\}/);
+  const wkndH = rule(/#realTable tbody tr\.wknd:hover td\{background:(#[0-9A-Fa-f]{6})\}/);
+  check('будни залиты ровным тоном', !!base, 'правила #realTable tbody tr td нет');
+  check('выходные залиты своим', !!wknd, 'правила .wknd нет');
+  /* ⚠️ Без своего ховера у выходных вес правил совпадает, и наведение либо не отзывается,
+     либо заливает выходной серым будним тоном. */
+  check('у будней есть ховер', !!baseH, 'ховер будней пропал');
+  check('и у выходных свой', !!wkndH, 'ховер выходных пропал — выходной посереет под мышью');
+  /* Розовый — это красный канал заметно выше синего. Так проверка переживёт смену оттенка,
+     но заметит возврат к бежевому --sand или к серому. */
+  const rgb = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16));
+  if (base && wknd) {
+    const [wr, wg, wb] = rgb(wknd), [br, bg2, bb] = rgb(base);
+    check('выходной розовый, а не серый', wr - wb >= 12 && wr > wg, wknd);
+    check('будний нейтральный, без розовизны', Math.abs(br - bb) <= 3, base);
+    check('и они различимы', wknd.toLowerCase() !== base.toLowerCase(), wknd);
+  }
+  /* ⚠️ Зебру в этой таблице гасим намеренно: через строку фон менялся, и выходной то
+     выделялся, то сливался с соседней тёмной полосой. */
+  check('зебра в этой таблице погашена', /#realTable tbody tr td\{background:/.test(css),
+        'без базового правила tr:nth-child(even) снова раскрасит чётные дни');
+}
+
 console.log(bad ? '\nПЛОХО: ' + bad + '\n' : '\nВсё хорошо.\n');
 process.exit(bad ? 1 : 0);
