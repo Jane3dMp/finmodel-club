@@ -2684,6 +2684,11 @@ function alfa_payments_upsert(string $date, ?array $branches = null, ?array $pre
        абонемент». По дневной сумме этого не сказать: два пробных в один день дают 30 и
        выглядят как купленный абонемент. Поэтому рядом с суммой держим максимум. */
     $byCustMax = [];
+    /* Сколько из этих денег — за пробное. Клуб отмечает это сам: у платежа есть статья, и
+       пробное проходит как «Оплата пробного» (15 р, ЕРИП), а абонемент — как «Регулярное
+       пополнение». Статья надёжнее суммы: цена пробного когда-нибудь изменится, а разметка
+       останется. Сумма остаётся запасным правилом — на дни, снятые до этой правки. */
+    $byCustTrial = [];
     foreach ($r['rows'] as $x) {
         $name = alfa_pay_kassa_name($x, $refs);
         $isOut = alfa_pay_is_out($x);
@@ -2703,7 +2708,10 @@ function alfa_payments_upsert(string $date, ?array $branches = null, ?array $pre
         else        { $byIn[$name]  = round(($byIn[$name]  ?? 0) + $v, 2); $inc += $v;
                       $cid = (int)($x['customer_id'] ?? 0);
                       if ($cid) { $byCust[$cid] = round(($byCust[$cid] ?? 0) + $v, 2);
-                                  if ($v > ($byCustMax[$cid] ?? 0)) $byCustMax[$cid] = round($v, 2); } }
+                                  if ($v > ($byCustMax[$cid] ?? 0)) $byCustMax[$cid] = round($v, 2);
+                                  $pitem = (string)($refs['payItems'][(int)($x['pay_item_id'] ?? 0)] ?? '');
+                                  if ($pitem !== '' && mb_stripos($pitem, 'пробн') !== false)
+                                      $byCustTrial[$cid] = round(($byCustTrial[$cid] ?? 0) + $v, 2); } }
     }
     $st = alfa_pay_store_read();
     /* Касса задним числом: платёж могли исправить, перенести на другой день или удалить.
@@ -2717,15 +2725,15 @@ function alfa_payments_upsert(string $date, ?array $branches = null, ?array $pre
     $st[$r['date']] = ['income' => round($inc, 2), 'expense' => round($out, 2),
                        'count' => count($r['rows']), 'byIn' => $byIn, 'byOut' => $byOut,
                        'byItem' => $byItem, 'byCust' => $byCust, 'byCustMax' => $byCustMax,
-                       'byType' => $byType,
+                       'byCustTrial' => $byCustTrial, 'byType' => $byType,
                        'move' => round($move, 2), 'moveN' => $moveN, 'ts' => date('c')];
     ksort($st);
     if (count($st) > 400) $st = array_slice($st, -400, null, true);   // храним последние ~13 месяцев
     alfa_pay_store_write($st);
     return ['date' => $r['date'], 'income' => round($inc, 2), 'expense' => round($out, 2),
             'count' => count($r['rows']), 'byIn' => $byIn, 'byOut' => $byOut, 'byItem' => $byItem,
-            'byCust' => $byCust, 'byCustMax' => $byCustMax, 'byType' => $byType,
-            'move' => round($move, 2), 'moveN' => $moveN];
+            'byCust' => $byCust, 'byCustMax' => $byCustMax, 'byCustTrial' => $byCustTrial,
+            'byType' => $byType, 'move' => round($move, 2), 'moveN' => $moveN];
 }
 
 /* ===== ПЛАТЕЖИ ЗА ДЕНЬ (кассы) =====
