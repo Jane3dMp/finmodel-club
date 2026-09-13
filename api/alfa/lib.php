@@ -2960,7 +2960,10 @@ function alfa_sales_month_seats(string $ym, array $store, array $att, string $to
 }
 /* Медиана «факт ÷ прогноз» по прошлым неделям — по ней предлагаем реалистичное «идём на»
    (прогноз всегда оптимистичнее факта: часть детей не приходит и списание не проходит). */
-function alfa_sales_ratio(array $reports, int $limit = 8): float {
+/* ⚠️ $used — сколько недель реально легло в медиану. Без него интерфейс не отличает
+   настоящую медиану 0.9 от запасного значения 0.9, которое берётся когда истории нет
+   вовсе, — и подпись «медиана за прошлые недели» врала бы на пустом месте. */
+function alfa_sales_ratio(array $reports, int $limit = 8, ?int &$used = null): float {
     $keys = array_keys($reports); sort($keys);
     $r = [];
     foreach (array_reverse($keys) as $k) {
@@ -2970,6 +2973,7 @@ function alfa_sales_ratio(array $reports, int $limit = 8): float {
         if ($f > 0 && $p > 0) $r[] = $f / $p;
         if (count($r) >= $limit) break;
     }
+    $used = count($r);
     if (!$r) return 0.9;
     sort($r);
     $n = count($r);
@@ -3095,7 +3099,8 @@ function alfa_sales_build(string $runDate, ?array $branches = null, bool $deep =
              'seats' => $paceSeats['seats'], 'kids' => $paceSeats['kids'],
              'seatDays' => $paceSeats['days'], 'lessonDays' => $paceSeats['lessonDays']];
 
-    $ratio = alfa_sales_ratio($reports);
+    $ratioN = 0;
+    $ratio = alfa_sales_ratio($reports, 8, $ratioN);
     $suggest  = $nf > 0 ? floor($nf * $ratio / 100) * 100 : 0;
     $mSuggest = ($month && $month['forecast'] > 0) ? floor($month['forecast'] * $ratio / 1000) * 1000 : 0;
 
@@ -3108,7 +3113,7 @@ function alfa_sales_build(string $runDate, ?array $branches = null, bool $deep =
         'active' => (int)$act['count'], 'activePrev' => $actPrev,
         'activeSrc' => (string)$act['src'] . (isset($act['err']) ? (': ' . $act['err']) : ''),
         'activeDays' => (int)($act['days'] ?? 0),
-        'ratio' => round($ratio, 4),
+        'ratio' => round($ratio, 4), 'ratioN' => $ratioN,
         'month' => $month, 'pace' => $pace,
         // ручные поля (что вписала Жанна) переживают пересборку
         'man' => is_array($old['man'] ?? null) ? $old['man'] : [],

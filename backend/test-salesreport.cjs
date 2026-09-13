@@ -30,7 +30,7 @@ const NAMES = ['_salesNum', '_salesCfg', '_ratAgg', '_ratSubjToCourse', '_ratMod
                '_salesPeriodSel', '_salesRangeFact', '_salesRangePair', '_salesRangeText',
                '_salesRangeHtml',   // salesPullRange — async, регуляркой не берётся и не нужен: он только в onclick
                '_fillRangeMissing', '_kassaDayWord',
-               '_salesReports', '_salesCur', '_salesDate', '_salesMonName', '_salesHtml', '_salesCronHtml'];
+               '_salesReports', '_salesCur', '_salesDate', '_salesMonName', '_salesRatioText', '_salesWeekWord', '_salesHtml', '_salesCronHtml'];
 const ONE_LINERS = ['_salesMonthEnd', '_salesMonday', '_salesGoals',   // тело в одну строку
                     '_fillIdx', '_fillGroups', '_fillPlanMap', '_fillArch', '_fillNoName', '_fillTeachName',
                     '_fillShift', '_dmy', '_kassaDayOf'];
@@ -89,7 +89,7 @@ const ctx = {
   location: { origin: 'https://app.proznanie.club' },
 };
 const API = new Function('ctx', 'with (ctx) { ' + src +
-  ' return {_salesNum,_salesTops,_salesWeekText,_salesMonthText,_salesMonthEnd,_salesCfg,_salesHtml,' +
+  ' return {_salesNum,_salesTops,_salesWeekText,_salesMonthText,_salesMonthEnd,_salesCfg,_salesHtml,_salesRatioText,_salesWeekWord,' +
   '_salesLastYearDates,_salesLastYearLabel,_salesLastYearFact,_salesActiveNote,_salesFillLines,_salesFillLinesFor,_fillShift,_fillRangeLabel,_fillFreeInLoad,_fillSeatWord,' +
   '_salesRangeFact,_salesRangePair,_salesRangeText,_salesRangeHtml,_fillRangeMissing}; }')(ctx);
 
@@ -281,6 +281,60 @@ check('поле «идём на» с подсказкой', hFull.indexOf("sales
    с отправленным сообщением и видит два разных показателя. */
 check('в панели тоже «Выполнение плана»', hFull.indexOf('Выполнение плана') > 0, hFull.slice(0, 400));
 check('и старого слова в ней нет', hFull.toLowerCase().indexOf('доходимост') < 0, hFull);
+
+/* ===== «ИДЁМ НА»: РАСЧЁТ ВИДЕН И СХОДИТСЯ =====
+   Жанна 13.09.2026: «как ты посчитал, на сколько идём?» Цифра = прогноз × медиана
+   «факт ÷ прогноз», вниз до сотни. Подпись обязана показывать сам расчёт.
+   ⚠️ И он обязан сходиться на калькуляторе: 27 224 × 73% = 19 800, а предложено 20 000 —
+   ровно та же ловушка, что дала «разница −4 п.п.». Поэтому знаков у процента ровно
+   столько, сколько нужно, чтобы перемножение по показанным числам дало ту же цифру. */
+{
+  // живой случай: прогноз 27 224, предложено 20 000
+  eq('одного знака хватает', API._salesRatioText(27224, 0.735, 20000), '73,5');
+  eq('целого процента мало — берём точнее', API._salesRatioText(27224, 0.7346, 19900), '73,46');
+  eq('где целого хватает, лишних знаков не пишем', API._salesRatioText(10000, 0.9, 9000), '90');
+  /* ⚠️ Цифру могли вписать руками или посчитать старой формулой. Тогда расчёта нет —
+     и выдумывать его нельзя. */
+  eq('чужая цифра — расчёта не показываем', API._salesRatioText(27224, 0.735, 25000), '');
+  eq('без прогноза считать нечего', API._salesRatioText(0, 0.735, 20000), '');
+
+  /* Перемножение ПО ПОКАЗАННЫМ числам обязано давать ту же цифру — проверяем свойство,
+     а не отдельные случаи. */
+  for (const [nf, r, sug] of [[27224, 0.735, 20000], [18300, 0.812, 14800], [9111, 0.5, 4500],
+                              [31999, 1.2, 38300], [7777, 0.6666, 5100]]) {
+    const txt = API._salesRatioText(nf, r, sug);
+    const shown = +String(txt).replace(',', '.');
+    check('расчёт сходится на калькуляторе: ' + nf + ' × ' + txt + '%',
+          !!txt && Math.floor(nf * shown / 100 / 100) * 100 === sug,
+          'показано ' + txt + '%, вышло ' + (Math.floor(nf * shown / 100 / 100) * 100) + ' вместо ' + sug);
+  }
+
+  /* ⚠️ «Медиана 0.9» и «истории нет, поэтому 0.9» — разные вещи, а число одно. Отличает их
+     только счётчик недель с сервера; без него подпись врала бы на пустом месте. */
+  eq('одна неделя', API._salesWeekWord(1), 'неделе');
+  eq('две', API._salesWeekWord(2), 'неделям');
+  eq('шесть', API._salesWeekWord(6), 'неделям');
+  eq('одиннадцать — исключение', API._salesWeekWord(11), 'неделям');
+
+  ctx._salesStore.reports['2025-10-27'].ratio = 0.735;
+  ctx._salesStore.reports['2025-10-27'].ratioN = 6;
+  ctx._salesStore.reports['2025-10-27'].next = { week: '2025-11-03', forecast: 27224, suggest: 20000 };
+  const hR = render({});
+  check('расчёт «идём на» показан целиком', /× 73,5%, вниз до сотни/.test(hR),
+        (hR.match(/предлагаю[\s\S]{0,220}/) || [''])[0]);
+  check('и сказано, по скольким неделям медиана', hR.indexOf('по 6 неделям') > 0,
+        (hR.match(/предлагаю[\s\S]{0,220}/) || [''])[0]);
+
+  // истории нет — так и говорим, а не выдаём запасные 90% за медиану
+  ctx._salesStore.reports['2025-10-27'].ratio = 0.9;
+  ctx._salesStore.reports['2025-10-27'].ratioN = 0;
+  ctx._salesStore.reports['2025-10-27'].next = { week: '2025-11-03', forecast: 27224, suggest: 24500 };
+  const hR0 = render({});
+  check('без истории медианой не прикрываемся', hR0.indexOf('истории ещё нет') > 0,
+        (hR0.match(/предлагаю[\s\S]{0,220}/) || [''])[0]);
+  check('и слова «медиана» там нет', (hR0.match(/предлагаю[\s\S]{0,220}/) || [''])[0].indexOf('медиана') < 0,
+        (hR0.match(/предлагаю[\s\S]{0,220}/) || [''])[0]);
+}
 
 check('нет undefined в разметке', hFull.indexOf('undefined') < 0, hFull.slice(Math.max(0, hFull.indexOf('undefined') - 120), hFull.indexOf('undefined') + 80));
 check('нет NaN в разметке', hFull.indexOf('NaN') < 0, hFull.slice(Math.max(0, hFull.indexOf('NaN') - 120), hFull.indexOf('NaN') + 80));
