@@ -10958,6 +10958,33 @@ function _trHasPaid(id){
   if(t.paid) return true;
   return (t.tariffs||[]).some(x=>x&&x.balance!=null&&x.balance>0);
 }
+/* ===== ЧТО СЧИТАЕМ ПОКУПКОЙ АБОНЕМЕНТА =====
+   Жанна 13.09.2026: «абонемент — это платёж 16 р и более. Пробное за 15 — не абонемент.
+   А наша основная цель — продать абонемент».
+   Значит признак покупки — ДЕНЬГИ, и именно размер ОДНОГО платежа. По названию тарифа этого
+   не увидеть надёжно: пробный абонемент так и называется «пробное», а платный могли завести
+   с любым именем. По сумме за день — тоже: два пробных в один день дают 30 р и выглядели бы
+   как абонемент, поэтому сервер хранит рядом самый крупный одиночный платёж клиента (byCustMax).
+   Действующий НЕ пробный абонемент оставляем вторым признаком: деньги за него клуб получил,
+   просто платёж мог пройти до окна снимков кассы (перенос с прошлого года, подарочный).
+   ⚠️ Остаток на балансе сюда НЕ берём (в отличие от _trHasPaid): 15 р, лежащие на пробном
+   абонементе, — это не проданный абонемент, а именно тот случай, ради которого правило меняли. */
+const TR_TRIAL_MAX=15;            // пробное стоит 15 р; абонемент — 16 и дороже
+function _trBought(id){
+  if(_trPayBig(id)) return true;
+  const t=_trTar[String(id)]||_trTar[Number(id)];
+  return !!(t&&t.paid);
+}
+/* Ступенью раньше: заплатил в кассу хоть раз — пробное это или абонемент.
+   Жанна 13.09.2026: «пробные — часть воронки, нельзя их исключать, их тоже нужно показать».
+   Верно: между «дошёл» и «купил абонемент» стоит «заплатил за пробное», и пропажа этой
+   ступени прячет ровно тех, с кем работать — кто пробное оплатил, а абонемент ещё нет.
+   ⚠️ Купивших включаем сюда всегда, даже когда платежа в снимках кассы нет (абонемент из
+   Alfa, оплата прошла раньше окна): иначе ступень оказалась бы МЕНЬШЕ следующей, и воронка
+   на экране читалась бы как ошибка счёта. */
+function _trPaidAny(id){
+  return _trPaySum(id)>0 || _trBought(id);
+}
 function _trYearStart(){
   const d=new Date(), y=d.getFullYear(), m=d.getMonth()+1;
   return (m>=9?y:y-1)+"-09-01";     // учебный год начинается 1 сентября
@@ -11378,7 +11405,8 @@ async function trPullPayments(){
   const need=[];
   for(let d=new Date(from+"T12:00:00"); _dIso(d)<=to; d.setDate(d.getDate()+1)){
     const k=_dIso(d), sn=(_paySnap||{})[k];
-    if(!sn || !sn.byCust) need.push(k);
+    /* Дни без byCustMax перечитываем тоже: по ним не отличить абонемент от двух пробных. */
+    if(!sn || !sn.byCust || !sn.byCustMax) need.push(k);
   }
   if(!need.length){ toast("Платежи за сезон уже разложены по клиентам"); return; }
   _trPayBusy=true; _trPayProg="0/"+need.length; renderTrials();
@@ -11393,14 +11421,34 @@ async function trPullPayments(){
 }
 function _trPayDays(){
   const from=(_trFun&&_trFun.from)||"", to=_trToday();
-  if(!from||!_paySnap) return {have:0, withCust:0, from:from, to:to};
-  let have=0, withCust=0;
+  if(!from||!_paySnap) return {have:0, withCust:0, withMax:0, from:from, to:to};
+  let have=0, withCust=0, withMax=0;
   Object.keys(_paySnap).forEach(k=>{
     if(k<from||k>to) return;
     have++;
     if(_paySnap[k]&&_paySnap[k].byCust) withCust++;
+    /* Размер одиночного платежа снимки научились хранить позже разбивки по клиентам. У старых
+       дней его нет, и «абонемент или пробное» по ним решается дневной суммой — приблизительно.
+       Считаем такие дни отдельно, чтобы способ можно было назвать вслух. */
+    if(_paySnap[k]&&_paySnap[k].byCustMax) withMax++;
   });
-  return {have:have, withCust:withCust, from:from, to:to};
+  return {have:have, withCust:withCust, withMax:withMax, from:from, to:to};
+}
+/* Был ли у ребёнка платёж ДОРОЖЕ пробного — то есть куплен ли абонемент. Где сервер отдал
+   максимум одиночного платежа, смотрим его; где нет (старый снимок) — дневную сумму, и тогда
+   два пробных в один день ошибочно сойдут за абонемент. Насколько цифра приблизительна,
+   говорит _trPayDays().withMax, и это пишется рядом с числом. */
+function _trPayBig(id){
+  const from=(_trFun&&_trFun.from)||"", to=_trToday();
+  if(!from||!_paySnap) return false;
+  const s=String(id), n=Number(id);
+  return Object.keys(_paySnap).some(k=>{
+    if(k<from||k>to) return false;
+    const sn=_paySnap[k]; if(!sn) return false;
+    const src=sn.byCustMax||sn.byCust; if(!src) return false;
+    const v=src[s]!=null?src[s]:src[n];
+    return (+v||0)>TR_TRIAL_MAX;
+  });
 }
 function _trPaySum(id){
   const from=(_trFun&&_trFun.from)||"", to=_trToday();
@@ -11459,7 +11507,10 @@ function _trMgrCoverage(rows){
   const set=(typeof _trNewSet==="function")?_trNewSet():null;
   const fn=_trFunnel();
   if(!set||!fn) return null;
-  const inR=(rows||[]).reduce((s,m)=>s+(+m.kids||0),0);
+  /* Без строк менеджеров (сообщение в чат считается вовсе без amoCRM) берём тот же итог по
+     всему набору — он и есть сумма этих строк. */
+  const T=rows?null:_trSetTotals();
+  const inR=rows?rows.reduce((s,m)=>s+(+m.kids||0),0):((T&&T.kids)||0);
   return {set:set.size, inRating:inR, returning:+fn.returning||0, noData:+fn.noData||0};
 }
 function _trMgrCoverageNote(rows){
@@ -11481,7 +11532,8 @@ function _trMgrStats(){
   const pick=nm=>{
     const k=nm||"менеджер не определён";
     return by[k]||(by[k]={name:k, unknown:!nm, kids:0, enrolled:0, came:0, missed:0,
-                          waiting:0, noLes:0, paid:0, paidCame:0, sum:0, pay:0, arch:0,
+                          waiting:0, noLes:0, trial:0, trialCame:0, paid:0, paidCame:0,
+                          sum:0, pay:0, arch:0,
                           kids2:[]});     // поимённо: «дай списком раскрывашкой детей у каждого менеджера»
   };
   const add=(rows,bucket)=>rows.forEach(r=>{
@@ -11493,7 +11545,8 @@ function _trMgrStats(){
     /* Конверсия считается от ДОШЕДШИХ, значит и числитель должен быть из них. Иначе абонемент
        ждущего или возвращенца попадал бы в числитель, но не в знаменатель, — так и получались
        105% и 183%. Общее число купивших оставляем отдельной колонкой: оно тоже нужно. */
-    if(_trHasPaid(r.id)){ m.paid++; if(bucket==="came") m.paidCame++; }
+    if(_trPaidAny(r.id)){ m.trial++; if(bucket==="came") m.trialCame++; }
+    if(_trBought(r.id)){ m.paid++; if(bucket==="came") m.paidCame++; }
     if(_trArchived(r.id)) m.arch++;
     /* Списание по проведённому занятию — единственные настоящие деньги в этих данных.
        Это НЕ оплата в кассу: абонемент могли купить раньше, а списывается он по занятиям. */
@@ -11516,6 +11569,37 @@ function _trMgrStats(){
     return (b.came-a.came)||(b.kids-a.kids)||a.name.localeCompare(b.name,"ru");
   });
   return rows;
+}
+/* ===== ИТОГ ПО ВСЕМУ НАБОРУ =====
+   Ровно та строка «Итого», что стоит под рейтингом менеджеров, — но считается БЕЗ amoCRM:
+   деление по менеджерам на общую цифру не влияет, а ради неё пришлось бы читать всю воронку
+   сделок. Это и нужно отделу продаж: Жанна 13.09.2026 — «из этих данных только общих тоже
+   нужно делать сообщение».
+   Функция ОДНА на таблицу и на сообщение в чат. Разойдись они, отдел сверил бы сообщение
+   с экраном и не сошёлся — а сверять его будут именно так. */
+function _trSetTotals(){
+  const fn=_trFunnel(); if(!fn) return null;
+  const T={kids:0,enrolled:0,came:0,missed:0,waiting:0,noLes:0,trial:0,trialCame:0,
+           paid:0,paidCame:0,sum:0,pay:0,arch:0};
+  const add=(rows,bucket)=>(rows||[]).forEach(r=>{
+    T.kids++; T[bucket]++;
+    if(bucket==="came"||bucket==="missed"||bucket==="waiting") T.enrolled++;
+    /* Конверсия считается от ДОШЕДШИХ, значит и числитель только из них — как в рейтинге.
+       Общее число купивших идёт отдельно: оплатить можно и не придя на занятие. */
+    if(_trPaidAny(r.id)){ T.trial++; if(bucket==="came") T.trialCame++; }
+    if(_trBought(r.id)){ T.paid++; if(bucket==="came") T.paidCame++; }
+    if(_trArchived(r.id)) T.arch++;
+    (r.les||[]).forEach(x=>{ if(x.done) T.sum+=(+x.sum||0); });
+    T.pay+=_trPaySum(r.id);            // настоящие деньги: платежи клиента в кассу за сезон
+  });
+  /* Возвращенцев и тех, про кого Alfa не ответила, не берём — ровно как рейтинг менеджеров:
+     первые не новые клиенты, вторых просто не посчитали. Разницу объясняет _trMgrCoverage. */
+  add(fn.lists.came,"came"); add(fn.lists.missedAll,"missed"); add(fn.lists.waiting,"waiting");
+  add(fn.lists.noLessons,"noLes");
+  const base=T.came+T.missed;                 // ждущих в доходимость не берём: их черёд не настал
+  T.reach=base?(100*T.came/base):null;
+  T.conv=T.came?(100*T.paidCame/T.came):null;
+  return T;
 }
 /* Кого не удалось связать с менеджером. Жанна: «давай найдём менеджера, который не определён».
    Показываем имя, телефон и ПРИЧИНУ: без телефона в Alfa или телефон не встретился ни в одной
@@ -11551,7 +11635,11 @@ const _TR_BUCK={came:["дошёл","var(--green)"], missed:["не дошёл","v
 const _TR_BORD=["came","missed","waiting","noLes"];
 function _trMoneyStage(id){
   const pay=_trPaySum(id);
-  if(pay>0) return ["оплатил "+_gm(pay)+" р","var(--green)"];
+  /* Пробное и абонемент — разные ступени воронки, и в списке на обзвон их нельзя красить
+     одинаково: «оплатил 15 р» значит, что звонить как раз надо. */
+  if(pay>0) return _trBought(id)
+    ? ["оплатил "+_gm(pay)+" р — абонемент","var(--green)"]
+    : ["оплатил "+_gm(pay)+" р — только пробное","#C9922E"];
   const t=_trTar[String(id)]||_trTar[Number(id)];
   if(!t) return ["абонементы не загружены","var(--muted)"];
   if(t.paid) return ["абонемент есть, оплаты в сезон не видно","#C9922E"];
@@ -11573,7 +11661,8 @@ function _trMgrKidsHtml(rows){
       </div>`;
     }).join("");
     return `<details style="margin-bottom:6px"><summary style="cursor:pointer;font-size:13px">
-      <b>${esc(m.name)}</b> <span style="color:var(--muted)">— ${m.kids} ${_fmlKid(m.kids)} · дошли ${m.came} · купили ${m.paid} · оплатили ${_gm(m.pay)} р</span>
+      <b>${esc(m.name)}</b> <span style="color:var(--muted)">— ${m.kids} ${_fmlKid(m.kids)} · дошли ${m.came} · купили ${m.paid}${
+        m.trial>m.paid?(" · только пробное "+(m.trial-m.paid)):""} · оплатили ${_gm(m.pay)} р</span>
       <!-- ⚠️ stopPropagation обязателен: кнопка внутри summary, и без него клик по печати
            заодно свернул бы раскрывашку. -->
       <button class="btn ghost sm" style="margin-left:8px" title="Весь список этого менеджера — отдельным листом"
@@ -11705,7 +11794,8 @@ function _trMgrPrintPage(m,only){
       <br>Зелёная строка «впереди» значит, что занятие у ребёнка ещё будет: такой не потерян, и разговор с родителем другой.</div>`
     : `<h2>${esc(m.name)} — дети нового набора</h2>
     <div class="sub">Детей: ${list.length} · дошли ${m.came} · не дошли ${m.missed} · ждём ${m.waiting}${
-      m.noLes?(" · без занятий "+m.noLes):""} · купили абонемент ${m.paid} · оплатили ${_gm(m.pay)} р · напечатано ${when}
+      m.noLes?(" · без занятий "+m.noLes):""} · купили абонемент ${m.paid}${
+      m.trial>m.paid?(" · только пробное "+(m.trial-m.paid)):""} · оплатили ${_gm(m.pay)} р · напечатано ${when}
       <br>Два столбца этапов независимы: слева — где ребёнок по занятиям, справа — по деньгам.
       Оплатить абонемент можно, ещё не придя на первое занятие, — поэтому купивших бывает больше дошедших.</div>`;
   return `<div class="page">${head}
@@ -11733,14 +11823,18 @@ function _trMgrTableHtml(){
   const rows=_trMgrStats();
   if(!rows||!rows.length) return "";
   const pc=v=>v==null?`<span style="color:var(--muted)">—</span>`:`<b style="color:${v>=70?"var(--green)":(v>=40?"#C9922E":"var(--red)")}">${Math.round(v)}%</b>`;
-  const T={kids:0,enrolled:0,came:0,missed:0,waiting:0,noLes:0,paid:0,paidCame:0,sum:0,pay:0,arch:0};
-  rows.forEach(m=>Object.keys(T).forEach(k=>T[k]+=m[k]));
+  /* «Итого» считает общая функция, а не сумма строк: ту же цифру берёт сообщение в чат отдела
+     продаж, где деления по менеджерам нет вовсе. Один способ на оба места надёжнее двух
+     одинаковых — сверять сообщение будут именно с этой строкой. */
+  const T=_trSetTotals()||{kids:0,enrolled:0,came:0,missed:0,waiting:0,noLes:0,trial:0,trialCame:0,paid:0,paidCame:0,sum:0,pay:0,arch:0,reach:null,conv:null};
   const tr=m=>`<tr${m.unknown?" style=\"color:var(--muted)\"":""}>
     <td style="text-align:left">${m.unknown?"":"<b>"}${esc(m.name)}${m.unknown?"":"</b>"}</td>
     <td class="num">${m.kids}</td><td class="num">${m.enrolled}</td>
     <td class="num" style="color:var(--green)">${m.came}</td>
     <td class="num" style="color:var(--red)">${m.missed}</td>
     <td class="num">${m.waiting}</td><td class="num">${pc(m.reach)}</td>
+    <td class="num">${m.trialCame}${m.trial>m.trialCame
+      ? ` <span style="color:var(--muted);font-weight:400">· всего ${m.trial}</span>` : ""}</td>
     <td class="num">${m.paidCame}${m.paid>m.paidCame
       ? ` <span style="color:var(--muted);font-weight:400">· всего ${m.paid}</span>` : ""}</td>
     <td class="num">${pc(m.conv)}</td>
@@ -11749,20 +11843,27 @@ function _trMgrTableHtml(){
     <td class="num" style="color:var(--muted)">${m.noLes||""}</td>
     <td class="num" style="color:var(--muted)">${m.arch||""}</td></tr>`;
   const pd=_trPayDays();
-  const payNote=(!pd.withCust)
-    ? `<div class="hint" style="margin:6px 0;color:var(--terra-d)">Колонка «Оплачено» пуста: дневные снимки кассы за сезон сняты до того, как модель научилась раскладывать платежи по клиентам.<button class="btn ghost sm" style="margin-left:6px" onclick="trPullPayments()"${_trPayBusy?" disabled":""}>${_trPayBusy?("собираю "+esc(_trPayProg)):"собрать платежи за сезон"}</button></div>`
+  const payBtn=`<button class="btn ghost sm" style="margin-left:6px" onclick="trPullPayments()"${_trPayBusy?" disabled":""}>${_trPayBusy?("собираю "+esc(_trPayProg)):"собрать платежи за сезон"}</button>`;
+  /* Касса отвечает сразу за две колонки: «Оплачено» (сумма) и «Купили» (был ли платёж дороже
+     пробного). Поэтому пропусков два вида, и чинит их одна кнопка. */
+  const payWhy=(!pd.withCust)
+    ? "Колонка «Оплачено» пуста, а «Купили» посчитано только по абонементам: дневные снимки кассы за сезон сняты до того, как модель научилась раскладывать платежи по клиентам."
     : (pd.withCust<pd.have
-      ? `<div class="hint" style="margin:6px 0;color:var(--terra-d)">«Оплачено» посчитано по ${pd.withCust} дням из ${pd.have} — у остальных снимков разбивки по клиентам нет, сумма неполная.<button class="btn ghost sm" style="margin-left:6px" onclick="trPullPayments()"${_trPayBusy?" disabled":""}>${_trPayBusy?("собираю "+esc(_trPayProg)):"собрать платежи за сезон"}</button></div>`
-      : "");
+      ? `«Оплачено» посчитано по ${pd.withCust} ${_kassaDayTo(pd.withCust)} из ${pd.have} — у остальных снимков разбивки по клиентам нет, сумма неполная, и «Купили» занижено.`
+      : (pd.withMax<pd.withCust
+        ? `По ${pd.withCust-pd.withMax} ${_kassaDayTo(pd.withCust-pd.withMax)} снимок хранит только сумму за день, а не размер платежа: два пробных подряд там сочтутся абонементом, и «Купили» может быть завышено.`
+        : ""));
+  const payNote=payWhy?`<div class="hint" style="margin:6px 0;color:var(--terra-d)">${payWhy}${payBtn}</div>`:"";
   const tarNote=(!_trTar||!Object.keys(_trTar).length)
-    ? `<div class="hint" style="margin:6px 0">Абонементы ещё не загружены — колонки «купили» и «конверсия» пока пустые.</div>` : "";
+    ? `<div class="hint" style="margin:6px 0">Абонементы ещё не загружены — «купили» посчитано только по платежам в кассу: ребёнок с абонементом, платёж по которому в снимки кассы не попал, сюда не вошёл.</div>` : "";
   return `<details style="margin:10px 0" open><summary style="cursor:pointer;font-weight:600">🏅 Рейтинг менеджеров (${rows.length})</summary>
-    <div class="hint" style="margin:6px 0">Считается по тем же корзинам, что и цифры выше, только по этому набору. Кто занимался в клубе до 1 сентября, в рейтинг не входит: это не новые клиенты, и их абонементы к работе менеджера по набору отношения не имеют. Менеджер — ответственный по сделке amoCRM, связь по телефону. <b>Доходимость</b> = дошли ÷ (дошли + не дошли), ждущие не в счёт. <b>Конверсия</b> = купили абонемент ИЗ ДОШЕДШИХ ÷ дошли. В колонке «Купили» первое число — именно они; «всего» через точку — вместе с теми, кто абонемент оплатил, а на занятие ещё не пришёл. <b>Списано</b> — сумма списаний по проведённым занятиям, а не деньги в кассе.</div>
+    <div class="hint" style="margin:6px 0">Считается по тем же корзинам, что и цифры выше, только по этому набору. Кто занимался в клубе до 1 сентября, в рейтинг не входит: это не новые клиенты, и их абонементы к работе менеджера по набору отношения не имеют. Менеджер — ответственный по сделке amoCRM, связь по телефону. <b>Доходимость</b> = дошли ÷ (дошли + не дошли), ждущие не в счёт. <b>Конверсия</b> = купили абонемент ИЗ ДОШЕДШИХ ÷ дошли. В колонке «Купили» первое число — именно они; «всего» через точку — вместе с теми, кто абонемент оплатил, а на занятие ещё не пришёл. <b>Оплатили</b> — заплатили в кассу хоть раз, пробное за 15 р тоже: это часть воронки, и разница с «Купили» — те, с кем работать. <b>Купил</b> — это деньги, а не название тарифа: платёж в кассу <b>от 16 р</b> (пробное стоит 15 и абонементом не считается) либо действующий не пробный абонемент, если платёж прошёл до окна снимков кассы. <b>Списано</b> — сумма списаний по проведённым занятиям, а не деньги в кассе.</div>
     ${_trMgrCoverageNote(rows)}${tarNote}${payNote}
     <div class="tscroll"><table><thead><tr>
       <th style="text-align:left">Менеджер</th><th class="num">Детей</th><th class="num" title="Есть хотя бы одно занятие в расписании">Вписаны</th>
       <th class="num">Дошли</th><th class="num">Не дошли</th><th class="num">Ждём</th><th class="num">Доходимость</th>
-      <th class="num" title="Первое число — купившие ИЗ дошедших, его и делим на «Дошли». Через точку — сколько всего детей менеджера с действующим абонементом: оплатить можно и не придя на занятие, поэтому общее число бывает больше">Купили</th><th class="num">Конверсия</th>
+      <th class="num" title="Заплатили в кассу хотя бы раз — и 15 р за пробное, и абонемент. Это ступень воронки между «Дошли» и «Купили»: разница между колонками — те, кто пробное оплатил, а абонемент ещё нет">Оплатили</th>
+      <th class="num" title="Купил = платёж в кассу от 16 р (пробное за 15 р — не абонемент) или действующий не пробный абонемент. Первое число — купившие ИЗ дошедших, его и делим на «Дошли». Через точку — сколько всего таких детей у менеджера: оплатить можно и не придя на занятие, поэтому общее число бывает больше">Купили</th><th class="num">Конверсия</th>
       <th class="num" title="Сумма списаний по проведённым занятиям этих детей">Списано</th>
       <th class="num" title="Платежи этих клиентов в кассу Alfa за сезон — настоящие деньги">Оплачено</th>
       <th class="num" title="Ребёнок в наборе есть, а занятий в расписании нет">Без занятий</th>
@@ -11773,10 +11874,12 @@ function _trMgrTableHtml(){
       <td class="num"><b style="color:var(--green)">${T.came}</b></td>
       <td class="num"><b style="color:var(--red)">${T.missed}</b></td>
       <td class="num"><b>${T.waiting}</b></td>
-      <td class="num">${pc((T.came+T.missed)?(100*T.came/(T.came+T.missed)):null)}</td>
+      <td class="num">${pc(T.reach)}</td>
+      <td class="num"><b>${T.trialCame}</b>${T.trial>T.trialCame
+        ? ` <span style="color:var(--muted)">· всего ${T.trial}</span>` : ""}</td>
       <td class="num"><b>${T.paidCame}</b>${T.paid>T.paidCame
         ? ` <span style="color:var(--muted)">· всего ${T.paid}</span>` : ""}</td>
-      <td class="num">${pc(T.came?(100*T.paidCame/T.came):null)}</td>
+      <td class="num">${pc(T.conv)}</td>
       <td class="num"><b>${_gm(T.sum)}</b></td>
       <td class="num"><b style="color:var(--green)">${_gm(T.pay)}</b></td>
       <td class="num">${T.noLes||""}</td><td class="num">${T.arch||""}</td></tr>
@@ -11801,7 +11904,7 @@ function _trFunnelHtml(){
     <span style="font-size:12px;color:var(--muted)">с ${esc(_trFun.from)} по ${esc(_trFun.to)}${prog}</span>
     <button class="btn ghost sm" style="margin-left:auto${_trHidePaid?';background:var(--graphite);color:#fff;border-color:var(--graphite)':''}"
       onclick="trToggleHidePaid()"
-      title="Прячет тех, у кого есть действующий платный абонемент или остаток на балансе. Остаются те, кто пробное прошёл, а абонемент не купил">${_trHidePaid?"✓ ":""}скрыть купивших</button>
+      title="Прячет тех, у кого есть действующий платный абонемент или остаток на балансе. Остаются те, кто пробное прошёл, а абонемент не купил. Это не то же, что «Купили» в рейтинге менеджеров: здесь прячется и тот, у кого деньги остались на пробном абонементе">${_trHidePaid?"✓ ":""}скрыть купивших</button>
     <button class="btn ghost sm" onclick="trPrintMissedWeek()" title="Список для обзвона: кто из набора пропустил занятие за последние 7 дней">🖨 не пришли за неделю</button>
     <button class="btn ghost sm" onclick="trLoadManagers(true)"${_trMgrBusy?" disabled":""}
       title="Читает всю воронку amoCRM и связывает детей со сделками по телефону — тогда видно, чей клиент не дошёл">${
@@ -11883,6 +11986,17 @@ function _trDayLabel(d){
   return pre+d.slice(8)+"."+d.slice(5,7)+" "+(dn[x.getDay()]||"");
 }
 function renderTrials(){
+  /* Те же данные набора читает «📣 Отчёт для отдела продаж», и проход мог запустить не он.
+     Без этой строки он остался бы со своим «⏳ Читаю…» до следующего клика: обновить себя
+     по окончании чужой загрузки ему нечем.
+     ⚠️ Только когда дашборд на экране и в его полях никто не печатает: innerHTML стёр бы
+     и фокус, и недописанную цель «идём на». */
+  (function(){
+    const rb=document.getElementById("rukBody"), p=rb&&rb.closest(".panel");
+    if(!rb||!p||!p.classList.contains("active")) return;
+    if(rb.contains(document.activeElement)) return;
+    if(typeof _salesRefresh==="function") _salesRefresh();
+  })();
   const el=document.getElementById("trialsBody"); if(!el) return;
   const d=_trDate||_trToday();
   const isToday=(d===_trToday());
@@ -12886,6 +13000,8 @@ function _kassaTopHtml(){
    ⚠️ Вылезло 09.09.2026, когда в тестах заглушку _kassaDayWord заменили настоящей функцией:
    заглушка склоняла по-своему и обе ошибки прятала. */
 function _kassaDayOf(n){ n=Math.abs(+n||0); const t=n%10, h=n%100; return (t===1&&h!==11)?"дня":"дней"; }
+/* Дательный падеж: «по 1 дню», «по 8 дням» — кроме единицы форма одна. */
+function _kassaDayTo(n){ n=Math.abs(+n||0); const t=n%10, h=n%100; return (t===1&&h!==11)?"дню":"дням"; }
 function _kassaDayWord(n){
   n=Math.abs(+n||0); const t=n%10, h=n%100;
   if(t===1&&h!==11) return "день";
@@ -14523,6 +14639,110 @@ function _salesFillLinesFor(from,to){
   }
   return L;
 }
+/* ===== НОВЫЙ НАБОР В СООБЩЕНИИ =====
+   Жанна 13.09.2026: «из этих данных — только общих — тоже нужно делать сообщение в отчёте для
+   отдела продаж». Цифры те же, что в строке «Итого» рейтинга менеджеров, и считает их одна
+   функция _trSetTotals: сверять сообщение будут именно с той таблицей.
+   По менеджерам здесь НИЧЕГО нет — просили общие. Заодно это снимает с сообщения amoCRM:
+   для общей цифры воронка сделок не нужна, а читается она дольше всего.
+   ⚠️ Это не цифры недели. Набор живой: ребёнок дошёл сегодня — доходимость изменилась сегодня.
+   Поэтому в шапке блока стоит «на сегодня», а сам блок идёт только с ПОСЛЕДНИМ отчётом:
+   приклеить сегодняшний набор к сообщению за позапрошлую неделю значит отправить в чат две
+   разные даты под одной шапкой.
+   ⚠️ Нет источника — нет строки. «Купили 0» без загруженных абонементов это не ноль, а
+   незнание, и в чате его прочтут как провал набора. */
+function _salesSetLines(){
+  /* ⚠️ Пока проход идёт, _trFun уже не пуст, но ещё не полон: непрочитанные дети падают в
+     «Alfa не ответила», и цифры выглядят настоящими, будучи занижены. Во время загрузки
+     блока нет вовсе. */
+  if(_trFunBusy) return [];
+  const T=(typeof _trSetTotals==="function")?_trSetTotals():null;
+  if(!T||!T.kids) return [];
+  const from=(_trFun&&_trFun.from)||"";
+  const L=["", "Новый набор"+(from?(" с "+_salesDate(from)):"")+" — на сегодня "+_salesDate(_todayIso())+":"];
+  L.push("детей "+T.kids+", вписаны на занятия "+T.enrolled+"; дошли "+T.came+", не дошли "+T.missed
+        +", ждём "+T.waiting+(T.reach!=null?(" — доходимость "+Math.round(T.reach)+"%"):"")+".");
+  const pd=(typeof _trPayDays==="function")?_trPayDays():null;
+  const payOk=!!(pd&&pd.withCust), payPart=payOk&&pd.withCust<pd.have;
+  const payApprox=payOk&&pd.withMax<pd.withCust;      // дни, где размер одного платежа неизвестен
+  /* Абонементы грузятся отдельным проходом: без них «купили» молчит, а не показывает ноль.
+     Недогруженные — тот же ноль: у непрочитанного ребёнка абонемента «нет».
+     Правило покупки называем прямо в сообщении: продажа абонемента — главная цель отдела,
+     и первый вопрос в чате будет «а что вы считаете покупкой». */
+  if(!_trTarBusy && _trTar && Object.keys(_trTar).length){
+    /* Ступенями, а не одной цифрой: дошёл → заплатил (пробное 15 р тоже платёж) → купил
+       абонемент. Жанна 13.09.2026: «пробные — часть воронки, нельзя их исключать, их тоже
+       нужно показать». Разница ступеней и есть работа отдела: пробное оплачено, абонемент нет. */
+    L.push("Из дошедших "+T.came+": "+(payOk?("заплатили в кассу "+T.trialCame+", "):"")
+      +"купили абонемент "+T.paidCame+(T.conv!=null?(" — конверсия "+Math.round(T.conv)+"%"):"")+".");
+    if(payOk && T.trialCame>T.paidCame){
+      const only=T.trialCame-T.paidCame;
+      L.push("Только пробное — "+only+" "+_fmlKid(only)+": 15 р заплатили, абонемент ещё не купили. Это и есть работа.");
+    }
+    if(T.paid>T.paidCame) L.push("Всего купивших "+T.paid+": остальные оплатили абонемент, но на занятие ещё не пришли.");
+    const how=["Абонемент — это платёж от "+(TR_TRIAL_MAX+1)+" р; пробное за "+TR_TRIAL_MAX+" р стоит отдельной ступенью, а не считается покупкой."];
+    if(!payOk) how.push("⚠️ Платежи по клиентам ещё не разложены, поэтому сюда попали только дети с действующим абонементом — цифра занижена.");
+    else {
+      if(payPart) how.push("⚠️ Платежи разложены по клиентам за "+pd.withCust+" "+_kassaDayWord(pd.withCust)+" из "+pd.have+" — цифра занижена.");
+      /* Старые снимки хранят только дневную сумму: два пробных в один день там неотличимы от
+         абонемента. Молчать нельзя — цифру завышает именно то, ради чего правило меняли. */
+      if(payApprox) how.push("⚠️ По "+(pd.withCust-pd.withMax)+" "+_kassaDayTo(pd.withCust-pd.withMax)+" известна только сумма за день, а не размер платежа — два пробных в один день там сочтутся абонементом.");
+    }
+    L.push(how.join(" "));
+  }
+  /* Деньги: «оплачено» — платежи в кассу (настоящие), «списано» — по проведённым занятиям.
+     Разные вещи, и называть их надо порознь, иначе в чате сложат одно с другим. */
+  const money=["списано по занятиям "+_salesNum(T.sum)];
+  if(payOk) money.unshift("в кассу "+_salesNum(T.pay)
+      +(payPart?(" (по "+pd.withCust+" "+_kassaDayTo(pd.withCust)+" из "+pd.have+" — сумма неполная)"):""));
+  L.push("Деньги набора: "+money.join(", ")+".");
+  if(T.noLes) L.push("Без занятий "+T.noLes+" — в наборе есть, а в расписании Alfa занятий нет.");
+  if(T.arch) L.push("В архиве Alfa: "+T.arch+".");
+  /* Расхождение с самим набором объясняем прямо в сообщении: «в наборе 151, а тут 142» без
+     объяснения читается как ошибка — на экране мы это уже объясняем, в чате обязаны так же. */
+  const c=(typeof _trMgrCoverage==="function")?_trMgrCoverage():null;
+  if(c&&c.set>c.inRating){
+    const why=[];
+    if(c.returning) why.push(c.returning+" занимались в клубе до 1 сентября — это не новые клиенты");
+    if(c.noData) why.push("про "+c.noData+" Alfa не ответила");
+    const rest=c.set-c.inRating-c.returning-c.noData;
+    if(rest>0) why.push(rest+" — причина неизвестна");
+    L.push("Всего в наборе "+c.set+", в цифрах выше "+c.inRating+(why.length?(": "+why.join(", ")):"")+".");
+  }
+  return L;
+}
+/* Последний собранный отчёт. Живые цифры набора цепляем только к нему — см. выше. */
+function _salesIsLast(rep){
+  const keys=Object.keys(_salesReports()).sort();
+  return !!(rep&&rep.key&&keys.length&&rep.key===keys[keys.length-1]);
+}
+/* Данные набора для сообщения. amoCRM НЕ читаем: общей цифре менеджеры не нужны, а это самый
+   долгий источник. По одному проходу за раз — параллельно они упираются в антибот хостинга. */
+let _salesSetBusy="";
+async function salesSetLoad(){
+  if(_salesSetBusy||_mgrRukBusy) return;
+  const draw=()=>_salesRefresh();
+  const step=async(label,fn)=>{ _salesSetBusy=label; draw(); try{ await fn(); }catch(e){} };
+  try{
+    if(!_trFun) await step("занятия набора из Alfa", ()=>trLoadFunnel(false));
+    if(!_trTar||!Object.keys(_trTar).length) await step("абонементы", ()=>_salesTarWait());
+    if(!_paySnap) await step("кассу", ()=>_payLoadStore());
+  } finally { _salesSetBusy=""; draw(); }
+}
+/* Пересбор с нуля. ⚠️ Обнулять _trFun можно только когда проход НЕ идёт: работающий цикл
+   продолжает складывать ответы в _trFun.kids и упадёт на null — а запустил его, может быть,
+   и не этот раздел вовсе. */
+function salesSetReload(){
+  if(_trFunBusy||_trTarBusy||_salesSetBusy||_mgrRukBusy){ toast("Набор уже читается — дождитесь конца"); return; }
+  _trFun=null; _trTar={}; salesSetLoad();
+}
+/* trLoadFunnel в конце сам запускает абонементы и не ждёт их. Если проход уже идёт —
+   дожидаемся именно его: второй параллельный проход по Alfa упрётся в антибот, а свой
+   busy-флаг отдал бы управление сразу, и сообщение осталось бы без строки «купили». */
+async function _salesTarWait(){
+  while(_trTarBusy) await new Promise(r=>setTimeout(r,400));
+  if(!_trTar||!Object.keys(_trTar).length) await trLoadTariffs(false);
+}
 function _salesWeekText(rep){
   const man=rep.man||{}, L=[];
   L.push("Оборот недели: "+_salesNum(rep.fact)+".");
@@ -14549,6 +14769,8 @@ function _salesWeekText(rep){
     L.push("Активных клиентов: "+rep.active+((+rep.activePrev)?(" ("+(d>=0?"+":"")+d+")"):"")+"."); }
   _salesFillLines(rep).forEach(x=>L.push(x));
   _salesPaceLines(rep).forEach(x=>L.push(x));
+  /* Набор — живые цифры на сегодня, поэтому только к последнему отчёту (см. _salesSetLines). */
+  if(_salesIsLast(rep)) _salesSetLines().forEach(x=>L.push(x));
   if(man.note) { L.push(""); L.push(String(man.note).trim()); }
   return L.join("\n");
 }
@@ -15139,6 +15361,77 @@ function _salesRatioText(nf, ratio, sug){
      правка руками). Врать про расчёт нельзя: отдаём пусто, и подпись скажет иначе. */
   return "";
 }
+/* Экранная часть блока «Новый набор»: ровно те цифры, что уходят в сообщение, и честная
+   пометка о каждом источнике, которого не хватает. Разбора по менеджерам здесь нет намеренно —
+   в чат просили общие; кому нужен разбор, идёт во вкладку «🏅 Рейтинг менеджеров». */
+function _salesSetHtml(rep){
+  const H=s=>`<h3 style="margin:16px 0 6px">Новый набор — что уйдёт в сообщение</h3>`+s;
+  const set=(typeof _trNewSet==="function")?_trNewSet():null;
+  if(!set||!set.size) return H(`<div class="hint">Набор пуст — он берётся из «Цели набора». Отметьте там детей, и блок появится и здесь, и в сообщении.</div>`);
+  /* Проход мог запустить и соседний раздел («Пробные», «Рейтинг менеджеров») — тогда данные
+     на середине, и показывать их нельзя: они выглядят настоящими, будучи занижены. */
+  const busy=_salesSetBusy||(_trFunBusy?"занятия набора из Alfa":"");
+  if(busy) return H(`<div class="callout">⏳ Читаю ${esc(busy)}… Это отдельный проход по Alfa по всему набору (${set.size} ${_fmlKid(set.size)}), занимает до минуты.</div>`);
+  const T=(typeof _trSetTotals==="function")?_trSetTotals():null;
+  if(!T||!T.kids) return H(`<div class="callout" style="font-size:12px">В сообщении цифр набора пока нет: их не собирали. Это отдельный проход по Alfa по всему набору (${set.size} ${_fmlKid(set.size)}) — до минуты, поэтому сам он не запускается.
+    <button class="btn sm" style="margin-left:8px" onclick="salesSetLoad()">👥 Собрать набор</button></div>`);
+  const row=(lab,val,note)=>`<tr><td>${lab}</td><td style="text-align:right;white-space:nowrap"><b>${val}</b></td><td style="font-size:12px;color:var(--muted)">${note||""}</td></tr>`;
+  const pct=v=>v==null?'<span style="color:var(--muted)">—</span>':(Math.round(v)+"%");
+  const dash='<span style="color:var(--muted)">—</span>';
+  const tarOk=!_trTarBusy && !!(_trTar&&Object.keys(_trTar).length);
+  const pd=(typeof _trPayDays==="function")?_trPayDays():null;
+  const payOk=!!(pd&&pd.withCust), payApprox=payOk&&pd.withMax<pd.withCust;
+  /* Одна кнопка на все пропуски кассы: и «разбивки по клиентам нет», и «размер платежа
+     неизвестен» чинятся одним и тем же перечитыванием дней. */
+  const payBtn=`<button class="btn ghost sm" style="margin-left:6px" onclick="trPullPayments()"${_trPayBusy?" disabled":""}>${_trPayBusy?("собираю "+esc(_trPayProg)):"собрать платежи за сезон"}</button>`;
+  const cov=(function(){
+    const c=(typeof _trMgrCoverage==="function")?_trMgrCoverage():null;
+    if(!c||c.set<=c.inRating) return "весь набор целиком";
+    const why=[];
+    if(c.returning) why.push(c.returning+" занимались до 1 сентября — не новые клиенты");
+    if(c.noData) why.push("про "+c.noData+" Alfa не ответила");
+    const rest=c.set-c.inRating-c.returning-c.noData;
+    if(rest>0) why.push(rest+" — причина неизвестна");
+    return "в наборе "+c.set+", сюда не вошли: "+why.join(", ");
+  })();
+  const payNote=!payOk
+    ? ('<b style="color:var(--terra-d)">платежи по клиентам не разложены</b> — строки «оплатили в кассу» в сообщении не будет, а «купили» посчитано только по абонементам'+payBtn)
+    : (pd.withCust<pd.have
+        ? ('<b style="color:var(--terra-d)">посчитано по '+pd.withCust+' '+_kassaDayTo(pd.withCust)+' из '+pd.have+'</b> — сумма неполная, так и написано в сообщении'+payBtn)
+        : "платежи этих клиентов в кассу Alfa за сезон — настоящие деньги");
+  const tab=`<table style="max-width:760px"><tbody>
+    ${row("Детей в наборе", T.kids, cov)}
+    ${row("Вписаны на занятия", T.enrolled, "есть хотя бы одно занятие в расписании Alfa")}
+    ${row("Дошли", '<span style="color:var(--green)">'+T.came+'</span>', "были хотя бы на одном занятии")}
+    ${row("Не дошли", '<span style="color:var(--red)">'+T.missed+'</span>', "занятия прошли, ребёнка не было ни на одном — им и звонить")}
+    ${row("Ждём", T.waiting, "первое занятие ещё впереди — в доходимость не идут")}
+    ${row("Доходимость", pct(T.reach), "дошли ÷ (дошли + не дошли)")}
+    ${row("Заплатили в кассу", (tarOk&&payOk)?(T.trialCame+(T.trial>T.trialCame?' <span style="color:var(--muted);font-weight:400">· всего '+T.trial+'</span>':'')):dash,
+          payOk?"хоть раз, пробное за 15 р тоже платёж — ступень воронки между «Дошли» и «Купили»"
+               :'<b style="color:var(--terra-d)">платежей по клиентам нет</b> — ступень не посчитать')}
+    ${(tarOk&&payOk&&T.trialCame>T.paidCame)?row("…из них только пробное", '<span style="color:#C9922E">'+(T.trialCame-T.paidCame)+'</span>', "15 р заплатили, абонемент ещё не купили — это и есть работа отдела"):""}
+    ${row("Купили абонемент", tarOk?(T.paidCame+(T.paid>T.paidCame?' <span style="color:var(--muted);font-weight:400">· всего '+T.paid+'</span>':'')):dash,
+          tarOk?("купил = платёж в кассу от "+(TR_TRIAL_MAX+1)+" р (пробное за "+TR_TRIAL_MAX+" р — не абонемент) либо действующий не пробный абонемент. Первое число — из дошедших, его и делим на «Дошли»"
+                 +(payOk?"":' · <b style="color:var(--terra-d)">платежей по клиентам нет</b>, поэтому сейчас это только дети с абонементом — цифра занижена')
+                 +(payApprox?(' · <b style="color:var(--terra-d)">по '+(pd.withCust-pd.withMax)+' '+_kassaDayTo(pd.withCust-pd.withMax)+' известна только сумма за день</b>: два пробных подряд там сочтутся абонементом'+payBtn):''))
+               :(_trTarBusy?("абонементы читаются"+(_trTarProg?(" — "+esc(_trTarProg)):"")+", строка появится сама")
+                           :'<b style="color:var(--terra-d)">абонементы не загружены</b> — строки «купили» в сообщении не будет'))}
+    ${row("Конверсия", tarOk?pct(T.conv):dash, "купили из дошедших ÷ дошли")}
+    ${row("Сумма платежей в кассу", payOk?('<span style="color:var(--green)">'+_gm(T.pay)+'</span>'):dash, payNote)}
+    ${row("Списано по занятиям", _gm(T.sum), "по проведённым занятиям этих детей — это не деньги в кассе")}
+    ${T.noLes?row("Без занятий", T.noLes, "ребёнок в наборе есть, а занятий в расписании Alfa нет"):""}
+    ${T.arch?row("В архиве Alfa", T.arch, "ребёнка уже убрали в архив"):""}
+  </tbody></table>`;
+  /* ⚠️ Набор живой, а недельный отчёт заморожен. К старому отчёту цифры не цепляем и говорим
+     об этом вслух: молча пропавший из текста блок читается как поломка. */
+  const stale=_salesIsLast(rep)?"" :
+    `<div class="callout" style="border-color:var(--terra);font-size:12px;margin-top:8px">В сообщение эти цифры сейчас <b>не попадут</b>: открыт не последний отчёт. Набор считается на сегодня, и в тексте за прошлую неделю он назвал бы две разные даты под одной шапкой. Выберите последнюю неделю в списке вверху.</div>`;
+  return H(`<div class="hint" style="margin-bottom:6px">Цифры на момент сбора — это снимок Alfa, а не заморозка воскресного cron: в отличие от оборота, набор меняется каждый день. Считает их та же функция, что строку «Итого» в «🏅 Рейтинге менеджеров», — цифры там и здесь всегда одинаковые.</div>`
+    +tab+stale
+    +`<div class="hd-actions" style="margin-top:8px">
+        <button class="btn ghost sm" onclick="salesSetReload()">🔄 Пересобрать набор</button>
+        <span class="hint">Разбор по менеджерам — во вкладке «🏅 Рейтинг менеджеров»: в чат уходят только общие цифры.</span></div>`);
+}
 function _salesHtml(){
   const head=`<div class="callout" style="margin-bottom:10px;font-size:12px">Готовое сообщение в чат отдела продаж. Цифры замораживает cron <b>в воскресенье в 22:00</b>: оборот недели (факт из Alfa), прогноз на следующую неделю (снимок Alfa) и число активных клиентов. Позже их уже не восстановить — прогноз превращается в факт, а клиенты меняются каждый день. «Идём на» и комментарий вписываете вы: то, что впишете, станет «Шли на» в следующем отчёте.</div>`;
   /* Свой период не зависит от снимков отчётов — он считается из дневного хранилища. Поэтому
@@ -15154,6 +15447,9 @@ function _salesHtml(){
     ${_salesPeriodSel(curKey)}
     <button class="btn sm" id="salesBtn" onclick="salesBuild('${_jsStr(curKey)}')">🔄 Пересобрать эту неделю</button>
     ${R[_salesMonday(_todayIso())]?'':`<button class="btn ghost sm" onclick="salesBuild()" title="Обычно это делает cron в воскресенье в 22:00">🧮 Собрать за текущую неделю</button>`}
+    ${/* Кнопка стоит здесь, а не только у блока внизу: без неё цифры набора молча не попадут
+         в текст, который копируют прямо со следующего экрана. */""}
+    ${(_trFun||_salesSetBusy)?'':`<button class="btn ghost sm" onclick="salesSetLoad()" title="Общие цифры нового набора: дошли, не дошли, конверсия, деньги. Отдельный проход по Alfa — до минуты">👥 Добавить набор в сообщение</button>`}
     <span id="salesProg" style="font-size:12px;color:var(--muted)">${_salesStore.settings&&_salesStore.settings.lastRun?("последний запуск: "+esc(String(_salesStore.settings.lastRun).slice(0,16).replace("T"," "))):""}</span>
   </div>`;
   if(!rep) return head+bar+`<div class="callout">Отчётов пока нет. Нажмите «Пересобрать» — соберём за текущую неделю, дальше это делает cron в воскресенье в 22:00 (настройка ниже).</div>`+_salesCronHtml();
@@ -15225,7 +15521,7 @@ function _salesHtml(){
 
   let h=head+bar+msg("salesMsgWeek","Сообщение за неделю",weekText,"week")+
     _salesPaceHtml(rep)+
-    `<h3 style="margin:16px 0 6px">Откуда цифры</h3>`+wtab;
+    `<h3 style="margin:16px 0 6px">Откуда цифры</h3>`+wtab+_salesSetHtml(rep);
 
   /* ---- месячный блок ---- */
   if(rep.month){
