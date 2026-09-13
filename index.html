@@ -2208,7 +2208,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-09-13-01";
+const APP_VER="2026-09-13-02";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -14448,9 +14448,14 @@ function _salesWeekText(rep){
   L.push("Оборот недели: "+_salesNum(rep.fact)+".");
   if(+rep.goal){
     L.push("Шли на "+_salesNum(rep.goal)+".");
-    /* Доходимость — сколько из обещанного действительно дошло до кассы. Округляем ВНИЗ:
-       16 885 из 22 000 — это 76,7%, и в отчёт отделу продаж честнее отдать 76, а не 77. */
-    L.push("Доходимость "+Math.floor(100*(+rep.fact||0)/(+rep.goal))+"%.");
+    /* ⚠️ Раньше это называлось «доходимость», и Жанна 13.09.2026 споткнулась о «Доходимость
+       103%»: доходимость по смыслу не может быть больше ста. Здесь считается другое —
+       выполнение денежного плана, и перевыполнить его можно.
+       Слово «доходимость» в этом же приложении занято дважды и оба раза под другое:
+       в рейтинге менеджеров это дошли ÷ (дошли + не дошли), в планировщике — доля заявок,
+       дошедших до оплаты. Обе физически ≤ 100%, и путать их с этой цифрой нельзя.
+       Округляем ВНИЗ: 16 885 из 22 000 — это 76,7%, и отделу продаж честнее отдать 76. */
+    L.push("Выполнение плана "+Math.floor(100*(+rep.fact||0)/(+rep.goal))+"%.");
   }
   const ly=+(man.lastYear||0);
   if(ly){ L.push(""); L.push(_salesLastYearLabel(rep.week)+" этот же период - "+_salesNum(ly)+"."); }
@@ -14886,8 +14891,9 @@ function _salesHtml(){
              '<span style="color:var(--green)">'+_gm(rep.fact)+'</span>',
              "среднее дохода с пропусками и без пополам · дней с занятиями: "+(rep.daysWithLessons||0))}
     ${numRow("Шли на", (+rep.goal)?_gm(rep.goal):'<span style="color:var(--muted)">—</span>', goalSrc)}
-    ${numRow("Доходимость", (+rep.goal)?(Math.floor(100*(+rep.fact||0)/(+rep.goal))+"%"):'<span style="color:var(--muted)">—</span>',
-             (+rep.goal)?("оборот недели ÷ «шли на»"):"без цели считать не от чего")}
+    ${/* То же имя, что в сообщении: панель и чат обязаны называть цифру одинаково. */""}
+    ${numRow("Выполнение плана", (+rep.goal)?(Math.floor(100*(+rep.fact||0)/(+rep.goal))+"%"):'<span style="color:var(--muted)">—</span>',
+             (+rep.goal)?("оборот недели ÷ «шли на» · больше 100% значит, что план перевыполнен"):"без цели считать не от чего")}
     <tr><td>${esc(_salesLastYearLabel(W))} — этот же период</td>
       <td style="text-align:right"><input class="cell" type="number" step="1" style="width:110px;text-align:right"
         value="${man.lastYear||''}" placeholder="${LY.known?_gm(LY.sum):'—'}" onchange="salesSet('${_jsStr(W)}','lastYear',this.value)"></td>
