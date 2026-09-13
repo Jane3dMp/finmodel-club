@@ -19,7 +19,7 @@ const NAMES = ['_salesNum', '_salesCfg', '_ratAgg', '_ratSubjToCourse', '_ratMod
                '_salesTops', '_salesFillLines', '_salesFillLinesFor',
                '_salesWeekText', '_salesMonthText',
                // сводка загрузки считается функциями раздела «Заполняемость» — берём настоящие
-               '_fillAgg', '_fillRows', '_fillTotals', '_fillWho', '_fillCap', '_fillCats',
+               '_fillAgg', '_fillRows', '_fillTotals', '_fillWho', '_fillFreeInLoad', '_fillSeatWord', '_fillCap', '_fillCats',
                '_fillPlanPerGroup', '_fillTopId', '_fillTeach', '_fillSubjName',
                '_fillGroupName',
                // строку «Год назад» в сводке считают эти же функции раздела
@@ -90,7 +90,7 @@ const ctx = {
 };
 const API = new Function('ctx', 'with (ctx) { ' + src +
   ' return {_salesNum,_salesTops,_salesWeekText,_salesMonthText,_salesMonthEnd,_salesCfg,_salesHtml,' +
-  '_salesLastYearDates,_salesLastYearLabel,_salesLastYearFact,_salesActiveNote,_salesFillLines,_salesFillLinesFor,_fillShift,_fillRangeLabel,' +
+  '_salesLastYearDates,_salesLastYearLabel,_salesLastYearFact,_salesActiveNote,_salesFillLines,_salesFillLinesFor,_fillShift,_fillRangeLabel,_fillFreeInLoad,_fillSeatWord,' +
   '_salesRangeFact,_salesRangePair,_salesRangeText,_salesRangeHtml,_fillRangeMissing}; }')(ctx);
 
 /* ================= формат чисел (как в чате: 22.578) ================= */
@@ -431,15 +431,86 @@ check('обычная неделя — недельный текст на мес
   const skewLy = skew.find(x => x.indexOf('Год назад') === 0) || '';
   check('при перекосе разница не выдумана', skewLy.indexOf('разница +0 п.п.') > 0, skewLy);
   check('и названы ОБА процента', /63% против 63% сейчас/.test(skewLy), skewLy);
-  check('и сказано, по какому правилу', skewLy.indexOf('по списаниям') > 0, skewLy);
-  check('и почему', skewLy.indexOf('нет разбивки по деньгам') > 0, skewLy);
+  /* ⚠️ Второй процент нельзя называть загрузкой: строка «Загрузка» выше считает по галочкам
+     и включает бесплатные места. Жанна 13.09.2026: «оставила бы 74% единственным показателем».
+     Поэтому здесь он назван тем, что он есть, — оплаченными местами. */
+  check('и сказано, по какому правилу', skewLy.indexOf('по оплаченным местам') > 0, skewLy);
+  check('вторым показателем загрузки его не называем', skewLy.toLowerCase().indexOf('загрузк') < 0, skewLy);
+  check('и почему', skewLy.indexOf('разбивки по деньгам за прошлый год нет') > 0, skewLy);
+  // ⚠️ «п.п.» уже кончается точкой — вторая подряд читается как опечатка
+  check('двух точек подряд нет', skewLy.indexOf('п.п..') < 0, skewLy);
+
+  /* ===== СКОЛЬКО ИЗ ЗАГРУЗКИ — БЕСПЛАТНЫЕ МЕСТА =====
+     Жанна 13.09.2026: «нелогично считать нулевых как будто непришедших, они всё-таки были;
+     оставила бы 74% единственным показателем, но со сноской, что 4 процента за ноль».
+     Место занято — значит в загрузку идёт. Но рядом обязана стоять цена: какая часть этих
+     процентов не принесла денег. Иначе «74%» читаются как 74% выручки. */
+  {
+    const fr = skew.find(x => x.indexOf('Из них') === 0) || '';
+    check('сноска про бесплатные места есть', !!fr, skew.join(' | '));
+    // NEWROW: attZero 2 в день × 7 дней = 14 мест из 56 = 25 п.п.
+    check('названо число мест', fr.indexOf('14 мест без денег') > 0, fr);
+    check('и корзина', fr.indexOf('за 0 — 14') > 0, fr);
+    check('и сколько это процентов', fr.indexOf('25 п.п.') > 0, fr);
+    // строка целиком — её читает человек в чате, а не машина
+    eq('сноска читается по-русски', fr, 'Из них 14 мест без денег (за 0 — 14) — это 25 п.п. загрузки.');
+    // ⚠️ «без списания» в этом окне нет — пустую корзину не перечисляем
+    check('пустых корзин не называем', fr.indexOf('без списания') < 0, fr);
+
+    /* ⚠️ Считаем только ОТМЕЧЕННЫЕ галочками корзины: снятая в загрузку не попала, и
+       приписывать ей проценты было бы неправдой. */
+    ctx.S.fillCats = { full: 1, trial: 0, zero: 0, none: 1, miss: 1 };
+    check('снятая галочка из сноски уходит',
+          !API._salesFillLines(repW).some(x => x.indexOf('Из них') === 0),
+          API._salesFillLines(repW).join(' | '));
+    ctx.S.fillCats = { full: 1, trial: 0, zero: 1, none: 1, miss: 1 };
+
+    /* Сама функция — она общая у экрана и чата, чтобы сноски не разошлись. */
+    const T0 = { seats: 200 }, W0 = { zero: 30, none: 10 };
+    const F0 = API._fillFreeInLoad(T0, W0);
+    eq('мест без денег', F0.cnt, 40);
+    eq('и это п.п.', F0.pp, 20);
+    ctx.S.fillCats = { full: 1, trial: 0, zero: 0, none: 0, miss: 1 };
+    eq('обе галочки сняты — сноски нет вовсе', API._fillFreeInLoad(T0, W0), null);
+    ctx.S.fillCats = { full: 1, trial: 0, zero: 1, none: 1, miss: 1 };
+    eq('бесплатных нет — сноски нет', API._fillFreeInLoad(T0, { zero: 0, none: 0 }), null);
+    eq('без мест не делим на ноль', API._fillFreeInLoad({ seats: 0 }, W0), null);
+  }
+
+  /* ===== АРИФМЕТИКА СТРОКИ ДОЛЖНА СХОДИТЬСЯ =====
+     ⚠️ Живой случай 13.09.2026: «75% против 70% сейчас, разница −4 п.п.» — Жанна сверила
+     глазами и не сошлась. Три величины округлялись независимо: год назад 74,57 → «75»,
+     сейчас 70,14 → «70», а разница считалась из неокруглённых: −4,43 → «−4».
+     Оба числа по-своему верны, но вместе читаются как ошибка — а это сообщение сверяют
+     в отделе продаж. Ниже ровно те дроби, что дали ту строку. */
+  {
+    ctx.S.fillPlan = { '10': 700 };
+    ctx._fillStore.fill = {
+      '2026-08-31': { '10': [1, 700, 491, 0, 480, 14000, 470, 10, 11, 0, 6, {}, {}] },
+      '2025-09-01': { '10': [1, 700, 522, 0, 510, 15000] },   // старый формат: разбивки нет
+    };
+    const ly2 = API._salesFillLines(repW);
+    const line = ly2.find(x => x.indexOf('Год назад') === 0) || '';
+    check('строка эталона на месте', !!line, ly2.join(' | '));
+    const m = line.match(/(\d+)% против (\d+)% сейчас, разница ([+−])(\d+) п\.п\./);
+    check('строка разобралась', !!m, line);
+    if (m) {
+      const was = +m[1], now = +m[2], sign = m[3] === "−" ? -1 : 1, diff = sign * (+m[4]);
+      eq('год назад округлён', was, 75);
+      eq('сейчас округлён', now, 70);
+      // главное: разница — это РАЗНОСТЬ ПОКАЗАННЫХ чисел, а не третье округление
+      eq('разница сходится с тем, что видно', diff, now - was);
+      eq('и это именно −5, а не −4', diff, -5);
+    }
+  }
 
   // оба окна в новом формате — галочки работают, лишних оговорок нет
+  ctx.S.fillPlan = { '10': 8 };
   ctx._fillStore.fill = mkFill(NEWROW, NEWROW);
   const okLines = API._salesFillLines(repW);
   const okLy = okLines.find(x => x.indexOf('Год назад') === 0) || '';
   check('оба окна новые — короткая строка', okLy.indexOf('против') < 0, okLy);
-  check('оговорки про списания нет', okLy.indexOf('по списаниям') < 0, okLy);
+  check('оговорки про оплаченные места нет', okLy.indexOf('по оплаченным местам') < 0, okLy);
   check('процент по галочкам', okLy.indexOf('88%') > 0, okLy);
   check('разница 0', okLy.indexOf('разница +0 п.п.') > 0, okLy);
   // ⚠️ строка «Загрузка:» рядом обязана давать тот же процент, иначе сообщение спорит с собой

@@ -27,7 +27,7 @@ const MULTI = ['_fillGroupName', '_fillAcadYear', '_fillYearWeeks', '_fillPeriod
                '_fillSubjName', '_fillTeach', '_fillTopId',
                '_fillPlanPerGroup',
                '_fillAgg', '_fillCap', 'fillPlanSet',
-               '_fillRows', '_fillTotals', '_fillModelPlan', '_fillHtml',
+               '_fillRows', '_fillTotals', '_fillModelPlan', '_fillFreeInLoad', '_fillSeatWord', '_fillHtml',
                '_salesCfg', '_salesPace', '_salesPaceLines', '_salesPaceHtml'];
 const ONE = ['_fillIdx', '_fillGroups', '_fillPctColor',
              '_fillTeachName',
@@ -84,7 +84,7 @@ const ctx = {
   document: { getElementById: () => null },
 };
 const API = new Function('ctx', 'with (ctx) { ' + src +
-  ' return {_fillAgg,_fillCap,_fillRows,_fillTotals,_fillModelPlan,_fillHtml,_fillPeriods,_fillCur,' +
+  ' return {_fillAgg,_fillCap,_fillRows,_fillTotals,_fillModelPlan,_fillFreeInLoad,_fillSeatWord,_fillHtml,_fillPeriods,_fillCur,' +
   '_fillAcadYear,_fillAcadMonth,_fillYearWeeks,_fillPeriodOpts,_fillArch,_fillNoName,_fillGroupName,' +
   '_fillWho,_fillKidsCur,_fillKidsHtml,_fillPlanPerGroup,_fillCap,_fillTeach,_fillSubjName,_fillTopId,' +
   '_salesMonIn,_fillLesWord,_fillDaysNote,' +
@@ -224,6 +224,48 @@ check('эталон честно говорит, что прошлого год�
       h.slice(h.indexOf('Эталон загрузки'), h.indexOf('Эталон загрузки') + 400));
 check('и предлагает его посчитать', h.indexOf('fillPullRange(') > 0);
 check('вёрстка без «undefined»', h.indexOf('undefined') < 0, h.slice(Math.max(0, h.indexOf('undefined') - 120), h.indexOf('undefined') + 60));
+
+/* ⚠️ Сноска «сколько из загрузки — бесплатные места». Жанна 13.09.2026: «нелогично считать
+   нулевых как будто непришедших, они всё-таки были; оставила бы 74% единственным
+   показателем, но со сноской, что 4 процента за ноль». Место занято — значит в загрузку
+   идёт; но рядом обязана стоять цена: какая часть процентов не принесла денег.
+   Экран и сообщение отдела продаж считают её ОДНОЙ функцией — разойдись они, руководитель
+   и продажники видели бы разные сноски под одной и той же цифрой. */
+{
+  /* ⚠️ По умолчанию галочки «за 0» и «без списания» СНЯТЫ — эти места в загрузку не входят,
+     и сноска про них молчит. Это правильно: приписывать проценты корзине, которой нет
+     в числителе, было бы неправдой. Включаем их для самой проверки. */
+  const keepC = ctx.S.fillCats;
+  eq('при снятых галочках сноски нет вовсе', API._fillFreeInLoad({ seats: 400 }, { zero: 30, none: 10 }), null);
+  ctx.S.fillCats = { full: 1, trial: 0, zero: 1, none: 1, miss: 1 };
+  const T0 = { seats: 400 }, W0 = { zero: 30, none: 10 };
+  eq('мест без денег', API._fillFreeInLoad(T0, W0).cnt, 40);
+  eq('и это п.п. загрузки', API._fillFreeInLoad(T0, W0).pp, 10);
+  eq('бесплатных нет — сноски нет', API._fillFreeInLoad(T0, { zero: 0, none: 0 }), null);
+  eq('без мест не делим на ноль', API._fillFreeInLoad({ seats: 0 }, W0), null);
+
+  /* На самом экране сноска появляется только когда такие места есть. В этой фикстуре
+     разбивки по деньгам нет вовсе, поэтому её быть не должно — и пустой «(  )» тоже. */
+  check('без бесплатных мест сноски на экране нет', h.indexOf('мест без денег') < 0,
+        h.slice(Math.max(0, h.indexOf('В загрузке учтено') - 20), h.indexOf('В загрузке учтено') + 320));
+  check('но сама подпись про числитель на месте', h.indexOf('В загрузке учтено') > 0);
+
+  /* «42 мест» вместо «42 места» делает отчёт похожим на машинный перевод. */
+  eq('одно место', API._fillSeatWord(1), 'место');
+  eq('два места', API._fillSeatWord(2), 'места');
+  eq('сорок два места', API._fillSeatWord(42), 'места');
+  eq('пять мест', API._fillSeatWord(5), 'мест');
+  eq('одиннадцать мест — исключение', API._fillSeatWord(11), 'мест');
+  eq('четырнадцать мест — тоже', API._fillSeatWord(14), 'мест');
+  eq('двадцать одно место', API._fillSeatWord(21), 'место');
+  eq('и слово подставляется в сноску', API._fillFreeInLoad({ seats: 400 }, { zero: 40, none: 2 }).word, 'места');
+
+  /* ⚠️ Одно место из тысячи даёт «0 п.п.» — строка, которая сама себя опровергает:
+     «мест без денег 1 — это 0 п.п.». Ниже половины пункта говорим словами. */
+  eq('доля меньше половины пункта', API._fillFreeInLoad({ seats: 1000 }, { zero: 1, none: 0 }).ppText, 'меньше 1 п.п.');
+  eq('а заметная доля — числом', API._fillFreeInLoad({ seats: 400 }, { zero: 30, none: 10 }).ppText, '10 п.п.');
+  ctx.S.fillCats = keepC;
+}
 
 /* незасчитанные дни периода честно названы */
 ctx._fillStore.fill = { '2026-09-01': FILL['2026-09-01'] };
