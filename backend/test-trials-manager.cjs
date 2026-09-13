@@ -149,7 +149,7 @@ delete ctx.S.children['201'];
     let s2 = '';
     for (const n of ['_trPayDays', '_trPaySum', '_trPayHtml', '_trMoneyStage', '_trMgrKidsHtml', '_trMgrUnknownHtml', '_trMgrStats', '_trMgrTableHtml',
                      '_trTarText', '_trMgrKidsSorted', '_trPColor', '_trEvText', '_trMgrPrintPage', 'trPrintMgr', 'trPrintMgrAll',
-                     '_trMissCell', '_trDayLabel']) {
+                     '_trMissCell', '_trDayLabel', '_trBalance', '_trBalText']) {
       const m = html2.match(new RegExp('\\nfunction ' + n + '\\([^)]*\\)\\s*\\{[\\s\\S]*?\\n\\}', 'm'));
       if (!m) { console.log('не найдено в index.html: ' + n); process.exit(1); }
       s2 += m[0] + '\n';
@@ -177,6 +177,13 @@ delete ctx.S.children['201'];
     const mgrOf = { '201': 'Ольга', '202': 'Ольга', '203': 'Ольга', '204': 'Ольга',
                     '205': 'Мария', '206': 'Мария', '207': 'Мария' };   // у 208 менеджера нет
     const ctx2 = {
+      /* Балансы живут в модели: их одной выгрузкой приносит «💰 Балансы и возраст».
+         Здесь — маленькая сетка с теми же полями, что в настоящей. */
+      S: { grid: [{ kids: [{ alfaId: '201', alfaBalance: 184 }, { alfaId: '204', alfaBalance: -120 },
+                           { alfaId: '206', alfaBalance: 0 }, { alfaId: '207', alfaBalance: '' }] }],
+           balancesAt: '' },
+      kidsOf: l => (l && l.kids) || [],
+      _trCards: {},
       _trMgr: {}, _trTar: { '202': {} },
     // касса по дням: у 04.09 разбивки по клиентам ещё нет — сумма должна быть честно неполной
     _trFun: { from: '2026-09-01' },
@@ -207,7 +214,7 @@ delete ctx.S.children['201'];
     };
     const A2 = new Function('ctx', 'with (ctx) { ' + s2 +
     ' return {_trMgrStats,_trMgrTableHtml,_trMgrUnknownHtml,_trMgrKidsHtml,_trMoneyStage,_trPaySum,_trPayDays,_trPayHtml,' +
-    '_trTarText,_trMgrKidsSorted,_trPColor,_trEvText,_trMgrPrintPage,trPrintMgr,trPrintMgrAll,_jsStr,_trMissCell}; }')(ctx2);
+    '_trTarText,_trMgrKidsSorted,_trPColor,_trEvText,_trMgrPrintPage,trPrintMgr,trPrintMgrAll,_jsStr,_trMissCell,_trBalance,_trBalText}; }')(ctx2);
 
     const st = A2._trMgrStats();
     eq('менеджеров в рейтинге', st.length, 3);            // Ольга, Мария и «не определён»
@@ -332,6 +339,51 @@ delete ctx.S.children['201'];
   check('дошедшие идут раньше не дошедших',
         ol.indexOf('дошёл') < ol.indexOf('не дошёл'), 'порядок внутри менеджера');
 
+
+  /* ================= ДЕНЬГИ НА СЧЕТУ =================
+     Жанна 13.09.2026: «сюда нужно баланс добавить, чтобы было видно, что там у них на счетах».
+     ⚠️ Это НЕ «оплатил в сезоне»: там деньги, которые клуб получил, здесь — сколько у ребёнка
+     осталось. Минус значит долг, ради него колонка и нужна. */
+  {
+    eq('баланс берётся из модели по alfaId', A2._trBalance(201), 184);
+    eq('минус — это долг, а не ошибка', A2._trBalance(204), -120);
+    eq('ноль — это ноль', A2._trBalance(206), 0);
+    /* ⚠️ «Не знаем» и «ноль» — разные вещи: свалить их в одно значило бы показать пустой
+       счёт у всех, к кому просто не сходили за цифрой. */
+    eq('пустая строка — не ноль, а «не знаем»', A2._trBalance(207), null);
+    eq('ребёнка в сетке нет — тоже «не знаем»', A2._trBalance(999), null);
+
+    eq('ноль показываем числом', A2._trBalText(0).t, '0 р');
+    eq('и серым', A2._trBalText(0).c, 'var(--muted)');
+    eq('не знаем — прочерк', A2._trBalText(null).t, '—');
+    check('и подсказка говорит, что делать', A2._trBalText(null).ttl.indexOf('Балансы и возраст') > 0, A2._trBalText(null).ttl);
+    eq('долг красным', A2._trBalText(-120).c, 'var(--red)');
+    // ⚠️ настоящий минус, а не дефис: «-120» читается как часть номера, «−120» — как долг
+    eq('и с настоящим минусом', A2._trBalText(-120).t, '−120 р');
+    check('и названо долгом', A2._trBalText(-120).ttl.indexOf('Долг') === 0, A2._trBalText(-120).ttl);
+    eq('деньги зелёным', A2._trBalText(184).c, 'var(--green)');
+    eq('без лишнего плюса', A2._trBalText(184).t, '184 р');
+
+    /* На экране колонка стоит рядом с этапами. */
+    const hb2 = A2._trMgrKidsHtml(A2._trMgrStats());
+    check('баланс виден в списке', hb2.indexOf('184 р') > 0, hb2.slice(hb2.indexOf('Ребёнок 201') - 60, hb2.indexOf('Ребёнок 201') + 420));
+    check('и долг тоже', hb2.indexOf('−120 р') > 0, hb2);
+    check('объяснено, что это не «оплатил в сезоне»', hb2.indexOf('что у ребёнка осталось') > 0, hb2.slice(0, 900));
+    /* ⚠️ Деньги на счету меняются каждый день: снимок недельной давности, выданный за
+       сегодняшний, дороже, чем отсутствие цифры — по ней звонят родителям. */
+    check('без выгрузки честно сказано, что цифр нет', hb2.indexOf('ни разу не подтягивали') > 0, hb2.slice(0, 900));
+    ctx2.S.balancesAt = '2026-09-13T08:30:00';
+    const hb3 = A2._trMgrKidsHtml(A2._trMgrStats());
+    check('а с выгрузкой — дата снимка', hb3.indexOf('Снимок балансов от') > 0, hb3.slice(0, 900));
+    check('и в ней сам день', hb3.indexOf('13.09') > 0, hb3.slice(0, 900));
+
+    /* На печатном листе баланс идёт подстрокой к деньгам — девятая колонка сжала бы имя. */
+    const olga = A2._trMgrStats().find(x => x.name === 'Ольга');
+    const sheet = A2._trMgrPrintPage(olga);
+    check('на листе баланс есть', sheet.indexOf('на счету 184 р') > 0, sheet);
+    // у кого баланса не знаем — на бумаге прочерк не печатаем, он только шумит
+    eq('прочерков на листе нет', sheet.split('на счету —').length - 1, 0);
+  }
 
   /* ================= ПЕЧАТЬ СПИСКА ПО МЕНЕДЖЕРУ =================
      Жанна: «вот эти списки хочу печатать по каждому менеджеру». Лист обязан повторять экран,

@@ -2208,7 +2208,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-09-13-05";
+const APP_VER="2026-09-13-06";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -11534,10 +11534,12 @@ function _trMgrKidsHtml(rows){
     const list=_trMgrKidsSorted(m);
     const li=list.map(x=>{
       const b=_TR_BUCK[x.b]||["—","var(--muted)"], ms=_trMoneyStage(x.id);
+      const bal=_trBalText(_trBalance(x.id));
       return `<div style="display:flex;gap:8px;align-items:baseline;padding:3px 0;border-bottom:1px solid var(--line);flex-wrap:wrap">
         <span style="flex:1;min-width:180px;font-size:13px">${_trKidLink(x.id)}${_trArchBadge(x.id)}</span>
         <span style="width:110px;font-size:12px;color:${b[1]}">${esc(b[0])}</span>
         <span style="flex:1;min-width:200px;font-size:12px;color:${ms[1]}">${esc(ms[0])}</span>
+        <span style="width:84px;text-align:right;font-size:12px;color:${bal.c}" title="${esc(bal.ttl)}">${esc(bal.t)}</span>
       </div>`;
     }).join("");
     return `<details style="margin-bottom:6px"><summary style="cursor:pointer;font-size:13px">
@@ -11553,7 +11555,16 @@ function _trMgrKidsHtml(rows){
   return `<div style="margin-top:10px"><h4 style="margin:8px 0 4px">📋 Дети по менеджерам
     <button class="btn ghost sm" style="margin-left:8px;font-weight:400" title="Все менеджеры сразу — каждому свой лист" onclick="trPrintMgrAll()">🖨 Все списки</button>
     <button class="btn ghost sm" style="margin-left:4px;font-weight:400" title="Только не дошедшие: кому звонить в первую очередь. Менеджеров без таких детей в печать не берём" onclick="trPrintMgrAll('missed')">🖨 Не дошли</button></h4>
-    <div class="hint" style="margin-bottom:6px">Два столбца этапов независимы: слева — где ребёнок по занятиям, справа — по деньгам. Оплатить абонемент можно, ещё не придя на первое занятие, — поэтому «Купили» в таблице выше бывает больше «Дошли».</div>
+    <div class="hint" style="margin-bottom:6px">Два столбца этапов независимы: слева — где ребёнок по занятиям, справа — по деньгам. Оплатить абонемент можно, ещё не придя на первое занятие, — поэтому «Купили» в таблице выше бывает больше «Дошли».
+      <br><b>Справа — баланс</b>: сколько у ребёнка на счету в Alfa. Это не то же, что «оплатил в сезоне»: там деньги, которые клуб уже получил, а здесь — что у ребёнка осталось. <b style="color:var(--red)">Минус — долг.</b>
+      ${(function(){
+        /* ⚠️ Деньги на счету меняются каждый день. Показать снимок недельной давности как
+           сегодняшний — значит соврать дороже, чем не показать вовсе: по этой цифре звонят
+           родителям. Поэтому дата снимка стоит рядом, а если её нет — так и говорим. */
+        if(!S.balancesAt) return ' <b style="color:var(--terra-d)">Балансы ни разу не подтягивали</b> — в колонке будут прочерки. Нажмите «💰 Балансы и возраст» на вкладке с детьми.';
+        let d=""; try{ d=new Date(S.balancesAt).toLocaleString("ru-RU",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"}); }catch(e){}
+        return " Снимок балансов от <b>"+esc(d)+"</b> — обновляется кнопкой «💰 Балансы и возраст».";
+      })()}</div>
     ${rows.map(one).join("")}</div>`;
 }
 /* ===== ПЕЧАТЬ СПИСКА ПО МЕНЕДЖЕРУ =====
@@ -11562,6 +11573,35 @@ function _trMgrKidsHtml(rows){
    Один менеджер — один лист: класс .page в OBZ_CSS даёт разрыв страницы. */
 /* Порядок детей ОДИН и тот же на экране и в печати. Если разъедется, печатный список
    перестанет совпадать с тем, что менеджер видит у себя, и сверять их станет невозможно. */
+/* ===== ДЕНЬГИ НА СЧЕТУ В ALFA =====
+   Жанна 13.09.2026: «сюда нужно баланс добавить, чтобы было видно, что там у них на счетах».
+   Берём из модели, а не из Alfa: балансы уже лежат у детей — их одной выгрузкой приносит
+   кнопка «💰 Балансы и возраст». Спрашивать Alfa заново означало бы 70+ запросов ради
+   цифры, которая уже есть.
+   ⚠️ Отдельно от «оплатил в сезоне»: тот столбец про деньги, которые клуб получил, а это —
+   сколько у ребёнка осталось. Минус здесь значит долг, и это главное, ради чего колонка. */
+function _trBalance(id){
+  const s=String(id);
+  let v=null;
+  try{
+    (S.grid||[]).some(l=>kidsOf(l).some(k=>{
+      if(String(k.alfaId||"")!==s) return false;
+      if(k.alfaBalance==null||k.alfaBalance==="") return false;
+      v=+k.alfaBalance; return true;
+    }));
+  }catch(e){}
+  return (v==null||isNaN(v))?null:v;
+}
+/* Минус — долг, ноль — пусто, плюс — деньги есть. ⚠️ «—» и «0» разные вещи: первое значит
+   «не знаем» (балансы не подтягивали), второе — «знаем, и там ноль». Свалить их в одно
+   значило бы показать пустой счёт у всех, кому просто не сходили за цифрой. */
+function _trBalText(b){
+  if(b==null) return {t:"—", c:"var(--muted)", ttl:"Баланс не подтягивали — нажмите «💰 Балансы и возраст» на вкладке с детьми"};
+  const t=(b<0?"−":"")+_gm(Math.abs(b))+" р";
+  if(b<0) return {t:t, c:"var(--red)", ttl:"Долг: столько ребёнок должен клубу"};
+  if(b>0) return {t:t, c:"var(--green)", ttl:"Деньги на счету в Alfa — их ещё не списали за занятия"};
+  return {t:t, c:"var(--muted)", ttl:"На счету пусто"};
+}
 function _trMgrKidsSorted(m){
   return ((m&&m.kids2)||[]).slice().sort((a,b)=>{
     const d=_TR_BORD.indexOf(a.b)-_TR_BORD.indexOf(b.b);
@@ -11616,7 +11656,14 @@ function _trMgrPrintPage(m,only){
       <td class="nm">${esc(_trKidName(x.id))}${_trArchived(x.id)?'<div class="mut" style="font-weight:400">в архиве Alfa</div>':""}</td>
       <td style="white-space:nowrap">${esc(_trPhone(x.id)||"—")}</td>
       ${les}
-      <td style="color:${_trPColor(ms[1])}">${esc(ms[0])}</td>
+      <td style="color:${_trPColor(ms[1])}">${esc(ms[0])}${(function(){
+        /* Баланс на листе — подстрокой в той же колонке: заводить девятую ради одного числа
+           значит сжать имя и телефон, а они нужнее. Прочерк не печатаем вовсе — на бумаге
+           он только шумит. */
+        const bb=_trBalance(x.id); if(bb==null) return "";
+        const bt=_trBalText(bb);
+        return '<div style="color:'+_trPColor(bt.c)+'">на счету '+esc(bt.t)+'</div>';
+      })()}</td>
       <td>${tar?esc(tar):'<span class="mut">—</span>'}</td>
       <td class="mut">${esc(_trEvText(x.id))}</td>
       <td><span class="call"></span></td></tr>`;
