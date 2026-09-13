@@ -1496,6 +1496,34 @@ switch ($action) {
                   'debug' => ['scanned' => $res['scanned'], 'pages' => $res['pages']]]);
         break;
 
+    // --- ПЛАТЕЖИ ЗА ДИАПАЗОН: один проход по журналу вместо запроса на каждый день ---
+    //     Окно денег набора начинается 1 июня (предоплаты за год), и по дню на запрос это
+    //     была бы сотня проходов с двоичным поиском в каждом. Клиент режет окно на отрезки
+    //     по две недели и зовёт это.
+    //     ⚠️ Пишем снимки, только если проход прошёл диапазон НАСКВОЗЬ. Оборванный проход
+    //     записал бы пустые дни поверх настоящих, и модель показала бы «в тот день никто
+    //     не платил» — хуже, чем не записать ничего.
+    case 'paymentsRange':
+        @set_time_limit(300);
+        $from = alfa_iso((string)($in['from'] ?? date('Y-m-d')));
+        $to   = alfa_iso((string)($in['to'] ?? $from));
+        if ($to < $from) { $t = $to; $to = $from; $from = $t; }
+        if ((strtotime($to) - strtotime($from)) > 31 * 86400)
+            json_out(['ok' => false, 'error' => 'Диапазон больше 31 дня — просите частями'], 400);
+        $branches = alfa_realization_branches() ?: [alfa_branch()];
+        $r = alfa_payments_range($from, $to, $branches);
+        if (empty($r['complete']))
+            json_out(['ok' => false, 'error' => 'Журнал платежей не дочитан до конца диапазона — снимки не трогаем, попробуйте окно короче'], 502);
+        $snaps = [];
+        for ($d = $from; $d <= $to; $d = date('Y-m-d', strtotime($d . ' +1 day'))) {
+            $rows = $r['days'][$d] ?? [];
+            try { $snaps[$d] = alfa_payments_upsert($d, $branches, ['rows' => $rows, 'date' => $d]); }
+            catch (\Throwable $e) { /* один день не записался — остальные всё равно нужны */ }
+        }
+        json_out(['ok' => true, 'from' => $from, 'to' => $to, 'snapshots' => $snaps,
+                  'debug' => ['scanned' => $r['scanned'], 'pages' => $r['pages']]]);
+        break;
+
     // --- РАЗВЕДКА: отдаёт ли Alfa остаток по кассам? Сырые записи pay-account + соседние пути ---
     //     Справочник касс мы читаем только как id → name; есть ли там баланс — неизвестно.
     //     Если есть — «Наличные в клубе» можно брать прямо из Alfa, без ручного пересчёта.

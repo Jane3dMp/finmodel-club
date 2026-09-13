@@ -2689,6 +2689,11 @@ function alfa_payments_upsert(string $date, ?array $branches = null, ?array $pre
        пополнение». Статья надёжнее суммы: цена пробного когда-нибудь изменится, а разметка
        останется. Сумма остаётся запасным правилом — на дни, снятые до этой правки. */
     $byCustTrial = [];
+    /* Приход по СТАТЬЯМ (у расхода такое уже есть). Нужен для одного вопроса: что вообще
+       попало в окно денег. Окно начинается 1 июня — значит, в нём лето, а летом платят за
+       лагерь, и такой платёж наше правило зачтёт как абонемент. Пока разделять не просили,
+       но видеть это надо, иначе цифра «купили» однажды соврёт молча. */
+    $byItemIn = [];
     foreach ($r['rows'] as $x) {
         $name = alfa_pay_kassa_name($x, $refs);
         $isOut = alfa_pay_is_out($x);
@@ -2711,7 +2716,10 @@ function alfa_payments_upsert(string $date, ?array $branches = null, ?array $pre
                                   if ($v > ($byCustMax[$cid] ?? 0)) $byCustMax[$cid] = round($v, 2);
                                   $pitem = (string)($refs['payItems'][(int)($x['pay_item_id'] ?? 0)] ?? '');
                                   if ($pitem !== '' && mb_stripos($pitem, 'пробн') !== false)
-                                      $byCustTrial[$cid] = round(($byCustTrial[$cid] ?? 0) + $v, 2); } }
+                                      $byCustTrial[$cid] = round(($byCustTrial[$cid] ?? 0) + $v, 2); }
+                      $pin = (string)($refs['payItems'][(int)($x['pay_item_id'] ?? 0)] ?? '');
+                      if ($pin === '') $pin = 'Без статьи';
+                      $byItemIn[$pin] = round(($byItemIn[$pin] ?? 0) + $v, 2); }
     }
     $st = alfa_pay_store_read();
     /* Касса задним числом: платёж могли исправить, перенести на другой день или удалить.
@@ -2725,7 +2733,7 @@ function alfa_payments_upsert(string $date, ?array $branches = null, ?array $pre
     $st[$r['date']] = ['income' => round($inc, 2), 'expense' => round($out, 2),
                        'count' => count($r['rows']), 'byIn' => $byIn, 'byOut' => $byOut,
                        'byItem' => $byItem, 'byCust' => $byCust, 'byCustMax' => $byCustMax,
-                       'byCustTrial' => $byCustTrial, 'byType' => $byType,
+                       'byCustTrial' => $byCustTrial, 'byItemIn' => $byItemIn, 'byType' => $byType,
                        'move' => round($move, 2), 'moveN' => $moveN, 'ts' => date('c')];
     ksort($st);
     if (count($st) > 400) $st = array_slice($st, -400, null, true);   // храним последние ~13 месяцев
@@ -2733,7 +2741,8 @@ function alfa_payments_upsert(string $date, ?array $branches = null, ?array $pre
     return ['date' => $r['date'], 'income' => round($inc, 2), 'expense' => round($out, 2),
             'count' => count($r['rows']), 'byIn' => $byIn, 'byOut' => $byOut, 'byItem' => $byItem,
             'byCust' => $byCust, 'byCustMax' => $byCustMax, 'byCustTrial' => $byCustTrial,
-            'byType' => $byType, 'move' => round($move, 2), 'moveN' => $moveN];
+            'byItemIn' => $byItemIn, 'byType' => $byType,
+            'move' => round($move, 2), 'moveN' => $moveN];
 }
 
 /* ===== ПЛАТЕЖИ ЗА ДЕНЬ (кассы) =====
@@ -2750,6 +2759,23 @@ function alfa_pay_page(int $branch, int $page, int $per = 50): array {
     return ['items' => is_array($r['items'] ?? null) ? $r['items'] : [], 'total' => (int)($r['total'] ?? 0)];
 }
 function alfa_pay_row_date(array $x): string { return alfa_iso((string)($x['document_date'] ?? ($x['date'] ?? ''))); }
+/* Одна строка журнала в наш вид. Общая для «дня» и «диапазона»: разойдись они, снимки,
+   собранные разными кнопками, стали бы разными по составу полей. */
+function alfa_pay_row_norm(array $x, int $bid, string $d): array {
+    return ['id' => $x['id'] ?? null, 'branch' => $bid,
+            'customer_id' => (int)($x['customer_id'] ?? 0),
+            'income' => (float)($x['income'] ?? 0),
+            'note' => (string)($x['note'] ?? ''),
+            'payer' => (string)($x['payer_name'] ?? ''),
+            'date' => $d,
+            'pay_type_id' => $x['pay_type_id'] ?? null,
+            'pay_type_name' => (string)($x['pay_type_name'] ?? ''),
+            'pay_account_id' => $x['pay_account_id'] ?? null,
+            'pay_item_id' => $x['pay_item_id'] ?? null,
+            'location_id' => $x['location_id'] ?? null,
+            'created_at' => (string)($x['created_at'] ?? ''),
+            'is_confirmed' => $x['is_confirmed'] ?? null];
+}
 function alfa_payments_day(string $date, ?array $branches = null): array {
     $date = alfa_iso($date);
     $branches = $branches ?: (alfa_realization_branches() ?: [alfa_branch()]);
@@ -2782,19 +2808,7 @@ function alfa_payments_day(string $date, ?array $branches = null): array {
                 $scanned++;
                 $d = alfa_pay_row_date($x);
                 if ($d === $date) {
-                    $rows[] = ['id' => $x['id'] ?? null, 'branch' => $bid,
-                               'customer_id' => (int)($x['customer_id'] ?? 0),
-                               'income' => (float)($x['income'] ?? 0),
-                               'note' => (string)($x['note'] ?? ''),
-                               'payer' => (string)($x['payer_name'] ?? ''),
-                               'date' => $d,
-                               'pay_type_id' => $x['pay_type_id'] ?? null,
-                               'pay_type_name' => (string)($x['pay_type_name'] ?? ''),
-                               'pay_account_id' => $x['pay_account_id'] ?? null,
-                               'pay_item_id' => $x['pay_item_id'] ?? null,
-                               'location_id' => $x['location_id'] ?? null,
-                               'created_at' => (string)($x['created_at'] ?? ''),
-                               'is_confirmed' => $x['is_confirmed'] ?? null];
+                    $rows[] = alfa_pay_row_norm($x, $bid, $d);
                 } elseif ($d !== '' && $d < $date) { $passed = true; }
             }
             if ($passed && $rows) break;      // прошли нужный день насквозь
@@ -2802,6 +2816,64 @@ function alfa_payments_day(string $date, ?array $branches = null): array {
         }
     }
     return ['date' => $date, 'rows' => $rows, 'scanned' => $scanned, 'pages' => $pagesUsed];
+}
+
+/* ===== ПЛАТЕЖИ ЗА ДИАПАЗОН ОДНИМ ПРОХОДОМ =====
+   По дню на запрос окно с 1 июня стоило бы сотню проходов по журналу, у каждого свой двоичный
+   поиск: минуты работы и верный способ упереться в антибот хостинга. Журнал отсортирован от
+   свежих к старым, поэтому за диапазон достаточно ОДНОГО прохода — находим страницу, где
+   кончаются записи новее «to», и идём вперёд, пока не станет старше «from».
+   ⚠️ Диапазон просим короткий (клиент режет по две недели): страниц всё равно десятки, а шлюз
+   хостинга рвёт долгие запросы, и обрыв выглядит как «нажимаю, а данные не меняются».
+   ⚠️ complete — прошли ли мы диапазон НАСКВОЗЬ (встретили запись старше from или дочитали
+   журнал до конца). Без этого признака оборванный проход записал бы в хранилище пустые дни
+   поверх настоящих: для модели это выглядело бы как «в тот день не платили никто». */
+function alfa_payments_range(string $from, string $to, ?array $branches = null): array {
+    $from = alfa_iso($from); $to = alfa_iso($to);
+    if ($to < $from) { $t = $to; $to = $from; $from = $t; }
+    $branches = $branches ?: (alfa_realization_branches() ?: [alfa_branch()]);
+    $PER = 50; $days = []; $scanned = 0; $pagesUsed = 0; $complete = true;
+    foreach ($branches as $bid) {
+        $bid = (int)$bid;
+        $first = alfa_pay_page($bid, 0, $PER); $pagesUsed++;
+        $total = $first['total']; $items0 = $first['items'];
+        if (!$items0) continue;
+        $pages = max(1, (int)ceil($total / $PER));
+        // двоичный поиск: первая страница, где самая свежая запись уже НЕ новее «to»
+        $lo = 0; $hi = $pages - 1; $start = 0;
+        if (alfa_pay_row_date($items0[0]) > $to) {
+            while ($lo <= $hi) {
+                $mid = intdiv($lo + $hi, 2);
+                $pg = alfa_pay_page($bid, $mid, $PER); $pagesUsed++;
+                $it = $pg['items'];
+                if (!$it) { $hi = $mid - 1; continue; }
+                if (alfa_pay_row_date($it[0]) > $to) { $start = $mid + 1; $lo = $mid + 1; }
+                else { $hi = $mid - 1; }
+            }
+            $start = max(0, $start - 1);   // шаг назад: день мог начаться на предыдущей странице
+        }
+        $passed = false; $lastPage = $start - 1;
+        for ($p = $start; $p < $pages && $p < $start + 120; $p++) {
+            $pg = alfa_pay_page($bid, $p, $PER); $pagesUsed++;
+            $it = $pg['items']; if (!$it) { $passed = true; break; }
+            $lastPage = $p;
+            foreach ($it as $x) {
+                if (!is_array($x)) continue;
+                $scanned++;
+                $d = alfa_pay_row_date($x);
+                if ($d === '') continue;
+                if ($d < $from) { $passed = true; continue; }
+                if ($d > $to) continue;
+                $days[$d][] = alfa_pay_row_norm($x, $bid, $d);
+            }
+            if ($passed) break;
+        }
+        // дочитали журнал до последней страницы — дальше записей нет, диапазон закрыт
+        if (!$passed && $lastPage >= $pages - 1) $passed = true;
+        if (!$passed) $complete = false;
+    }
+    return ['days' => $days, 'from' => $from, 'to' => $to, 'complete' => $complete,
+            'scanned' => $scanned, 'pages' => $pagesUsed];
 }
 
 /* ===================== ОТЧЁТ ДЛЯ ОТДЕЛА ПРОДАЖ (вс 22:00) =====================
