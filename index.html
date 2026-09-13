@@ -2208,7 +2208,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-09-13-03";
+const APP_VER="2026-09-13-04";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -14542,6 +14542,108 @@ function _salesPaceLines(rep){
   else L.push("До цели "+_salesNum(P.gap)+".");
   return L;
 }
+/* ===== ПЛАКАТ «ИДЁМ К ЦЕЛИ» =====
+   Жанна 13.09.2026: «сделай из этого плакат». Лист A4 на стену кабинета, значит читается
+   с двух метров и говорит ОДНУ вещь. Главная цифра здесь — не деньги, а дети: «добрать 299»
+   понятно каждому, а «не хватает 49 106» для команды абстракция. Деньги рядом, помельче.
+   Шкала двухслойная, и это не украшение: «уже в кассе» и «ожидаем к концу месяца» — разные
+   вещи, и на плакате, где цифра висит месяц, путать их нельзя.
+   ⚠️ Ширины полос обрезаем сотней: прогноз может перекрыть цель, и полоса уехала бы за
+   рамку листа. */
+function _posterW(part, whole){
+  const w=+whole||0, p=+part||0;
+  if(w<=0) return 0;
+  return Math.max(0, Math.min(100, 100*p/w));
+}
+function _salesPosterHtml(P, today){
+  if(!P||!P.goal) return "";
+  const done=(P.gap<=0);
+  const wFc=_posterW(P.forecast,P.goal), wFt=_posterW(P.fact,P.goal);
+  const pFc=Math.round(wFc), pFt=Math.round(wFt);
+  const mon=String(_salesMonName(P.ym)||"").toUpperCase();
+  /* Главный посыл. Детей считаем не всегда — тогда главной становится сумма. */
+  /* ⚠️ Главная цифра не переносится: «+120 400» на печати уехало бы за поле, и правого края
+     на бумаге уже не вернуть. Замерено в браузере: до девяти знаков 132px влезают с запасом,
+     дальше уменьшаем — чужой шрифт принтера может оказаться шире нашего. */
+  const heroSize=(t)=>(String(t).length>=9?96:(String(t).length>=8?112:132));
+  const heroTag=(t,cls)=>'<div class="hero'+(cls?(" "+cls):"")+'" style="font-size:'+heroSize(t)+'px">'+t+'</div>';
+  const lead=done
+    ? '<div class="lab">Цель месяца взята</div>'+heroTag("+"+_gm(P.forecast-P.goal),"ok")
+      +'<div class="sub">столько сверх цели ожидаем к концу месяца</div>'
+    : (P.needKids
+        ? '<div class="lab">Нужно добрать</div>'+heroTag(String(P.needKids),"")
+          +'<div class="sub">детей на курсы до конца месяца</div>'
+        : '<div class="lab">До цели не хватает</div>'+heroTag(_gm(P.gap),"")
+          +'<div class="sub">рублей</div>');
+  const cells=[["Цель месяца",_gm(P.goal),""],
+               ["Уже в кассе",_gm(P.fact),"ok"],
+               ["Ожидаем к концу месяца",_gm(P.forecast),"tr"]];
+  /* Строку «Не хватает» добавляем, только если главной цифрой стоят дети: когда героем уже
+     висит сама сумма, второй раз её называть незачем — на плакате повтор читается как ошибка. */
+  if(!done && P.needKids) cells.push(["Не хватает",_gm(P.gap),"no"]);
+  const note=(!done&&P.needKids&&P.perKid>0)
+    ? ("Один ребёнок приносит в среднем "+_gm(P.perKid)+" р в месяц — считано по "+P.kids+" детям этого месяца.")
+    : "";
+  return '<div class="poster">'
+    +'<div class="top"><div class="mon">'+esc(mon)+'</div><div class="club">Прознание + CODDY</div></div>'
+    +'<div class="lead">'+lead+'</div>'
+    +'<div class="bar"><i class="fc" style="width:'+wFc.toFixed(1)+'%"></i>'
+    +'<i class="ft" style="width:'+wFt.toFixed(1)+'%"></i></div>'
+    +'<div class="legend"><span><b class="d ft"></b> в кассе '+pFt+'%</span>'
+    +'<span><b class="d fc"></b> ожидаем '+pFc+'%</span>'
+    +'<span class="r">цель 100%</span></div>'
+    +'<table class="nums"><tbody>'
+    +cells.map(c=>'<tr><td>'+esc(c[0])+'</td><td class="v '+c[2]+'">'+c[1]+'</td></tr>').join("")
+    +'</tbody></table>'
+    +(note?('<div class="note">'+esc(note)+'</div>'):"")
+    +'<div class="foot">напечатано '+esc(today||"")+'</div></div>';
+}
+const POSTER_CSS=`
+  @page{size:A4 portrait;margin:14mm}
+  body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;margin:0;color:#20201D;background:#fff}
+  /* ⚠️ Лист занимал две трети страницы, и низ оставался пустым — на стене это читается как
+     недоделанный черновик. Тянем на всю печатную высоту и распределяем блоки, а главную
+     цифру ставим в середину. box-sizing — страховка: без неё любой padding уводит ширину
+     за поля страницы, и принтер обрезает правый край с цифрами. */
+  .poster{max-width:182mm;min-height:262mm;margin:0 auto;box-sizing:border-box;
+          display:flex;flex-direction:column}
+  .lead{flex:1;display:flex;flex-direction:column;justify-content:center}
+  .top{display:flex;justify-content:space-between;align-items:baseline;
+       border-bottom:3px solid #20201D;padding-bottom:6px;margin-bottom:26px}
+  .mon{font-size:30px;font-weight:800;letter-spacing:.06em}
+  .club{font-size:14px;color:#8a8178;letter-spacing:.04em}
+  .lead{text-align:center}
+  .lead .lab{font-size:17px;color:#8a8178;letter-spacing:.04em;text-transform:uppercase}
+  .lead .hero{font-size:132px;line-height:1;font-weight:800;color:#1F5BC0;margin:2px 0 4px;white-space:nowrap}
+  .lead .hero.ok{color:#3B7A57}
+  .lead .sub{font-size:21px;color:#20201D}
+  .bar{position:relative;height:34px;border-radius:17px;background:#EFEDE7;overflow:hidden;margin-bottom:8px}
+  .bar i{position:absolute;left:0;top:0;bottom:0;display:block;border-radius:17px}
+  .bar .fc{background:#C9D8F2}
+  .bar .ft{background:#3B7A57}
+  .legend{display:flex;gap:20px;font-size:14px;color:#5C574F;margin-bottom:24px}
+  .legend .r{margin-left:auto}
+  .legend .d{display:inline-block;width:11px;height:11px;border-radius:3px;margin-right:5px}
+  .legend .d.ft{background:#3B7A57}
+  .legend .d.fc{background:#C9D8F2}
+  .nums{width:100%;border-collapse:collapse}
+  .nums td{padding:11px 0;border-bottom:1px solid #E6DED3;font-size:19px}
+  .nums td.v{text-align:right;font-weight:800;font-size:27px;white-space:nowrap}
+  .nums td.v.ok{color:#3B7A57} .nums td.v.no{color:#B0493D} .nums td.v.tr{color:#565B62}
+  .note{margin-top:16px;font-size:14px;color:#5C574F;line-height:1.45}
+  .foot{margin-top:20px;font-size:12px;color:#8a8178;text-align:right}`;
+function salesPacePoster(week){
+  const R=_salesReports(), rep=R[week]||R[_salesWeek]||null;
+  const P=rep?_salesPace(rep):null;
+  if(!P){ toast("Прогноз месяца ещё не собран — нажмите «Пересобрать эту неделю»"); return; }
+  const w=window.open("","_blank"); if(!w){ toast("Разрешите всплывающие окна"); return; }
+  const today=new Date().toLocaleDateString("ru-RU");
+  w.document.write('<!doctype html><html><head><meta charset="utf-8"><title>'
+    +esc(_salesMonName(P.ym))+' — идём к цели</title><style>'+POSTER_CSS+'</style></head><body>'
+    +_salesPosterHtml(P,today)+'</body></html>');
+  w.document.close();
+  setTimeout(()=>{ try{ w.focus(); w.print(); }catch(e){} }, 300);
+}
 function _salesPaceHtml(rep){
   const P=_salesPace(rep);
   if(!P) return `<div class="callout" style="margin:14px 0">Прогноз месяца появится после пересборки отчёта: нажмите «🔄 Пересобрать эту неделю».</div>`;
@@ -14558,7 +14660,9 @@ function _salesPaceHtml(rep){
   const cover=P.full?"":`<div class="callout" style="border-color:var(--terra);margin-top:8px;font-size:12px">
     Сколько детей добрать пока не считаем: детоместа посчитаны по ${P.seatDays} ${_kassaDayWord(P.seatDays)} из ${P.lessonDays} учебных в этом месяце.
     Счётчик появился недавно, старые дни его не имеют. Пересчитать: <b>Дашборд руководителя → 📦 Заполняемость групп</b> → выбрать месяц → «🔁 Пересчитать заново». Дальше это делает ночной cron.</div>`;
-  return `<div class="card" style="margin:14px 0"><h3>🎯 Идём к цели месяца</h3>
+  return `<div class="card" style="margin:14px 0"><h3>🎯 Идём к цели месяца
+    <button class="btn ghost sm" style="margin-left:8px;font-weight:400" onclick="salesPacePoster('${_jsStr(rep.week||"")}')"
+      title="Лист A4 на стену: сколько детей добрать до цели, сколько уже в кассе и сколько ожидаем">🖨 Плакат</button></h3>
     <table style="max-width:760px"><tbody>
       <tr><td>Оборот ${esc(_salesMonName(P.ym))} — факт на сегодня</td><td class="num" colspan="3"><b style="color:var(--green)">${_gm(P.fact)}</b></td></tr>
       <tr><td>Прогноз ${esc(_salesMonName(P.ym))} целиком</td><td class="num" colspan="3"><b style="color:var(--terra-d)">${_gm(P.forecast)}</b>

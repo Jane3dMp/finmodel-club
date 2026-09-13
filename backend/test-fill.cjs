@@ -199,6 +199,9 @@ check('но нехватку до цели показываем всё равн�
       /До цели 30.000\.$/m.test(API._salesPaceLines(rep4).join('\n')), API._salesPaceLines(rep4).join(' | '));
 check('и объясняем, почему цифры нет',
       /Пересчитать заново/.test(API._salesPaceHtml(rep4)), 'нет подсказки о пересчёте');
+/* Жанна 13.09.2026: «сделай из этого плакат» — кнопка живёт в заголовке этого же блока. */
+check('кнопка плаката в заголовке', API._salesPaceHtml(rep).indexOf('salesPacePoster(') > 0,
+      API._salesPaceHtml(rep).slice(0, 300));
 
 /* ================= 7. вёрстка собирается ================= */
 const h = API._fillHtml();

@@ -30,7 +30,8 @@ const NAMES = ['_salesNum', '_salesCfg', '_ratAgg', '_ratSubjToCourse', '_ratMod
                '_salesPeriodSel', '_salesRangeFact', '_salesRangePair', '_salesRangeText',
                '_salesRangeHtml',   // salesPullRange — async, регуляркой не берётся и не нужен: он только в onclick
                '_fillRangeMissing', '_kassaDayWord',
-               '_salesReports', '_salesCur', '_salesDate', '_salesMonName', '_salesRatioText', '_salesWeekWord', '_salesHtml', '_salesCronHtml'];
+               '_salesReports', '_salesCur', '_salesDate', '_salesMonName', '_salesRatioText', '_salesWeekWord',
+               '_posterW', '_salesPosterHtml', '_salesHtml', '_salesCronHtml'];
 const ONE_LINERS = ['_salesMonthEnd', '_salesMonday', '_salesGoals',   // тело в одну строку
                     '_fillIdx', '_fillGroups', '_fillPlanMap', '_fillArch', '_fillNoName', '_fillTeachName',
                     '_fillShift', '_dmy', '_kassaDayOf'];
@@ -89,7 +90,7 @@ const ctx = {
   location: { origin: 'https://app.proznanie.club' },
 };
 const API = new Function('ctx', 'with (ctx) { ' + src +
-  ' return {_salesNum,_salesTops,_salesWeekText,_salesMonthText,_salesMonthEnd,_salesCfg,_salesHtml,_salesRatioText,_salesWeekWord,' +
+  ' return {_salesNum,_salesTops,_salesWeekText,_salesMonthText,_salesMonthEnd,_salesCfg,_salesHtml,_salesRatioText,_salesWeekWord,_posterW,_salesPosterHtml,' +
   '_salesLastYearDates,_salesLastYearLabel,_salesLastYearFact,_salesActiveNote,_salesFillLines,_salesFillLinesFor,_fillShift,_fillRangeLabel,_fillFreeInLoad,_fillSeatWord,' +
   '_salesRangeFact,_salesRangePair,_salesRangeText,_salesRangeHtml,_fillRangeMissing}; }')(ctx);
 
@@ -279,6 +280,57 @@ check('сказано, где рейтинг искать', hFull.indexOf('во 
 check('поле «идём на» с подсказкой', hFull.indexOf("salesSet('2025-10-27','nextGoal',this.value)") > 0);
 /* Панель и чат обязаны называть цифру одинаково: иначе руководитель сверяет экран
    с отправленным сообщением и видит два разных показателя. */
+/* ================= ПЛАКАТ «ИДЁМ К ЦЕЛИ» =================
+   Жанна 13.09.2026: «сделай из этого плакат». Лист A4 на стену: читается с двух метров
+   и говорит одну вещь. Главная цифра — дети, а не деньги: «добрать 299» понятно каждому,
+   «не хватает 49 106» для команды абстракция. */
+{
+  // цифры с её экрана
+  const PP = { ym: '2026-09', fact: 38631, forecast: 100894, goal: 150000, gap: 49106,
+               needKids: 299, perKid: 164, kids: 512 };
+  const h = API._salesPosterHtml(PP, '13.09.2026');
+  check('месяц в шапке', h.indexOf('СЕНТЯБРЬ 2026') > 0, h.slice(0, 300));
+  // ⚠️ главная цифра — дети; если героем встанут деньги, плакат перестанет звать к действию
+  check('главная цифра — дети', /class="hero"[^>]*>299</.test(h), h.slice(0, 700));
+  check('и подписана словами', h.indexOf('детей на курсы до конца месяца') > 0, h);
+  // разделитель тысяч ставит _gm, а он в этом стенде заглушка — число ищем в любом виде
+  check('цель на листе', /150.?000/.test(h), h);
+  check('факт на листе', /38.?631/.test(h), h);
+  check('прогноз на листе', /100.?894/.test(h), h);
+  check('и сколько не хватает', /49.?106/.test(h), h);
+  check('дата печати', h.indexOf('13.09.2026') > 0, h);
+  /* Две полосы — разные вещи: «уже в кассе» и «ожидаем к концу месяца». На плакате, который
+     висит месяц, путать их нельзя. */
+  check('полоса факта', h.indexOf('class="ft" style="width:25.8%"') > 0, (h.match(/<div class="bar">[^<]*<i[^>]*>.<i[^>]*>/) || [''])[0] || h);
+  check('полоса прогноза', h.indexOf('class="fc" style="width:67.3%"') > 0, h);
+  check('проценты подписаны', h.indexOf('в кассе 26%') > 0 && h.indexOf('ожидаем 67%') > 0, h);
+
+  /* ⚠️ Прогноз может перекрыть цель — полоса тогда уехала бы за рамку листа. */
+  eq('полоса не длиннее цели', API._posterW(200000, 150000), 100);
+  eq('и не короче нуля', API._posterW(-5, 150000), 0);
+  eq('без цели делить не на что', API._posterW(100, 0), 0);
+  eq('половина', API._posterW(75000, 150000), 50);
+
+  /* Цель взята — плакат говорит об этом, а не показывает пустой остаток. */
+  const hDone = API._salesPosterHtml({ ym: '2026-09', fact: 138631, forecast: 162400, goal: 150000,
+                                       gap: 0, needKids: null, perKid: 164, kids: 512 }, '13.09.2026');
+  check('цель взята — так и написано', hDone.indexOf('Цель месяца взята') > 0, hDone.slice(0, 700));
+  check('и показано, на сколько сверх', /\+12.?400/.test(hDone), hDone);
+  check('зелёным, а не синим', hDone.indexOf('hero ok') > 0, hDone);
+  check('строки «Не хватает» на таком листе нет', hDone.indexOf('Не хватает') < 0, hDone);
+
+  /* Детоместа посчитаны не всегда — тогда героем встают рубли. */
+  const hNo = API._salesPosterHtml({ ym: '2026-09', fact: 38631, forecast: 100894, goal: 150000,
+                                     gap: 49106, needKids: null, perKid: 0, kids: 0 }, '13.09.2026');
+  check('без детоместов герой — рубли', hNo.indexOf('До цели не хватает') > 0, hNo.slice(0, 700));
+  // ⚠️ и та же сумма не должна стоять на листе дважды — повтор читается как ошибка
+  eq('сумма названа один раз', hNo.split('49').length - 1, 1);
+  check('и про среднего ребёнка не выдумываем', hNo.indexOf('в среднем') < 0, hNo);
+
+  eq('без цели плаката нет', API._salesPosterHtml({ ym: '2026-09', goal: 0 }, '13.09.2026'), '');
+  eq('и без данных тоже', API._salesPosterHtml(null, '13.09.2026'), '');
+}
+
 check('в панели тоже «Выполнение плана»', hFull.indexOf('Выполнение плана') > 0, hFull.slice(0, 400));
 check('и старого слова в ней нет', hFull.toLowerCase().indexOf('доходимост') < 0, hFull);
 
