@@ -2208,7 +2208,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-09-13-04";
+const APP_VER="2026-09-13-05";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -14584,7 +14584,7 @@ function _salesPosterHtml(P, today){
   const note=(!done&&P.needKids&&P.perKid>0)
     ? ("Один ребёнок приносит в среднем "+_gm(P.perKid)+" р в месяц — считано по "+P.kids+" детям этого месяца.")
     : "";
-  return '<div class="poster">'
+  return '<div class="ps-root">'
     +'<div class="top"><div class="mon">'+esc(mon)+'</div><div class="club">Прознание + CODDY</div></div>'
     +'<div class="lead">'+lead+'</div>'
     +'<div class="bar"><i class="fc" style="width:'+wFc.toFixed(1)+'%"></i>'
@@ -14598,40 +14598,124 @@ function _salesPosterHtml(P, today){
     +(note?('<div class="note">'+esc(note)+'</div>'):"")
     +'<div class="foot">напечатано '+esc(today||"")+'</div></div>';
 }
+/* ⚠️ Каждое правило под .ps-root, и это не педантизм: у плаката общие имена классов
+   (.note, .bar, .top, .d, .v), а для PDF он рисуется ПРЯМО В СТРАНИЦЕ приложения — без
+   префикса он и сам бы перекрасился нашими стилями, и наши задел. Отдельный iframe эту
+   задачу решал бы чище, но html2canvas в документе, собранном через document.write,
+   не рисует вовсе: canvas выходит полностью прозрачным (проверено 13.09.2026). */
 const POSTER_CSS=`
-  @page{size:A4 portrait;margin:14mm}
-  body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;margin:0;color:#20201D;background:#fff}
   /* ⚠️ Лист занимал две трети страницы, и низ оставался пустым — на стене это читается как
      недоделанный черновик. Тянем на всю печатную высоту и распределяем блоки, а главную
      цифру ставим в середину. box-sizing — страховка: без неё любой padding уводит ширину
      за поля страницы, и принтер обрезает правый край с цифрами. */
-  .poster{max-width:182mm;min-height:262mm;margin:0 auto;box-sizing:border-box;
-          display:flex;flex-direction:column}
-  .lead{flex:1;display:flex;flex-direction:column;justify-content:center}
-  .top{display:flex;justify-content:space-between;align-items:baseline;
+  .ps-root{font-family:-apple-system,Segoe UI,Roboto,sans-serif;color:#20201D;background:#fff;
+          max-width:182mm;min-height:262mm;margin:0 auto;box-sizing:border-box;
+          display:flex;flex-direction:column;text-align:left}
+  .ps-root .lead{flex:1;display:flex;flex-direction:column;justify-content:center;text-align:center}
+  .ps-root .top{display:flex;justify-content:space-between;align-items:baseline;
        border-bottom:3px solid #20201D;padding-bottom:6px;margin-bottom:26px}
-  .mon{font-size:30px;font-weight:800;letter-spacing:.06em}
-  .club{font-size:14px;color:#8a8178;letter-spacing:.04em}
-  .lead{text-align:center}
-  .lead .lab{font-size:17px;color:#8a8178;letter-spacing:.04em;text-transform:uppercase}
-  .lead .hero{font-size:132px;line-height:1;font-weight:800;color:#1F5BC0;margin:2px 0 4px;white-space:nowrap}
-  .lead .hero.ok{color:#3B7A57}
-  .lead .sub{font-size:21px;color:#20201D}
-  .bar{position:relative;height:34px;border-radius:17px;background:#EFEDE7;overflow:hidden;margin-bottom:8px}
-  .bar i{position:absolute;left:0;top:0;bottom:0;display:block;border-radius:17px}
-  .bar .fc{background:#C9D8F2}
-  .bar .ft{background:#3B7A57}
-  .legend{display:flex;gap:20px;font-size:14px;color:#5C574F;margin-bottom:24px}
-  .legend .r{margin-left:auto}
-  .legend .d{display:inline-block;width:11px;height:11px;border-radius:3px;margin-right:5px}
-  .legend .d.ft{background:#3B7A57}
-  .legend .d.fc{background:#C9D8F2}
-  .nums{width:100%;border-collapse:collapse}
-  .nums td{padding:11px 0;border-bottom:1px solid #E6DED3;font-size:19px}
-  .nums td.v{text-align:right;font-weight:800;font-size:27px;white-space:nowrap}
-  .nums td.v.ok{color:#3B7A57} .nums td.v.no{color:#B0493D} .nums td.v.tr{color:#565B62}
-  .note{margin-top:16px;font-size:14px;color:#5C574F;line-height:1.45}
-  .foot{margin-top:20px;font-size:12px;color:#8a8178;text-align:right}`;
+  .ps-root .mon{font-size:30px;font-weight:800;letter-spacing:.06em}
+  .ps-root .club{font-size:14px;color:#8a8178;letter-spacing:.04em}
+  .ps-root .lead .lab{font-size:17px;color:#8a8178;letter-spacing:.04em;text-transform:uppercase}
+  .ps-root .lead .hero{font-size:132px;line-height:1;font-weight:800;color:#1F5BC0;margin:2px 0 4px;white-space:nowrap}
+  .ps-root .lead .hero.ok{color:#3B7A57}
+  .ps-root .lead .sub{font-size:21px;color:#20201D}
+  .ps-root .bar{position:relative;height:34px;border-radius:17px;background:#EFEDE7;overflow:hidden;margin-bottom:8px}
+  .ps-root .bar i{position:absolute;left:0;top:0;bottom:0;display:block;border-radius:17px}
+  .ps-root .bar .fc{background:#C9D8F2}
+  .ps-root .bar .ft{background:#3B7A57}
+  .ps-root .legend{display:flex;gap:20px;font-size:14px;color:#5C574F;margin-bottom:24px}
+  .ps-root .legend .r{margin-left:auto}
+  .ps-root .legend .d{display:inline-block;width:11px;height:11px;border-radius:3px;margin-right:5px}
+  .ps-root .legend .d.ft{background:#3B7A57}
+  .ps-root .legend .d.fc{background:#C9D8F2}
+  .ps-root .nums{width:100%;border-collapse:collapse}
+  .ps-root .nums td{padding:11px 0;border-bottom:1px solid #E6DED3;font-size:19px;background:none}
+  .ps-root .nums td.v{text-align:right;font-weight:800;font-size:27px;white-space:nowrap}
+  .ps-root .nums td.v.ok{color:#3B7A57} .ps-root .nums td.v.no{color:#B0493D} .ps-root .nums td.v.tr{color:#565B62}
+  .ps-root .note{margin-top:16px;font-size:14px;color:#5C574F;line-height:1.45}
+  .ps-root .foot{margin-top:20px;font-size:12px;color:#8a8178;text-align:right}`;
+/* Для отдельного окна печати к тем же правилам добавляется страница и чистый body. */
+const POSTER_PAGE_CSS=`@page{size:A4 portrait;margin:14mm}
+  body{margin:0;background:#fff}`+POSTER_CSS;
+/* ===== ПЛАКАТ ФАЙЛОМ (PDF) =====
+   Жанна 13.09.2026: «сделай пдф». Печать через 🖨 даёт вектор и лучшее качество, но требует
+   выбрать «Сохранить как PDF» в диалоге принтера — а файл нужен готовый, чтобы отправить.
+   ⚠️ Векторно PDF здесь не собрать: у jsPDF стандартные шрифты без кириллицы, «СЕНТЯБРЬ»
+   вышел бы кракозябрами, а вшивать TTF в single-file приложение — это сотни килобайт.
+   Поэтому страницу рисует сам браузер (html2canvas), а в PDF ложится картинкой: на листе
+   ровно то, что видно на экране. При scale 3 это ~250 точек на дюйм — для плаката с
+   крупными цифрами достаточно. */
+function _loadJs(src, ready){
+  return new Promise((res,rej)=>{
+    if(ready&&ready()) return res();
+    const s=document.createElement("script");
+    s.src=src; s.onload=()=>res(); s.onerror=()=>rej(new Error("не загрузилось: "+src));
+    document.head.appendChild(s);
+  });
+}
+/* Как вписать снимок в A4 с полями 14 мм. ⚠️ Лист обязан остаться ОДНИМ: если картинка выше
+   печатной области, ужимаем её по высоте, а не режем на страницы. */
+function _posterFit(cw, ch){
+  const W=210, maxW=182, maxH=269;
+  cw=+cw||0; ch=+ch||0;
+  if(cw<=0||ch<=0) return null;
+  let w=maxW, h=maxW*ch/cw;
+  if(h>maxH){ h=maxH; w=maxH*cw/ch; }
+  return {w:w, h:h, x:(W-w)/2, y:14};
+}
+/* Имя файла человеку в «Загрузках». ⚠️ Слэши и двоеточия в имени запрещены Windows —
+   месяц приходит строкой вида «сентябрь 2026», но подстраховаться дешевле, чем объяснять
+   потом, почему файл не сохранился. */
+function _posterFileName(P){
+  const mon=String((typeof _salesMonName==="function"?_salesMonName(P&&P.ym):"")||"").trim();
+  const base=(mon?(mon+" — "):"")+"идём к цели";
+  return base.replace(/[\\/:*?"<>|]/g,"-")+".pdf";
+}
+async function salesPacePdf(week){
+  const R=_salesReports(), rep=R[week]||R[_salesWeek]||null;
+  const P=rep?_salesPace(rep):null;
+  if(!P){ toast("Прогноз месяца ещё не собран — нажмите «Пересобрать эту неделю»"); return; }
+  let fr=null;
+  try{
+    toast("Собираю PDF…");
+    await _loadJs("https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js",
+                  ()=>!!(window.jspdf&&window.jspdf.jsPDF));
+    await _loadJs("https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js",
+                  ()=>typeof html2canvas!=="undefined");
+    /* ⚠️ Рисуем плакат ПРЯМО В СТРАНИЦЕ, хотя чище было бы в своём iframe: html2canvas в
+       документе, собранном через document.write, не рисует вовсе — canvas выходит полностью
+       прозрачным (проверено 13.09.2026, обе версии — и за экраном, и в углу страницы).
+       Стили плаката живут под .ps-root, поэтому приложение от такой вставки не страдает.
+       Узел прячем за z-index, а не display:none: невидимое браузер не раскладывает, и
+       снимать было бы нечего. */
+    fr=document.createElement("div");
+    fr.setAttribute("aria-hidden","true");
+    fr.style.cssText="position:fixed;left:0;top:0;width:760px;background:#fff;z-index:-1;opacity:.01;pointer-events:none";
+    const st=document.createElement("style"); st.textContent=POSTER_CSS;
+    fr.appendChild(st);
+    const box=document.createElement("div");
+    box.innerHTML=_salesPosterHtml(P,new Date().toLocaleDateString("ru-RU"));
+    fr.appendChild(box);
+    document.body.appendChild(fr);
+    const node=fr.querySelector(".ps-root");
+    if(!node) throw new Error("плакат не собрался");
+    const canvas=await html2canvas(node,{scale:3,backgroundColor:"#ffffff",logging:false});
+    const fit=_posterFit(canvas.width,canvas.height);
+    if(!fit) throw new Error("снимок плаката вышел пустым");
+    /* ⚠️ compress обязателен: без него снимок ложится в PDF несжатым потоком, и один лист
+       весит 24 МБ — такой файл не отправить в мессенджере. С ним — 35 КБ, потому что плакат
+       это плоские заливки. Замерено на этом же плакате. PNG, а не JPEG: разница в размере
+       копеечная, а JPEG мылит края крупных букв. */
+    const doc=new window.jspdf.jsPDF({unit:"mm",format:"a4",orientation:"portrait",compress:true});
+    doc.addImage(canvas.toDataURL("image/png"),"PNG",fit.x,fit.y,fit.w,fit.h,undefined,"MEDIUM");
+    doc.save(_posterFileName(P));
+    toast("PDF сохранён");
+  }catch(e){
+    console.warn("PDF плаката:",(e&&e.message)||e);
+    toast("PDF не собрался: "+((e&&e.message)||e)+". Пока можно так: «🖨 Плакат» → в окне печати выбрать «Сохранить как PDF»");
+  }finally{ if(fr&&fr.parentNode) fr.parentNode.removeChild(fr); }
+}
 function salesPacePoster(week){
   const R=_salesReports(), rep=R[week]||R[_salesWeek]||null;
   const P=rep?_salesPace(rep):null;
@@ -14639,7 +14723,7 @@ function salesPacePoster(week){
   const w=window.open("","_blank"); if(!w){ toast("Разрешите всплывающие окна"); return; }
   const today=new Date().toLocaleDateString("ru-RU");
   w.document.write('<!doctype html><html><head><meta charset="utf-8"><title>'
-    +esc(_salesMonName(P.ym))+' — идём к цели</title><style>'+POSTER_CSS+'</style></head><body>'
+    +esc(_salesMonName(P.ym))+' — идём к цели</title><style>'+POSTER_PAGE_CSS+'</style></head><body>'
     +_salesPosterHtml(P,today)+'</body></html>');
   w.document.close();
   setTimeout(()=>{ try{ w.focus(); w.print(); }catch(e){} }, 300);
@@ -14662,7 +14746,9 @@ function _salesPaceHtml(rep){
     Счётчик появился недавно, старые дни его не имеют. Пересчитать: <b>Дашборд руководителя → 📦 Заполняемость групп</b> → выбрать месяц → «🔁 Пересчитать заново». Дальше это делает ночной cron.</div>`;
   return `<div class="card" style="margin:14px 0"><h3>🎯 Идём к цели месяца
     <button class="btn ghost sm" style="margin-left:8px;font-weight:400" onclick="salesPacePoster('${_jsStr(rep.week||"")}')"
-      title="Лист A4 на стену: сколько детей добрать до цели, сколько уже в кассе и сколько ожидаем">🖨 Плакат</button></h3>
+      title="Лист A4 на стену: сколько детей добрать до цели, сколько уже в кассе и сколько ожидаем. В окне печати можно выбрать «Сохранить как PDF» — так качество лучше всего">🖨 Плакат</button>
+    <button class="btn ghost sm" style="margin-left:4px;font-weight:400" onclick="salesPacePdf('${_jsStr(rep.week||"")}')"
+      title="Тот же плакат готовым файлом PDF — отправить или напечатать позже">⬇ PDF</button></h3>
     <table style="max-width:760px"><tbody>
       <tr><td>Оборот ${esc(_salesMonName(P.ym))} — факт на сегодня</td><td class="num" colspan="3"><b style="color:var(--green)">${_gm(P.fact)}</b></td></tr>
       <tr><td>Прогноз ${esc(_salesMonName(P.ym))} целиком</td><td class="num" colspan="3"><b style="color:var(--terra-d)">${_gm(P.forecast)}</b>

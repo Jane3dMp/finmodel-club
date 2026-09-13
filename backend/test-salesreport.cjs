@@ -31,7 +31,7 @@ const NAMES = ['_salesNum', '_salesCfg', '_ratAgg', '_ratSubjToCourse', '_ratMod
                '_salesRangeHtml',   // salesPullRange — async, регуляркой не берётся и не нужен: он только в onclick
                '_fillRangeMissing', '_kassaDayWord',
                '_salesReports', '_salesCur', '_salesDate', '_salesMonName', '_salesRatioText', '_salesWeekWord',
-               '_posterW', '_salesPosterHtml', '_salesHtml', '_salesCronHtml'];
+               '_posterW', '_salesPosterHtml', '_posterFit', '_posterFileName', '_salesHtml', '_salesCronHtml'];
 const ONE_LINERS = ['_salesMonthEnd', '_salesMonday', '_salesGoals',   // тело в одну строку
                     '_fillIdx', '_fillGroups', '_fillPlanMap', '_fillArch', '_fillNoName', '_fillTeachName',
                     '_fillShift', '_dmy', '_kassaDayOf'];
@@ -90,7 +90,7 @@ const ctx = {
   location: { origin: 'https://app.proznanie.club' },
 };
 const API = new Function('ctx', 'with (ctx) { ' + src +
-  ' return {_salesNum,_salesTops,_salesWeekText,_salesMonthText,_salesMonthEnd,_salesCfg,_salesHtml,_salesRatioText,_salesWeekWord,_posterW,_salesPosterHtml,' +
+  ' return {_salesNum,_salesTops,_salesWeekText,_salesMonthText,_salesMonthEnd,_salesCfg,_salesHtml,_salesRatioText,_salesWeekWord,_posterW,_salesPosterHtml,_posterFit,_posterFileName,' +
   '_salesLastYearDates,_salesLastYearLabel,_salesLastYearFact,_salesActiveNote,_salesFillLines,_salesFillLinesFor,_fillShift,_fillRangeLabel,_fillFreeInLoad,_fillSeatWord,' +
   '_salesRangeFact,_salesRangePair,_salesRangeText,_salesRangeHtml,_fillRangeMissing}; }')(ctx);
 
@@ -329,6 +329,57 @@ check('поле «идём на» с подсказкой', hFull.indexOf("sales
 
   eq('без цели плаката нет', API._salesPosterHtml({ ym: '2026-09', goal: 0 }, '13.09.2026'), '');
   eq('и без данных тоже', API._salesPosterHtml(null, '13.09.2026'), '');
+
+  /* ===== PDF =====
+     Жанна 13.09.2026: «сделай пдф». Печать даёт вектор, но требует выбрать «Сохранить как
+     PDF» в диалоге принтера — а файл нужен готовый, чтобы отправить.
+     ⚠️ Для снимка плакат рисуется ПРЯМО В СТРАНИЦЕ приложения: html2canvas в документе,
+     собранном через document.write в iframe, не рисует вовсе — canvas выходит полностью
+     прозрачным (проверено в браузере). Значит стили плаката обязаны быть изолированы,
+     иначе они растекутся по приложению: у него есть и свои .note, .bar, .top, .v, .d. */
+  const css = (html.match(/const POSTER_CSS=`([\s\S]*?)`;/) || [])[1] || '';
+  check('css плаката найден', !!css, 'POSTER_CSS пропал');
+  {
+    // все селекторы обязаны начинаться с .ps-root — иначе правило потечёт в приложение
+    const body = css.replace(/\/\*[\s\S]*?\*\//g, '');
+    const bad = [];
+    body.split('}').forEach(chunk => {
+      const sel = chunk.split('{')[0].trim();
+      if (!sel) return;
+      sel.split(',').forEach(s => { s = s.trim(); if (s && s.indexOf('.ps-root') !== 0) bad.push(s); });
+    });
+    eq('ни одного правила без .ps-root', bad.join(' | '), '');
+    // ⚠️ body и @page в общем css жить не должны: он вставляется в страницу приложения
+    check('body в общем css нет', /(^|})\s*body\s*\{/.test(body) === false, body.slice(0, 200));
+    check('@page в общем css нет', body.indexOf('@page') < 0, body.slice(0, 200));
+    // а в css для окна печати они как раз нужны
+    const pageCss = (html.match(/const POSTER_PAGE_CSS=`([\s\S]*?)`\+POSTER_CSS;/) || [])[1] || '';
+    check('в css окна печати есть @page', pageCss.indexOf('@page') >= 0, pageCss);
+    check('и чистый body', /body\s*\{/.test(pageCss), pageCss);
+  }
+  check('корень плаката — свой класс', h.indexOf('<div class="ps-root">') === 0, h.slice(0, 60));
+
+  /* Как снимок вписывается в A4 с полями 14 мм. Лист обязан остаться одним. */
+  {
+    const a = API._posterFit(2064, 2973);          // настоящий снимок при scale 3
+    eq('ширина — вся печатная область', Math.round(a.w), 182);
+    eq('высота по пропорции', Math.round(a.h), 262);
+    eq('и отступ слева ровно поле', Math.round(a.x), 14);
+    // ⚠️ слишком высокий снимок ужимаем, а не режем на две страницы
+    const b = API._posterFit(1000, 3000);
+    check('высокий снимок не вылезает', b.h <= 269.01, JSON.stringify(b));
+    check('и по ширине тоже', b.w <= 182.01, JSON.stringify(b));
+    check('он остаётся по центру', Math.abs(b.x - (210 - b.w) / 2) < 0.01, JSON.stringify(b));
+    eq('пустой снимок — нечего вписывать', API._posterFit(0, 100), null);
+    eq('и отрицательный', API._posterFit(100, -1), null);
+  }
+
+  /* Имя файла человеку в «Загрузках». */
+  eq('имя файла с месяцем', API._posterFileName({ ym: '2026-09' }), 'сентябрь 2026 — идём к цели.pdf');
+  /* ⚠️ Слэши и двоеточия Windows в имени не пропустит — файл просто не сохранится. */
+  ctx._salesMonNameOverride = null;
+  check('запрещённых символов в имени нет', !/[\\/:*?"<>|]/.test(API._posterFileName({ ym: '2026-09' })),
+        API._posterFileName({ ym: '2026-09' }));
 }
 
 check('в панели тоже «Выполнение плана»', hFull.indexOf('Выполнение плана') > 0, hFull.slice(0, 400));
