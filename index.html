@@ -11508,13 +11508,14 @@ function _trPayDays(){
 function _trPayParts(id){
   const from=_trPayFrom(), to=_trToday();
   const s=String(id), n=Number(id);
-  const out={course:0, trial:0, skip:0, bought:false};
+  const out={course:0, trial:0, skip:0, bought:false, last:""};
   if(!_paySnap) return out;
   const val=m=>{ if(!m) return 0; const v=(m[s]!=null)?m[s]:m[n]; return +v||0; };
   Object.keys(_paySnap).forEach(k=>{
     if(k<from||k>to) return;
     const sn=_paySnap[k]; if(!sn||!sn.byCust) return;
     const all=val(sn.byCust); if(!all) return;
+    if(k>out.last) out.last=k;              // когда платили в последний раз — для сверки с балансом
     if(sn.byItemIn){                       // снимок со статьями — раскладываем честно
       const t=val(sn.byCustTrial), sk=val(sn.byCustSkip);
       out.trial+=t; out.skip+=sk; out.course+=(all-sk);
@@ -11724,12 +11725,12 @@ function _trMgrKidsHtml(rows){
     const list=_trMgrKidsSorted(m);
     const li=list.map(x=>{
       const b=_TR_BUCK[x.b]||["—","var(--muted)"], ms=_trMoneyStage(x.id);
-      const bal=_trBalText(_trBalance(x.id));
+      const bal=_trBalText(_trBalance(x.id)), stale=_trBalStale(x.id);
       return `<div style="display:flex;gap:8px;align-items:baseline;padding:3px 0;border-bottom:1px solid var(--line);flex-wrap:wrap">
         <span style="flex:1;min-width:180px;font-size:13px">${_trKidLink(x.id)}${_trArchBadge(x.id)}</span>
         <span style="width:110px;font-size:12px;color:${b[1]}">${esc(b[0])}</span>
         <span style="flex:1;min-width:200px;font-size:12px;color:${ms[1]}">${esc(ms[0])}</span>
-        <span style="width:84px;text-align:right;font-size:12px;color:${bal.c}" title="${esc(bal.ttl)}">${esc(bal.t)}</span>
+        <span style="width:84px;text-align:right;font-size:12px;color:${stale?"var(--muted)":bal.c}" title="${esc(bal.ttl)}${stale?esc(" · ⚠️ снимок балансов старше платежа от "+_trDayLabel(stale)+" — цифра уже другая, обновите «💰 Балансы и возраст»"):""}">${esc(bal.t)}${stale?'<b style="color:var(--terra-d)"> ⏳</b>':""}</span>
       </div>`;
     }).join("");
     return `<details style="margin-bottom:6px"><summary style="cursor:pointer;font-size:13px">
@@ -11748,7 +11749,7 @@ function _trMgrKidsHtml(rows){
     <button class="btn ghost sm" style="margin-left:4px;font-weight:400" title="Только не дошедшие: кому звонить в первую очередь. Менеджеров без таких детей в печать не берём" onclick="trPrintMgrAll('missed')">🖨 Не дошли</button></h4>
     <div class="hint" style="margin-bottom:6px">Два столбца этапов независимы: слева — где ребёнок по занятиям, справа — по деньгам. Оплатить абонемент можно, ещё не придя на первое занятие, — поэтому «Купили» в таблице выше бывает больше «Дошли».
       <br><b>Деньги</b> берутся из дневных снимков кассы Alfa <b>с 1 июня</b> (предоплаты за год начинаются ещё до лета), <b>без лагеря и интенсивов</b> — их узнаём по статье платежа. «Платёж в кассе не нашли» — это про наши снимки, а не про родителя: день мог быть ещё не снят, а сегодняшний платёж — пройти уже после снимка. Перечитывает дни кнопка «собрать платежи за сезон» над таблицей, сегодняшний она берёт всегда.
-      <br><b>Справа — баланс</b>: сколько у ребёнка на счету в Alfa. Это не то же, что «оплатил в сезоне»: там деньги, которые клуб уже получил, а здесь — что у ребёнка осталось. <b style="color:var(--red)">Минус — долг.</b>
+      <br><b>Справа — баланс</b>: сколько у ребёнка на счету в Alfa. Это не то же, что «оплатил»: слева деньги, которые клуб получил, справа — что у ребёнка осталось. Баланс меньше оплаты — норма: из него уже списали проведённые занятия (оплатил 184 = 4 занятия по 46, одно прошло — осталось 138). <b style="color:var(--red)">Минус — долг.</b> Значок <b style="color:var(--terra-d)">⏳</b> значит, что платёж прошёл ПОЗЖЕ снимка балансов — цифра рядом уже другая.
       ${(function(){
         /* ⚠️ Деньги на счету меняются каждый день. Показать снимок недельной давности как
            сегодняшний — значит соврать дороже, чем не показать вовсе: по этой цифре звонят
@@ -11787,6 +11788,19 @@ function _trBalance(id){
 /* Минус — долг, ноль — пусто, плюс — деньги есть. ⚠️ «—» и «0» разные вещи: первое значит
    «не знаем» (балансы не подтягивали), второе — «знаем, и там ноль». Свалить их в одно
    значило бы показать пустой счёт у всех, кому просто не сходили за цифрой. */
+/* ===== БАЛАНС УСТАРЕЛ? =====
+   Жанна 14.09.2026 на Исаеве: в модели «оплатил 184 р — абонемент» и баланс 0, а в Alfa на
+   счету 138. Всё верно и одновременно непонятно: платёж прошёл 13.09, а снимок балансов
+   снят 30.08 — то есть ДО оплаты. Цифры из разных дней стояли рядом без единого слова об этом.
+   Ловим ровно этот случай: последний платёж ребёнка новее снимка балансов. */
+function _trBalStale(id){
+  try{
+    if(!S.balancesAt) return "";
+    const snapDay=_dIso(new Date(S.balancesAt));
+    const last=_trPayParts(id).last;
+    return (last && last>snapDay) ? last : "";
+  }catch(e){ return ""; }
+}
 function _trBalText(b){
   if(b==null) return {t:"—", c:"var(--muted)", ttl:"Баланс не подтягивали — нажмите «💰 Балансы и возраст» на вкладке с детьми"};
   const t=(b<0?"−":"")+_gm(Math.abs(b))+" р";
