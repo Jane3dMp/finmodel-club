@@ -11723,15 +11723,20 @@ function _trMgrKidsHtml(rows){
   if(!rows||!rows.length) return "";
   const one=m=>{
     const list=_trMgrKidsSorted(m);
+    /* ⚠️ Именно таблица, а не строки из flex-спанов. Жанна 14.09.2026: «всё разбросано по
+       сторонам, тяжело строку читать» — и правда: резиновые колонки на широком экране
+       растаскивали имя и деньги к разным краям, глазу приходилось ехать через полметра.
+       У таблицы колонки стоят на месте, есть зебра и подсветка строки под курсором, а ширину
+       держим в 880px — читать длинную строку через весь монитор невозможно в принципе. */
     const li=list.map(x=>{
       const b=_TR_BUCK[x.b]||["—","var(--muted)"], ms=_trMoneyStage(x.id);
       const bal=_trBalText(_trBalance(x.id)), stale=_trBalStale(x.id);
-      return `<div style="display:flex;gap:8px;align-items:baseline;padding:3px 0;border-bottom:1px solid var(--line);flex-wrap:wrap">
-        <span style="flex:1;min-width:180px;font-size:13px">${_trKidLink(x.id)}${_trArchBadge(x.id)}</span>
-        <span style="width:110px;font-size:12px;color:${b[1]}">${esc(b[0])}</span>
-        <span style="flex:1;min-width:200px;font-size:12px;color:${ms[1]}">${esc(ms[0])}</span>
-        <span style="width:84px;text-align:right;font-size:12px;color:${stale?"var(--muted)":bal.c}" title="${esc(bal.ttl)}${stale?esc(" · ⚠️ снимок балансов старше платежа от "+_trDayLabel(stale)+" — цифра уже другая, обновите «💰 Балансы и возраст»"):""}">${esc(bal.t)}${stale?'<b style="color:var(--terra-d)"> ⏳</b>':""}</span>
-      </div>`;
+      return `<tr>
+        <td>${_trKidLink(x.id)}${_trArchBadge(x.id)}</td>
+        <td style="font-size:12px;color:${b[1]}">${esc(b[0])}</td>
+        <td style="font-size:12px;color:${ms[1]}">${esc(ms[0])}</td>
+        <td style="text-align:right;white-space:nowrap;font-size:12px;color:${stale?"var(--muted)":bal.c}" title="${esc(bal.ttl)}${stale?esc(" · ⚠️ снимок балансов старше платежа от "+_trDayLabel(stale)+" — цифра уже другая, обновите «💰 Балансы и возраст»"):""}">${esc(bal.t)}${stale?'<b style="color:var(--terra-d)"> ⏳</b>':""}</td>
+      </tr>`;
     }).join("");
     return `<details style="margin-bottom:6px"><summary style="cursor:pointer;font-size:13px">
       <b>${esc(m.name)}</b> <span style="color:var(--muted)">— ${m.kids} ${_fmlKid(m.kids)} · дошли ${m.came} · купили ${m.paid}${
@@ -11742,7 +11747,10 @@ function _trMgrKidsHtml(rows){
         onclick="event.stopPropagation();event.preventDefault();trPrintMgr('${_jsStr(m.name)}')">🖨 все</button>${
       m.missed?`<button class="btn ghost sm" style="margin-left:4px" title="Только не дошедшие — с занятиями, которые ребёнок пропустил, и ближайшим впереди"
         onclick="event.stopPropagation();event.preventDefault();trPrintMgr('${_jsStr(m.name)}','missed')">🖨 не дошли ${m.missed}</button>`:""}</summary>
-      <div style="padding:6px 0 4px 4px">${li}</div></details>`;
+      <div class="tscroll" style="max-width:880px;margin:6px 0 4px">
+        <table><colgroup><col style="width:34%"><col style="width:110px"><col><col style="width:96px"></colgroup>
+        <thead><tr><th>Ребёнок</th><th>По занятиям</th><th>По деньгам</th><th style="text-align:right">Баланс</th></tr></thead>
+        <tbody>${li}</tbody></table></div></details>`;
   };
   return `<div style="margin-top:10px"><h4 style="margin:8px 0 4px">📋 Дети по менеджерам
     <button class="btn ghost sm" style="margin-left:8px;font-weight:400" title="Все менеджеры сразу — каждому свой лист" onclick="trPrintMgrAll()">🖨 Все списки</button>
