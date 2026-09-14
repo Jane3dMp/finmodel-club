@@ -2208,7 +2208,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-09-13-07";
+const APP_VER="2026-09-14-01";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -2256,6 +2256,10 @@ function _idbRestore(){
    (локальный режим), где localStorage — единственная копия. Теперь честно говорим и пробуем
    освободить место, выбрасывая самые старые сохранённые версии модели. */
 let _lsFull=false, _idbOk=false, _fbApplied=false;   // _fbApplied: облако уже отдало свою версию
+/* Список версий в памяти вкладки. Он главнее localStorage: тот общий на домен, его переполняют
+   соседние инструменты клуба, и при нехватке места версии вылетают из него первыми. Пока
+   вкладка жива, полный список лежит здесь; на диске его бережёт IndexedDB. */
+let _scnJson=null;
 /* ===== ЗАПАСНОЕ ХРАНИЛИЩЕ: IndexedDB =====
    ⚠️ localStorage — ОДИН НА ВЕСЬ ДОМЕН, а не на приложение. Финмодель делит пять мегабайт
    app.proznanie.club с другими инструментами клуба, и своей доли у неё нет и быть не может.
@@ -2323,12 +2327,27 @@ function _lsUsage(){
   return {total, by};
 }
 function _lsMb(n){ return (n/1048576).toFixed(1).replace(".",",")+" МБ"; }
+function _lsKb(n){ return Math.round(n/1024)+" КБ"; }
+/* Кто занял общую память домена: финмодель или соседи. Без этого разговор о переполнении
+   упирается в «удалите версии», а версии тут почти ни при чём. */
+function _lsWho(){
+  const u=_lsUsage(); let mine=0, other=0, otherN=0;
+  Object.keys(u.by).forEach(k=>{
+    if(k.indexOf("proznanie_finmodel")===0) mine+=u.by[k];
+    else { other+=u.by[k]; otherN++; }
+  });
+  return {total:u.total, mine:mine, other:other, otherN:otherN};
+}
 function _lsWarn(where){
   if(_lsFull) return;                                   // не мигаем на каждом сохранении
   _lsFull=true;
   const u=_lsUsage();
   try{ setSync("err","⚠ Память браузера заполнена"); }catch(e){}
-  try{ toast("Память браузера переполнена ("+_lsMb(u.total)+") — локальная копия не сохраняется. Нажмите «Сохранить» вверху: все версии уедут в таблицу. Потом удалите лишние в ☰ Меню → «⋮ Версии модели»."); }catch(e){}
+  /* ⚠️ Не советуем чистить версии: пять мегабайт localStorage — общие на весь домен, и занимают
+     их соседние инструменты клуба, а не финмодель. Говорим, кто именно занял место. */
+  const w=_lsWho();
+  try{ toast("Память браузера переполнена ("+_lsMb(u.total)+"): финмодель — "+_lsMb(w.mine)
+    +", остальное ("+w.otherN+" записей) пишет не она. Работа не потеряна: запасная копия в браузере и облако продолжают сохраняться. Подробности — ☰ Меню → «⋮ Версии модели»."); }catch(e){}
   console.error("localStorage переполнен при записи:",where,"занято:",_lsMb(u.total),u.by);
 }
 /* Освобождаем место, жертвуя ОДНОЙ сохранённой версией — иначе не сохранится и текущая работа.
@@ -2340,7 +2359,10 @@ function _lsTrimScenarios(){
     if(typeof loadScenarioList!=="function") return false;
     const cur=currentScenarioName();
     let raw={};
-    try{ const r=localStorage.getItem(SCN_KEY); if(r) raw=JSON.parse(r)||{}; }catch(e){}
+    try{ raw=JSON.parse(_scnJson||localStorage.getItem(SCN_KEY)||"{}")||{}; }catch(e){}
+    /* ⚠️ Полный список сначала запоминаем в памяти вкладки и только потом режем localStorage.
+       Иначе версия исчезала бы и с экрана: loadScenarioList читал бы уже урезанную запись. */
+    if(_scnJson===null) _scnJson=JSON.stringify(raw);
     const names=Object.keys(raw).filter(n=>n!==cur);
     if(!names.length) return false;
     names.sort((a,b)=>{
@@ -2351,7 +2373,7 @@ function _lsTrimScenarios(){
     const victim=names[0];
     delete raw[victim];
     localStorage.setItem(SCN_KEY, JSON.stringify(raw));
-    try{ toast("Не хватило памяти браузера: версия «"+victim+"» убрана из локальной копии. Она остаётся в облаке и в Google-таблице, но открыть её отсюда больше нельзя."); }catch(e){}
+    try{ toast("Быстрой памяти браузера не хватило: версия «"+victim+"» убрана из неё. Данные целы — версия осталась в запасной копии браузера, в облаке и в Google-таблице и открывается как обычно."); }catch(e){}
     console.warn("localStorage: удалена локальная копия версии «"+victim+"», чтобы освободить место");
     return true;
   }catch(e){ return false; }
@@ -22658,7 +22680,9 @@ function renderConflictBanner(){
 const SCN_KEY="proznanie_finmodel_scenarios_v1";
 function loadScenarioList(){
   let list={};
-  try{ const r=localStorage.getItem(SCN_KEY); if(r) list=JSON.parse(r)||{}; }catch(e){}
+  /* ⚠️ Сначала память вкладки, и только потом localStorage: общую память домена переполняют
+     соседние инструменты клуба, из неё версии вылетают, а здесь список полный. */
+  try{ const r=(_scnJson!==null)?_scnJson:localStorage.getItem(SCN_KEY); if(r) list=JSON.parse(r)||{}; }catch(e){}
   /* ⚠️ Открытая версия в SCN_KEY НЕ хранится: её полная копия и так лежит в LS_KEY, а держать
      второй экземпляр — самый дорогой способ переполнить память браузера. При трёх версиях в
      браузере лежало ЧЕТЫРЕ полных копии модели, и на модели в 869 детей это упиралось в лимит.
@@ -22680,8 +22704,40 @@ function saveScenarioList(obj){
   let cur=""; try{ cur=currentScenarioName(); }catch(e){}
   const out={};
   for(const k in obj) if(k!==cur) out[k]=obj[k];       // открытую не дублируем, см. loadScenarioList
-  try{ localStorage.setItem(SCN_KEY, JSON.stringify(out)); return true; }
-  catch(e){ _lsWarn("список версий модели"); return false; }
+  const json=JSON.stringify(out), at=new Date().toISOString();
+  _scnJson=json;                                       // память вкладки — всегда полная
+  /* IndexedDB — всегда: у него предел на порядки выше, и соседи по домену в него не лезут.
+     Именно эта копия возвращает версию, вытесненную из localStorage (см. _idbRestoreScenarios). */
+  _idbSet("scenarios",{at:at,json:json}).catch(()=>{});
+  try{ localStorage.setItem(SCN_KEY,json); localStorage.setItem(SCN_AT,at); return true; }
+  catch(e){
+    /* Ругаемся, только если запасной копии нет вовсе. Раньше каждое переполнение выглядело как
+       потеря версий, хотя терялась лишь быстрая копия. */
+    if(_idbOff) _lsWarn("список версий модели");
+    return false;
+  }
+}
+const SCN_AT=SCN_KEY+"_at";
+/* Вернуть версии, вытесненные из localStorage. ⚠️ Строго ДОБАВЛЯЕМ пропавшие имена и никогда
+   не перетираем то, что есть: удаление версии идёт через saveScenarioList и стирает её и в
+   IndexedDB, а вот вытеснение — нет. Так возвращается только по-настоящему потерянное. */
+function _idbRestoreScenarios(){
+  return _idbGet("scenarios").then(v=>{
+    if(!v||!v.json) return false;
+    let idb={}; try{ idb=JSON.parse(v.json)||{}; }catch(e){ return false; }
+    const names=Object.keys(idb); if(!names.length) return false;
+    let cur=""; try{ cur=currentScenarioName(); }catch(e){}
+    const list=loadScenarioList(), back=[];
+    names.forEach(n=>{ if(n!==cur && list[n]===undefined){ list[n]=idb[n]; back.push(n); } });
+    if(!back.length) return false;
+    const out={}; for(const k in list) if(k!==cur) out[k]=list[k];
+    _scnJson=JSON.stringify(out);
+    try{ localStorage.setItem(SCN_KEY,_scnJson); }catch(e){}
+    try{ renderScenarioBar(); }catch(e){}
+    try{ if(document.getElementById("scnModal").classList.contains("show")) renderScnList(); }catch(e){}
+    console.info("Версии подняты из запасной копии:",back.join(", "));
+    return true;
+  }).catch(()=>false);
 }
 
 function currentScenarioName(){ return (S.meta&&S.meta.name)||"Основной"; }
@@ -22838,11 +22894,35 @@ function renderScnList(){
   // гарантируем, что текущий есть в списке
   if(!list[cur]) list[cur]=snapshotState();
   const names=Object.keys(list);
-  let h="";
+  /* ===== СКОЛЬКО ЭТО ВЕСИТ =====
+     Жанна 14.09.2026: «может, удалим ненужные версии, если мы их не используем». Чтобы решать,
+     надо видеть цифры: вес каждой версии и когда её в последний раз выгружали. И главное —
+     сколько места вообще занято и КЕМ: пять мегабайт localStorage общие на весь домен, их
+     занимает электронный журнал, и удаление версий его долю не освободит. */
+  const size={}; let total=0, big="", bigN=0;
+  names.forEach(n=>{
+    const b=JSON.stringify(list[n]||{}).length*2;       // UTF-16, примерно два байта на символ
+    size[n]=b; total+=b;
+    if(b>bigN){ bigN=b; big=n; }
+  });
+  const w=_lsWho();
+  const when=n=>{
+    const t=(list[n]&&list[n]._savedAt)||"";
+    if(!t) return "в таблицу не выгружалась";
+    try{ return "выгружена "+new Date(t).toLocaleString("ru-RU",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"}); }
+    catch(e){ return ""; }
+  };
+  let h=`<div class="hint" style="margin-bottom:8px">
+    <b>Версий ${names.length}</b>, вместе ${_lsMb(total)}${big&&names.length>1?(" · самая крупная «"+esc(big)+"» "+_lsKb(bigN)):""}.
+    Каждая лежит ещё и в запасной копии браузера и в облаке — переполнение быстрой памяти их больше не теряет.
+    <br>Память браузера: занято <b>${_lsMb(w.total)}</b> из ~5 МБ. Финмодель — ${_lsMb(w.mine)}, остальное (${w.otherN} записей) пишет <b>не она</b>: это общая память домена, её занимает электронный журнал. <b style="color:var(--terra-d)">Удаление версий её долю не освободит.</b>
+    Удалять стоит то, что и правда не нужно, — например накопившиеся «(копия) (копия)».</div>`;
   names.forEach(n=>{
     const isCur=n===cur;
     h+=`<div style="display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--line);border-radius:8px;margin-bottom:6px;background:${isCur?'var(--sand-l)':'#fff'}">
-      <span style="flex:1;font-weight:${isCur?'700':'500'};font-size:13px">${esc(n)}${isCur?' <span style="color:var(--green);font-size:11px">● открыта</span>':''}</span>
+      <span style="flex:1;min-width:0">
+        <span style="font-weight:${isCur?'700':'500'};font-size:13px">${esc(n)}${isCur?' <span style="color:var(--green);font-size:11px">● открыта</span>':''}</span>
+        <br><span style="font-size:11px;color:var(--muted)">${_lsKb(size[n])} · ${esc(when(n))}</span></span>
       ${isCur?'':`<button class="btn sm" onclick="openScenario('${_jsStr(n)}')">Открыть</button>`}
       <button class="btn ghost sm" onclick="renameScenario('${_jsStr(n)}')">Переименовать</button>
       ${names.length>1?`<button class="btn gray sm" onclick="deleteScenarioByName('${_jsStr(n)}')">×</button>`:''}
@@ -23037,7 +23117,7 @@ setTimeout(()=>{ if(_lastSnap===null) _lastSnap=_snap(); updateUndoBtn(); }, 0);
    он показывает то же самое, но молча и только тогда, когда на него смотрят. */
 /* Запасная копия модели: поднимаем её, если она новее локальной. Раньше при переполнении
    общей памяти домена работа шла «в никуда» — на экране одно, в браузере другое. */
-setTimeout(function(){ try{ _idbRestore(); }catch(e){} }, 300);
+setTimeout(function(){ try{ _idbRestore(); }catch(e){} try{ _idbRestoreScenarios(); }catch(e){} }, 300);
 /* новые из amo (оплаченный этап) — тихо проверяем при загрузке и раз в 10 минут:
    бейдж в шапке загорается, когда кого-то надо посадить в группу */
 setTimeout(function(){ try{ _amoCheck(true); }catch(e){} }, 12000);
