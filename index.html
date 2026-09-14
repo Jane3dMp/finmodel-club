@@ -22680,9 +22680,17 @@ function renderConflictBanner(){
 const SCN_KEY="proznanie_finmodel_scenarios_v1";
 function loadScenarioList(){
   let list={};
-  /* ⚠️ Сначала память вкладки, и только потом localStorage: общую память домена переполняют
-     соседние инструменты клуба, из неё версии вылетают, а здесь список полный. */
-  try{ const r=(_scnJson!==null)?_scnJson:localStorage.getItem(SCN_KEY); if(r) list=JSON.parse(r)||{}; }catch(e){}
+  try{ const r=localStorage.getItem(SCN_KEY); if(r) list=JSON.parse(r)||{}; }catch(e){}
+  /* ⚠️ Память вкладки ДОПОЛНЯЕТ localStorage, а не подменяет его. Дополняет — потому что из
+     общей памяти домена версии вылетают (её переполняют соседние инструменты клуба), и полным
+     список остаётся только здесь. Не подменяет — потому что во второй вкладке того же
+     приложения на диск могли записать свежее; при совпадении имени верим диску. */
+  if(_scnJson){
+    try{
+      const mem=JSON.parse(_scnJson)||{};
+      Object.keys(mem).forEach(n=>{ if(list[n]===undefined) list[n]=mem[n]; });
+    }catch(e){}
+  }
   /* ⚠️ Открытая версия в SCN_KEY НЕ хранится: её полная копия и так лежит в LS_KEY, а держать
      второй экземпляр — самый дорогой способ переполнить память браузера. При трёх версиях в
      браузере лежало ЧЕТЫРЕ полных копии модели, и на модели в 869 детей это упиралось в лимит.
