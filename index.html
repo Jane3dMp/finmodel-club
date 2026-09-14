@@ -2208,7 +2208,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-09-14-01";
+const APP_VER="2026-09-14-02";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -22927,7 +22927,10 @@ function renderScnList(){
     Удалять стоит то, что и правда не нужно, — например накопившиеся «(копия) (копия)».</div>`;
   names.forEach(n=>{
     const isCur=n===cur;
+    /* Галочка только у закрытых версий: открытую удаляют отдельной кнопкой, там надо ещё и
+       переключиться на другую — пакетному удалению это ни к чему. */
     h+=`<div style="display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--line);border-radius:8px;margin-bottom:6px;background:${isCur?'var(--sand-l)':'#fff'}">
+      ${isCur?'<span style="width:16px;flex:none"></span>':`<input type="checkbox" style="width:16px;height:16px;flex:none" ${_scnSel[n]?"checked":""} onchange="scnSel('${_jsStr(n)}',this.checked)" title="Отметить для удаления">`}
       <span style="flex:1;min-width:0">
         <span style="font-weight:${isCur?'700':'500'};font-size:13px">${esc(n)}${isCur?' <span style="color:var(--green);font-size:11px">● открыта</span>':''}</span>
         <br><span style="font-size:11px;color:var(--muted)">${_lsKb(size[n])} · ${esc(when(n))}</span></span>
@@ -22936,6 +22939,19 @@ function renderScnList(){
       ${names.length>1?`<button class="btn gray sm" onclick="deleteScenarioByName('${_jsStr(n)}')">×</button>`:''}
     </div>`;
   });
+  /* ===== ПАКЕТНОЕ УДАЛЕНИЕ =====
+     Жанна 14.09.2026: «удали копии, которые не используются». Какие именно не нужны, знает
+     только она — отмечает галочками, а кнопка «отметить копии» ставит их разом на всё, что
+     называется «(копия)» и сейчас не открыто. */
+  const selNames=names.filter(n=>n!==cur && _scnSel[n]);
+  const copies=names.filter(n=>n!==cur && /\(копия/i.test(n));
+  const selKb=selNames.reduce((a,n)=>a+(size[n]||0),0);
+  h+=`<div class="hd-actions" style="margin-top:10px;border-top:1px solid var(--line);padding-top:10px">
+    ${copies.length?`<button class="btn ghost sm" onclick="scnSelCopies()">Отметить копии (${copies.length})</button>`:""}
+    ${selNames.length?`<button class="btn ghost sm" onclick="scnSelNone()">Снять отметки</button>`:""}
+    <button class="btn gray sm"${selNames.length?"":" disabled"} onclick="scnDeleteSelected()">🗑 Удалить отмеченные${selNames.length?(" ("+selNames.length+")"):""}</button>
+    ${selNames.length?`<span style="font-size:12px;color:var(--muted)">освободит ${_lsKb(selKb)} в браузере</span>`:""}
+  </div>`;
   /* Версии, которых в этом браузере нет. Спрашиваем облако один раз за открытие окна и
      дорисовываем блок отдельно — чтобы список не ждал сети. */
   const only=(_scnCloud||[]).filter(n=>!names.some(x=>_fbKey(x)===n));
@@ -22976,12 +22992,37 @@ function renameScenario(oldName){
   document.getElementById("scnCurName").textContent=currentScenarioName();
   toast("Переименовано: "+nn);
 }
-function deleteScenarioByName(name){
+let _scnSel={};                                        // отмеченные к удалению
+function scnSel(name,on){ if(on) _scnSel[name]=true; else delete _scnSel[name]; renderScnList(); }
+function scnSelNone(){ _scnSel={}; renderScnList(); }
+function scnSelCopies(){
+  const cur=currentScenarioName();
+  Object.keys(loadScenarioList()).forEach(n=>{ if(n!==cur && /\(копия/i.test(n)) _scnSel[n]=true; });
+  renderScnList();
+}
+/* ===== УДАЛИТЬ ВЕРСИЮ ВЕЗДЕ =====
+   ⚠️ Версия живёт в ЧЕТЫРЁХ местах: быстрая память браузера, запасная копия (IndexedDB),
+   Google-таблица и облако. Стереть только в браузере мало: при следующем запуске список
+   сливается с таблицей ОБЪЕДИНЕНИЕМ, и удалённая версия возвращается как ни в чём не бывало.
+   Поэтому после записи списка выгружаем его в таблицу и убираем узел из облака.
+   Что не удалось убрать — возвращаем наверх: молчать про недоудалённое нельзя, человек
+   уверен, что убрал. */
+async function _scnPurge(names){
+  const cloudErr=[];
+  for(const n of names){
+    try{ if(FB_ON&&_fbDb) await _fbDb.ref("scenarios/"+_fbKey(n)).remove(); }
+    catch(e){ cloudErr.push(n); }
+  }
+  _scnCloud=null;                                      // список облака перечитаем заново
+  if(S.gasUrl){ try{ await pushGas(true); }catch(e){} }
+  return cloudErr;
+}
+async function deleteScenarioByName(name){
   const list=loadScenarioList();
   if(Object.keys(list).length<=1){ toast("Нельзя удалить единственную версию"); return; }
-  if(!confirm("Удалить версию «"+name+"»? Необратимо.")) return;
+  if(!confirm("Удалить версию «"+name+"» НАВСЕГДА?\n\nОна исчезнет из браузера, из Google-таблицы и из облака. Вернуть будет нельзя.")) return;
   const wasCurrent=(name===currentScenarioName());
-  delete list[name];
+  delete list[name]; delete _scnSel[name];
   saveScenarioList(list);
   if(wasCurrent){
     const next=Object.keys(list)[0];
@@ -22991,7 +23032,25 @@ function deleteScenarioByName(name){
   }
   renderScenarioBar(); renderScnList();
   document.getElementById("scnCurName").textContent=currentScenarioName();
-  toast("Версия удалена");
+  const err=await _scnPurge([name]);
+  renderScnList();
+  toast(err.length?"Версия удалена, но из облака убрать не вышло — попробуйте ещё раз":"Версия удалена");
+}
+async function scnDeleteSelected(){
+  const cur=currentScenarioName(), list=loadScenarioList();
+  const names=Object.keys(list).filter(n=>n!==cur && _scnSel[n]);
+  if(!names.length){ toast("Ничего не отмечено"); return; }
+  if(Object.keys(list).length-names.length<1){ toast("Хотя бы одна версия должна остаться"); return; }
+  if(!confirm("Удалить НАВСЕГДА "+names.length+" "+(names.length===1?"версию":"версии")+":\n\n• "
+      +names.join("\n• ")+"\n\nОни исчезнут из браузера, из Google-таблицы и из облака. Вернуть будет нельзя.")) return;
+  names.forEach(n=>{ delete list[n]; delete _scnSel[n]; });
+  saveScenarioList(list);
+  renderScenarioBar(); renderScnList();
+  toast("Удаляю из таблицы и облака…");
+  const err=await _scnPurge(names);
+  renderScnList();
+  toast(err.length?("Удалено "+(names.length-err.length)+" из "+names.length+" — из облака не вышло убрать: "+err.join(", "))
+                  :("Удалено версий: "+names.length));
 }
 function closeScnMenu(){ document.getElementById("scnModal").classList.remove("show"); }
 
