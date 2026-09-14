@@ -1157,7 +1157,13 @@ function alfa_names_cache_path(): string {
    is_study=0 означает лида (заявка заведена, ребёнок не оформлен), и путать их нельзя —
    лид как раз тот, кого мы ждём, а архивный уже ушёл. Флаг берём тем же запросом, что и
    имя, то есть бесплатно. */
-function alfa_customer_cards(array $ids, ?array $branches = null): array {
+/* ⚠️ Кэш карточек жил ВЕЧНО: раз прочитанное имя возвращалось навсегда, а вместе с ним и
+   «в архиве». Жанна 14.09.2026: «Аникеев в списке на обзвон, а он уже в архиве — жала и
+   пересобрать, и обновить». Имя действительно меняется редко, но архив, ЭВ и телефон — нет,
+   и списки на обзвон звали людей, с которыми вопрос давно закрыт.
+   Теперь у записи есть время: сутки она живёт, «пересобрать» обновляет принудительно. */
+const ALFA_CARD_TTL = 86400;
+function alfa_customer_cards(array $ids, ?array $branches = null, bool $force = false): array {
     $ids = array_values(array_unique(array_map('intval', array_filter($ids))));
     if (!$ids) return [];
     $f = alfa_names_cache_path();
@@ -1166,10 +1172,14 @@ function alfa_customer_cards(array $ids, ?array $branches = null): array {
     $out = []; $miss = [];
     foreach ($ids as $id) {
         $c = $cache[(string)$id] ?? null;
-        if (is_array($c) && ($c['n'] ?? '') !== '') $out[$id] = ['name' => (string)$c['n'],
-                                                                 'archived' => !empty($c['a']),
-                                                                 'evzz' => (string)($c['e'] ?? ''),
-                                                                 'phone' => (string)($c['p'] ?? '')];
+        $has = is_array($c) && ($c['n'] ?? '') !== '';
+        /* Записи, сделанные до появления метки времени, считаем просроченными: именно в них
+           и застрял старый признак архива. Обновятся по одному разу и получат метку. */
+        $fresh = $has && !$force && (int)($c['t'] ?? 0) > time() - ALFA_CARD_TTL;
+        if ($fresh) $out[$id] = ['name' => (string)$c['n'],
+                                 'archived' => !empty($c['a']),
+                                 'evzz' => (string)($c['e'] ?? ''),
+                                 'phone' => (string)($c['p'] ?? '')];
         else $miss[] = $id;
     }
     if ($miss) {
@@ -1177,13 +1187,17 @@ function alfa_customer_cards(array $ids, ?array $branches = null): array {
         $branches = $branches ?: alfa_realization_branches();
         $found = false;
         foreach ($miss as $id) {
+            $hit = null; $answered = false;
             foreach ($branches as $bid) {
                 $r = alfa_http('POST', "$host/v2api/" . (int)$bid . "/customer/index?id=" . $id,
                     ['id' => $id, 'page' => 0, 'count' => 1], $token, true, 8);
-                if (isset($r['__err'])) continue;
-                $hit = null;
+                if (isset($r['__err'])) continue;        // связь оборвалась — это не ответ «нет такого»
+                $answered = true;
                 foreach (($r['items'] ?? []) as $c) if ((int)($c['id'] ?? 0) === $id) { $hit = $c; break; }
-                if (!$hit) continue;
+                if ($hit) break;
+            }
+            $old = $cache[(string)$id] ?? null;
+            if ($hit) {
                 $nm = trim((string)($hit['name'] ?? ''));
                 /* Разные установки Alfa помечают архив по-разному, поэтому смотрим все
                    известные поля разом (их список уже собран в alfa_flags). */
@@ -1198,8 +1212,22 @@ function alfa_customer_cards(array $ids, ?array $branches = null): array {
                 if (is_array($ph)) { $ph = ''; foreach ((array)($hit['phone'] ?? []) as $x) { $x = trim((string)$x); if ($x !== '') { $ph = $x; break; } } }
                 $ph = is_scalar($ph) ? trim((string)$ph) : '';
                 if ($nm !== '') { $out[$id] = ['name' => $nm, 'archived' => $arch, 'evzz' => $ev, 'phone' => $ph];
-                                  $cache[(string)$id] = ['n' => $nm, 'a' => $arch ? 1 : 0, 'e' => $ev, 'p' => $ph]; $found = true; }
-                break;
+                                  $cache[(string)$id] = ['n' => $nm, 'a' => $arch ? 1 : 0, 'e' => $ev,
+                                                         'p' => $ph, 't' => time()]; $found = true; }
+            } elseif ($answered && $old && ($old['n'] ?? '') !== '') {
+                /* Alfa ОТВЕТИЛА, а карточки нет. В части установок архивные из выдачи просто
+                   исчезают — значит ребёнка убрали в архив или удалили. Для списков на обзвон
+                   это одно и то же: звонить не надо. Имя оставляем из прошлого чтения, чтобы
+                   строка не превратилась в «id 5270». */
+                $out[$id] = ['name' => (string)$old['n'], 'archived' => true,
+                             'evzz' => (string)($old['e'] ?? ''), 'phone' => (string)($old['p'] ?? '')];
+                $cache[(string)$id] = ['n' => (string)$old['n'], 'a' => 1, 'e' => (string)($old['e'] ?? ''),
+                                       'p' => (string)($old['p'] ?? ''), 't' => time()]; $found = true;
+            } elseif ($old && ($old['n'] ?? '') !== '') {
+                /* Alfa не ответила вовсе — отдаём прошлое чтение как есть и метку НЕ трогаем,
+                   чтобы следующий проход попробовал снова. */
+                $out[$id] = ['name' => (string)$old['n'], 'archived' => !empty($old['a']),
+                             'evzz' => (string)($old['e'] ?? ''), 'phone' => (string)($old['p'] ?? '')];
             }
         }
         if ($found) @file_put_contents($f, json_encode($cache, JSON_UNESCAPED_UNICODE), LOCK_EX);
@@ -1425,7 +1453,7 @@ function alfa_kids_lessons(array $ids, string $from, string $to, ?array $branche
     }
     if ($dirty) @file_put_contents($f, json_encode($cache, JSON_UNESCAPED_UNICODE), LOCK_EX);
     return ['kids' => $out, 'before' => $before, 'asked' => $asked, 'from' => $from, 'to' => $to, 'today' => $today,
-            'cards' => alfa_customer_cards($ids, $branches)];
+            'cards' => alfa_customer_cards($ids, $branches, $force)];
 }
 
 /* Снимок дня по пробным. Жанна: «нужна переключашка между днями, не нужно каждый раз

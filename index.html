@@ -2208,7 +2208,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-09-14-03";
+const APP_VER="2026-09-14-04";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -12358,6 +12358,17 @@ function _obzPaint(){ if(_admSec==="obzvon"){ const b=document.getElementById("a
 
 function _obzCard(id){ return (_obz&&_obz.cards&&(_obz.cards[String(id)]||_obz.cards[Number(id)]))||null; }
 function _obzArch(id){ const c=_obzCard(id); return !!(c&&c.archived); }
+/* Сколько детей росписи не попадёт в списки из-за архива. Считаем по обеим корзинам сразу:
+   на экране это одна цифра «скрыто архивных», и по ней видно, что архив вообще учитывается. */
+function _obzArchCount(){
+  if(!_obz||!_obz.roster) return 0;
+  const seen={}; let n=0;
+  ["new","old"].forEach(k=>(_obz.roster[k]||[]).forEach(r=>{
+    const id=String(r.id); if(seen[id]) return; seen[id]=1;
+    if(_obzArch(id)) n++;
+  }));
+  return n;
+}
 function _obzEv(id){ const c=_obzCard(id); return (c&&c.evzz)?String(c.evzz).trim():""; }
 function _obzName(id, fallback){ const c=_obzCard(id); return (c&&c.name)||fallback||("id "+id); }
 function _obzSubj(sid){ return (_obz&&_obz.subjects&&_obz.subjects[String(sid)])||("предмет "+sid); }
@@ -12576,10 +12587,16 @@ function _obzvonHtml(){
   const a=_obzNewMissed()||[], b=_obzOldMissed()||[];
   const when=_obzWhen();
   const ranBy=(_obz.ranBy==="cron")?"воскресный прогон":"собрано вручную";
+  /* Архивных в списки не берём — вопрос по ним закрыт. Но молча выкидывать нельзя: Жанна
+     14.09.2026 спросила «почему Аникеев в списке, он же в архиве», и по экрану было не понять,
+     учитываем мы архив вообще или нет. Теперь число скрытых стоит рядом со снимком. */
+  const arch=_obzArchCount();
   const info=`<div style="font-size:12px;color:var(--muted);margin-bottom:10px">
     Снимок от ${esc(when||"—")} (${esc(ranBy)}) · детей в обходе: ${Object.keys(_obz.kids||{}).length} ·
-    занятия с ${esc(_obz.season||"")} по ${esc(_obz.to||"")}
-    <button class="btn ghost sm" style="margin-left:8px" onclick="obzPrintBoth()">🖨 печать обоих списков</button></div>`;
+    занятия с ${esc(_obz.season||"")} по ${esc(_obz.to||"")}${
+      arch?(" · <b>скрыто архивных: "+arch+"</b>"):""}
+    <button class="btn ghost sm" style="margin-left:8px" onclick="obzPrintBoth()">🖨 печать обоих списков</button>
+    <br>Признак «в архиве» берётся из карточки Alfa вместе со снимком. Убрали ребёнка в архив сегодня — нажмите «пересобрать сейчас», карточки перечитаются.</div>`;
   const tile=(n,lab,col,ttl)=>`<div title="${esc(ttl||"")}" style="flex:1;min-width:150px;border:1px solid var(--line);border-radius:9px;padding:8px 12px;background:#fff">
     <div style="font-size:22px;font-weight:700${col?";color:"+col:""}">${n}</div>
     <div style="font-size:12px;color:var(--muted)">${lab}</div></div>`;
