@@ -978,10 +978,20 @@ h3.cmp-fl span{font-weight:400;font-size:12px;color:var(--muted)}
 .cmp-bed.free{color:var(--muted);cursor:pointer;justify-content:center;font-size:11px}
 .cmp-bed.free:hover{border-color:var(--terra);color:var(--coal)}
 .cmp-bed.free.hot{border-color:var(--green);border-style:solid;color:var(--green);background:#F1F7F3}
-.cmp-bed.busy{border-style:solid;background:#fff;cursor:pointer}
+.cmp-bed.busy{border-style:solid;background:#fff;flex-direction:column;align-items:stretch;gap:3px;padding:4px 6px 5px}
 .cmp-bed.busy.on{border-color:var(--graphite);box-shadow:0 0 0 2px rgba(44,47,53,.12)}
 .cmp-bed.staff{border-style:solid;padding:3px 4px}
+/* строка с именем — она же «взять ребёнка в руку»; поле комментария ниже кликом не выбирает */
+.cmp-bl{display:flex;align-items:center;gap:5px;cursor:pointer;min-height:19px}
 .cmp-bn{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* Коммент по ребёнку прямо под ФИО. Тот же r.note, что в столбце «Комментарий» в резерве:
+   пишем где удобно — видно в обоих местах. Пустое поле почти не видно, чтобы не рябило. */
+.cmp-note{display:block;width:100%;box-sizing:border-box;font:inherit;font-size:11px;line-height:1.35;
+  padding:2px 5px;border:1px solid transparent;border-radius:5px;background:var(--sand-l);color:var(--muted)}
+.cmp-note::placeholder{color:#B3AEA6}
+.cmp-note:hover{border-color:var(--line)}
+.cmp-note:focus{outline:none;border-color:var(--terra);background:#FFFCF6;color:var(--coal)}
+.cmp-note.has{background:var(--acc-soft);color:var(--coal)}
 .cmp-x{border:none;background:none;color:var(--muted);cursor:pointer;font-size:15px;line-height:1;padding:0 3px}
 .cmp-x:hover{color:var(--red)}
 .cmp-bedit{display:flex;flex-wrap:wrap;gap:5px;align-items:center;margin-top:6px;padding-top:6px;border-top:1px dashed var(--line)}
@@ -20539,6 +20549,16 @@ function campPlace(bedKey){
   _campPick=null; _campSave(); _campDraw();
 }
 function campFree(id){ const r=_campRow(id); if(!r) return; r.bed=""; _campSave(); _campDraw(); }
+/* Коммент из расселения — то же поле r.note, что в столбце «Комментарий» в резерве.
+   Перерисовывать блоки не надо: поле само себе картинка, а перерисовка увела бы курсор. */
+function campBedNote(id,el){
+  const r=_campRow(id); if(!r) return;
+  r.note=String(el.value||"").trim();
+  el.value=r.note;
+  el.classList.toggle("has",!!r.note);
+  el.title="Комментарий по ребёнку — он же в столбце «Комментарий» в резерве"+(r.note?(":\n"+r.note):"");
+  _campSave();
+}
 function campBlockSex(bid,v){
   const sh=_campShift(); if(!sh) return;
   const keys=new Set(_campBeds(_campLayout(sh)).filter(b=>b.block.id===bid).map(b=>b.key));
@@ -21279,7 +21299,7 @@ function renderCampRooms(){
     unplaced.sort((a,b)=>(a.sex===b.sex?0:(a.sex<b.sex?1:-1))||String(a.fio).localeCompare(String(b.fio),"ru")).forEach(r=>{
       const st=CAMP_ST[r.status]||CAMP_ST.maybe;
       const age=_ageStr(r.dob);   // расселять без возраста нельзя: в блок к шестилеткам не селят двенадцатилетнего
-      h+='<span class="cmp-kid'+(r.sex?(' '+r.sex):'')+(_campPick===r.id?' on':'')+'" onclick="campPick(\''+_jsStr(r.id)+'\')" title="'+esc(st.t+(_campPrepaid(r)?" · деньги внесены":" · оплаты пока нет")+(r.sex?(" · "+CAMP_SEXN[r.sex]):" · пол не указан")+(age?(" · "+_ageStrFull(r.dob)):""))+'">'
+      h+='<span class="cmp-kid'+(r.sex?(' '+r.sex):'')+(_campPick===r.id?' on':'')+'" onclick="campPick(\''+_jsStr(r.id)+'\')" title="'+esc(st.t+(_campPrepaid(r)?" · деньги внесены":" · оплаты пока нет")+(r.sex?(" · "+CAMP_SEXN[r.sex]):" · пол не указан")+(age?(" · "+_ageStrFull(r.dob)):"")+(r.note?("\n📝 "+r.note):""))+'">'
        +_campDot(r)+' '+esc(r.fio)+(age?'<i class="cmp-kid-a">'+esc(age)+'</i>':'')+(r.sex?'':' <b style="color:var(--red)">?</b>')+'</span>';
     });
     h+='</div>';
@@ -21336,9 +21356,14 @@ function _campBlockHtml(sh,b,byKey){
       if(r){
         const st=CAMP_ST[r.status]||CAMP_ST.maybe;
         const age=_ageStr(r.dob);
-        h+='<div class="cmp-bed busy'+(_campPick===r.id?' on':'')+'" onclick="campPick(\''+_jsStr(r.id)+'\')" title="'+esc(st.t+(_campPrepaid(r)?" · деньги внесены":" · оплаты пока нет")+(age?(" · "+age):""))+'">'
+        const jrid=_jsStr(r.id);
+        h+='<div class="cmp-bed busy'+(_campPick===r.id?' on':'')+'">'
+         +'<div class="cmp-bl" onclick="campPick(\''+jrid+'\')" title="'+esc(st.t+(_campPrepaid(r)?" · деньги внесены":" · оплаты пока нет")+(age?(" · "+age):""))+'">'
          +'<span class="cmp-bn">'+_campDot(r)+' '+esc(r.fio)+(age?'<i class="cmp-kid-a">'+esc(age)+'</i>':'')+'</span>'
-         +'<button class="cmp-x" title="Освободить место" onclick="event.stopPropagation();campFree(\''+_jsStr(r.id)+'\')">×</button></div>';
+         +'<button class="cmp-x" title="Освободить место" onclick="event.stopPropagation();campFree(\''+jrid+'\')">×</button></div>'
+         +'<input class="cmp-note'+(r.note?' has':'')+'" placeholder="коммент" value="'+esc(r.note||"")
+         +'" title="'+esc("Комментарий по ребёнку — он же в столбце «Комментарий» в резерве"+(r.note?(":\n"+r.note):""))+'"'
+         +' onclick="event.stopPropagation()" onchange="campBedNote(\''+jrid+'\',this)"></div>';
       } else {
         h+='<div class="cmp-bed free'+(_campPick?' hot':'')+'" onclick="campPlace(\''+jkey+'\')">'+(_campPick?'поставить сюда':'свободно')+'</div>';
       }
