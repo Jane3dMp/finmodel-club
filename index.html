@@ -2208,7 +2208,7 @@ const LS_KEY = "proznanie_finmodel_v1";
    Браузер держит index.html в кэше, поэтому после деплоя люди продолжают работать на старой
    версии и не понимают, почему новых кнопок нет (а PHP на сервере уже новый — получается
    рассинхрон). Раз в 10 минут тихо перечитываем сам файл и сравниваем APP_VER. */
-const APP_VER="2026-09-14-04";
+const APP_VER="2026-09-15-01";
 let _verNagShown=false;
 async function _checkAppVersion(){
   if(_verNagShown) return;
@@ -2260,6 +2260,7 @@ let _lsFull=false, _idbOk=false, _fbApplied=false;   // _fbApplied: облако
    соседние инструменты клуба, и при нехватке места версии вылетают из него первыми. Пока
    вкладка жива, полный список лежит здесь; на диске его бережёт IndexedDB. */
 let _scnJson=null;
+let _scnIdbOk=false;                                   // запасная копия версий хоть раз записалась
 /* ===== ЗАПАСНОЕ ХРАНИЛИЩЕ: IndexedDB =====
    ⚠️ localStorage — ОДИН НА ВЕСЬ ДОМЕН, а не на приложение. Финмодель делит пять мегабайт
    app.proznanie.club с другими инструментами клуба, и своей доли у неё нет и быть не может.
@@ -2350,31 +2351,23 @@ function _lsWarn(where){
     +", остальное ("+w.otherN+" записей) пишет не она. Работа не потеряна: запасная копия в браузере и облако продолжают сохраняться. Подробности — ☰ Меню → «⋮ Версии модели»."); }catch(e){}
   console.error("localStorage переполнен при записи:",where,"занято:",_lsMb(u.total),u.by);
 }
-/* Освобождаем место, жертвуя ОДНОЙ сохранённой версией — иначе не сохранится и текущая работа.
-   ⚠️ Раньше это делалось молча и бралась просто первая в списке: у Жанны первой после открытой
-   шла версия с названием «Не трогать». Теперь: (1) берём самую давнюю по выгрузке в таблицу,
-   а не случайную; (2) говорим вслух, какую именно и где она осталась. */
+/* ===== ОСВОБОДИТЬ МЕСТО В ОБЩЕЙ ПАМЯТИ ДОМЕНА =====
+   Раньше здесь жертвовали ОДНОЙ сохранённой версией: список версий лежал в localStorage и был
+   самым тяжёлым, что финмодель туда клала. Отсюда и брались сообщения «не хватило памяти:
+   версия убрана» — Жанна видела их раз за разом, последнее 15.09.2026.
+   С 15.09.2026 версий в localStorage нет вовсе: они живут в IndexedDB, в облаке и в таблице
+   (см. saveScenarioList). Жертвовать нечем, и выбрасывать больше нечего — осталась одна
+   полезная работа: убрать ключ, если он ещё лежит от прежней версии приложения.
+   ⚠️ Убираем только после того, как список ТОЧНО уехал в запасную копию: иначе в режиме без
+   IndexedDB это единственное место, где он есть. */
 function _lsTrimScenarios(){
   try{
-    if(typeof loadScenarioList!=="function") return false;
-    const cur=currentScenarioName();
-    let raw={};
-    try{ raw=JSON.parse(_scnJson||localStorage.getItem(SCN_KEY)||"{}")||{}; }catch(e){}
-    /* ⚠️ Полный список сначала запоминаем в памяти вкладки и только потом режем localStorage.
-       Иначе версия исчезала бы и с экрана: loadScenarioList читал бы уже урезанную запись. */
-    if(_scnJson===null) _scnJson=JSON.stringify(raw);
-    const names=Object.keys(raw).filter(n=>n!==cur);
-    if(!names.length) return false;
-    names.sort((a,b)=>{
-      const ta=String((raw[a]&&raw[a]._savedAt)||""), tb=String((raw[b]&&raw[b]._savedAt)||"");
-      if(ta!==tb) return ta<tb?-1:1;                    // самая давняя выгрузка — первой под нож
-      return JSON.stringify(raw[b]).length-JSON.stringify(raw[a]).length;   // иначе самая крупная
-    });
-    const victim=names[0];
-    delete raw[victim];
-    localStorage.setItem(SCN_KEY, JSON.stringify(raw));
-    try{ toast("Быстрой памяти браузера не хватило: версия «"+victim+"» убрана из неё. Данные целы — версия осталась в запасной копии браузера, в облаке и в Google-таблице и открывается как обычно."); }catch(e){}
-    console.warn("localStorage: удалена локальная копия версии «"+victim+"», чтобы освободить место");
+    let had=false;
+    try{ had=localStorage.getItem(SCN_KEY)!==null; }catch(e){}
+    if(!had || !_scnIdbOk) return false;
+    localStorage.removeItem(SCN_KEY);
+    try{ localStorage.removeItem(SCN_AT); }catch(e){}
+    console.info("Список версий убран из localStorage: он живёт в IndexedDB");
     return true;
   }catch(e){ return false; }
 }
@@ -22731,37 +22724,42 @@ function saveScenarioList(obj){
   for(const k in obj) if(k!==cur) out[k]=obj[k];       // открытую не дублируем, см. loadScenarioList
   const json=JSON.stringify(out), at=new Date().toISOString();
   _scnJson=json;                                       // память вкладки — всегда полная
-  /* IndexedDB — всегда: у него предел на порядки выше, и соседи по домену в него не лезут.
-     Именно эта копия возвращает версию, вытесненную из localStorage (см. _idbRestoreScenarios). */
-  _idbSet("scenarios",{at:at,json:json}).catch(()=>{});
-  try{ localStorage.setItem(SCN_KEY,json); localStorage.setItem(SCN_AT,at); return true; }
-  catch(e){
-    /* Ругаемся, только если запасной копии нет вовсе. Раньше каждое переполнение выглядело как
-       потеря версий, хотя терялась лишь быстрая копия. */
-    if(_idbOff) _lsWarn("список версий модели");
-    return false;
-  }
+  /* ⚠️ В localStorage список версий НЕ пишем вовсе (15.09.2026). Он общий на весь домен, и
+     версии — самое тяжёлое, что финмодель туда клала: при нехватке места выбрасывало именно
+     их, и Жанна раз за разом видела «быстрой памяти не хватило». Читают этот список только
+     при открытии окна версий и переключении — синхронность ему не нужна.
+     Дом версий теперь: IndexedDB (здесь), облако и Google-таблица. */
+  _idbSet("scenarios",{at:at,json:json}).then(()=>{_scnIdbOk=true;}).catch(()=>{});
+  if(_idbOff) _lsWarn("список версий модели");         // запасной копии нет вовсе — вот это беда
+  return true;
 }
 const SCN_AT=SCN_KEY+"_at";
-/* Вернуть версии, вытесненные из localStorage. ⚠️ Строго ДОБАВЛЯЕМ пропавшие имена и никогда
-   не перетираем то, что есть: удаление версии идёт через saveScenarioList и стирает её и в
-   IndexedDB, а вот вытеснение — нет. Так возвращается только по-настоящему потерянное. */
+/* Поднять версии из IndexedDB и заодно увести их туда насовсем.
+   ⚠️ Объединяем, а не заменяем: в localStorage могли остаться версии, которых в запасной копии
+   ещё нет (первый запуск после правки), а в запасной — те, что оттуда вытеснило. Имя, которое
+   есть в обоих, берём из localStorage: он писался последним.
+   ⚠️ Ключ из localStorage удаляем ТОЛЬКО после успешной записи в IndexedDB. Иначе в режиме
+   инкогнито, где IndexedDB нет, мы бы стёрли единственную локальную копию списка. */
 function _idbRestoreScenarios(){
   return _idbGet("scenarios").then(v=>{
-    if(!v||!v.json) return false;
-    let idb={}; try{ idb=JSON.parse(v.json)||{}; }catch(e){ return false; }
-    const names=Object.keys(idb); if(!names.length) return false;
+    let idb={};
+    try{ if(v&&v.json) idb=JSON.parse(v.json)||{}; }catch(e){}
     let cur=""; try{ cur=currentScenarioName(); }catch(e){}
     const list=loadScenarioList(), back=[];
-    names.forEach(n=>{ if(n!==cur && list[n]===undefined){ list[n]=idb[n]; back.push(n); } });
-    if(!back.length) return false;
+    Object.keys(idb).forEach(n=>{ if(n!==cur && list[n]===undefined){ list[n]=idb[n]; back.push(n); } });
     const out={}; for(const k in list) if(k!==cur) out[k]=list[k];
-    _scnJson=JSON.stringify(out);
-    try{ localStorage.setItem(SCN_KEY,_scnJson); }catch(e){}
-    try{ renderScenarioBar(); }catch(e){}
-    try{ if(document.getElementById("scnModal").classList.contains("show")) renderScnList(); }catch(e){}
-    console.info("Версии подняты из запасной копии:",back.join(", "));
-    return true;
+    const json=JSON.stringify(out);
+    _scnJson=json;
+    return _idbSet("scenarios",{at:new Date().toISOString(),json:json}).then(()=>{
+      _scnIdbOk=true;
+      /* Место, которое список занимал в общей памяти домена, возвращаем соседям и самой
+         модели: ради него всё и затевалось. */
+      try{ localStorage.removeItem(SCN_KEY); localStorage.removeItem(SCN_AT); }catch(e){}
+      if(back.length) console.info("Версии подняты из запасной копии:",back.join(", "));
+      try{ renderScenarioBar(); }catch(e){}
+      try{ if(document.getElementById("scnModal").classList.contains("show")) renderScnList(); }catch(e){}
+      return true;
+    }).catch(()=>false);
   }).catch(()=>false);
 }
 
@@ -22870,6 +22868,9 @@ function openScnMenu(){
   _scnCloud=null;                                     // при каждом открытии спрашиваем облако заново
   renderScnList();
   document.getElementById("scnModal").classList.add("show");
+  /* Список версий живёт в IndexedDB, а она асинхронная: если окно открыли раньше, чем она
+     ответила при старте, спрашиваем ещё раз — и окно дорисуется само. */
+  try{ _idbRestoreScenarios(); }catch(e){}
 }
 /* ===== ВЕРСИИ, КОТОРЫХ НЕТ В ЭТОМ БРАУЗЕРЕ =====
    ⚠️ 09.09.2026: список версий строился ТОЛЬКО из localStorage. У Жанны он опустел (память
